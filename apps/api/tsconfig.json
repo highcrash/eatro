@@ -1,0 +1,18 @@
+{
+  "extends": "@restora/config/tsconfig/nest",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@restora/types": ["../../packages/types/dist"],
+      "@restora/types/*": ["../../packages/types/dist/*"],
+      "@restora/utils": ["../../packages/utils/dist"],
+      "@restora/utils/*": ["../../packages/utils/dist/*"]
+    },
+    "types": ["node", "bcryptjs"],
+    "incremental": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "test"]
+}

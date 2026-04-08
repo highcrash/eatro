@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage/
+.playwright/
+playwright-report/
+test-results/
+
+# Misc
+.DS_Store
+Thumbs.db
+*.pem
+
+# Turbo
+.turbo/
+
+# Prisma
+prisma/migrations/dev.db
+prisma/migrations/dev.db-journal
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+infra/postgres-data/
+infra/redis-data/
+
+# TypeScript build artifacts leaked into src directories
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map
+*.tsbuildinfo
+
+# Uploaded files
+apps/api/uploads/
+
+# Claude Code local settings
+.claude/settings.local.json

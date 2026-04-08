@@ -1,0 +1,1832 @@
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { Plus, Minus, ArrowLeft, ShoppingBag, X, Printer, Search } from 'lucide-react';
+
+import type { MenuItem, Order, OrderItem, CreateOrderDto, VoidOrderItemDto, WasteReason } from '@restora/types';
+import { formatCurrency } from '@restora/utils';
+import { useAuthStore } from '../store/auth.store';
+import { api } from '../lib/api';
+import PaymentModal from '../components/PaymentModal';
+import ReceiptModal from '../components/ReceiptModal';
+import BillModal from '../components/BillModal';
+
+interface CartItem {
+  menuItem: MenuItem;
+  quantity: number;
+  notes?: string;
+}
+
+// ─── Void Item Dialog ─────────────────────────────────────────────────────────
+
+interface VoidItemDialogProps {
+  item: OrderItem;
+  orderId: string;
+  isCashier: boolean;
+  onClose: () => void;
+  onConfirm: (dto: VoidOrderItemDto) => void;
+  isPending: boolean;
+  error?: string;
+}
+
+const VOID_WASTE_REASONS: { value: WasteReason; label: string }[] = [
+  { value: 'SPOILAGE', label: 'Spoilage' },
+  { value: 'PREPARATION_ERROR', label: 'Preparation Error' },
+  { value: 'OVERCOOKED', label: 'Overcooked' },
+  { value: 'CONTAMINATION', label: 'Contamination' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+function VoidItemDialog({ item, orderId, isCashier, onClose, onConfirm, isPending, error }: VoidItemDialogProps) {
+  const [reason, setReason] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpManagerName, setOtpManagerName] = useState('');
+  const [devOtp, setDevOtp] = useState(''); // Shown when SMS is disabled
+  const [verifyError, setVerifyError] = useState('');
+  const [sending, setSending] = useState(false);
+  const [logAsWaste, setLogAsWaste] = useState(false);
+  const [wasteReason, setWasteReason] = useState<WasteReason>('PREPARATION_ERROR');
+
+  const requestOtp = async () => {
+    if (!reason.trim()) return;
+    setSending(true);
+    setVerifyError('');
+    try {
+      const res = await api.post<{ sent: boolean; otp?: string; managerName?: string }>('/void-otp/request', {
+        orderId,
+        itemName: item.menuItemName,
+        itemQty: item.quantity,
+        reason,
+      });
+      setOtpSent(true);
+      setOtpManagerName(res.managerName || 'Manager');
+      if (res.otp) setDevOtp(res.otp); // SMS disabled — show OTP for dev
+    } catch (e) {
+      setVerifyError(e instanceof Error ? e.message : 'Failed to send OTP');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!reason.trim()) return;
+    setVerifyError('');
+
+    if (isCashier) {
+      // Verify OTP
+      try {
+        const res = await api.post<{ valid: boolean; error?: string }>('/void-otp/verify', { orderId, otp });
+        if (!res.valid) {
+          setVerifyError(res.error || 'Invalid OTP');
+          return;
+        }
+        // OTP verified — find a manager to use as approver
+        const managers = await api.get<{ id: string; role: string }[]>('/staff');
+        const mgr = (managers as any[]).find((s: any) => s.role === 'MANAGER' || s.role === 'OWNER');
+        onConfirm({ reason, approverId: mgr?.id || 'otp-verified', logAsWaste, wasteReason: logAsWaste ? wasteReason : undefined });
+      } catch (e) {
+        setVerifyError(e instanceof Error ? e.message : 'Verification failed');
+      }
+    } else {
+      const { user } = useAuthStore.getState();
+      onConfirm({ reason, approverId: user!.id, logAsWaste, wasteReason: logAsWaste ? wasteReason : undefined });
+    }
+  };
+
+  const canSubmit = reason.trim() !== '' && (!isCashier || (otpSent && otp.trim().length === 6));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-theme-surface rounded-theme shadow-2xl w-full max-w-[460px] max-h-[90vh] overflow-hidden flex flex-col">
+        <header className="px-6 py-4 border-b border-theme-border flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-theme-text">Void Item</h3>
+            <p className="text-xs text-theme-text-muted mt-0.5">
+              {item.quantity} × {item.menuItemName} · {formatCurrency(Number(item.totalPrice))}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-theme hover:bg-theme-bg flex items-center justify-center text-theme-text-muted"
+          >
+            <X size={14} />
+          </button>
+        </header>
+
+        <div className="p-6 space-y-4 overflow-auto">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-theme-text-muted mb-1.5">
+              Reason for void
+            </label>
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Customer changed order"
+              className="w-full bg-theme-bg rounded-theme px-4 py-3 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
+              autoFocus
+            />
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={logAsWaste}
+              onChange={(e) => setLogAsWaste(e.target.checked)}
+              className="w-4 h-4 accent-theme-accent"
+            />
+            <span className="text-sm text-theme-text">Log as waste (item was already prepared)</span>
+          </label>
+
+          {logAsWaste && (
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-theme-text-muted mb-1.5">
+                Waste reason
+              </label>
+              <select
+                value={wasteReason}
+                onChange={(e) => setWasteReason(e.target.value as WasteReason)}
+                className="w-full bg-theme-bg rounded-theme px-4 py-3 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
+              >
+                {VOID_WASTE_REASONS.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {isCashier && (
+            <div className="border-2 border-theme-accent/30 rounded-theme p-4 bg-theme-accent/5">
+              <p className="text-xs font-bold uppercase tracking-wider text-theme-accent mb-2">Manager OTP Approval</p>
+              {!otpSent ? (
+                <button
+                  onClick={() => void requestOtp()}
+                  disabled={!reason.trim() || sending}
+                  className="w-full bg-theme-text text-white py-2.5 rounded-theme text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40"
+                >
+                  {sending ? 'Sending OTP…' : 'Send OTP to Manager'}
+                </button>
+              ) : (
+                <>
+                  <p className="text-[11px] text-theme-text-muted mb-3">
+                    OTP sent to <span className="font-bold text-theme-text">{otpManagerName}</span>
+                    {devOtp && <span className="text-theme-danger ml-2">(Dev: {devOtp})</span>}
+                  </p>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-theme-text-muted mb-1.5">
+                    Enter 6-digit OTP
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                    placeholder="000000"
+                    className="w-full bg-theme-surface border border-theme-border rounded-theme px-4 py-3 text-2xl font-bold font-mono tracking-[0.5em] text-center text-theme-text outline-none focus:border-theme-accent"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => { setOtpSent(false); setOtp(''); setDevOtp(''); }}
+                    className="text-xs text-theme-text-muted hover:text-theme-accent mt-2"
+                  >
+                    Resend OTP
+                  </button>
+                </>
+              )}
+              {verifyError && (
+                <p className="text-xs text-theme-danger mt-2">{verifyError}</p>
+              )}
+            </div>
+          )}
+
+          {error && <p className="text-xs text-theme-danger">{error}</p>}
+        </div>
+
+        <footer className="px-6 py-4 border-t border-theme-border flex gap-3 shrink-0">
+          <button
+            onClick={onClose}
+            className="flex-1 bg-theme-bg text-theme-text font-semibold py-3 rounded-theme hover:bg-theme-surface-alt transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void handleSubmit()}
+            disabled={!canSubmit || isPending || sending}
+            className="flex-1 bg-theme-danger text-white font-bold py-3 rounded-theme hover:opacity-90 transition-opacity disabled:opacity-40"
+          >
+            {sending || isPending ? 'Processing…' : 'Void Item'}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+// ─── Add Items Overlay (with category + search) ─────────────────────────────
+
+function AddItemsOverlay({
+  menuItems,
+  newItemCart,
+  setNewItemCart,
+  onClose,
+  onSubmit,
+  isPending,
+  orderNumber,
+}: {
+  menuItems: MenuItem[];
+  newItemCart: CartItem[];
+  setNewItemCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
+  onClose: () => void;
+  onSubmit: () => void;
+  isPending: boolean;
+  orderNumber: string;
+}) {
+  const [addSearch, setAddSearch] = useState('');
+  const [addCatId, setAddCatId] = useState<string | null>(null);
+
+  // Fetch categories from API for proper hierarchy (includes parents with 0 direct items)
+  const { data: apiCategories = [] } = useQuery<{ id: string; name: string; parentId: string | null; children?: { id: string; name: string }[] }[]>({
+    queryKey: ['menu-categories'],
+    queryFn: () => api.get('/menu/categories'),
+  });
+
+  const parentCats = apiCategories
+    .filter((c) => !c.parentId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const getChildren = (pid: string) => apiCategories
+    .filter((c) => c.parentId === pid)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Filter items
+  const searchLower = addSearch.trim().toLowerCase();
+  const childIdsOfSelected = addCatId ? getChildren(addCatId).map((c) => c.id) : [];
+  const filteredItems = menuItems
+    .filter((m) => m.isAvailable)
+    .filter((m) => {
+      if (searchLower) return m.name.toLowerCase().includes(searchLower);
+      if (!addCatId) return true;
+      // Direct match on selected category, OR item is in a child of the selected parent
+      return m.categoryId === addCatId || childIdsOfSelected.includes(m.categoryId);
+    });
+
+  const addToNewCart = (item: MenuItem) => {
+    setNewItemCart((prev) => {
+      const existing = prev.find((c) => c.menuItem.id === item.id);
+      if (existing) return prev.map((c) => c.menuItem.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+      return [...prev, { menuItem: item, quantity: 1 }];
+    });
+  };
+
+  const removeFromNewCart = (menuItemId: string) => {
+    setNewItemCart((prev) => {
+      const existing = prev.find((c) => c.menuItem.id === menuItemId);
+      if (!existing || existing.quantity <= 1) return prev.filter((c) => c.menuItem.id !== menuItemId);
+      return prev.map((c) => c.menuItem.id === menuItemId ? { ...c, quantity: c.quantity - 1 } : c);
+    });
+  };
+
+  const newCartTotal = newItemCart.reduce(
+    (s, c) => s + Number(c.menuItem.price) * c.quantity,
+    0,
+  );
+
+  return (
+    <div className="fixed inset-0 z-40 bg-theme-bg flex flex-col">
+      {/* Orange top bar */}
+      <header className="h-16 bg-theme-accent text-white flex items-center px-6 gap-4 shrink-0">
+        <button
+          onClick={onClose}
+          className="text-white text-sm font-semibold flex items-center gap-1 hover:opacity-80 transition-opacity"
+        >
+          <ArrowLeft size={16} /> Back to Order #{orderNumber}
+        </button>
+        <div className="h-8 w-px bg-white/30" />
+        <h1 className="text-xl font-extrabold">Add Items</h1>
+        <div className="flex-1" />
+        <button onClick={onClose} className="text-white hover:opacity-80 transition-opacity">
+          <X size={20} />
+        </button>
+      </header>
+
+      <div className="flex-1 flex overflow-hidden">
+        {/* Menu side */}
+        <section className="flex-1 min-w-0 flex flex-col">
+          {/* Search */}
+          <div className="px-6 pt-4 pb-3">
+            <div className="relative max-w-md">
+              <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
+              <input
+                type="text"
+                value={addSearch}
+                onChange={(e) => { setAddSearch(e.target.value); if (e.target.value) setAddCatId(null); }}
+                placeholder="Search products…"
+                className="w-full bg-theme-surface rounded-full pl-11 pr-10 py-2.5 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent"
+              />
+              {addSearch && (
+                <button onClick={() => setAddSearch('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-theme-text-muted hover:text-theme-text">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Category pill tabs */}
+          {!searchLower && (
+            <div className="px-6 pb-3">
+              <div className="flex gap-1 bg-theme-surface rounded-theme p-1 border border-theme-border w-fit max-w-full overflow-x-auto">
+                <button
+                  onClick={() => setAddCatId(null)}
+                  className={`px-4 py-2 text-sm rounded-theme whitespace-nowrap transition-colors ${
+                    !addCatId ? 'font-semibold text-theme-accent border-2 border-theme-accent' : 'font-medium text-theme-text-muted hover:text-theme-text'
+                  }`}
+                >
+                  All
+                </button>
+                {parentCats.map((cat) => {
+                  const children = getChildren(cat.id);
+                  const isParentActive = addCatId === cat.id;
+                  const isChildActive = children.some((c) => c.id === addCatId);
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => setAddCatId(cat.id)}
+                      className={`px-4 py-2 text-sm rounded-theme whitespace-nowrap transition-colors ${
+                        isParentActive || isChildActive
+                          ? 'font-semibold text-theme-accent border-2 border-theme-accent'
+                          : 'font-medium text-theme-text-muted hover:text-theme-text'
+                      }`}
+                    >
+                      {cat.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Menu grid (matches NewOrderView) */}
+          <div className="flex-1 overflow-auto px-6 pb-6 grid grid-cols-5 gap-3 content-start">
+            {filteredItems.map((item) => {
+              const inCart = newItemCart.find((c) => c.menuItem.id === item.id);
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => addToNewCart(item)}
+                  className={`relative bg-theme-surface rounded-theme p-1.5 text-center border transition-all hover:border-theme-accent ${
+                    inCart ? 'border-theme-pop border-2' : 'border-theme-border'
+                  }`}
+                >
+                  {inCart && (
+                    <div className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-theme-pop text-white flex items-center justify-center text-[9px] font-bold z-10">
+                      {inCart.quantity}
+                    </div>
+                  )}
+                  <div className="aspect-square bg-theme-bg rounded-theme mb-1 flex items-center justify-center overflow-hidden">
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-base">🍽️</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] font-semibold text-theme-text leading-tight truncate">{item.name}</p>
+                  <p className="text-[11px] font-bold text-theme-text">{formatCurrency(Number(item.price))}</p>
+                </button>
+              );
+            })}
+            {filteredItems.length === 0 && (
+              <p className="col-span-5 text-center py-12 text-theme-text-muted text-sm">No items found</p>
+            )}
+          </div>
+        </section>
+
+        {/* New items cart sidebar */}
+        <aside className="w-[400px] shrink-0 bg-theme-surface border-l border-theme-border flex flex-col">
+          <div className="px-5 py-4 border-b border-theme-border">
+            <p className="text-xs font-bold uppercase tracking-wider text-theme-text-muted">New Items</p>
+            <p className="text-xs text-theme-text-muted mt-0.5">These will be added to the existing order</p>
+          </div>
+
+          <div className="flex-1 overflow-auto p-4 space-y-2">
+            {newItemCart.length === 0 ? (
+              <p className="text-center text-theme-text-muted text-xs py-6">Tap items to add</p>
+            ) : (
+              newItemCart.map(({ menuItem, quantity, notes }) => (
+                <div key={menuItem.id} className="bg-theme-bg rounded-theme p-3">
+                  <div className="flex items-start gap-2">
+                    <span className="w-7 h-7 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center text-xs font-bold shrink-0">
+                      {quantity}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-theme-text truncate">{menuItem.name}</p>
+                      <p className="text-[11px] text-theme-text-muted">
+                        {formatCurrency(Number(menuItem.price))} each
+                      </p>
+                    </div>
+                    <span className="text-sm font-bold text-theme-text shrink-0">
+                      {formatCurrency(Number(menuItem.price) * quantity)}
+                    </span>
+                  </div>
+
+                  {notes !== undefined ? (
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <input
+                        autoFocus={!notes}
+                        value={notes}
+                        onChange={(e) => setNewItemCart((prev) => prev.map((c) => c.menuItem.id === menuItem.id ? { ...c, notes: e.target.value } : c))}
+                        placeholder="e.g. extra spicy, no onions"
+                        className="flex-1 bg-theme-surface rounded-theme px-2 py-1 text-[11px] text-theme-text outline-none border border-theme-border focus:border-theme-accent"
+                      />
+                      <button
+                        onClick={() => setNewItemCart((prev) => prev.map((c) => c.menuItem.id === menuItem.id ? { ...c, notes: undefined } : c))}
+                        className="text-theme-text-muted hover:text-theme-danger text-xs"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-2 flex items-center justify-between">
+                    {notes === undefined ? (
+                      <button
+                        onClick={() => setNewItemCart((prev) => prev.map((c) => c.menuItem.id === menuItem.id ? { ...c, notes: '' } : c))}
+                        className="text-[10px] text-theme-text-muted hover:text-theme-accent flex items-center gap-1 transition-colors"
+                      >
+                        📝 Add note
+                      </button>
+                    ) : <span />}
+                    <div className="flex items-center gap-1 ml-auto">
+                      <button
+                        onClick={() => removeFromNewCart(menuItem.id)}
+                        className="w-6 h-6 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center hover:border-theme-danger hover:text-theme-danger transition-colors"
+                      >
+                        <Minus size={10} />
+                      </button>
+                      <span className="w-4 text-center text-xs font-bold">{quantity}</span>
+                      <button
+                        onClick={() => addToNewCart(menuItem)}
+                        className="w-6 h-6 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center hover:border-theme-accent hover:text-theme-accent transition-colors"
+                      >
+                        <Plus size={10} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="p-4 border-t border-theme-border">
+            <button
+              onClick={onSubmit}
+              disabled={newItemCart.length === 0 || isPending}
+              className="w-full bg-theme-pop hover:opacity-90 text-white py-4 rounded-theme font-bold text-sm transition-opacity disabled:opacity-40"
+            >
+              {isPending ? 'Adding…' : `Add to Order (${formatCurrency(newCartTotal)})`}
+            </button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+// ─── Active Order View ────────────────────────────────────────────────────────
+
+function ActiveOrderView({
+  order: initialOrder,
+  onBack,
+}: {
+  order: Order;
+  onBack: () => void;
+}) {
+  const { user } = useAuthStore();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const isCashier = user?.role === 'CASHIER' || user?.role === 'KITCHEN' || user?.role === 'WAITER';
+
+  const [order, setOrder] = useState<Order>(initialOrder);
+
+  // Sync with parent when server data updates (e.g. QR customer adds items)
+  useEffect(() => {
+    setOrder(initialOrder);
+  }, [initialOrder]);
+
+  const [showPayment, setShowPayment] = useState(false);
+  const [showBill, setShowBill] = useState(false);
+  const [paidOrder, setPaidOrder] = useState<Order | null>(null);
+  const [cashReceived, setCashReceived] = useState(0);
+  const [voidingItem, setVoidingItem] = useState<OrderItem | null>(null);
+  const [showAddItems, setShowAddItems] = useState(false);
+  const [newItemCart, setNewItemCart] = useState<CartItem[]>([]);
+
+  const { data: orderWaiters = [] } = useQuery<{ id: string; name: string; role: string; isActive: boolean }[]>({
+    queryKey: ['waiters'],
+    queryFn: () => api.get('/staff'),
+    select: (d: any[]) => d.filter((s) => s.role === 'WAITER' && s.isActive),
+  });
+
+  const setWaiterMut = useMutation({
+    mutationFn: (waiterId: string) => api.patch<Order>(`/orders/${order.id}/waiter`, { waiterId }),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const acceptOrderMut = useMutation({
+    mutationFn: () => api.post<Order>(`/orders/${order.id}/accept`, {}),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+      void queryClient.invalidateQueries({ queryKey: ['pending-orders'] });
+    },
+  });
+
+  const cancelOrderMut = useMutation({
+    mutationFn: () => api.post<Order>(`/orders/${order.id}/void`, { reason: 'Cancelled by cashier', approverId: user?.id ?? '' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['tables'] });
+      void queryClient.invalidateQueries({ queryKey: ['pending-orders'] });
+      void navigate('/tables');
+    },
+  });
+
+  const removeItemMut = useMutation({
+    mutationFn: (itemId: string) => api.post<Order>(`/orders/${order.id}/items/${itemId}/cancel`, {}),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const { data: menuItems = [] } = useQuery<MenuItem[]>({
+    queryKey: ['menu'],
+    queryFn: () => api.get<MenuItem[]>('/menu'),
+    enabled: showAddItems,
+  });
+
+  const addItemsMutation = useMutation({
+    mutationFn: (items: { menuItemId: string; quantity: number; notes?: string }[]) =>
+      api.post<Order>(`/orders/${order.id}/items`, items),
+    onSuccess: (updated) => {
+      printNewItemsKT(updated, newItemCart);
+      setOrder(updated);
+      setShowAddItems(false);
+      setNewItemCart([]);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const printNewItemsKT = (ord: Order, newItems: CartItem[]) => {
+    const items = newItems
+      .map((c) => `<tr><td style="padding:4px 0;font-size:16px;font-weight:bold">${c.quantity}\u00d7</td><td style="padding:4px 8px;font-size:16px">${c.menuItem.name}</td></tr>`)
+      .join('');
+    const html = `<html><head><style>
+      body { font-family: monospace; width: 80mm; margin: 0; padding: 8px; }
+      h1 { font-size: 24px; margin: 0; text-align: center; }
+      .meta { font-size: 12px; text-align: center; color: #666; margin: 4px 0 12px; }
+      table { width: 100%; border-collapse: collapse; }
+      .divider { border-top: 1px dashed #000; margin: 8px 0; }
+    </style></head><body>
+      <h1>*** ADDITIONAL ITEMS ***</h1>
+      <div class="meta">#${ord.orderNumber} &mdash; ${ord.tableNumber ? 'Table ' + ord.tableNumber : ord.type}</div>
+      <div class="meta">${new Date().toLocaleTimeString()}</div>
+      <div class="divider"></div>
+      <table>${items}</table>
+      <div class="divider"></div>
+      <script>window.onload=function(){window.print();window.close();}<\/script>
+    </body></html>`;
+    const win = window.open('', '_blank', 'width=320,height=600');
+    if (win) { win.document.write(html); win.document.close(); }
+  };
+
+  const voidItemMutation = useMutation({
+    mutationFn: (dto: VoidOrderItemDto & { itemId: string }) =>
+      api.post<Order>(`/orders/${order.id}/items/${dto.itemId}/void`, {
+        reason: dto.reason,
+        approverId: dto.approverId,
+        logAsWaste: dto.logAsWaste,
+        wasteReason: dto.wasteReason,
+      }),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      setVoidingItem(null);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const activeItems = order.items.filter((i) => !i.voidedAt);
+  const pendingApprovalItems = activeItems.filter((i) => i.kitchenStatus === 'PENDING_APPROVAL');
+  const voidedItems = order.items.filter((i) => i.voidedAt);
+  const total = Number(order.totalAmount);
+  const subtotal = Number(order.subtotal);
+  const tax = Number(order.taxAmount);
+
+  const approveAllMut = useMutation({
+    mutationFn: () => api.post<Order>(`/orders/${order.id}/approve-items`, {}),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const rejectAllMut = useMutation({
+    mutationFn: () => api.post<Order>(`/orders/${order.id}/reject-items`, {}),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const approveItemMut = useMutation({
+    mutationFn: (itemId: string) => api.post<Order>(`/orders/${order.id}/items/${itemId}/approve`, {}),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const rejectItemMut = useMutation({
+    mutationFn: (itemId: string) => api.post<Order>(`/orders/${order.id}/items/${itemId}/reject`, {}),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const [showDiscountPicker, setShowDiscountPicker] = useState(false);
+  const [showCouponInput, setShowCouponInput] = useState(false);
+  const [posCouponCode, setPosCouponCode] = useState('');
+  const [custSearch, setCustSearch] = useState('');
+  const [showCustForm, setShowCustForm] = useState(false);
+  const [newCustPhone, setNewCustPhone] = useState('');
+  const [newCustName, setNewCustName] = useState('');
+  const [showMoveTable, setShowMoveTable] = useState(false);
+  const [movingItem, setMovingItem] = useState<OrderItem | null>(null);
+
+  const { data: availableDiscounts = [] } = useQuery<{ id: string; name: string; type: string; value: number; scope: string; isActive: boolean }[]>({
+    queryKey: ['active-discounts'],
+    queryFn: () => api.get('/discounts/active'),
+  });
+
+  const applyDiscountMut = useMutation({
+    mutationFn: (discountId: string) => api.post<Order>(`/orders/${order.id}/apply-discount`, { discountId }),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      setShowDiscountPicker(false);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const removeDiscountMut = useMutation({
+    mutationFn: () => api.post<Order>(`/orders/${order.id}/remove-discount`, {}),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const applyCouponMut = useMutation({
+    mutationFn: (code: string) => api.post<Order>(`/orders/${order.id}/apply-coupon`, { code }),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      setShowCouponInput(false);
+      setPosCouponCode('');
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const { data: custResults = [] } = useQuery<{ id: string; name: string; phone: string; totalOrders: number }[]>({
+    queryKey: ['customer-search', custSearch],
+    queryFn: () => api.get(`/customers/search?q=${encodeURIComponent(custSearch)}`),
+    enabled: custSearch.length >= 2,
+  });
+
+  const assignCustomerMut = useMutation({
+    mutationFn: (customerId: string | null) => api.post<Order>(`/customers/assign-order`, { orderId: order.id, customerId }),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      setCustSearch('');
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const createCustomerMut = useMutation({
+    mutationFn: () => api.post<{ id: string; name: string; phone: string }>('/customers', { phone: newCustPhone, name: newCustName || undefined }),
+    onSuccess: async (c) => {
+      setShowCustForm(false);
+      setNewCustPhone('');
+      setNewCustName('');
+      assignCustomerMut.mutate((c as any).id);
+    },
+  });
+
+  const { data: allTables = [] } = useQuery<{ id: string; tableNumber: string; status: string }[]>({
+    queryKey: ['tables-for-move'],
+    queryFn: () => api.get('/tables'),
+    enabled: showMoveTable || !!movingItem,
+  });
+
+  const moveTableMut = useMutation({
+    mutationFn: (newTableId: string) => api.post<Order>(`/orders/${order.id}/move-table`, { tableId: newTableId }),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      setShowMoveTable(false);
+      void queryClient.invalidateQueries({ queryKey: ['tables'] });
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const moveItemMut = useMutation({
+    mutationFn: ({ itemId, tableId }: { itemId: string; tableId: string }) =>
+      api.post<Order>(`/orders/${order.id}/items/${itemId}/move-table`, { tableId }),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      setMovingItem(null);
+      void queryClient.invalidateQueries({ queryKey: ['tables'] });
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
+  const discount = Number(order.discountAmount);
+
+  const STATUS_LABEL: Record<string, string> = {
+    PENDING: 'Pending', CONFIRMED: 'Confirmed', PREPARING: 'Preparing',
+    READY: 'Ready', SERVED: 'Served',
+  };
+
+  if (paidOrder) {
+    return (
+      <ReceiptModal
+        order={paidOrder}
+        cashReceived={cashReceived}
+        onDone={() => {
+          void queryClient.invalidateQueries({ queryKey: ['tables'] });
+          void navigate('/tables');
+        }}
+      />
+    );
+  }
+
+  const STATUS_PILL: Record<string, string> = {
+    PENDING: 'text-theme-warn bg-theme-warn/10',
+    CONFIRMED: 'text-theme-info bg-theme-info/10',
+    PREPARING: 'text-theme-warn bg-theme-warn/10',
+    READY: 'text-theme-pop bg-theme-pop/10',
+    SERVED: 'text-theme-pop bg-theme-pop/10',
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-theme-bg">
+      {/* Top bar */}
+      <header className="h-16 bg-theme-surface border-b border-theme-border flex items-center px-6 gap-4 shrink-0">
+        <button onClick={onBack} className="text-theme-text-muted hover:text-theme-accent flex items-center gap-1 text-sm font-semibold transition-colors">
+          <ArrowLeft size={16} /> Tables
+        </button>
+        <div className="h-8 w-px bg-theme-border" />
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-xl font-extrabold text-theme-text">Order #{order.orderNumber}</h1>
+          <span className="text-xs text-theme-text-muted">
+            {order.tableNumber ? `Table ${order.tableNumber}` : 'Takeaway'} · {order.type}
+          </span>
+        </div>
+        <div className="flex-1" />
+        <span className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full ${STATUS_PILL[order.status] ?? 'text-theme-text-muted bg-theme-bg'}`}>
+          {STATUS_LABEL[order.status] ?? order.status}
+        </span>
+      </header>
+
+      {/* Bill requested banner */}
+      {(order as any).billRequested && order.status !== 'PAID' && (
+        <div className="px-6 py-3 bg-theme-info/10 border-b-2 border-theme-info/30 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-theme-info text-white flex items-center justify-center font-bold animate-pulse">💰</div>
+            <div>
+              <p className="text-sm font-bold text-theme-info">Customer has requested the bill</p>
+              <p className="text-[11px] text-theme-text-muted">Process payment when ready</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowPayment(true)}
+            className="bg-theme-info text-white text-xs font-bold px-4 py-2 rounded-theme hover:opacity-90 transition-opacity"
+          >
+            Process Payment
+          </button>
+        </div>
+      )}
+
+      {/* Waiter + Customer bar */}
+      <div className="bg-theme-surface border-b border-theme-border px-6 py-3 flex items-center gap-6 shrink-0 flex-wrap">
+        {orderWaiters.length > 0 && (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase text-theme-text-muted">Waiter</span>
+              <select
+                value={(order as any).waiterId ?? ''}
+                onChange={(e) => { if (e.target.value) setWaiterMut.mutate(e.target.value); }}
+                className="text-sm font-semibold bg-theme-bg rounded-theme px-3 py-1.5 border-0 text-theme-text outline-none"
+              >
+                <option value="">— Select —</option>
+                {orderWaiters.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+              </select>
+            </div>
+            <div className="h-6 w-px bg-theme-border" />
+          </>
+        )}
+        <span className="text-[10px] font-bold uppercase text-theme-text-muted">Customer</span>
+        <span className="text-xs font-theme-body font-medium font-semibold text-theme-text-muted">Customer:</span>
+        {(order as any).customerName && (order as any).customerId ? (
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-theme-body text-theme-text font-medium">{(order as any).customerName}</span>
+            {(order as any).customerPhone && <span className="text-xs font-theme-body text-theme-text-muted">{(order as any).customerPhone}</span>}
+            <button onClick={() => assignCustomerMut.mutate(null)} className="text-theme-text-muted hover:text-theme-accent text-xs">✕</button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 flex-1">
+            <div className="relative flex-1 max-w-xs">
+              <input
+                value={custSearch}
+                onChange={(e) => setCustSearch(e.target.value)}
+                placeholder="Search phone or name..."
+                className="w-full border border-theme-border px-3 py-1.5 text-sm font-theme-body text-theme-text outline-none focus:border-theme-accent bg-theme-surface"
+              />
+              {custSearch.length >= 2 && custResults.length > 0 && (
+                <div className="absolute top-full left-0 w-full bg-theme-surface border border-theme-border shadow-lg z-10 max-h-40 overflow-auto">
+                  {custResults.map((c) => (
+                    <button key={c.id} onClick={() => assignCustomerMut.mutate(c.id)}
+                      className="w-full text-left px-3 py-2 text-sm font-theme-body hover:bg-theme-surface-alt flex justify-between border-b border-theme-surface-alt last:border-0">
+                      <span className="text-theme-text">{c.name}</span>
+                      <span className="text-theme-text-muted text-xs">{c.phone} ({c.totalOrders} orders)</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {!showCustForm ? (
+              <button onClick={() => setShowCustForm(true)} className="text-xs font-theme-body text-theme-accent hover:underline font-semibold whitespace-nowrap">+ New</button>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <input value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} placeholder="Phone"
+                  className="border border-theme-border px-2 py-1 text-xs font-theme-body w-28 outline-none focus:border-theme-accent" />
+                <input value={newCustName} onChange={(e) => setNewCustName(e.target.value)} placeholder="Name"
+                  className="border border-theme-border px-2 py-1 text-xs font-theme-body w-24 outline-none focus:border-theme-accent" />
+                <button onClick={() => createCustomerMut.mutate()} disabled={!newCustPhone || createCustomerMut.isPending}
+                  className="bg-theme-accent text-white text-[10px] px-2 py-1 font-theme-body disabled:opacity-40">Add</button>
+                <button onClick={() => setShowCustForm(false)} className="text-theme-text-muted text-xs">✕</button>
+              </div>
+            )}
+            <button onClick={() => assignCustomerMut.mutate(null)}
+              className="text-xs font-theme-body text-theme-text-muted border border-theme-border px-2 py-1 hover:border-theme-text whitespace-nowrap">Walk-in</button>
+          </div>
+        )}
+        {assignCustomerMut.isPending && <span className="text-theme-text-muted font-theme-body text-xs">Saving...</span>}
+      </div>
+
+      {/* Pending approval banner */}
+      {pendingApprovalItems.length > 0 && (
+        <div className="bg-theme-danger/10 border-b-2 border-theme-danger/30 px-6 py-3 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-theme-danger text-white flex items-center justify-center font-bold animate-pulse">🔔</div>
+            <div>
+              <p className="text-sm font-bold text-theme-danger">
+                {pendingApprovalItems.length} new item{pendingApprovalItems.length > 1 ? 's' : ''} from QR customer
+              </p>
+              <p className="text-[11px] text-theme-text-muted">Awaiting your approval before they go to kitchen</p>
+            </div>
+          </div>
+          {pendingApprovalItems.length > 1 && (
+            <div className="flex gap-2">
+              <button
+                onClick={() => rejectAllMut.mutate()}
+                disabled={rejectAllMut.isPending}
+                className="border-2 border-theme-danger text-theme-danger font-semibold px-4 py-2 rounded-theme text-sm hover:bg-theme-danger hover:text-white transition-colors disabled:opacity-40"
+              >
+                Reject All
+              </button>
+              <button
+                onClick={() => approveAllMut.mutate()}
+                disabled={approveAllMut.isPending}
+                className="bg-theme-danger text-white font-bold px-4 py-2 rounded-theme text-sm hover:opacity-90 transition-opacity disabled:opacity-40"
+              >
+                Approve All
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Items + Summary split */}
+      <div className="flex-1 flex overflow-hidden">
+      <section className="flex-1 overflow-auto p-6">
+      <div className="bg-theme-surface rounded-theme border border-theme-border overflow-hidden">
+        <div className="px-5 py-3 border-b border-theme-border flex items-center justify-between">
+          <h3 className="text-sm font-bold text-theme-text">Items ({activeItems.length})</h3>
+          <span className="text-[10px] text-theme-text-muted">Auto-refreshing</span>
+        </div>
+        {/* Active items */}
+        <div className="divide-y divide-theme-border">
+          {activeItems.map((item) => {
+            const isPendingApproval = item.kitchenStatus === 'PENDING_APPROVAL';
+            const ks = item.kitchenStatus;
+            const STATUS_PILL: Record<string, string> = {
+              READY:    'text-theme-pop bg-theme-pop/10',
+              PREPARING:'text-theme-warn bg-theme-warn/10',
+              SERVED:   'text-theme-pop bg-theme-pop/10',
+              QUEUED:   'text-theme-text-muted bg-theme-bg',
+            };
+            const statusLabel: Record<string, string> = {
+              READY: 'DONE', PREPARING: 'PREPARING', SERVED: 'SERVED', QUEUED: 'QUEUED',
+            };
+            return (
+              <div key={item.id} className={`px-5 py-3 ${isPendingApproval ? 'bg-theme-danger/5' : ''}`}>
+                <div className="flex items-start gap-3">
+                  <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                    isPendingApproval ? 'bg-theme-danger text-white' : 'bg-theme-bg text-theme-text'
+                  }`}>
+                    {item.quantity}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-theme-text">{item.menuItemName}</p>
+                      {isPendingApproval ? (
+                        <span className="text-[9px] font-bold uppercase text-theme-danger bg-theme-surface px-1.5 py-0.5 rounded">NEW · AWAITING</span>
+                      ) : ks && STATUS_PILL[ks] ? (
+                        <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${STATUS_PILL[ks]}`}>
+                          {statusLabel[ks]}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-[11px] text-theme-text-muted mt-0.5">
+                      {item.quantity} × {formatCurrency(Number(item.unitPrice))}
+                    </p>
+                    {item.notes && (
+                      <p className="text-[11px] text-theme-accent mt-0.5 flex items-center gap-1">📝 {item.notes}</p>
+                    )}
+                    {(order.status === 'PENDING' || order.status === 'CONFIRMED') && (
+                      <button
+                        onClick={() => {
+                          const note = prompt(item.notes ? 'Edit note:' : 'Add note for this item:', item.notes ?? '');
+                          if (note !== null) api.patch(`/orders/${order.id}/items/${item.id}/notes`, { notes: note }).then(() => queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] }));
+                        }}
+                        className="text-[10px] text-theme-text-muted hover:text-theme-accent mt-0.5"
+                      >
+                        {item.notes ? 'Edit note' : '+ Add note'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <span className="text-sm font-extrabold text-theme-text">{formatCurrency(Number(item.totalPrice))}</span>
+                    {isPendingApproval ? (
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => rejectItemMut.mutate(item.id)}
+                          disabled={rejectItemMut.isPending}
+                          title="Reject"
+                          className="w-7 h-7 rounded-theme border-2 border-theme-danger text-theme-danger hover:bg-theme-danger hover:text-white flex items-center justify-center transition-colors disabled:opacity-40"
+                        >
+                          <X size={12} />
+                        </button>
+                        <button
+                          onClick={() => approveItemMut.mutate(item.id)}
+                          disabled={approveItemMut.isPending}
+                          title="Approve"
+                          className="w-7 h-7 rounded-theme bg-theme-pop text-white hover:opacity-90 flex items-center justify-center transition-opacity disabled:opacity-40 text-sm font-bold"
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    ) : order.status === 'PENDING' ? (
+                      <button
+                        onClick={() => removeItemMut.mutate(item.id)}
+                        disabled={removeItemMut.isPending}
+                        className="text-[10px] text-theme-text-muted hover:text-theme-danger transition-colors"
+                      >
+                        Remove
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setMovingItem(item)}
+                          className="text-[10px] text-theme-text-muted hover:text-theme-accent transition-colors"
+                          title="Move this item to another table"
+                        >
+                          Move
+                        </button>
+                        <span className="text-theme-border">·</span>
+                        <button
+                          onClick={() => setVoidingItem(item)}
+                          className="text-[10px] text-theme-text-muted hover:text-theme-danger transition-colors"
+                        >
+                          Void
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Voided items */}
+        {voidedItems.length > 0 && (
+          <div className="border-t border-theme-border bg-theme-bg/40 px-5 py-3">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-theme-text-muted mb-2">Voided</p>
+            {voidedItems.map((item) => (
+              <div key={item.id} className="flex items-center justify-between py-1 opacity-50">
+                <div className="flex items-center gap-3">
+                  <span className="w-7 h-7 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center text-xs font-bold">
+                    {item.quantity}
+                  </span>
+                  <p className="text-sm font-semibold line-through text-theme-text">{item.menuItemName}</p>
+                </div>
+                <span className="text-sm font-bold line-through text-theme-text">{formatCurrency(Number(item.totalPrice))}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      </section>
+
+      {/* Right summary panel */}
+      <aside className="w-[400px] bg-theme-surface border-l border-theme-border flex flex-col shrink-0">
+      <div className="p-5 space-y-2 flex-1 overflow-auto">
+        <div className="flex justify-between text-sm font-theme-body text-theme-text-muted">
+          <span>Subtotal</span><span>{formatCurrency(subtotal)}</span>
+        </div>
+        {discount > 0 && (
+          <div className="flex justify-between text-sm font-theme-body text-green-600">
+            <span className="flex items-center gap-1">
+              {(order as any).discountName || 'Discount'}
+              {(order as any).couponCode && <span className="text-[10px] bg-green-600/10 px-1.5 py-0.5 font-semibold">{(order as any).couponCode}</span>}
+            </span>
+            <span className="flex items-center gap-2">
+              -{formatCurrency(discount)}
+              {order.status !== 'PAID' && (
+                <button onClick={() => removeDiscountMut.mutate()} className="text-theme-border hover:text-theme-accent text-[10px]">✕</button>
+              )}
+            </span>
+          </div>
+        )}
+        <div className="flex justify-between text-sm font-theme-body text-theme-text-muted">
+          <span>Tax</span><span>{formatCurrency(tax)}</span>
+        </div>
+        <div className="flex justify-between font-theme-display text-2xl tracking-wide pt-1">
+          <span>TOTAL</span>
+          <span className="text-theme-accent">{formatCurrency(total)}</span>
+        </div>
+        {/* Discount / Coupon controls */}
+        {discount === 0 && order.status !== 'PAID' && order.status !== 'VOID' && (
+          <div className="flex items-center gap-2 pt-2">
+            <button
+              onClick={() => { setShowDiscountPicker(true); setShowCouponInput(false); }}
+              className="flex-1 bg-theme-bg hover:bg-theme-surface-alt text-theme-text font-semibold py-2 rounded-theme text-xs transition-colors"
+            >
+              + Discount
+            </button>
+            <button
+              onClick={() => { setShowCouponInput(true); setShowDiscountPicker(false); }}
+              className="flex-1 bg-theme-bg hover:bg-theme-surface-alt text-theme-text font-semibold py-2 rounded-theme text-xs transition-colors"
+            >
+              + Coupon
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div className="p-4 border-t border-theme-border flex flex-wrap gap-2">
+          {/* PENDING: Accept, Add Items, Cancel */}
+          {order.status === 'PENDING' && (
+            <>
+              <button
+                onClick={() => { if (confirm('Cancel this QR order? The customer will be notified.')) cancelOrderMut.mutate(); }}
+                disabled={cancelOrderMut.isPending}
+                className="flex items-center gap-1.5 px-4 py-3 border border-theme-border text-theme-accent hover:border-theme-accent text-sm font-theme-body transition-colors disabled:opacity-40"
+              >
+                {cancelOrderMut.isPending ? 'Cancelling…' : 'Cancel Order'}
+              </button>
+              <button
+                onClick={() => setShowAddItems(true)}
+                className="flex items-center gap-1.5 px-4 py-3 border border-theme-border text-theme-text-muted hover:border-theme-text hover:text-theme-text text-sm font-theme-body transition-colors"
+              >
+                <Plus size={14} />
+                Edit Items
+              </button>
+              <button
+                onClick={() => acceptOrderMut.mutate()}
+                disabled={acceptOrderMut.isPending || activeItems.length === 0}
+                className="flex-1 bg-theme-pop hover:opacity-90 text-white flex items-center justify-center gap-2 py-3 rounded-theme font-bold text-sm transition-opacity disabled:opacity-40"
+              >
+                {acceptOrderMut.isPending ? 'Accepting…' : '✓ Accept → Kitchen'}
+              </button>
+            </>
+          )}
+          {order.status !== 'PENDING' && (
+            <>
+              <button
+                onClick={() => setShowBill(true)}
+                disabled={activeItems.length === 0}
+                className="flex items-center gap-1.5 px-4 py-3 border border-theme-border text-theme-text-muted hover:border-theme-text hover:text-theme-text text-sm font-theme-body transition-colors disabled:opacity-40"
+              >
+                <Printer size={14} />
+                Bill
+              </button>
+              {/* Move Table */}
+              {order.tableId && (
+                <button
+                  onClick={() => setShowMoveTable(true)}
+                  className="flex items-center gap-1.5 px-4 py-3 bg-theme-bg hover:bg-theme-surface-alt rounded-theme text-theme-text font-semibold text-sm transition-colors"
+                >
+                  Move Table
+                </button>
+              )}
+              <button
+                onClick={() => setShowAddItems(true)}
+                className="flex items-center gap-1.5 px-4 py-3 border border-theme-border text-theme-text-muted hover:border-theme-text hover:text-theme-text text-sm font-theme-body transition-colors"
+              >
+                <Plus size={14} />
+                Add Items
+              </button>
+              <button
+                onClick={() => setShowPayment(true)}
+                disabled={activeItems.length === 0}
+                className="flex-1 bg-theme-pop hover:opacity-90 text-white flex items-center justify-center gap-2 py-3 rounded-theme font-bold text-sm transition-opacity disabled:opacity-40"
+              >
+                <ShoppingBag size={16} />
+                Process Payment
+              </button>
+            </>
+          )}
+        </div>
+      </aside>
+      </div>
+
+      {showAddItems && (
+        <AddItemsOverlay
+          menuItems={menuItems}
+          newItemCart={newItemCart}
+          setNewItemCart={setNewItemCart}
+          onClose={() => { setShowAddItems(false); setNewItemCart([]); }}
+          onSubmit={() => addItemsMutation.mutate(newItemCart.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity, notes: c.notes || undefined })))}
+          isPending={addItemsMutation.isPending}
+          orderNumber={order.orderNumber}
+        />
+      )}
+
+      {showBill && (
+        <BillModal order={order} onClose={() => setShowBill(false)} />
+      )}
+
+      {showPayment && (
+        <PaymentModal
+          order={order}
+          onClose={() => setShowPayment(false)}
+          onSuccess={(paid, cash) => {
+            setShowPayment(false);
+            setPaidOrder(paid);
+            setCashReceived(cash);
+          }}
+        />
+      )}
+
+      {voidingItem && (
+        <VoidItemDialog
+          item={voidingItem}
+          orderId={order.id}
+          isCashier={isCashier}
+          onClose={() => setVoidingItem(null)}
+          isPending={voidItemMutation.isPending}
+          error={voidItemMutation.isError ? (voidItemMutation.error as Error).message : undefined}
+          onConfirm={(dto) =>
+            voidItemMutation.mutate({ ...dto, itemId: voidingItem.id })
+          }
+        />
+      )}
+
+      {/* Discount picker modal */}
+      {showDiscountPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowDiscountPicker(false)}>
+          <div className="bg-theme-surface rounded-theme shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
+            <header className="px-5 py-4 border-b border-theme-border flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-wider text-theme-text-muted">Apply Discount</p>
+              <button onClick={() => setShowDiscountPicker(false)} className="w-7 h-7 rounded-theme hover:bg-theme-bg flex items-center justify-center text-theme-text-muted">
+                <X size={14} />
+              </button>
+            </header>
+            <div className="p-3 space-y-1 overflow-auto">
+              {availableDiscounts.length === 0 ? (
+                <p className="text-center text-sm text-theme-text-muted py-6">No discounts available</p>
+              ) : (
+                availableDiscounts.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => applyDiscountMut.mutate(d.id)}
+                    className="w-full text-left p-3 rounded-theme hover:bg-theme-bg flex items-center justify-between transition-colors"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-theme-text">{d.name}</p>
+                      <p className="text-[10px] text-theme-text-muted">All items · {d.type === 'FLAT' ? `${formatCurrency(Number(d.value))} off` : `${d.value}% off`}</p>
+                    </div>
+                    <span className="text-xs font-bold text-theme-pop">{d.type === 'FLAT' ? `-${formatCurrency(Number(d.value))}` : `-${d.value}%`}</span>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="border-t border-theme-border p-3">
+              <button
+                onClick={() => { setShowDiscountPicker(false); setShowCouponInput(true); }}
+                className="w-full text-theme-accent text-xs font-bold uppercase tracking-wider py-2 hover:underline"
+              >
+                — or use Coupon Code instead —
+              </button>
+            </div>
+            {applyDiscountMut.isError && (
+              <p className="px-5 pb-3 text-xs text-theme-danger text-center">{(applyDiscountMut.error as Error).message}</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Coupon code modal */}
+      {showCouponInput && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => { setShowCouponInput(false); setPosCouponCode(''); }}>
+          <div className="bg-theme-surface rounded-theme shadow-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <header className="px-5 py-4 border-b border-theme-border flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-wider text-theme-text-muted">Coupon Code</p>
+              <button onClick={() => { setShowCouponInput(false); setPosCouponCode(''); }} className="w-7 h-7 rounded-theme hover:bg-theme-bg flex items-center justify-center text-theme-text-muted">
+                <X size={14} />
+              </button>
+            </header>
+            <div className="p-5 space-y-3">
+              <input
+                value={posCouponCode}
+                onChange={(e) => setPosCouponCode(e.target.value.toUpperCase())}
+                placeholder="ENTER CODE"
+                autoFocus
+                className="w-full bg-theme-bg rounded-theme px-4 py-3 text-base font-bold font-mono tracking-widest text-center text-theme-text outline-none border border-transparent focus:border-theme-accent uppercase"
+              />
+              <button
+                onClick={() => applyCouponMut.mutate(posCouponCode)}
+                disabled={!posCouponCode.trim() || applyCouponMut.isPending}
+                className="w-full bg-theme-pop text-white font-bold py-3 rounded-theme hover:opacity-90 transition-opacity disabled:opacity-40"
+              >
+                {applyCouponMut.isPending ? 'Applying…' : 'Apply Coupon'}
+              </button>
+              {applyCouponMut.isError && (
+                <p className="text-xs text-theme-danger text-center">{(applyCouponMut.error as Error).message}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Move single item to another table */}
+      {movingItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setMovingItem(null)}
+        >
+          <div
+            className="bg-theme-surface rounded-theme shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="px-6 py-4 border-b border-theme-border flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-theme-text">Move Item</h3>
+                <p className="text-xs text-theme-text-muted mt-0.5 truncate">
+                  {movingItem.quantity}× {movingItem.menuItemName} → pick destination table
+                </p>
+              </div>
+              <button
+                onClick={() => setMovingItem(null)}
+                className="w-8 h-8 rounded-theme hover:bg-theme-bg flex items-center justify-center text-theme-text-muted"
+              >
+                <X size={16} />
+              </button>
+            </header>
+
+            <div className="p-6 overflow-auto">
+              <div className="grid grid-cols-4 gap-3">
+                {allTables
+                  .filter((t) => t.id !== order.tableId)
+                  .map((t) => {
+                    const isVacant = t.status === 'AVAILABLE';
+                    const isOccupied = t.status === 'OCCUPIED';
+                    const enabled = isVacant || isOccupied;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => enabled && moveItemMut.mutate({ itemId: movingItem.id, tableId: t.id })}
+                        disabled={!enabled || moveItemMut.isPending}
+                        className={`aspect-square rounded-theme border-2 flex flex-col items-center justify-center transition-colors ${
+                          isVacant
+                            ? 'bg-theme-pop-soft border-theme-pop text-theme-text hover:bg-theme-pop hover:text-white'
+                            : isOccupied
+                              ? 'bg-theme-accent-soft border-theme-accent text-theme-text hover:bg-theme-accent hover:text-white'
+                              : 'bg-theme-bg border-theme-border text-theme-text-muted opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <span className="text-base font-bold">{t.tableNumber}</span>
+                        <span className="text-[9px] uppercase">
+                          {isVacant ? 'vacant' : isOccupied ? 'add to' : t.status.toLowerCase().slice(0, 4)}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+
+              {allTables.filter((t) => t.id !== order.tableId).length === 0 && (
+                <p className="text-center text-sm text-theme-text-muted py-8">No other tables</p>
+              )}
+
+              <p className="text-[10px] text-theme-text-muted text-center mt-4">
+                Vacant tables will get a new order. Occupied tables will receive this item into their existing order.
+              </p>
+
+              {moveItemMut.isError && (
+                <p className="text-xs text-theme-danger text-center mt-3">
+                  {(moveItemMut.error as Error).message}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Move Table modal */}
+      {showMoveTable && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowMoveTable(false)}
+        >
+          <div
+            className="bg-theme-surface rounded-theme shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="px-6 py-4 border-b border-theme-border flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-theme-text">Move To Table</h3>
+                <p className="text-xs text-theme-text-muted mt-0.5">
+                  Currently at Table {order.tableNumber}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowMoveTable(false)}
+                className="w-8 h-8 rounded-theme hover:bg-theme-bg flex items-center justify-center text-theme-text-muted"
+              >
+                <X size={16} />
+              </button>
+            </header>
+
+            <div className="p-6 overflow-auto">
+              <div className="grid grid-cols-4 gap-3">
+                {allTables
+                  .filter((t) => t.id !== order.tableId)
+                  .map((t) => {
+                    const isVacant = t.status === 'AVAILABLE';
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => isVacant && moveTableMut.mutate(t.id)}
+                        disabled={!isVacant || moveTableMut.isPending}
+                        className={`aspect-square rounded-theme border-2 flex flex-col items-center justify-center transition-colors ${
+                          isVacant
+                            ? 'bg-theme-pop-soft border-theme-pop text-theme-text hover:bg-theme-pop hover:text-white'
+                            : 'bg-theme-bg border-theme-border text-theme-text-muted opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <span className="text-base font-bold">{t.tableNumber}</span>
+                        <span className="text-[9px] uppercase">
+                          {isVacant ? 'vacant' : t.status.toLowerCase().slice(0, 4)}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+
+              {allTables.filter((t) => t.id !== order.tableId).length === 0 && (
+                <p className="text-center text-sm text-theme-text-muted py-8">No other tables</p>
+              )}
+
+              <p className="text-[10px] text-theme-text-muted text-center mt-4">
+                QR customer will see updated table number automatically.
+              </p>
+
+              {moveTableMut.isError && (
+                <p className="text-xs text-theme-danger text-center mt-3">
+                  {(moveTableMut.error as Error).message}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── New Order View ───────────────────────────────────────────────────────────
+
+function NewOrderView({
+  tableId,
+  tableNumber,
+  onBack,
+}: {
+  tableId?: string;
+  tableNumber: string;
+  onBack: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [waiterId, setWaiterId] = useState<string>('');
+
+  const { data: menuItems = [] } = useQuery<MenuItem[]>({
+    queryKey: ['menu'],
+    queryFn: () => api.get<MenuItem[]>('/menu'),
+  });
+
+  const { data: waiters = [] } = useQuery<{ id: string; name: string; role: string; isActive: boolean }[]>({
+    queryKey: ['waiters'],
+    queryFn: () => api.get('/staff'),
+    select: (d: any[]) => d.filter((s) => s.role === 'WAITER' && s.isActive),
+  });
+
+  // Fetch categories for proper hierarchy
+  const { data: apiCats = [] } = useQuery<{ id: string; name: string; parentId: string | null }[]>({
+    queryKey: ['menu-categories'],
+    queryFn: () => api.get('/menu/categories'),
+  });
+  const topCats = apiCats.filter((c) => !c.parentId).sort((a, b) => a.name.localeCompare(b.name));
+  const getSubCats = (pid: string) => apiCats.filter((c) => c.parentId === pid).sort((a, b) => a.name.localeCompare(b.name));
+
+  const searchTrimmed = search.trim().toLowerCase();
+  const childIdsOfActive = activeCategory ? getSubCats(activeCategory).map((c) => c.id) : [];
+  const filtered = menuItems
+    .filter((m) => {
+      if (searchTrimmed) return m.name.toLowerCase().includes(searchTrimmed);
+      if (!activeCategory) return true;
+      return m.categoryId === activeCategory || childIdsOfActive.includes(m.categoryId);
+    });
+
+  const subtotal = cart.reduce((s, c) => s + Number(c.menuItem.price) * c.quantity, 0);
+
+  const addToCart = (item: MenuItem) => {
+    setCart((prev) => {
+      const existing = prev.find((c) => c.menuItem.id === item.id);
+      if (existing) return prev.map((c) => c.menuItem.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+      return [...prev, { menuItem: item, quantity: 1 }];
+    });
+  };
+
+  const removeFromCart = (itemId: string) => {
+    setCart((prev) => {
+      const existing = prev.find((c) => c.menuItem.id === itemId);
+      if (!existing || existing.quantity <= 1) return prev.filter((c) => c.menuItem.id !== itemId);
+      return prev.map((c) => c.menuItem.id === itemId ? { ...c, quantity: c.quantity - 1 } : c);
+    });
+  };
+
+  const printKitchenTicket = (order: Order) => {
+    const activeItems = order.items.filter((i) => !i.voidedAt);
+    const items = activeItems
+      .map(
+        (i) =>
+          `<tr><td style="padding:4px 0;font-size:16px;font-weight:bold">${i.quantity}\u00d7</td><td style="padding:4px 8px;font-size:16px">${i.menuItemName}</td></tr>${i.notes ? `<tr><td></td><td style="font-size:12px;color:#666;padding-bottom:4px">&nbsp;&rarr; ${i.notes}</td></tr>` : ''}`,
+      )
+      .join('');
+
+    const html = `<html><head><style>
+      body { font-family: monospace; width: 80mm; margin: 0; padding: 8px; }
+      h1 { font-size: 24px; margin: 0; text-align: center; }
+      .meta { font-size: 12px; text-align: center; color: #666; margin: 4px 0 12px; }
+      table { width: 100%; border-collapse: collapse; }
+      .divider { border-top: 1px dashed #000; margin: 8px 0; }
+      .notes { font-size: 12px; font-style: italic; margin-top: 8px; }
+    </style></head><body>
+      <h1>KITCHEN ORDER</h1>
+      <div class="meta">#${order.orderNumber} &mdash; ${order.tableNumber ? 'Table ' + order.tableNumber : order.type}</div>
+      <div class="meta">${new Date(order.createdAt).toLocaleTimeString()}</div>
+      <div class="divider"></div>
+      <table>${items}</table>
+      <div class="divider"></div>
+      ${order.notes ? `<div class="notes">Note: ${order.notes}</div>` : ''}
+      <script>window.onload=function(){window.print();window.close();}<\/script>
+    </body></html>`;
+
+    const win = window.open('', '_blank', 'width=320,height=600');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+  };
+
+  const createOrderMutation = useMutation({
+    mutationFn: (dto: CreateOrderDto) => api.post<Order>('/orders', dto),
+    onSuccess: (order) => {
+      printKitchenTicket(order);
+      void queryClient.invalidateQueries({ queryKey: ['tables'] });
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', tableId] });
+      void navigate('/tables');
+    },
+  });
+
+  const handlePlaceOrder = () => {
+    createOrderMutation.mutate({
+      tableId,
+      waiterId: waiterId || undefined,
+      type: tableId ? 'DINE_IN' : 'TAKEAWAY',
+      items: cart.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity, notes: c.notes || undefined })),
+    });
+  };
+
+  const setCartNote = (menuItemId: string, notes: string) => {
+    setCart((prev) => prev.map((c) => c.menuItem.id === menuItemId ? { ...c, notes } : c));
+  };
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden bg-theme-bg">
+      {/* Top bar */}
+      <header className="h-16 bg-theme-surface border-b border-theme-border flex items-center px-6 gap-4 shrink-0">
+        <button onClick={onBack} className="text-theme-text-muted hover:text-theme-accent flex items-center gap-1 text-sm font-semibold transition-colors">
+          <ArrowLeft size={16} /> Tables
+        </button>
+        <div className="h-8 w-px bg-theme-border" />
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-xl font-extrabold text-theme-text">New Order</h1>
+          <span className="text-xs text-theme-text-muted">
+            {tableId ? `Table ${tableNumber}` : 'Takeaway'}
+          </span>
+        </div>
+      </header>
+
+      <div className="flex-1 flex overflow-hidden">
+      {/* Menu panel */}
+      <div className="flex-1 min-w-0 flex flex-col">
+
+        {/* Toolbar: search + waiter */}
+        <div className="px-6 pt-4 pb-3 flex items-center gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setActiveCategory(null); }}
+              placeholder="Search products…"
+              className="w-full bg-theme-surface rounded-full pl-11 pr-10 py-2.5 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-theme-text-muted hover:text-theme-text"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          {waiters.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase text-theme-text-muted">Waiter</span>
+              <select
+                value={waiterId}
+                onChange={(e) => setWaiterId(e.target.value)}
+                className="text-sm font-semibold bg-theme-surface rounded-theme px-3 py-2 border border-theme-border text-theme-text outline-none"
+              >
+                <option value="">— Select —</option>
+                {waiters.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Category pill tabs */}
+        {!searchTrimmed && (
+          <div className="px-6 pb-3">
+            <div className="flex gap-1 bg-theme-surface rounded-theme p-1 border border-theme-border w-fit max-w-full overflow-x-auto">
+              <button
+                onClick={() => setActiveCategory(null)}
+                className={`px-4 py-2 text-sm rounded-theme whitespace-nowrap transition-colors ${
+                  !activeCategory ? 'font-semibold text-theme-accent border-2 border-theme-accent' : 'font-medium text-theme-text-muted hover:text-theme-text'
+                }`}
+              >
+                All
+              </button>
+              {topCats.map((cat) => {
+                const subs = getSubCats(cat.id);
+                const isParentActive = activeCategory === cat.id;
+                const isChildActive = subs.some((s) => s.id === activeCategory);
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setActiveCategory(cat.id)}
+                    className={`px-4 py-2 text-sm rounded-theme whitespace-nowrap transition-colors ${
+                      isParentActive || isChildActive
+                        ? 'font-semibold text-theme-accent border-2 border-theme-accent'
+                        : 'font-medium text-theme-text-muted hover:text-theme-text'
+                    }`}
+                  >
+                    {cat.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-auto px-6 pb-6 grid grid-cols-5 gap-3 content-start">
+          {filtered.filter((m) => m.isAvailable).map((item) => {
+            const inCart = cart.find((c) => c.menuItem.id === item.id);
+            return (
+              <button
+                key={item.id}
+                onClick={() => addToCart(item)}
+                className={`relative bg-theme-surface rounded-theme p-2 text-center border transition-all hover:border-theme-accent ${
+                  inCart ? 'border-theme-pop border-2' : 'border-theme-border'
+                }`}
+              >
+                {inCart && (
+                  <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-theme-pop text-white flex items-center justify-center text-[10px] font-bold z-10">
+                    {inCart.quantity}
+                  </div>
+                )}
+                <div className="aspect-square bg-theme-bg rounded-theme mb-1.5 flex items-center justify-center overflow-hidden">
+                  {item.imageUrl ? (
+                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-xl">🍽️</span>
+                  )}
+                </div>
+                <p className="text-[11px] font-semibold text-theme-text leading-tight truncate">{item.name}</p>
+                <p className="text-xs font-bold text-theme-text">{formatCurrency(Number(item.price))}</p>
+              </button>
+            );
+          })}
+          {filtered.length === 0 && (
+            <p className="col-span-5 text-center py-12 text-theme-text-muted text-sm">No items found</p>
+          )}
+        </div>
+      </div>
+
+      {/* Cart panel */}
+      <aside className="w-[400px] shrink-0 flex flex-col bg-theme-surface border-l border-theme-border">
+        <div className="px-5 py-4 border-b border-theme-border">
+          <p className="text-xs font-bold uppercase tracking-wider text-theme-text-muted">Your Order</p>
+          <p className="text-xs text-theme-text-muted mt-0.5">{cart.reduce((s, c) => s + c.quantity, 0)} items</p>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4 space-y-2">
+          {cart.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-theme-text-muted text-sm">
+              Tap items to add
+            </div>
+          ) : (
+            cart.map(({ menuItem, quantity, notes }) => (
+              <div key={menuItem.id} className="bg-theme-bg rounded-theme p-3">
+                <div className="flex items-start gap-2">
+                  <span className="w-7 h-7 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center text-xs font-bold shrink-0">
+                    {quantity}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-theme-text truncate">{menuItem.name}</p>
+                    <p className="text-[11px] text-theme-text-muted">
+                      {formatCurrency(Number(menuItem.price))} each
+                    </p>
+                  </div>
+                  <span className="text-sm font-bold text-theme-text shrink-0">
+                    {formatCurrency(Number(menuItem.price) * quantity)}
+                  </span>
+                </div>
+
+                {notes !== undefined ? (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <input
+                      autoFocus={!notes}
+                      value={notes}
+                      onChange={(e) => setCartNote(menuItem.id, e.target.value)}
+                      placeholder="e.g. extra spicy, no onions"
+                      className="flex-1 bg-theme-surface rounded-theme px-2 py-1 text-[11px] text-theme-text outline-none border border-theme-border focus:border-theme-accent"
+                    />
+                    <button
+                      onClick={() => setCart((prev) => prev.map((c) => c.menuItem.id === menuItem.id ? { ...c, notes: undefined } : c))}
+                      className="text-theme-text-muted hover:text-theme-danger text-xs"
+                      title="Remove note"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="mt-2 flex items-center justify-between">
+                  {notes === undefined ? (
+                    <button
+                      onClick={() => setCartNote(menuItem.id, '')}
+                      className="text-[10px] text-theme-text-muted hover:text-theme-accent flex items-center gap-1 transition-colors"
+                    >
+                      📝 Add note
+                    </button>
+                  ) : <span />}
+                  <div className="flex items-center gap-1 ml-auto">
+                    <button
+                      onClick={() => removeFromCart(menuItem.id)}
+                      className="w-6 h-6 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center hover:border-theme-accent hover:text-theme-accent transition-colors"
+                    >
+                      <Minus size={10} />
+                    </button>
+                    <span className="w-4 text-center text-xs font-bold">{quantity}</span>
+                    <button
+                      onClick={() => addToCart(menuItem)}
+                      className="w-6 h-6 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center hover:border-theme-accent hover:text-theme-accent transition-colors"
+                    >
+                      <Plus size={10} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="border-t border-theme-border p-5">
+          <div className="space-y-1.5 mb-4">
+            <div className="flex justify-between text-sm">
+              <span className="text-theme-text-muted">Subtotal</span>
+              <span className="font-semibold">{formatCurrency(subtotal)}</span>
+            </div>
+            <p className="text-[11px] text-theme-text-muted">Tax calculated at checkout</p>
+            <div className="border-t border-theme-border pt-2 mt-2 flex justify-between items-baseline">
+              <span className="text-base font-bold">Grand Total</span>
+              <span className="text-2xl font-extrabold text-theme-text">{formatCurrency(subtotal)}</span>
+            </div>
+          </div>
+
+          {createOrderMutation.isError && (
+            <p className="text-xs text-theme-danger mb-3 text-center">
+              {(createOrderMutation.error as Error).message}
+            </p>
+          )}
+
+          <button
+            onClick={handlePlaceOrder}
+            disabled={cart.length === 0 || createOrderMutation.isPending}
+            className="w-full bg-theme-pop hover:opacity-90 text-white flex items-center justify-center gap-2 py-4 rounded-theme font-bold text-sm transition-opacity disabled:opacity-40"
+          >
+            <ShoppingBag size={16} />
+            {createOrderMutation.isPending ? 'Placing…' : 'Place Order'}
+          </button>
+        </div>
+      </aside>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function OrderPage() {
+  const { tableId } = useParams<{ tableId?: string }>();
+  const [searchParams] = useSearchParams();
+  const orderId = searchParams.get('orderId');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const tableNumber = (location.state as { tableNumber?: string })?.tableNumber ?? tableId?.slice(-4) ?? 'T/A';
+
+  // Fetch by table (dine-in)
+  const { data: tableOrders = [], isLoading: loadingTable } = useQuery<Order[]>({
+    queryKey: ['orders', 'table', tableId],
+    queryFn: () => api.get<Order[]>(`/orders?tableId=${tableId}`),
+    enabled: !!tableId,
+    staleTime: 0,
+    refetchInterval: 3000,
+  });
+
+  // Fetch by id (takeaway / direct link)
+  const { data: directOrder, isLoading: loadingById } = useQuery<Order>({
+    queryKey: ['order', orderId],
+    queryFn: () => api.get<Order>(`/orders/${orderId}`),
+    enabled: !!orderId,
+    staleTime: 0,
+    refetchInterval: 3000,
+  });
+
+  const activeOrder = directOrder ?? tableOrders[0] ?? null;
+  const goBack = () => void navigate('/tables');
+
+  if ((tableId && loadingTable) || (orderId && loadingById)) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <span className="text-theme-border font-theme-body text-sm">Loading…</span>
+      </div>
+    );
+  }
+
+  if (activeOrder) {
+    return <ActiveOrderView order={activeOrder} onBack={goBack} />;
+  }
+
+  return <NewOrderView tableId={tableId} tableNumber={tableNumber} onBack={goBack} />;
+}

@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Restora POS — Sunrise Theme Mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            accent:    '#FC8019',
+            'accent-soft': '#FFE5D2',
+            pop:       '#09AA29',
+            highlight: '#FFF2E8',
+            dark:      '#171826',
+            faded:     '#9F9F9E',
+            cultured:  '#F5F5F5',
+            sep:       '#EFEFEF',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #E8E8E8; }
+    .screen { width: 1280px; min-height: 820px; }
+    .screen-label {
+      font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
+      color: #666; padding: 24px 0 8px;
+    }
+    /* Hide scrollbars in mockup for clean look */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    /* Chair icon for table cards (CSS-only) */
+    .chair {
+      width: 64px; height: 64px; background: #D8D8D8;
+      position: relative; border-radius: 6px;
+    }
+    .chair::before, .chair::after {
+      content: ''; position: absolute; background: #D8D8D8;
+    }
+    .chair::before { top: -10px; left: 8px; right: 8px; height: 6px; border-radius: 3px; }
+    .chair::after { bottom: -10px; left: 8px; right: 8px; height: 6px; border-radius: 3px; }
+    .chair-side-l, .chair-side-r {
+      position: absolute; top: 8px; bottom: 8px; width: 6px; background: #D8D8D8; border-radius: 3px;
+    }
+    .chair-side-l { left: -10px; }
+    .chair-side-r { right: -10px; }
+  </style>
+</head>
+<body class="text-dark">
+
+<div class="max-w-[1320px] mx-auto px-5 py-8">
+
+  <header class="mb-6">
+    <h1 class="text-2xl font-bold">Restora POS — Sunrise Theme Mockup</h1>
+    <p class="text-sm text-gray-600 mt-1">
+      Static preview of the new POS layout. Four screens stacked vertically: Home / Customers / Tables / Payment.
+      Built with Tailwind CDN. Open in any browser.
+    </p>
+  </header>
+
+  <!-- ================================================================ -->
+  <!-- SCREEN 1: HOME / ORDER                                            -->
+  <!-- ================================================================ -->
+  <p class="screen-label">Screen 1 — Home (Place Order)</p>
+  <div class="screen bg-cultured rounded-2xl shadow-xl overflow-hidden flex">
+
+    <!-- Sidebar -->
+    <aside class="w-[88px] bg-white border-r border-sep flex flex-col items-center py-5">
+      <!-- Logo -->
+      <div class="w-12 h-12 bg-accent rounded-xl flex items-center justify-center mb-8">
+        <span class="text-white font-extrabold text-xl">R</span>
+      </div>
+      <!-- Nav -->
+      <nav class="flex flex-col gap-1 flex-1 w-full px-3">
+        <!-- Active: Home -->
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl bg-accent-soft text-accent">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 2l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg>
+          <span class="text-[10px] font-semibold">Home</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded hover:bg-cultured">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 22c0-4 4-7 8-7s8 3 8 7"/></svg>
+          <span class="text-[10px] font-semibold">Customers</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded hover:bg-cultured">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span class="text-[10px] font-semibold">Tables</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded hover:bg-cultured">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <span class="text-[10px] font-semibold">Cashier</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded hover:bg-cultured">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12l-1 4H7z"/><path d="M5 6h14l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z"/></svg>
+          <span class="text-[10px] font-semibold">Orders</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded hover:bg-cultured">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+          <span class="text-[10px] font-semibold">Reports</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded hover:bg-cultured">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          <span class="text-[10px] font-semibold">Settings</span>
+        </button>
+      </nav>
+      <!-- Avatar + logout -->
+      <div class="flex flex-col items-center gap-3 pt-4 border-t border-sep w-full">
+        <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-sm font-bold text-gray-600">K</div>
+        <button class="flex flex-col items-center gap-1 text-faded hover:text-accent">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+          <span class="text-[9px] font-semibold">Logout</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <div class="flex-1 flex flex-col">
+
+      <!-- Top bar -->
+      <header class="h-16 bg-white border-b border-sep flex items-center px-6 gap-5">
+        <h1 class="text-xl font-extrabold tracking-tight">Restro POS</h1>
+        <div class="flex-1 max-w-xl">
+          <div class="relative">
+            <svg class="absolute left-4 top-1/2 -translate-y-1/2 text-faded" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" placeholder="Search products....." class="w-full bg-cultured rounded-full pl-11 pr-4 py-2.5 text-sm placeholder:text-faded focus:outline-none focus:ring-2 focus:ring-accent/30" />
+          </div>
+        </div>
+        <button class="w-9 h-9 rounded-lg bg-cultured flex items-center justify-center text-faded hover:text-dark">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+        </button>
+        <button class="w-9 h-9 rounded-lg bg-cultured flex items-center justify-center text-pop">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5a14 14 0 0 1 20 0"/><path d="M5 12.8a10 10 0 0 1 14 0"/><path d="M8.5 16a6 6 0 0 1 7 0"/><circle cx="12" cy="19" r="1.2"/></svg>
+        </button>
+        <button class="bg-accent hover:bg-accent/90 text-white text-sm font-semibold px-4 py-2.5 rounded-lg flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Select Table
+        </button>
+      </header>
+
+      <!-- Below top bar: 2-col with menu + cart -->
+      <div class="flex-1 flex">
+
+        <!-- Menu area -->
+        <section class="flex-1 p-6 flex flex-col">
+          <!-- Category tabs -->
+          <div class="flex gap-1 bg-white rounded-xl p-1 shadow-sm w-fit mb-5 border border-sep">
+            <button class="px-4 py-2 text-sm font-medium text-faded">Starters</button>
+            <button class="px-4 py-2 text-sm font-medium text-faded">Breakfast</button>
+            <button class="px-4 py-2 text-sm font-semibold text-accent border-2 border-accent rounded-lg">Lunch</button>
+            <button class="px-4 py-2 text-sm font-medium text-faded">Supper</button>
+            <button class="px-4 py-2 text-sm font-medium text-faded">Deserts</button>
+            <button class="px-4 py-2 text-sm font-medium text-faded">Beverages</button>
+          </div>
+
+          <!-- Items grid 4 cols -->
+          <div class="grid grid-cols-4 gap-4">
+            <!-- Item card template -->
+            <!-- 1 -->
+            <div class="bg-white rounded-xl border border-sep overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+              <div class="aspect-square bg-cultured flex items-center justify-center">
+                <div class="w-24 h-24 rounded-full bg-gradient-to-br from-orange-200 to-yellow-100 flex items-center justify-center">
+                  <span class="text-3xl">🍜</span>
+                </div>
+              </div>
+              <div class="p-3 text-center">
+                <p class="text-sm font-semibold leading-tight">Schezwan Egg<br/>Noodles</p>
+                <p class="text-base font-bold mt-1">$24.00</p>
+              </div>
+            </div>
+            <!-- 2 -->
+            <div class="bg-white rounded-xl border border-sep overflow-hidden shadow-sm">
+              <div class="aspect-square bg-cultured flex items-center justify-center">
+                <div class="w-24 h-24 rounded-full bg-gradient-to-br from-yellow-100 to-amber-200 flex items-center justify-center"><span class="text-3xl">🍳</span></div>
+              </div>
+              <div class="p-3 text-center">
+                <p class="text-sm font-semibold leading-tight">Stir Egg Fry<br/>Udon Noodles</p>
+                <p class="text-base font-bold mt-1">$24.00</p>
+              </div>
+            </div>
+            <!-- 3 -->
+            <div class="bg-white rounded-xl border border-sep overflow-hidden shadow-sm">
+              <div class="aspect-square bg-cultured flex items-center justify-center">
+                <div class="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-100 to-teal-200 flex items-center justify-center"><span class="text-3xl">🍝</span></div>
+              </div>
+              <div class="p-3 text-center">
+                <p class="text-sm font-semibold leading-tight">Thai Style Fried<br/>Noodles</p>
+                <p class="text-base font-bold mt-1">$24.00</p>
+              </div>
+            </div>
+            <!-- 4 -->
+            <div class="bg-white rounded-xl border border-sep overflow-hidden shadow-sm">
+              <div class="aspect-square bg-cultured flex items-center justify-center">
+                <div class="w-24 h-24 rounded-full bg-gradient-to-br from-rose-100 to-orange-200 flex items-center justify-center"><span class="text-3xl">🍤</span></div>
+              </div>
+              <div class="p-3 text-center">
+                <p class="text-sm font-semibold leading-tight">Chinese Prawn<br/>Spaghetti</p>
+                <p class="text-base font-bold mt-1">$24.00</p>
+              </div>
+            </div>
+            <!-- Row 2 -->
+            <div class="bg-white rounded-xl border border-sep overflow-hidden shadow-sm">
+              <div class="aspect-square bg-cultured flex items-center justify-center">
+                <div class="w-24 h-24 rounded-full bg-gradient-to-br from-amber-100 to-orange-200 flex items-center justify-center"><span class="text-3xl">🍲</span></div>
+              </div>
+              <div class="p-3 text-center">
+                <p class="text-sm font-semibold leading-tight">Japaneese Soba<br/>Noodles</p>
+                <p class="text-base font-bold mt-1">$24.00</p>
+              </div>
+            </div>
+            <div class="bg-white rounded-xl border border-sep overflow-hidden shadow-sm">
+              <div class="aspect-square bg-cultured flex items-center justify-center">
+                <div class="w-24 h-24 rounded-full bg-gradient-to-br from-rose-100 to-orange-200 flex items-center justify-center"><span class="text-3xl">🍤</span></div>
+              </div>
+              <div class="p-3 text-center">
+                <p class="text-sm font-semibold leading-tight">Chinese Prawn<br/>Spaghetti</p>
+                <p class="text-base font-bold mt-1">$24.00</p>
+              </div>
+            </div>
+            <div class="bg-white rounded-xl border border-sep overflow-hidden shadow-sm">
+              <div class="aspect-square bg-cultured flex items-center justify-center">
+                <div class="w-24 h-24 rounded-full bg-gradient-to-br from-yellow-100 to-orange-100 flex items-center justify-center"><span class="text-3xl">🌶️</span></div>
+              </div>
+              <div class="p-3 text-center">
+                <p class="text-sm font-semibold leading-tight">Chilli Garlic Thai<br/>Noodles</p>
+                <p class="text-base font-bold mt-1">$24.00</p>
+              </div>
+            </div>
+            <div class="bg-white rounded-xl border border-sep overflow-hidden shadow-sm">
+              <div class="aspect-square bg-cultured flex items-center justify-center">
+                <div class="w-24 h-24 rounded-full bg-gradient-to-br from-orange-200 to-yellow-100 flex items-center justify-center"><span class="text-3xl">🍜</span></div>
+              </div>
+              <div class="p-3 text-center">
+                <p class="text-sm font-semibold leading-tight">Schezwan Egg<br/>Noodles</p>
+                <p class="text-base font-bold mt-1">$24.00</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Cart panel -->
+        <aside class="w-[400px] bg-white border-l border-sep flex flex-col">
+          <!-- Cart header -->
+          <div class="p-4 border-b border-sep flex items-center justify-between">
+            <button class="flex items-center gap-2 px-3 py-2 rounded-lg bg-cultured text-sm font-semibold hover:bg-sep">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              Add Customer
+            </button>
+            <div class="flex items-center gap-2">
+              <button class="w-9 h-9 rounded-lg bg-cultured flex items-center justify-center text-faded">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <button class="w-9 h-9 rounded-lg bg-cultured flex items-center justify-center text-faded">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="6" width="18" height="12" rx="1"/><path d="M7 6v12M11 6v12M15 6v12"/></svg>
+              </button>
+              <button class="w-9 h-9 rounded-lg bg-cultured flex items-center justify-center text-faded">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Cart items -->
+          <div class="flex-1 p-4 space-y-2 overflow-y-auto">
+            <div class="flex items-center justify-between p-3 rounded-lg bg-cultured">
+              <div class="flex items-center gap-3">
+                <button class="text-faded"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 18l6-6-6-6"/></svg></button>
+                <span class="w-6 h-6 rounded-full bg-white border border-sep flex items-center justify-center text-xs font-bold">1</span>
+                <span class="text-sm font-semibold">Schezwan Egg Noodles</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="text-sm font-bold">$25.00</span>
+                <button class="text-faded hover:text-accent"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg></button>
+              </div>
+            </div>
+
+            <div class="flex items-start justify-between p-3 rounded-lg bg-cultured">
+              <div class="flex items-start gap-3">
+                <button class="text-faded mt-0.5"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 18l6-6-6-6"/></svg></button>
+                <span class="w-6 h-6 rounded-full bg-white border border-sep flex items-center justify-center text-xs font-bold">2</span>
+                <div>
+                  <p class="text-sm font-semibold">Spicy Shrimp Soup</p>
+                  <p class="text-xs text-faded mt-0.5">Medium - Half Grilled</p>
+                </div>
+              </div>
+              <div class="flex flex-col items-end gap-1">
+                <span class="text-sm font-bold">$40.00</span>
+                <span class="text-[10px] text-faded line-through">$50.00</span>
+              </div>
+            </div>
+
+            <div class="flex items-start justify-between p-3 rounded-lg border-2 border-pop bg-pop/5">
+              <div class="flex items-start gap-3">
+                <button class="text-pop mt-0.5"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg></button>
+                <span class="w-6 h-6 rounded-full bg-white border border-sep flex items-center justify-center text-xs font-bold">1</span>
+                <div class="flex-1">
+                  <p class="text-sm font-semibold">Thai Style Fried Noodles</p>
+                  <p class="text-xs text-faded mt-0.5">Medium</p>
+                  <div class="flex gap-3 mt-2">
+                    <div>
+                      <p class="text-[10px] text-faded">Quantity</p>
+                      <input class="w-20 h-8 px-2 text-sm border border-sep rounded bg-white" value="1" />
+                    </div>
+                    <div>
+                      <p class="text-[10px] text-faded">Discount(%)</p>
+                      <input class="w-20 h-8 px-2 text-sm border border-sep rounded bg-white" value="20" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="flex flex-col items-end gap-1">
+                <span class="text-sm font-bold">$40.00</span>
+                <span class="text-[10px] text-faded line-through">$50.00</span>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between p-3 rounded-lg bg-cultured">
+              <div class="flex items-center gap-3">
+                <button class="text-faded"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 18l6-6-6-6"/></svg></button>
+                <span class="w-6 h-6 rounded-full bg-white border border-sep flex items-center justify-center text-xs font-bold">3</span>
+                <span class="text-sm font-semibold">Fried Basil</span>
+              </div>
+              <span class="text-sm font-bold">$75.00</span>
+            </div>
+          </div>
+
+          <!-- Add row -->
+          <div class="px-4 py-3 bg-highlight border-t border-b border-sep flex items-center justify-between">
+            <span class="text-sm font-semibold text-dark">Add</span>
+            <div class="flex gap-4 text-sm font-semibold text-accent">
+              <button>Discount</button>
+              <button>Coupon Code</button>
+              <button>Note</button>
+            </div>
+          </div>
+
+          <!-- Totals + actions -->
+          <div class="p-4 space-y-2">
+            <div class="flex justify-between text-sm"><span class="text-faded">Subtotal</span><span class="font-semibold">$200.00</span></div>
+            <div class="flex justify-between text-sm"><span class="text-faded">Tax</span><span class="font-semibold">$45.00</span></div>
+            <div class="flex justify-between items-baseline pt-1">
+              <span class="text-base font-bold">Payable Amount</span>
+              <span class="text-xl font-extrabold">$195.00</span>
+            </div>
+            <div class="flex gap-3 pt-3">
+              <button class="flex-1 bg-accent hover:bg-accent/90 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M10 8l4 4-4 4"/></svg>
+                Hold Cart
+              </button>
+              <button class="flex-1 bg-pop hover:bg-pop/90 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M14 8l4 4-4 4M6 12h12"/></svg>
+                Proceed
+              </button>
+            </div>
+          </div>
+        </aside>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!-- SCREEN 2: CUSTOMERS                                               -->
+  <!-- ================================================================ -->
+  <p class="screen-label">Screen 2 — Customers</p>
+  <div class="screen bg-cultured rounded-2xl shadow-xl overflow-hidden flex">
+
+    <!-- Sidebar (Customers active) -->
+    <aside class="w-[88px] bg-white border-r border-sep flex flex-col items-center py-5">
+      <div class="w-12 h-12 bg-accent rounded-xl flex items-center justify-center mb-8">
+        <span class="text-white font-extrabold text-xl">R</span>
+      </div>
+      <nav class="flex flex-col gap-1 flex-1 w-full px-3">
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded hover:bg-cultured">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 2l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg>
+          <span class="text-[10px] font-semibold">Home</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl bg-accent-soft text-accent">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 22c0-4 4-7 8-7s8 3 8 7"/></svg>
+          <span class="text-[10px] font-semibold">Customers</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span class="text-[10px] font-semibold">Tables</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <span class="text-[10px] font-semibold">Cashier</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12l-1 4H7z"/><path d="M5 6h14l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z"/></svg>
+          <span class="text-[10px] font-semibold">Orders</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+          <span class="text-[10px] font-semibold">Reports</span>
+        </button>
+      </nav>
+      <div class="flex flex-col items-center gap-3 pt-4 border-t border-sep w-full">
+        <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-sm font-bold text-gray-600">K</div>
+      </div>
+    </aside>
+
+    <!-- Main: customers list + persistent cart -->
+    <div class="flex-1 flex flex-col">
+      <!-- Top bar (same) -->
+      <header class="h-16 bg-white border-b border-sep flex items-center px-6 gap-5">
+        <h1 class="text-xl font-extrabold tracking-tight">Restro POS</h1>
+        <div class="flex-1 max-w-xl">
+          <div class="relative">
+            <svg class="absolute left-4 top-1/2 -translate-y-1/2 text-faded" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" placeholder="Search products....." class="w-full bg-cultured rounded-full pl-11 pr-4 py-2.5 text-sm placeholder:text-faded focus:outline-none" />
+          </div>
+        </div>
+        <button class="bg-accent text-white text-sm font-semibold px-4 py-2.5 rounded-lg flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Select Table
+        </button>
+      </header>
+
+      <div class="flex-1 flex">
+        <!-- Customers panel -->
+        <section class="flex-1 p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-bold">Customers</h2>
+            <button class="bg-accent text-white text-sm font-semibold px-4 py-2.5 rounded-lg flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              Add New Customer
+            </button>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-sep p-5">
+            <!-- Search -->
+            <div class="relative mb-5">
+              <svg class="absolute left-4 top-1/2 -translate-y-1/2 text-faded" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+              <input placeholder="Search Customers......" class="w-full bg-cultured rounded-lg pl-11 pr-4 py-3 text-sm placeholder:text-faded focus:outline-none" />
+            </div>
+
+            <!-- Selected customer -->
+            <div class="flex items-start gap-5 pb-6 border-b border-sep">
+              <div class="w-28 h-28 rounded-full bg-gradient-to-br from-orange-200 to-amber-300 flex items-center justify-center flex-shrink-0">
+                <span class="text-3xl font-bold text-white">VL</span>
+              </div>
+              <div class="flex-1">
+                <div class="flex items-baseline gap-3">
+                  <h3 class="text-2xl font-bold">Vincent Lobo</h3>
+                  <span class="text-faded text-sm">#542845</span>
+                </div>
+                <p class="text-sm text-faded mt-1">vincent.lobo@wanpik.com</p>
+                <p class="text-sm text-faded">+12-8541235476</p>
+                <div class="flex gap-3 mt-4">
+                  <button class="flex items-center gap-1.5 text-sm text-faded hover:text-dark">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
+                    Edit
+                  </button>
+                  <button class="flex items-center gap-1.5 text-sm text-faded hover:text-accent">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                    Delete
+                  </button>
+                </div>
+              </div>
+              <button class="border-2 border-accent text-accent font-semibold px-6 py-2 rounded-lg hover:bg-accent hover:text-white">Remove</button>
+            </div>
+
+            <!-- Recent customers -->
+            <div class="mt-6">
+              <h4 class="text-base font-bold mb-3">Recent Customers</h4>
+              <div class="space-y-2">
+                <div class="flex items-center gap-3 p-3 rounded-lg hover:bg-cultured cursor-pointer">
+                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-200 to-rose-300"></div>
+                  <div class="flex-1">
+                    <p class="text-sm font-semibold">Benjamin Cole</p>
+                    <p class="text-xs text-faded">ben.cole@gmail.com</p>
+                  </div>
+                  <span class="text-xs text-faded">16/02/2020</span>
+                </div>
+                <div class="flex items-center gap-3 p-3 rounded-lg hover:bg-cultured cursor-pointer">
+                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-200 to-pink-300"></div>
+                  <div class="flex-1">
+                    <p class="text-sm font-semibold">Monica Gill</p>
+                    <p class="text-xs text-faded">monica.g@gmail.com</p>
+                  </div>
+                  <span class="text-xs text-faded">16/02/2020</span>
+                </div>
+                <div class="flex items-center gap-3 p-3 rounded-lg hover:bg-cultured cursor-pointer">
+                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-200 to-indigo-300"></div>
+                  <div class="flex-1">
+                    <p class="text-sm font-semibold">Tyler Cox</p>
+                    <p class="text-xs text-faded">tyler.cox@gmail.com</p>
+                  </div>
+                  <span class="text-xs text-faded">16/02/2020</span>
+                </div>
+                <div class="flex items-center gap-3 p-3 rounded-lg hover:bg-cultured cursor-pointer">
+                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-200 to-teal-300"></div>
+                  <div class="flex-1">
+                    <p class="text-sm font-semibold">Sakura Fie</p>
+                    <p class="text-xs text-faded">sakura@gmail.com</p>
+                  </div>
+                  <span class="text-xs text-faded">16/02/2020</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Persistent cart panel (same content, customer chip filled) -->
+        <aside class="w-[400px] bg-white border-l border-sep flex flex-col">
+          <div class="p-4 border-b border-sep flex items-center gap-3">
+            <div class="w-9 h-9 rounded-full bg-gradient-to-br from-orange-200 to-amber-300 flex items-center justify-center text-white text-xs font-bold">VL</div>
+            <div class="flex-1">
+              <p class="text-sm font-semibold">Vincent Lobo</p>
+              <p class="text-[10px] text-faded">#542845</p>
+            </div>
+            <button class="w-8 h-8 rounded-lg bg-cultured flex items-center justify-center text-faded">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+            <button class="w-8 h-8 rounded-lg bg-cultured flex items-center justify-center text-faded">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1"/></svg>
+            </button>
+          </div>
+
+          <div class="flex-1 p-4 space-y-2 overflow-y-auto">
+            <div class="flex items-center justify-between p-3 rounded-lg bg-cultured">
+              <div class="flex items-center gap-3">
+                <button class="text-faded"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 18l6-6-6-6"/></svg></button>
+                <span class="w-6 h-6 rounded-full bg-white border border-sep flex items-center justify-center text-xs font-bold">1</span>
+                <span class="text-sm font-semibold">Schezwan Egg Noodles</span>
+              </div>
+              <span class="text-sm font-bold">$25.00</span>
+            </div>
+            <div class="flex items-start justify-between p-3 rounded-lg bg-cultured">
+              <div class="flex items-start gap-3">
+                <button class="text-faded mt-0.5"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 18l6-6-6-6"/></svg></button>
+                <span class="w-6 h-6 rounded-full bg-white border border-sep flex items-center justify-center text-xs font-bold">2</span>
+                <div>
+                  <p class="text-sm font-semibold">Spicy Shrimp Soup</p>
+                  <p class="text-xs text-faded mt-0.5">Medium - Half Grilled</p>
+                </div>
+              </div>
+              <div class="flex flex-col items-end gap-1">
+                <span class="text-sm font-bold">$40.00</span>
+                <span class="text-[10px] text-faded line-through">$50.00</span>
+              </div>
+            </div>
+            <div class="flex items-start justify-between p-3 rounded-lg border-2 border-pop bg-pop/5">
+              <div class="flex items-start gap-3">
+                <button class="text-pop mt-0.5"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg></button>
+                <span class="w-6 h-6 rounded-full bg-white border border-sep flex items-center justify-center text-xs font-bold">1</span>
+                <div class="flex-1">
+                  <p class="text-sm font-semibold">Thai Style Fried Noodles</p>
+                  <p class="text-xs text-faded mt-0.5">Medium</p>
+                  <div class="flex gap-3 mt-2">
+                    <div>
+                      <p class="text-[10px] text-faded">Quantity</p>
+                      <input class="w-20 h-8 px-2 text-sm border border-sep rounded bg-white" value="1" />
+                    </div>
+                    <div>
+                      <p class="text-[10px] text-faded">Discount(%)</p>
+                      <input class="w-20 h-8 px-2 text-sm border border-sep rounded bg-white" value="20" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="flex flex-col items-end gap-1">
+                <span class="text-sm font-bold">$40.00</span>
+                <span class="text-[10px] text-faded line-through">$50.00</span>
+              </div>
+            </div>
+            <div class="flex items-center justify-between p-3 rounded-lg bg-cultured">
+              <div class="flex items-center gap-3">
+                <button class="text-faded"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 18l6-6-6-6"/></svg></button>
+                <span class="w-6 h-6 rounded-full bg-white border border-sep flex items-center justify-center text-xs font-bold">3</span>
+                <span class="text-sm font-semibold">Fried Basil</span>
+              </div>
+              <span class="text-sm font-bold">$75.00</span>
+            </div>
+          </div>
+
+          <div class="px-4 py-3 bg-highlight border-t border-b border-sep flex items-center justify-between">
+            <span class="text-sm font-semibold">Add</span>
+            <div class="flex gap-4 text-sm font-semibold text-accent">
+              <button>Discount</button><button>Coupon Code</button><button>Note</button>
+            </div>
+          </div>
+
+          <div class="p-4 space-y-2">
+            <div class="flex justify-between text-sm"><span class="text-faded">Subtotal</span><span class="font-semibold">$200.00</span></div>
+            <div class="flex justify-between text-sm"><span class="text-faded">Tax</span><span class="font-semibold">$45.00</span></div>
+            <div class="flex justify-between items-baseline pt-1">
+              <span class="text-base font-bold">Payable Amount</span>
+              <span class="text-xl font-extrabold">$195.00</span>
+            </div>
+            <div class="flex gap-3 pt-3">
+              <button class="flex-1 bg-accent text-white font-semibold py-3 rounded-lg">Hold Cart</button>
+              <button class="flex-1 bg-pop text-white font-semibold py-3 rounded-lg">Proceed</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!-- SCREEN 3: TABLES                                                  -->
+  <!-- ================================================================ -->
+  <p class="screen-label">Screen 3 — Tables</p>
+  <div class="screen bg-cultured rounded-2xl shadow-xl overflow-hidden flex">
+
+    <aside class="w-[88px] bg-white border-r border-sep flex flex-col items-center py-5">
+      <div class="w-12 h-12 bg-accent rounded-xl flex items-center justify-center mb-8">
+        <span class="text-white font-extrabold text-xl">R</span>
+      </div>
+      <nav class="flex flex-col gap-1 flex-1 w-full px-3">
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9.5L12 2l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg>
+          <span class="text-[10px] font-semibold">Home</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 22c0-4 4-7 8-7s8 3 8 7"/></svg>
+          <span class="text-[10px] font-semibold">Customers</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl bg-accent-soft text-accent">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span class="text-[10px] font-semibold">Tables</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <span class="text-[10px] font-semibold">Cashier</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h12l-1 4H7z"/><path d="M5 6h14l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z"/></svg>
+          <span class="text-[10px] font-semibold">Orders</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 py-3 rounded-xl text-faded">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+          <span class="text-[10px] font-semibold">Reports</span>
+        </button>
+      </nav>
+      <div class="flex flex-col items-center gap-3 pt-4 border-t border-sep w-full">
+        <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-sm font-bold text-gray-600">K</div>
+      </div>
+    </aside>
+
+    <div class="flex-1 flex flex-col">
+      <header class="h-16 bg-white border-b border-sep flex items-center px-6 gap-5">
+        <h1 class="text-xl font-extrabold tracking-tight">Restro POS</h1>
+        <div class="flex-1 max-w-xl">
+          <div class="relative">
+            <svg class="absolute left-4 top-1/2 -translate-y-1/2 text-faded" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" placeholder="Search products....." class="w-full bg-cultured rounded-full pl-11 pr-4 py-2.5 text-sm" />
+          </div>
+        </div>
+        <button class="bg-accent text-white text-sm font-semibold px-4 py-2.5 rounded-lg flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Select Table
+        </button>
+      </header>
+
+      <div class="flex-1 p-6">
+        <!-- Filter tabs -->
+        <div class="flex gap-1 bg-white rounded-xl p-1 shadow-sm w-fit mb-4 border border-sep">
+          <button class="px-5 py-2 text-sm font-semibold text-accent border-2 border-accent rounded-lg">All Tables</button>
+          <button class="px-5 py-2 text-sm font-medium text-faded">Vacant</button>
+          <button class="px-5 py-2 text-sm font-medium text-faded">Occupied</button>
+          <button class="px-5 py-2 text-sm font-medium text-faded">Disabled</button>
+        </div>
+
+        <!-- Info banner -->
+        <div class="bg-white rounded-xl border border-sep px-4 py-3 mb-5 flex items-center justify-between">
+          <div class="flex items-center gap-2 text-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FC8019" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+            <span class="text-faded">Tables visible are for 4-6 guests occupancy.</span>
+          </div>
+          <button class="text-accent text-sm font-semibold">Show all tables</button>
+        </div>
+
+        <!-- Table grid -->
+        <div class="grid grid-cols-4 gap-5">
+          <!-- T43 vacant -->
+          <div class="bg-white rounded-xl border border-sep p-6 relative overflow-hidden">
+            <div class="flex justify-center"><div class="chair"><div class="chair-side-l"></div><div class="chair-side-r"></div></div></div>
+            <p class="text-center font-bold text-lg mt-4">T43</p>
+            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-pop"></div>
+          </div>
+          <!-- T45 hold (blue) -->
+          <div class="bg-white rounded-xl border border-sep p-6 relative overflow-hidden">
+            <div class="flex justify-center"><div class="chair"><div class="chair-side-l"></div><div class="chair-side-r"></div></div></div>
+            <p class="text-center font-bold text-lg mt-4">T45</p>
+            <p class="text-center text-xs text-faded underline">#457841</p>
+            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-blue-500"></div>
+          </div>
+          <!-- T46 vacant -->
+          <div class="bg-white rounded-xl border border-sep p-6 relative overflow-hidden">
+            <div class="flex justify-center"><div class="chair"><div class="chair-side-l"></div><div class="chair-side-r"></div></div></div>
+            <p class="text-center font-bold text-lg mt-4">T46</p>
+            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-pop"></div>
+          </div>
+          <!-- T47 occupied -->
+          <div class="bg-white rounded-xl border border-sep p-6 relative overflow-hidden">
+            <div class="flex justify-center"><div class="chair"><div class="chair-side-l"></div><div class="chair-side-r"></div></div></div>
+            <p class="text-center font-bold text-lg mt-4">T47</p>
+            <p class="text-center text-xs text-faded underline">#457875</p>
+            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-red-500"></div>
+          </div>
+          <!-- T51 occupied -->
+          <div class="bg-white rounded-xl border border-sep p-6 relative overflow-hidden">
+            <div class="flex justify-center"><div class="chair"><div class="chair-side-l"></div><div class="chair-side-r"></div></div></div>
+            <p class="text-center font-bold text-lg mt-4">T51</p>
+            <p class="text-center text-xs text-faded underline">#457894</p>
+            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-red-500"></div>
+          </div>
+          <!-- T52 vacant -->
+          <div class="bg-white rounded-xl border border-sep p-6 relative overflow-hidden">
+            <div class="flex justify-center"><div class="chair"><div class="chair-side-l"></div><div class="chair-side-r"></div></div></div>
+            <p class="text-center font-bold text-lg mt-4">T52</p>
+            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-pop"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom strip -->
+      <footer class="bg-white border-t border-sep px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-6">
+          <div class="flex items-center gap-2"><span class="w-4 h-4 rounded-full bg-red-500"></span><span class="text-sm font-medium">Occupied</span></div>
+          <div class="flex items-center gap-2"><span class="w-4 h-4 rounded-full bg-blue-500"></span><span class="text-sm font-medium">Order on hold</span></div>
+          <div class="flex items-center gap-2"><span class="w-4 h-4 rounded-full bg-pop"></span><span class="text-sm font-medium">Vacant</span></div>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="text-right">
+            <p class="text-sm font-bold">Table T42</p>
+            <p class="text-xs text-faded">Order #O5874</p>
+          </div>
+          <button class="bg-accent hover:bg-accent/90 text-white font-semibold px-6 py-3 rounded-lg flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            Select &amp; Place Order
+          </button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!-- SCREEN 4: PAYMENT                                                 -->
+  <!-- ================================================================ -->
+  <p class="screen-label">Screen 4 — Payment</p>
+  <div class="screen bg-cultured rounded-2xl shadow-xl overflow-hidden flex">
+
+    <div class="flex-1 flex flex-col">
+      <header class="h-16 bg-white border-b border-sep flex items-center px-6 gap-5">
+        <h1 class="text-xl font-extrabold tracking-tight">Restro POS</h1>
+        <div class="flex-1 max-w-xl">
+          <div class="relative">
+            <svg class="absolute left-4 top-1/2 -translate-y-1/2 text-faded" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" placeholder="Search products....." class="w-full bg-cultured rounded-full pl-11 pr-4 py-2.5 text-sm" />
+          </div>
+        </div>
+        <button class="w-9 h-9 rounded-lg bg-cultured flex items-center justify-center text-faded">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+        </button>
+        <button class="w-9 h-9 rounded-lg bg-cultured flex items-center justify-center text-pop">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 9.5a14 14 0 0 1 20 0"/><path d="M5 12.8a10 10 0 0 1 14 0"/><path d="M8.5 16a6 6 0 0 1 7 0"/><circle cx="12" cy="19" r="1.2"/></svg>
+        </button>
+        <button class="bg-accent text-white text-sm font-semibold px-4 py-2.5 rounded-lg flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Select Table
+        </button>
+      </header>
+
+      <div class="flex-1 grid grid-cols-2 gap-6 p-6">
+        <!-- Left: Order summary -->
+        <div class="bg-white rounded-2xl border border-sep p-6 flex flex-col">
+          <button class="text-accent text-sm font-semibold mb-3 flex items-center gap-1">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            Back
+          </button>
+
+          <div class="flex items-baseline justify-between mb-1">
+            <h2 class="text-lg font-bold">Order ID #O542145</h2>
+            <span class="text-xs text-faded">Dine-In - T34</span>
+          </div>
+          <p class="text-sm text-faded mb-5">Vincent Lobo</p>
+
+          <div class="space-y-3 border-t border-sep pt-4">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class="w-6 h-6 rounded-full bg-cultured flex items-center justify-center text-xs font-bold">1</span>
+                <span class="text-sm font-semibold">Schezwan Egg Noodles</span>
+              </div>
+              <span class="text-sm font-bold">$25.00</span>
+            </div>
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <span class="w-6 h-6 rounded-full bg-cultured flex items-center justify-center text-xs font-bold">2</span>
+                <div>
+                  <p class="text-sm font-semibold">Spicy Shrimp Soup</p>
+                  <p class="text-xs text-faded mt-0.5">Medium - Half Grilled</p>
+                </div>
+              </div>
+              <div class="flex flex-col items-end gap-1">
+                <span class="text-sm font-bold">$40.00</span>
+                <span class="text-[10px] text-faded">10% Disc - <span class="line-through">$50.00</span></span>
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class="w-6 h-6 rounded-full bg-cultured flex items-center justify-center text-xs font-bold">1</span>
+                <span class="text-sm font-semibold">Fried Basil</span>
+              </div>
+              <span class="text-sm font-bold">$25.00</span>
+            </div>
+          </div>
+
+          <div class="mt-6 pt-4 border-t border-sep space-y-2">
+            <div class="flex justify-between text-sm"><span class="text-faded">Subtotal</span><span class="font-semibold">$200.00</span></div>
+            <div class="flex justify-between text-sm"><span class="text-faded">Tax</span><span class="font-semibold">$45.00</span></div>
+            <div class="flex justify-between text-sm"><span class="text-faded">Discount</span><span class="font-semibold text-pop">-$50.00</span></div>
+            <div class="flex justify-between text-base pt-2 border-t border-sep">
+              <span class="font-bold">Grand Total</span>
+              <span class="font-extrabold">$195.00</span>
+            </div>
+          </div>
+
+          <div class="flex-1"></div>
+
+          <div class="bg-cultured rounded-xl p-4 mb-4 mt-6">
+            <div class="flex justify-between text-sm mb-1"><span class="text-faded">Credit</span><span class="font-bold">$200.00</span></div>
+            <div class="flex justify-between text-sm"><span class="text-faded">Balance</span><span class="font-bold text-pop">-5.00</span></div>
+          </div>
+
+          <button class="bg-pop hover:bg-pop/90 text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M2 10h20"/></svg>
+            Confirm Payment
+          </button>
+        </div>
+
+        <!-- Right: Customer + Payment -->
+        <div class="bg-white rounded-2xl border border-sep p-6 flex flex-col">
+          <!-- Customer header -->
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <p class="text-sm text-faded">Payable Amount</p>
+              <p class="text-3xl font-extrabold text-pop">$195.00</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="text-right">
+                <p class="text-sm font-bold">Vincent Lobo</p>
+                <p class="text-xs text-faded">#542845</p>
+              </div>
+              <div class="w-12 h-12 rounded-full bg-gradient-to-br from-orange-200 to-amber-300"></div>
+              <button class="w-9 h-9 rounded-lg bg-cultured flex items-center justify-center text-faded">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div class="grid grid-cols-2 border-b border-sep mb-5">
+            <button class="py-3 text-base font-bold text-accent border-b-2 border-accent">Cash</button>
+            <button class="py-3 text-base font-semibold text-faded">Other Modes</button>
+          </div>
+
+          <!-- Amount input -->
+          <div class="border-2 border-dark rounded-lg px-5 py-4 mb-5">
+            <p class="text-3xl font-extrabold text-right">$200.00</p>
+          </div>
+
+          <!-- Numpad -->
+          <div class="grid grid-cols-3 gap-3 flex-1">
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">1</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">2</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">3</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">4</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">5</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">6</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">7</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">8</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">9</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">00</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">0</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-xl font-bold flex items-center justify-center">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><path d="M18 9l-6 6M12 9l6 6"/></svg>
+            </button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-2xl font-bold">.</button>
+            <button class="bg-cultured hover:bg-sep rounded-xl py-5 text-base font-bold col-span-2">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="text-center text-xs text-gray-500 mt-10 pb-6">
+    Mockup file: mockups/pos-mockup.html · Open in any browser to preview · No production code modified
+  </footer>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,826 @@
+import { useState, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Plus, Pencil, Trash2, X, Package, Link2, Image, Upload } from 'lucide-react';
+
+import type { MenuItem, MenuCategory, CreateMenuItemDto, LinkedItemType } from '@restora/types';
+import { formatCurrency } from '@restora/utils';
+import { api } from '../lib/api';
+
+/** Resolve image path — uploaded files are served at /uploads/x.jpg (proxied to API in dev) */
+function resolveImageUrl(url: string) {
+  if (!url) return '';
+  return url;
+}
+
+// ─── Emoji Icon Picker ───────────────────────────────────────────────────────
+
+const EMOJI_LIST = [
+  '🍗', '🍕', '☕', '🥗', '🍜', '🥩', '🍰', '🍹', '🔥', '⭐',
+  '🍔', '🌮', '🍣', '🥘', '🧁', '🍝', '🥪', '🍱', '🫔', '🥐',
+  '🍩', '🧆', '🥧', '🍦', '🫕', '🍿', '🥤', '🍷', '🍺', '🧃',
+  '🫖', '🧋', '🥂', '🍵', '🫗', '🫐', '🍇', '🥑', '🌶️', '🧀',
+  '🥚', '🥓', '🌽', '🥕', '🍤', '🦐', '🦀', '🐟', '🍖', '🫓',
+];
+
+function IconPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Icon</label>
+      <div className="flex flex-wrap gap-1 p-2 border border-[#2A2A2A] bg-[#0D0D0D] max-h-[120px] overflow-auto">
+        {EMOJI_LIST.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onChange(emoji)}
+            className={`w-8 h-8 flex items-center justify-center text-lg hover:bg-[#2A2A2A] transition-colors ${
+              value === emoji ? 'bg-[#D62B2B]/30 ring-1 ring-[#D62B2B]' : ''
+            }`}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+      {value && (
+        <div className="flex items-center gap-2 mt-1">
+          <span className="text-sm text-[#999]">Selected: {value}</span>
+          <button type="button" onClick={() => onChange('')} className="text-xs text-[#D62B2B] hover:underline">Clear</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tags Input ──────────────────────────────────────────────────────────────
+
+const SUGGESTED_TAGS = ['Vegan', 'Vegetarian', 'Chicken', 'Beef', 'Seafood', 'Spicy', 'Nut-Free', 'Gluten-Free', 'Dairy-Free', 'Halal', 'New', 'Popular', 'Chef Special'];
+
+function TagsInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [input, setInput] = useState('');
+  const tags = value ? value.split(',').map((t) => t.trim()).filter(Boolean) : [];
+
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim();
+    if (trimmed && !tags.some((t) => t.toLowerCase() === trimmed.toLowerCase())) {
+      onChange([...tags, trimmed].join(', '));
+    }
+    setInput('');
+  };
+
+  const removeTag = (idx: number) => {
+    onChange(tags.filter((_, i) => i !== idx).join(', '));
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag(input);
+    }
+  };
+
+  const unusedSuggestions = SUGGESTED_TAGS.filter((s) => !tags.some((t) => t.toLowerCase() === s.toLowerCase()));
+
+  return (
+    <div>
+      <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Tags</label>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {tags.map((tag, idx) => (
+          <span key={idx} className="flex items-center gap-1 bg-[#2A2A2A] text-white text-xs font-body px-2 py-1">
+            {tag}
+            <button type="button" onClick={() => removeTag(idx)} className="text-[#999] hover:text-[#D62B2B]"><X size={10} /></button>
+          </span>
+        ))}
+      </div>
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Type and press Enter..."
+        className="w-full border border-[#2A2A2A] px-3 py-2 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white"
+      />
+      {unusedSuggestions.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {unusedSuggestions.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => addTag(s)}
+              className="text-[10px] font-body text-[#666] border border-[#2A2A2A] px-1.5 py-0.5 hover:border-[#555] hover:text-[#999] transition-colors"
+            >
+              + {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Category Form Dialog ─────────────────────────────────────────────────────
+
+function CategoryDialog({
+  initial,
+  categories,
+  onClose,
+}: {
+  initial?: MenuCategory;
+  categories: MenuCategory[];
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(initial?.name ?? '');
+  const [parentId, setParentId] = useState<string>(initial?.parentId ?? '');
+  const [icon, setIcon] = useState(initial?.icon ?? '');
+
+  // Filter out self and own children to prevent circular references
+  const parentOptions = categories.filter((c) => c.id !== initial?.id && !c.parentId);
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      initial
+        ? api.patch(`/menu/categories/${initial.id}`, { name, parentId: parentId || null, icon: icon || null })
+        : api.post('/menu/categories', { name, parentId: parentId || undefined, icon: icon || undefined }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['categories'] });
+      onClose();
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="bg-[#161616] w-[400px] p-6 space-y-4 max-h-[90vh] overflow-auto">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-xl tracking-wide">{initial ? 'EDIT' : 'ADD'} CATEGORY</h3>
+          <button onClick={onClose} className="text-[#999] hover:text-white"><X size={16} /></button>
+        </div>
+        <input
+          type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Category name"
+          className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white"
+          autoFocus
+        />
+        <div>
+          <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Parent Category</label>
+          <select
+            value={parentId} onChange={(e) => setParentId(e.target.value)}
+            className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#161616]"
+          >
+            <option value="">None (top-level)</option>
+            {parentOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <IconPicker value={icon} onChange={setIcon} />
+        {mutation.isError && <p className="text-xs text-[#D62B2B]">{(mutation.error as Error).message}</p>}
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
+          <button
+            onClick={() => mutation.mutate()} disabled={!name.trim() || mutation.isPending}
+            className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40"
+          >
+            {mutation.isPending ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Item Form Dialog ─────────────────────────────────────────────────────────
+
+function ItemDialog({
+  categories,
+  initial,
+  onClose,
+}: {
+  categories: MenuCategory[];
+  initial?: MenuItem;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [form, setForm] = useState({
+    name: initial?.name ?? '',
+    categoryId: initial?.categoryId ?? categories[0]?.id ?? '',
+    type: initial?.type ?? 'FOOD' as const,
+    price: initial ? String(Number(initial.price) / 100) : '',
+    description: initial?.description ?? '',
+    isAvailable: initial?.isAvailable ?? true,
+    cookingStationId: initial?.cookingStationId ?? '',
+    tags: initial?.tags ?? '',
+    imageUrl: initial?.imageUrl ?? '',
+  });
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  const { data: cookingStations = [] } = useQuery<{ id: string; name: string; isActive: boolean }[]>({
+    queryKey: ['cooking-stations'],
+    queryFn: () => api.get('/cooking-stations'),
+  });
+
+  const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
+
+  const handleFileUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    setUploading(true);
+    try {
+      const result = await api.upload<{ url: string }>('/upload/image', file);
+      set('imageUrl', result.url);
+    } catch (err) {
+      alert((err as Error).message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) void handleFileUpload(file);
+  };
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const dto: CreateMenuItemDto & { isAvailable?: boolean } = {
+        name: form.name,
+        categoryId: form.categoryId,
+        type: form.type as 'FOOD' | 'BEVERAGE' | 'MODIFIER',
+        price: Math.round(parseFloat(form.price) * 100),
+        description: form.description || undefined,
+        cookingStationId: form.cookingStationId || null,
+        tags: form.tags || undefined,
+        imageUrl: form.imageUrl || undefined,
+      };
+      if (initial) return api.patch(`/menu/${initial.id}`, { ...dto, isAvailable: form.isAvailable });
+      return api.post('/menu', dto);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['menu'] });
+      onClose();
+    },
+  });
+
+  // Build flat list with indentation for sub-categories
+  const allCats = categories.flatMap((c) => {
+    const result = [{ id: c.id, label: `${c.icon ? c.icon + ' ' : ''}${c.name}` }];
+    if (c.children) {
+      for (const child of c.children) {
+        result.push({ id: child.id, label: `  └ ${child.icon ? child.icon + ' ' : ''}${child.name}` });
+      }
+    }
+    return result;
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="bg-[#161616] w-[480px] p-6 space-y-4 max-h-[90vh] overflow-auto">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-xl tracking-wide">{initial ? 'EDIT' : 'ADD'} ITEM</h3>
+          <button onClick={onClose} className="text-[#999] hover:text-white"><X size={16} /></button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Name *</label>
+            <input value={form.name} onChange={(e) => set('name', e.target.value)}
+              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
+          </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Category</label>
+              <select value={form.categoryId} onChange={(e) => set('categoryId', e.target.value)}
+                className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white">
+                {allCats.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Type</label>
+              <select value={form.type} onChange={(e) => set('type', e.target.value)}
+                className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white">
+                <option value="FOOD">Food</option>
+                <option value="BEVERAGE">Beverage</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Price (Tk) *</label>
+            <input type="number" step="0.01" min="0" value={form.price} onChange={(e) => set('price', e.target.value)}
+              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
+          </div>
+
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Description</label>
+            <input value={form.description} onChange={(e) => set('description', e.target.value)}
+              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
+          </div>
+
+          {cookingStations.length > 0 && (
+            <div>
+              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Cooking Station</label>
+              <select value={form.cookingStationId} onChange={(e) => set('cookingStationId', e.target.value)}
+                className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white">
+                <option value="">None</option>
+                {cookingStations.filter((s) => s.isActive).map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Image Upload */}
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">
+              <Image size={12} className="inline mr-1" />Photo (Square)
+            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void handleFileUpload(file);
+              }}
+            />
+            {form.imageUrl ? (
+              <div className="flex items-start gap-3">
+                <div className="w-24 h-24 border border-[#2A2A2A] overflow-hidden bg-[#0D0D0D] flex-shrink-0">
+                  <img src={resolveImageUrl(form.imageUrl)} alt="Preview" className="w-full h-full object-cover" />
+                </div>
+                <div className="flex flex-col gap-2 pt-1">
+                  <button type="button" onClick={() => fileInputRef.current?.click()}
+                    className="text-xs font-body text-[#999] hover:text-white border border-[#2A2A2A] px-3 py-1.5 transition-colors">
+                    Change
+                  </button>
+                  <button type="button" onClick={() => set('imageUrl', '')}
+                    className="text-xs font-body text-[#D62B2B] hover:underline">
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                className={`flex flex-col items-center justify-center gap-2 py-6 border border-dashed cursor-pointer transition-colors ${
+                  dragOver ? 'border-[#D62B2B] bg-[#D62B2B]/5' : 'border-[#2A2A2A] hover:border-[#555] bg-[#0D0D0D]'
+                }`}
+              >
+                {uploading ? (
+                  <p className="text-xs font-body text-[#999]">Uploading...</p>
+                ) : (
+                  <>
+                    <Upload size={20} className="text-[#555]" />
+                    <p className="text-xs font-body text-[#999]">Click or drag image here</p>
+                    <p className="text-[10px] font-body text-[#555]">JPEG, PNG, WebP — max 5 MB</p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Tags */}
+          <TagsInput value={form.tags} onChange={(v) => set('tags', v)} />
+
+          {initial && (
+            <label className="flex items-center gap-2 text-sm font-body text-[#999]">
+              <input type="checkbox" checked={form.isAvailable} onChange={(e) => set('isAvailable', e.target.checked)} />
+              Available
+            </label>
+          )}
+        </div>
+
+        {mutation.isError && <p className="text-xs text-[#D62B2B]">{(mutation.error as Error).message}</p>}
+        <div className="flex gap-3 pt-2">
+          <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={!form.name.trim() || !form.price || mutation.isPending}
+            className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40"
+          >
+            {mutation.isPending ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Combo Items Dialog ───────────────────────────────────────────────────────
+
+function ComboDialog({
+  item,
+  allItems,
+  onClose,
+}: {
+  item: MenuItem;
+  allItems: MenuItem[];
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [rows, setRows] = useState<{ includedItemId: string; quantity: number }[]>(
+    (item.comboItems ?? []).map((c) => ({ includedItemId: c.includedItemId, quantity: c.quantity })),
+  );
+
+  const availableItems = allItems.filter((m) => m.id !== item.id);
+
+  const addRow = () => {
+    const first = availableItems.find((m) => !rows.some((r) => r.includedItemId === m.id));
+    if (first) setRows([...rows, { includedItemId: first.id, quantity: 1 }]);
+  };
+
+  const removeRow = (idx: number) => setRows(rows.filter((_, i) => i !== idx));
+
+  const updateRow = (idx: number, field: string, value: unknown) =>
+    setRows(rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+
+  const mutation = useMutation({
+    mutationFn: () => api.put(`/menu/${item.id}/combo-items`, { items: rows }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['menu'] });
+      onClose();
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="bg-[#161616] w-[520px] p-6 space-y-4 max-h-[90vh] overflow-auto">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-xl tracking-wide">COMBO ITEMS — {item.name}</h3>
+          <button onClick={onClose} className="text-[#999] hover:text-white"><X size={16} /></button>
+        </div>
+
+        <p className="text-xs font-body text-[#999]">Select menu items included in this combo bundle.</p>
+
+        <div className="space-y-2">
+          {rows.map((row, idx) => (
+            <div key={idx} className="flex gap-2 items-center">
+              <select
+                value={row.includedItemId}
+                onChange={(e) => updateRow(idx, 'includedItemId', e.target.value)}
+                className="flex-1 border border-[#2A2A2A] px-3 py-2 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#161616]"
+              >
+                {availableItems.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name} ({formatCurrency(Number(m.price))})</option>
+                ))}
+              </select>
+              <input
+                type="number" min={1} value={row.quantity}
+                onChange={(e) => updateRow(idx, 'quantity', parseInt(e.target.value) || 1)}
+                className="w-16 border border-[#2A2A2A] px-2 py-2 text-sm font-body text-center outline-none focus:border-[#D62B2B]"
+              />
+              <button onClick={() => removeRow(idx)} className="text-[#999] hover:text-[#D62B2B]"><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={addRow} className="text-sm font-body text-[#D62B2B] hover:underline flex items-center gap-1">
+          <Plus size={14} /> Add item
+        </button>
+
+        {mutation.isError && <p className="text-xs text-[#D62B2B]">{(mutation.error as Error).message}</p>}
+        <div className="flex gap-3 pt-2">
+          <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
+          <button
+            onClick={() => mutation.mutate()} disabled={mutation.isPending}
+            className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40"
+          >
+            {mutation.isPending ? 'Saving...' : 'Save Combo'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Linked Items Dialog ──────────────────────────────────────────────────────
+
+function LinkedDialog({
+  item,
+  allItems,
+  onClose,
+}: {
+  item: MenuItem;
+  allItems: MenuItem[];
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [rows, setRows] = useState<{ linkedMenuId: string; type: LinkedItemType; triggerQuantity: number; freeQuantity: number }[]>(
+    (item.linkedItems ?? []).map((l) => ({
+      linkedMenuId: l.linkedMenuId,
+      type: l.type,
+      triggerQuantity: l.triggerQuantity,
+      freeQuantity: l.freeQuantity,
+    })),
+  );
+
+  const availableItems = allItems.filter((m) => m.id !== item.id);
+
+  const addRow = () => {
+    const first = availableItems.find((m) => !rows.some((r) => r.linkedMenuId === m.id));
+    if (first) setRows([...rows, { linkedMenuId: first.id, type: 'FREE', triggerQuantity: 1, freeQuantity: 1 }]);
+  };
+
+  const removeRow = (idx: number) => setRows(rows.filter((_, i) => i !== idx));
+
+  const updateRow = (idx: number, field: string, value: unknown) =>
+    setRows(rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+
+  const mutation = useMutation({
+    mutationFn: () => api.put(`/menu/${item.id}/linked-items`, { items: rows }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['menu'] });
+      onClose();
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="bg-[#161616] w-[620px] p-6 space-y-4 max-h-[90vh] overflow-auto">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-xl tracking-wide">LINKED ITEMS — {item.name}</h3>
+          <button onClick={onClose} className="text-[#999] hover:text-white"><X size={16} /></button>
+        </div>
+
+        <p className="text-xs font-body text-[#999]">
+          FREE = always included free. COMPLEMENTARY = free for every N ordered (e.g., buy 2 get 1 free drink).
+        </p>
+
+        <div className="space-y-2">
+          {rows.map((row, idx) => (
+            <div key={idx} className="flex gap-2 items-center">
+              <select
+                value={row.linkedMenuId}
+                onChange={(e) => updateRow(idx, 'linkedMenuId', e.target.value)}
+                className="flex-1 border border-[#2A2A2A] px-3 py-2 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#161616]"
+              >
+                {availableItems.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+              <select
+                value={row.type}
+                onChange={(e) => updateRow(idx, 'type', e.target.value)}
+                className="w-36 border border-[#2A2A2A] px-2 py-2 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#161616]"
+              >
+                <option value="FREE">Free</option>
+                <option value="COMPLEMENTARY">Complementary</option>
+              </select>
+              {row.type === 'COMPLEMENTARY' && (
+                <input
+                  type="number" min={1} value={row.triggerQuantity} title="Trigger qty"
+                  onChange={(e) => updateRow(idx, 'triggerQuantity', parseInt(e.target.value) || 1)}
+                  className="w-14 border border-[#2A2A2A] px-2 py-2 text-sm font-body text-center outline-none focus:border-[#D62B2B]"
+                />
+              )}
+              <input
+                type="number" min={1} value={row.freeQuantity} title="Free qty"
+                onChange={(e) => updateRow(idx, 'freeQuantity', parseInt(e.target.value) || 1)}
+                className="w-14 border border-[#2A2A2A] px-2 py-2 text-sm font-body text-center outline-none focus:border-[#D62B2B]"
+              />
+              <button onClick={() => removeRow(idx)} className="text-[#999] hover:text-[#D62B2B]"><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={addRow} className="text-sm font-body text-[#D62B2B] hover:underline flex items-center gap-1">
+          <Plus size={14} /> Add linked item
+        </button>
+
+        {mutation.isError && <p className="text-xs text-[#D62B2B]">{(mutation.error as Error).message}</p>}
+        <div className="flex gap-3 pt-2">
+          <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
+          <button
+            onClick={() => mutation.mutate()} disabled={mutation.isPending}
+            className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40"
+          >
+            {mutation.isPending ? 'Saving...' : 'Save Linked Items'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Menu Page ────────────────────────────────────────────────────────────────
+
+export default function MenuPage() {
+  const qc = useQueryClient();
+  const [catDialog, setCatDialog] = useState<{ open: boolean; cat?: MenuCategory }>({ open: false });
+  const [itemDialog, setItemDialog] = useState<{ open: boolean; item?: MenuItem }>({ open: false });
+  const [comboDialog, setComboDialog] = useState<{ open: boolean; item?: MenuItem }>({ open: false });
+  const [linkedDialog, setLinkedDialog] = useState<{ open: boolean; item?: MenuItem }>({ open: false });
+  const [activeParent, setActiveParent] = useState<string | null>(null);
+  const [activeSub, setActiveSub] = useState<string | null>(null);
+
+  const { data: categories = [] } = useQuery<MenuCategory[]>({
+    queryKey: ['categories'],
+    queryFn: () => api.get<MenuCategory[]>('/menu/categories'),
+  });
+
+  const { data: menuItems = [] } = useQuery<MenuItem[]>({
+    queryKey: ['menu'],
+    queryFn: () => api.get<MenuItem[]>('/menu'),
+  });
+
+  const topCategories = categories.filter((c) => !c.parentId);
+  const selectedParent = topCategories.find((c) => c.id === activeParent);
+  const subCategories = selectedParent?.children ?? [];
+
+  // Filter items based on selection
+  const filtered = (() => {
+    if (activeSub) return menuItems.filter((m) => m.categoryId === activeSub);
+    if (activeParent) {
+      const childIds = (selectedParent?.children ?? []).map((c) => c.id);
+      return menuItems.filter((m) => m.categoryId === activeParent || childIds.includes(m.categoryId));
+    }
+    return menuItems;
+  })();
+
+  const deleteCat = useMutation({
+    mutationFn: (id: string) => api.delete(`/menu/categories/${id}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['categories'] }),
+  });
+
+  const deleteItem = useMutation({
+    mutationFn: (id: string) => api.delete(`/menu/${id}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['menu'] }),
+  });
+
+  const handleParentClick = (id: string | null) => {
+    setActiveParent(id);
+    setActiveSub(null);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Management</p>
+          <h1 className="font-display text-4xl text-white tracking-wide">MENU</h1>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={() => setCatDialog({ open: true })}
+            className="flex items-center gap-1.5 border border-[#2A2A2A] px-4 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors">
+            <Plus size={14} /> Category
+          </button>
+          <button onClick={() => setItemDialog({ open: true })}
+            className="flex items-center gap-1.5 bg-[#D62B2B] text-white px-4 py-2 text-sm font-body font-medium hover:bg-[#F03535] transition-colors">
+            <Plus size={14} /> Item
+          </button>
+        </div>
+      </div>
+
+      {/* Line 1: Parent Categories */}
+      <div className="border border-[#2A2A2A] bg-[#161616]">
+        <div className="flex items-center gap-0 overflow-x-auto">
+          <button
+            onClick={() => handleParentClick(null)}
+            className={`flex items-center gap-1.5 px-5 py-3 text-xs font-body font-medium tracking-widest uppercase whitespace-nowrap transition-colors border-b-2 ${
+              !activeParent ? 'border-[#D62B2B] text-[#D62B2B] bg-[#D62B2B]/5' : 'border-transparent text-[#999] hover:text-white'
+            }`}
+          >
+            All ({menuItems.length})
+          </button>
+          {topCategories.map((cat) => {
+            const childIds = (cat.children ?? []).map((c) => c.id);
+            const count = menuItems.filter((m) => m.categoryId === cat.id || childIds.includes(m.categoryId)).length;
+            const isActive = activeParent === cat.id;
+            return (
+              <div key={cat.id} className="flex items-center group">
+                <button
+                  onClick={() => handleParentClick(cat.id)}
+                  className={`flex items-center gap-1.5 px-5 py-3 text-xs font-body font-medium tracking-widest uppercase whitespace-nowrap transition-colors border-b-2 ${
+                    isActive ? 'border-[#D62B2B] text-[#D62B2B] bg-[#D62B2B]/5' : 'border-transparent text-[#999] hover:text-white'
+                  }`}
+                >
+                  {cat.icon && <span className="text-base">{cat.icon}</span>}
+                  {cat.name} ({count})
+                </button>
+                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity mr-2">
+                  <button onClick={() => setCatDialog({ open: true, cat })} className="text-[#555] hover:text-[#999] p-0.5"><Pencil size={10} /></button>
+                  <button onClick={() => { if (confirm(`Delete category "${cat.name}"?`)) deleteCat.mutate(cat.id); }}
+                    className="text-[#555] hover:text-[#D62B2B] p-0.5"><Trash2 size={10} /></button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Line 2: Subcategories (only when parent selected and has children) */}
+        {activeParent && subCategories.length > 0 && (
+          <div className="flex items-center gap-0 overflow-x-auto border-t border-[#2A2A2A] bg-[#0D0D0D]/50">
+            <button
+              onClick={() => setActiveSub(null)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-[11px] font-body font-medium tracking-widest uppercase whitespace-nowrap transition-colors border-b-2 ${
+                !activeSub ? 'border-[#D62B2B] text-[#D62B2B]' : 'border-transparent text-[#666] hover:text-white'
+              }`}
+            >
+              All {selectedParent?.name}
+            </button>
+            {subCategories.map((sub) => {
+              const subCount = menuItems.filter((m) => m.categoryId === sub.id).length;
+              const isActive = activeSub === sub.id;
+              return (
+                <div key={sub.id} className="flex items-center group">
+                  <button
+                    onClick={() => setActiveSub(sub.id)}
+                    className={`flex items-center gap-1.5 px-4 py-2.5 text-[11px] font-body font-medium tracking-widest uppercase whitespace-nowrap transition-colors border-b-2 ${
+                      isActive ? 'border-[#D62B2B] text-[#D62B2B]' : 'border-transparent text-[#666] hover:text-white'
+                    }`}
+                  >
+                    {sub.icon && <span className="text-sm">{sub.icon}</span>}
+                    {sub.name} ({subCount})
+                  </button>
+                  <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity mr-1">
+                    <button onClick={() => setCatDialog({ open: true, cat: sub })} className="text-[#555] hover:text-[#999] p-0.5"><Pencil size={9} /></button>
+                    <button onClick={() => { if (confirm(`Delete sub-category "${sub.name}"?`)) deleteCat.mutate(sub.id); }}
+                      className="text-[#555] hover:text-[#D62B2B] p-0.5"><Trash2 size={9} /></button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Items table */}
+      <div className="bg-[#161616] border border-[#2A2A2A]">
+        <table className="w-full text-sm font-body">
+          <thead>
+            <tr className="text-left text-xs text-[#999] tracking-widest uppercase border-b border-[#2A2A2A]">
+              <th className="px-5 py-3 font-medium w-12"></th>
+              <th className="px-5 py-3 font-medium">Name</th>
+              <th className="px-5 py-3 font-medium">Category</th>
+              <th className="px-5 py-3 font-medium">Type</th>
+              <th className="px-5 py-3 font-medium">Price</th>
+              <th className="px-5 py-3 font-medium">Tags</th>
+              <th className="px-5 py-3 font-medium">Status</th>
+              <th className="px-5 py-3 font-medium w-32">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((item) => {
+              const tags = item.tags ? item.tags.split(',').map((t) => t.trim()).filter(Boolean) : [];
+              return (
+                <tr key={item.id} className="border-b border-[#2A2A2A] last:border-0">
+                  <td className="px-5 py-2">
+                    {item.imageUrl ? (
+                      <div className="w-10 h-10 border border-[#2A2A2A] overflow-hidden bg-[#0D0D0D]">
+                        <img src={resolveImageUrl(item.imageUrl)} alt={item.name} className="w-full h-full object-cover" />
+                      </div>
+                    ) : (
+                      <div className="w-10 h-10 border border-[#2A2A2A] bg-[#0D0D0D] flex items-center justify-center text-[#333]">
+                        <Image size={14} />
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 font-medium text-white">
+                    {item.name}
+                    {item.isCombo && <span className="ml-2 text-[10px] font-medium tracking-widest uppercase text-[#D62B2B] border border-[#D62B2B] px-1.5 py-0.5">COMBO</span>}
+                    {(item.linkedItems?.length ?? 0) > 0 && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#999] border border-[#2A2A2A] px-1.5 py-0.5">LINKED</span>}
+                  </td>
+                  <td className="px-5 py-3 text-[#999]">{item.category?.name ?? '--'}</td>
+                  <td className="px-5 py-3 text-[#999]">{item.type}</td>
+                  <td className="px-5 py-3 text-white">{formatCurrency(Number(item.price))}</td>
+                  <td className="px-5 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {tags.map((tag, i) => (
+                        <span key={i} className="text-[10px] font-body text-[#999] border border-[#2A2A2A] px-1.5 py-0.5">{tag}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3">
+                    <span className={`text-xs font-medium ${item.isAvailable ? 'text-green-600' : 'text-[#999]'}`}>
+                      {item.isAvailable ? 'Available' : 'Unavailable'}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3">
+                    <div className="flex gap-2">
+                      <button onClick={() => setComboDialog({ open: true, item })} title="Combo items" className="text-[#999] hover:text-[#D62B2B]"><Package size={14} /></button>
+                      <button onClick={() => setLinkedDialog({ open: true, item })} title="Linked items" className="text-[#999] hover:text-[#D62B2B]"><Link2 size={14} /></button>
+                      <button onClick={() => setItemDialog({ open: true, item })} className="text-[#999] hover:text-white"><Pencil size={14} /></button>
+                      <button onClick={() => { if (confirm(`Delete "${item.name}"?`)) deleteItem.mutate(item.id); }}
+                        className="text-[#999] hover:text-[#D62B2B]"><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={8} className="px-5 py-8 text-center text-[#999]">No menu items</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {catDialog.open && <CategoryDialog initial={catDialog.cat} categories={categories} onClose={() => setCatDialog({ open: false })} />}
+      {itemDialog.open && <ItemDialog categories={categories} initial={itemDialog.item} onClose={() => setItemDialog({ open: false })} />}
+      {comboDialog.open && comboDialog.item && <ComboDialog item={comboDialog.item} allItems={menuItems} onClose={() => setComboDialog({ open: false })} />}
+      {linkedDialog.open && linkedDialog.item && <LinkedDialog item={linkedDialog.item} allItems={menuItems} onClose={() => setLinkedDialog({ open: false })} />}
+    </div>
+  );
+}

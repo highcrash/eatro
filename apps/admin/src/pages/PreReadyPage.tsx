@@ -1,0 +1,793 @@
+import { useState, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { formatCurrency } from '@restora/utils';
+import type { PreReadyItem, ProductionOrder, PreReadyBatch, Ingredient, ProductionStatus, Recipe } from '@restora/types';
+import type { MenuItem } from '@restora/types';
+
+// Calculate recipe cost for a pre-ready item from its recipe + ingredient costs
+function calcPreReadyCost(item: PreReadyItem, ingredients: Ingredient[]): { recipeCost: number; yieldQty: number; costPerUnit: number } | null {
+  if (!item.recipe || item.recipe.items.length === 0) return null;
+  let recipeCost = 0;
+  for (const ri of item.recipe.items) {
+    const ing = ingredients.find((i) => i.id === ri.ingredientId);
+    if (ing) {
+      recipeCost += Number(ing.costPerUnit) * Number(ri.quantity);
+    }
+  }
+  const yieldQty = Number(item.recipe.yieldQuantity) || 1;
+  return { recipeCost, yieldQty, costPerUnit: recipeCost / yieldQty };
+}
+
+const PR_CSV_EXAMPLE = `ingredient_name,quantity,unit
+Chicken Breast,0.25,KG
+Salt,5,G
+Oil,20,ML`;
+
+function downloadPRExampleCSV() {
+  const blob = new Blob([PR_CSV_EXAMPLE], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'preready-recipe-template.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const STATUS_COLORS: Record<ProductionStatus, string> = {
+  PENDING: 'text-[#FFA726] bg-[#3a2e00]',
+  APPROVED: 'text-[#29B6F6] bg-[#00243a]',
+  IN_PROGRESS: 'text-[#CE93D8] bg-[#2a003a]',
+  COMPLETED: 'text-[#4CAF50] bg-[#1a3a1a]',
+  WASTED: 'text-[#D62B2B] bg-[#3a0000]',
+  CANCELLED: 'text-[#666] bg-[#2A2A2A]',
+};
+
+const UNITS = ['KG', 'G', 'L', 'ML', 'PCS', 'DOZEN', 'BOX'];
+
+// Hardcoded local conversion factors for UI display
+const CONVERSION_MAP: Record<string, Record<string, number>> = {
+  KG: { G: 1000 }, G: { KG: 0.001 },
+  L: { ML: 1000 }, ML: { L: 0.001 },
+  DOZEN: { PCS: 12 }, PCS: { DOZEN: 1 / 12 },
+};
+
+function getConvertibleUnitsLocal(unit: string): string[] {
+  const related = Object.keys(CONVERSION_MAP[unit] ?? {});
+  return [unit, ...related];
+}
+
+function convertLocally(value: number, fromUnit: string, toUnit: string): number | null {
+  if (fromUnit === toUnit) return value;
+  const factor = CONVERSION_MAP[fromUnit]?.[toUnit];
+  return factor != null ? value * factor : null;
+}
+
+export default function PreReadyPage() {
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<'items' | 'production' | 'batches'>('items');
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [itemForm, setItemForm] = useState({ name: '', unit: 'PCS', minimumStock: '0' });
+  const [showRecipe, setShowRecipe] = useState<PreReadyItem | null>(null);
+  const [recipeLines, setRecipeLines] = useState<{ ingredientId: string; quantity: string; unit: string }[]>([]);
+  const [recipeYield, setRecipeYield] = useState({ quantity: '1', unit: 'PCS', notes: '' });
+  const [showCreateProd, setShowCreateProd] = useState(false);
+  const [prodForm, setProdForm] = useState({ preReadyItemId: '', quantity: '0', notes: '' });
+  const [completing, setCompleting] = useState<ProductionOrder | null>(null);
+  const [completeForm, setCompleteForm] = useState({ makingDate: new Date().toISOString().split('T')[0], expiryDate: '' });
+  const [showAutofillPR, setShowAutofillPR] = useState(false);
+  const [showCopyFromPR, setShowCopyFromPR] = useState(false);
+  const [copySearchPR, setCopySearchPR] = useState('');
+  const [csvErrorsPR, setCsvErrorsPR] = useState<Record<number, string>>({});
+  const csvInputRefPR = useRef<HTMLInputElement>(null);
+  const [ingSearch, setIngSearch] = useState<Record<number, string>>({});
+  const [ingredientFilter, setIngredientFilter] = useState('');
+  const [editingItem, setEditingItem] = useState<PreReadyItem | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', minimumStock: '0' });
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const { data: items = [] } = useQuery<PreReadyItem[]>({
+    queryKey: ['pre-ready-items'],
+    queryFn: () => api.get('/pre-ready/items'),
+  });
+
+  const { data: productions = [] } = useQuery<ProductionOrder[]>({
+    queryKey: ['productions'],
+    queryFn: () => api.get('/pre-ready/productions'),
+    enabled: tab === 'production',
+  });
+
+  const { data: batches = [] } = useQuery<(PreReadyBatch & { preReadyItem?: { name: string; unit: string } })[]>({
+    queryKey: ['pre-ready-batches'],
+    queryFn: () => api.get('/pre-ready/batches'),
+    enabled: tab === 'batches',
+  });
+
+  const { data: ingredients = [] } = useQuery<Ingredient[]>({
+    queryKey: ['ingredients'],
+    queryFn: () => api.get('/ingredients'),
+    select: (d) => d.filter((i) => i.isActive),
+  });
+
+  const { data: menuItems = [] } = useQuery<MenuItem[]>({
+    queryKey: ['menu-items-for-copy'],
+    queryFn: () => api.get('/menu'),
+    enabled: showCopyFromPR,
+  });
+
+  // Sources for copy-from: other pre-ready items + menu items with recipes
+  const allCopySources = [
+    ...items.filter((pr) => pr.id !== showRecipe?.id && pr.recipe && pr.recipe.items.length > 0)
+      .map((pr) => ({ id: pr.id, name: `[PR] ${pr.name}`, type: 'preready' as const })),
+    ...menuItems.map((m) => ({ id: m.id, name: m.name, type: 'menu' as const })),
+  ];
+
+  const handlePRCopyFromPreReady = (sourceId: string) => {
+    const pr = items.find((p) => p.id === sourceId);
+    if (pr?.recipe?.items) {
+      setRecipeLines(pr.recipe.items.map((i) => ({
+        ingredientId: i.ingredientId,
+        quantity: String(i.quantity),
+        unit: (i as any).unit ?? i.ingredient?.unit ?? 'G',
+      })));
+    }
+    setShowCopyFromPR(false);
+    setCopySearchPR('');
+    setIngSearch({});
+    setCsvErrorsPR({});
+  };
+
+  const handlePRCopyFromMenu = async (sourceId: string) => {
+    try {
+      const r = await api.get<Recipe>(`/recipes/menu-item/${sourceId}`);
+      if (r && r.items) {
+        setRecipeLines(r.items.map((i) => ({
+          ingredientId: i.ingredientId,
+          quantity: String(i.quantity),
+          unit: i.unit ?? 'G',
+        })));
+      }
+    } catch { /* no recipe */ }
+    setShowCopyFromPR(false);
+    setCopySearchPR('');
+    setIngSearch({});
+    setCsvErrorsPR({});
+  };
+
+  const handlePRCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const rows = text.trim().split('\n').map((r) => r.split(',').map((c) => c.trim()));
+      if (rows.length < 2) return;
+
+      const header = rows[0].map((h) => h.toLowerCase().replace(/[^a-z_]/g, ''));
+      const nameIdx = header.findIndex((h) => h.includes('ingredient') || h.includes('name'));
+      const qtyIdx = header.findIndex((h) => h.includes('qty') || h.includes('quantity'));
+      const unitIdx = header.findIndex((h) => h.includes('unit'));
+
+      if (nameIdx === -1 || qtyIdx === -1) {
+        setCsvErrorsPR({ [-1]: 'CSV must have ingredient_name and quantity columns' });
+        return;
+      }
+
+      const newLines: { ingredientId: string; quantity: string; unit: string }[] = [];
+      const errors: Record<number, string> = {};
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row[nameIdx]) continue;
+        const ingName = row[nameIdx].toLowerCase();
+        const qty = parseFloat(row[qtyIdx]) || 0;
+        const unit = unitIdx >= 0 && row[unitIdx] ? row[unitIdx].toUpperCase() : '';
+
+        const match = ingredients.find((ing) =>
+          ing.name.toLowerCase() === ingName ||
+          ing.name.toLowerCase().includes(ingName) ||
+          ingName.includes(ing.name.toLowerCase()) ||
+          (ing.itemCode ?? '').toLowerCase() === ingName
+        );
+
+        if (!match) {
+          errors[i] = `"${row[nameIdx]}" not found in inventory`;
+          newLines.push({ ingredientId: '', quantity: String(qty), unit: unit || 'G' });
+        } else if (qty <= 0) {
+          errors[i] = 'Invalid quantity';
+          newLines.push({ ingredientId: match.id, quantity: String(qty), unit: unit || match.unit });
+        } else {
+          newLines.push({ ingredientId: match.id, quantity: String(qty), unit: unit || match.unit });
+        }
+      }
+
+      setRecipeLines(newLines);
+      setCsvErrorsPR(errors);
+      setIngSearch({});
+      setShowAutofillPR(false);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  // Merge ingredients + pre-ready items into a single selectable list
+  const allSelectableItems = [
+    ...ingredients.map((i) => ({ id: i.id, name: i.name, unit: i.unit, itemCode: (i as any).itemCode ?? null, type: 'ingredient' as const })),
+    ...items.filter((pr) => pr.id !== showRecipe?.id).map((pr) => ({ id: `preready:${pr.id}`, name: `[PR] ${pr.name}`, unit: pr.unit, itemCode: null, type: 'preready' as const })),
+  ];
+
+  const createItemMut = useMutation({
+    mutationFn: () => api.post('/pre-ready/items', { ...itemForm, minimumStock: parseFloat(itemForm.minimumStock) || 0 }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['pre-ready-items'] }); setShowAddItem(false); },
+  });
+
+  const saveRecipeMut = useMutation({
+    mutationFn: () => api.put(`/pre-ready/items/${showRecipe!.id}/recipe`, {
+      yieldQuantity: parseFloat(recipeYield.quantity) || 1,
+      yieldUnit: recipeYield.unit,
+      notes: recipeYield.notes || undefined,
+      items: recipeLines.filter((l) => l.ingredientId && parseFloat(l.quantity) > 0).map((l) => ({ ingredientId: l.ingredientId, quantity: parseFloat(l.quantity), unit: l.unit })),
+    }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['pre-ready-items'] }); setShowRecipe(null); setIngSearch({}); },
+  });
+
+  const createProdMut = useMutation({
+    mutationFn: () => api.post('/pre-ready/productions', { preReadyItemId: prodForm.preReadyItemId, quantity: parseFloat(prodForm.quantity), notes: prodForm.notes || undefined }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['productions'] }); setShowCreateProd(false); },
+  });
+
+  const actionMut = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: string }) => api.post(`/pre-ready/productions/${id}/${action}`, {}),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['productions'] }),
+  });
+
+  const completeMut = useMutation({
+    mutationFn: () => api.post(`/pre-ready/productions/${completing!.id}/complete`, completeForm),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['productions'] }); void qc.invalidateQueries({ queryKey: ['pre-ready-items'] }); void qc.invalidateQueries({ queryKey: ['pre-ready-batches'] }); setCompleting(null); },
+  });
+
+  const updateItemMut = useMutation({
+    mutationFn: () => api.patch(`/pre-ready/items/${editingItem!.id}`, {
+      name: editForm.name || undefined,
+      minimumStock: parseFloat(editForm.minimumStock),
+    }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['pre-ready-items'] }); setEditingItem(null); },
+  });
+
+  const deleteItemMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/pre-ready/items/${id}`),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['pre-ready-items'] }); setDeleteError(null); },
+    onError: (err: Error) => { setDeleteError(err.message); },
+  });
+
+  const openRecipe = (item: PreReadyItem) => {
+    setShowRecipe(item);
+    setIngSearch({});
+    if (item.recipe) {
+      setRecipeLines(item.recipe.items.map((i) => ({ ingredientId: i.ingredientId, quantity: String(i.quantity), unit: i.unit ?? i.ingredient?.unit ?? 'G' })));
+      setRecipeYield({ quantity: String(item.recipe.yieldQuantity), unit: item.recipe.yieldUnit, notes: item.recipe.notes ?? '' });
+    } else {
+      setRecipeLines([]);
+      setRecipeYield({ quantity: '1', unit: item.unit, notes: '' });
+    }
+  };
+
+  const openEditItem = (item: PreReadyItem) => {
+    setEditingItem(item);
+    setEditForm({ name: item.name, minimumStock: String(Number(item.minimumStock)) });
+  };
+
+  const handleDeleteItem = (item: PreReadyItem) => {
+    setDeleteError(null);
+    if (confirm(`Delete "${item.name}"? This cannot be undone.`)) {
+      deleteItemMut.mutate(item.id);
+    }
+  };
+
+  const now = new Date();
+  const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="font-display text-3xl text-white tracking-widest">PRE-READY FOODS</h1>
+        <div className="flex gap-2">
+          {tab === 'items' && <button onClick={() => setShowAddItem(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">+ ADD ITEM</button>}
+          {tab === 'production' && <button onClick={() => setShowCreateProd(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">+ NEW PRODUCTION</button>}
+        </div>
+      </div>
+
+      <div className="flex border-b border-[#2A2A2A]">
+        {(['items', 'production', 'batches'] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={`px-6 py-3 font-body text-xs tracking-widest uppercase transition-colors border-b-2 -mb-px ${tab === t ? 'border-[#D62B2B] text-white' : 'border-transparent text-[#666] hover:text-[#999]'}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Items Tab */}
+      {tab === 'items' && (
+        <div className="bg-[#161616] border border-[#2A2A2A]">
+          {/* Ingredient filter */}
+          <div className="px-4 pt-4 pb-2 border-b border-[#2A2A2A]">
+            <div className="relative max-w-xs">
+              <input
+                list="pr-ing-filter"
+                placeholder="🔍 Filter by ingredient…"
+                value={ingredientFilter}
+                onChange={(e) => setIngredientFilter(e.target.value)}
+                className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-[#C8FF00] px-3 py-2 text-xs font-body focus:outline-none focus:border-[#C8FF00]/50 transition-colors placeholder:text-[#555]"
+              />
+              <datalist id="pr-ing-filter">
+                {ingredients.map((i) => <option key={i.id} value={i.name} />)}
+              </datalist>
+              {ingredientFilter && (
+                <button onClick={() => setIngredientFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#666] hover:text-white text-xs">✕</button>
+              )}
+            </div>
+          </div>
+          {deleteError && (
+            <div className="mx-4 mt-4 p-3 bg-[#3a1a1a] border border-[#D62B2B] text-[#F03535] font-body text-sm flex items-center justify-between">
+              <span>{deleteError}</span>
+              <button onClick={() => setDeleteError(null)} className="text-[#666] hover:text-white ml-4">{'\u2715'}</button>
+            </div>
+          )}
+          <table className="w-full">
+            <thead><tr className="border-b border-[#2A2A2A]">
+              {['Name', 'Unit', 'Stock', 'Min', 'Recipe Cost / Yield', 'Cost/Unit', 'Actions'].map((h) => (
+                <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {items.filter((item) => {
+                if (!ingredientFilter) return true;
+                const matchIng = ingredients.find((i) => i.name.toLowerCase() === ingredientFilter.toLowerCase());
+                if (!matchIng) return true;
+                return item.recipe?.items?.some((ri) => ri.ingredientId === matchIng.id) ?? false;
+              }).map((item) => {
+                const isLow = Number(item.currentStock) <= Number(item.minimumStock);
+                const cost = calcPreReadyCost(item, ingredients);
+                return (
+                  <tr key={item.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
+                    <td className="px-4 py-3 text-white font-body text-sm">{item.name}</td>
+                    <td className="px-4 py-3 text-[#999] font-body text-xs">{item.unit}</td>
+                    <td className="px-4 py-3"><span className={`font-body text-sm ${isLow ? 'text-[#D62B2B]' : 'text-white'}`}>{Number(item.currentStock).toFixed(2)}{isLow && ' \u25bc'}</span></td>
+                    <td className="px-4 py-3 text-[#999] font-body text-xs">{Number(item.minimumStock).toFixed(2)}</td>
+                    <td className="px-4 py-3">
+                      {cost ? (
+                        <span className="font-body text-xs">
+                          <span className="text-[#D62B2B]">{formatCurrency(cost.recipeCost)}</span>
+                          <span className="text-[#555]"> / {cost.yieldQty} {item.recipe?.yieldUnit ?? item.unit}</span>
+                        </span>
+                      ) : (
+                        <span className="text-[#444] font-body text-xs">No recipe</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {cost ? (
+                        <span className={`font-body text-xs font-medium ${cost.costPerUnit > 0 ? 'text-white' : 'text-[#666]'}`}>
+                          {formatCurrency(cost.costPerUnit)}/{item.unit}
+                        </span>
+                      ) : (
+                        <span className="text-[#444] font-body text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 flex gap-2">
+                      <button onClick={() => openRecipe(item)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Recipe</button>
+                      <button onClick={() => openEditItem(item)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Edit</button>
+                      <button onClick={() => handleDeleteItem(item)} className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs tracking-widest uppercase transition-colors">Delete</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {items.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-[#666] font-body text-sm">No pre-ready items yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Production Tab */}
+      {tab === 'production' && (
+        <div className="bg-[#161616] border border-[#2A2A2A]">
+          <table className="w-full">
+            <thead><tr className="border-b border-[#2A2A2A]">
+              {['Item', 'Qty', 'Est. Cost', 'Status', 'Requested By', 'Created', 'Actions'].map((h) => (
+                <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {productions.map((po) => {
+                const prItem = items.find((i) => i.id === po.preReadyItemId);
+                const prCost = prItem ? calcPreReadyCost(prItem, ingredients) : null;
+                const prodQty = Number(po.quantity);
+                const ratio = prCost && prCost.yieldQty > 0 ? prodQty / prCost.yieldQty : 0;
+                const estTotal = prCost ? prCost.recipeCost * ratio : 0;
+                return (
+                <tr key={po.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
+                  <td className="px-4 py-3 text-white font-body text-sm">{po.preReadyItem?.name}</td>
+                  <td className="px-4 py-3 text-[#999] font-body text-sm">{prodQty.toFixed(2)} {po.preReadyItem?.unit}</td>
+                  <td className="px-4 py-3 text-[#D62B2B] font-body text-xs font-medium">{estTotal > 0 ? formatCurrency(estTotal) : '—'}</td>
+                  <td className="px-4 py-3"><span className={`text-xs font-body px-2 py-0.5 ${STATUS_COLORS[po.status]}`}>{po.status}</span></td>
+                  <td className="px-4 py-3 text-[#999] font-body text-xs">{po.requestedBy?.name}</td>
+                  <td className="px-4 py-3 text-[#666] font-body text-xs">{new Date(po.createdAt).toLocaleDateString()}</td>
+                  <td className="px-4 py-3 flex gap-2">
+                    {po.status === 'PENDING' && <button onClick={() => actionMut.mutate({ id: po.id, action: 'approve' })} className="text-[#29B6F6] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Approve</button>}
+                    {po.status === 'APPROVED' && <button onClick={() => actionMut.mutate({ id: po.id, action: 'start' })} className="text-[#CE93D8] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Start</button>}
+                    {(po.status === 'IN_PROGRESS' || po.status === 'APPROVED') && <button onClick={() => { setCompleting(po); setCompleteForm({ makingDate: new Date().toISOString().split('T')[0], expiryDate: '' }); }} className="text-[#4CAF50] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Complete</button>}
+                    {po.status !== 'COMPLETED' && po.status !== 'CANCELLED' && <button onClick={() => actionMut.mutate({ id: po.id, action: 'cancel' })} className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs tracking-widest uppercase transition-colors">Cancel</button>}
+                  </td>
+                </tr>
+                );
+              })}
+              {productions.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-[#666] font-body text-sm">No production orders.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Batches Tab */}
+      {tab === 'batches' && (
+        <div className="bg-[#161616] border border-[#2A2A2A]">
+          <table className="w-full">
+            <thead><tr className="border-b border-[#2A2A2A]">
+              {['Item', 'Batch Qty', 'Remaining', 'Making Date', 'Expiry Date', 'Status'].map((h) => (
+                <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {batches.map((b) => {
+                const expiry = new Date(b.expiryDate);
+                const isExpired = expiry < now;
+                const isExpiring = !isExpired && expiry <= threeDaysFromNow;
+                return (
+                  <tr key={b.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
+                    <td className="px-4 py-3 text-white font-body text-sm">{b.preReadyItem?.name ?? '\u2014'}</td>
+                    <td className="px-4 py-3 text-[#999] font-body text-sm">{Number(b.quantity).toFixed(2)}</td>
+                    <td className="px-4 py-3 text-white font-body text-sm">{Number(b.remainingQty).toFixed(2)}</td>
+                    <td className="px-4 py-3 text-[#999] font-body text-xs">{new Date(b.makingDate).toLocaleDateString()}</td>
+                    <td className={`px-4 py-3 font-body text-xs ${isExpired ? 'text-[#D62B2B]' : isExpiring ? 'text-[#FFA726]' : 'text-[#999]'}`}>{expiry.toLocaleDateString()}</td>
+                    <td className="px-4 py-3">
+                      {isExpired ? <span className="text-[#D62B2B] text-xs font-body px-2 py-0.5 bg-[#3a1a1a]">EXPIRED</span> :
+                       isExpiring ? <span className="text-[#FFA726] text-xs font-body px-2 py-0.5 bg-[#3a2e00]">EXPIRING</span> :
+                       <span className="text-[#4CAF50] text-xs font-body px-2 py-0.5 bg-[#1a3a1a]">FRESH</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+              {batches.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-[#666] font-body text-sm">No active batches.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Add Item Dialog */}
+      {showAddItem && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setShowAddItem(false)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-xl text-white tracking-widest mb-6">ADD PRE-READY ITEM</h2>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-1"><label className="text-[#666] text-xs font-body tracking-widest uppercase">Name *</label><input value={itemForm.name} onChange={(e) => setItemForm((f) => ({ ...f, name: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1"><label className="text-[#666] text-xs font-body tracking-widest uppercase">Unit</label><select value={itemForm.unit} onChange={(e) => setItemForm((f) => ({ ...f, unit: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]">{UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
+                <div className="flex flex-col gap-1"><label className="text-[#666] text-xs font-body tracking-widest uppercase">Min Stock</label><input type="number" value={itemForm.minimumStock} onChange={(e) => setItemForm((f) => ({ ...f, minimumStock: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" /></div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowAddItem(false)} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
+              <button onClick={() => createItemMut.mutate()} disabled={!itemForm.name || createItemMut.isPending} className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2.5 transition-colors disabled:opacity-50">{createItemMut.isPending ? 'Creating\u2026' : 'Create'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Item Dialog */}
+      {editingItem && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setEditingItem(null)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-xl text-white tracking-widest mb-6">EDIT ITEM</h2>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs font-body tracking-widest uppercase">Name</label>
+                <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs font-body tracking-widest uppercase">Minimum Stock</label>
+                <input type="number" step="0.01" value={editForm.minimumStock} onChange={(e) => setEditForm((f) => ({ ...f, minimumStock: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs font-body tracking-widest uppercase">Unit</label>
+                <input value={editingItem.unit} disabled className="bg-[#0D0D0D] border border-[#2A2A2A] text-[#666] px-3 py-2 text-sm font-body cursor-not-allowed" />
+                <p className="text-[#666] font-body text-xs">Unit cannot be changed after creation.</p>
+              </div>
+            </div>
+            {updateItemMut.error && <p className="text-[#F03535] text-xs font-body mt-2">{(updateItemMut.error as Error).message}</p>}
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setEditingItem(null)} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
+              <button onClick={() => updateItemMut.mutate()} disabled={!editForm.name || updateItemMut.isPending} className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2.5 transition-colors disabled:opacity-50">{updateItemMut.isPending ? 'Saving\u2026' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recipe Editor Dialog */}
+      {showRecipe && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => { setShowRecipe(null); setIngSearch({}); }}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-lg p-6 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-xl text-white tracking-widest mb-1">RECIPE: {showRecipe.name}</h2>
+            <p className="text-[#666] font-body text-xs mb-4">Define ingredients needed to produce this pre-ready item.</p>
+
+            {/* Yield explanation */}
+            <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-4 mb-4 space-y-3">
+              <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase">Recipe Yield</p>
+              <p className="text-[#999] font-body text-xs leading-relaxed">
+                "This recipe produces <strong className="text-white">{recipeYield.quantity || '?'} {recipeYield.unit}</strong> of {showRecipe.name}."
+                When staff produces a different quantity, ingredients are scaled proportionally.
+              </p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-xs font-body tracking-widest uppercase">Yield Qty *</label>
+                  <input type="number" step="0.01" min="0.01" value={recipeYield.quantity} onChange={(e) => setRecipeYield((f) => ({ ...f, quantity: e.target.value }))} className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-xs font-body tracking-widest uppercase">Yield Unit</label>
+                  <div className="flex items-center gap-2">
+                    <select value={recipeYield.unit} onChange={(e) => setRecipeYield((f) => ({ ...f, unit: e.target.value }))} className="flex-1 bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]">
+                      {getConvertibleUnitsLocal(showRecipe.unit).map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                  {recipeYield.unit !== showRecipe.unit && (
+                    <p className="text-[#FFA726] font-body text-[10px]">
+                      Item stored in {showRecipe.unit} — will auto-convert
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-xs font-body tracking-widest uppercase">Notes</label>
+                  <input value={recipeYield.notes} onChange={(e) => setRecipeYield((f) => ({ ...f, notes: e.target.value }))} placeholder="e.g. Makes 1 batch" className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+                </div>
+              </div>
+              {/* Production scaling example */}
+              {parseFloat(recipeYield.quantity) > 0 && recipeLines.some((l) => l.ingredientId && parseFloat(l.quantity) > 0) && (
+                <div className="border-t border-[#2A2A2A] pt-2 mt-2">
+                  <p className="text-[#666] font-body text-[10px]">
+                    Example: Producing {(parseFloat(recipeYield.quantity) * 2).toFixed(1)} {recipeYield.unit} → all ingredients below are multiplied by 2×
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              {/* Autofill + Ingredients header */}
+              <div className="flex items-center justify-between">
+                <p className="text-[#666] text-xs font-body tracking-widest uppercase">Ingredients (for 1× recipe = {recipeYield.quantity} {recipeYield.unit})</p>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowAutofillPR(!showAutofillPR)}
+                    className="bg-[#0D0D0D] border border-[#2A2A2A] hover:border-[#D62B2B] text-[#999] hover:text-white font-body text-xs px-3 py-1 transition-colors"
+                  >
+                    Autofill ▾
+                  </button>
+                  {showAutofillPR && (
+                    <div className="absolute top-full right-0 mt-1 z-20 bg-[#161616] border border-[#2A2A2A] w-56 shadow-lg">
+                      <button
+                        onClick={() => { setShowAutofillPR(false); setShowCopyFromPR(true); setCopySearchPR(''); }}
+                        className="w-full text-left px-3 py-2.5 text-sm font-body text-[#999] hover:bg-[#1F1F1F] hover:text-white transition-colors border-b border-[#2A2A2A]"
+                      >
+                        Copy from existing recipe
+                        <span className="block text-[10px] text-[#666] mt-0.5">Menu items & Pre-Ready</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowAutofillPR(false); csvInputRefPR.current?.click(); }}
+                        className="w-full text-left px-3 py-2.5 text-sm font-body text-[#999] hover:bg-[#1F1F1F] hover:text-white transition-colors border-b border-[#2A2A2A]"
+                      >
+                        Upload CSV
+                        <span className="block text-[10px] text-[#666] mt-0.5">Import ingredients from file</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowAutofillPR(false); downloadPRExampleCSV(); }}
+                        className="w-full text-left px-3 py-2 text-xs font-body text-[#666] hover:bg-[#1F1F1F] hover:text-[#999] transition-colors"
+                      >
+                        ↓ Download CSV template
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <input ref={csvInputRefPR} type="file" accept=".csv" onChange={handlePRCSVUpload} className="hidden" />
+              </div>
+              {Object.keys(csvErrorsPR).length > 0 && (
+                <p className="text-[#FFA726] font-body text-[10px]">{Object.keys(csvErrorsPR).length} issue(s) from CSV — check red borders below</p>
+              )}
+              {recipeLines.map((line, idx) => {
+                const selectedIngredient = ingredients.find((i) => i.id === line.ingredientId);
+                const nativeUnit = selectedIngredient?.unit ?? 'G';
+                const convertibleUnits = getConvertibleUnitsLocal(nativeUnit);
+                const qty = parseFloat(line.quantity) || 0;
+                const showConvHelper = selectedIngredient && line.unit !== nativeUnit && qty > 0;
+                let convertedDisplay = '';
+                if (showConvHelper) {
+                  const converted = convertLocally(qty, line.unit, nativeUnit);
+                  convertedDisplay = converted !== null ? `= ${converted.toFixed(4).replace(/\.?0+$/, '')} ${nativeUnit} will be deducted from stock` : '(no conversion available)';
+                }
+                // Check if a pre-ready item was selected (for info message)
+                const searchVal = ingSearch[idx] !== undefined ? ingSearch[idx] : '';
+                const preReadyMatch = searchVal && allSelectableItems.some((i) => i.type === 'preready' && `${i.name} (${i.unit})` === searchVal);
+                const csvErrPR = csvErrorsPR[idx + 1];
+                return (
+                <div key={idx} className="space-y-1">
+                  <div className="grid grid-cols-12 gap-2 items-center">
+                    <div className="col-span-5 relative">
+                      <input
+                        list={`ing-list-${idx}`}
+                        value={ingSearch[idx] !== undefined ? ingSearch[idx] : (selectedIngredient ? `${selectedIngredient.name} (${selectedIngredient.unit})` : '')}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setIngSearch((s) => ({ ...s, [idx]: val }));
+                          if (csvErrPR) setCsvErrorsPR((errs) => { const next = { ...errs }; delete next[idx + 1]; return next; });
+                          const match = allSelectableItems.find((i) => i.type === 'ingredient' && (`${i.name} (${i.unit})` === val || i.itemCode === val));
+                          if (match) {
+                            setRecipeLines((l) => l.map((item, i) => i === idx ? { ...item, ingredientId: match.id, unit: match.unit } : item));
+                            setIngSearch((s) => { const next = { ...s }; delete next[idx]; return next; });
+                          }
+                        }}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="Type to search..."
+                        className={`w-full bg-[#0D0D0D] border text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] ${csvErrPR ? 'border-[#D62B2B]' : 'border-[#2A2A2A]'}`}
+                      />
+                      <datalist id={`ing-list-${idx}`}>
+                        {allSelectableItems.filter((i) => {
+                          const s = (ingSearch[idx] ?? '').toLowerCase().trim();
+                          return !s || i.name.toLowerCase().includes(s) || (i.itemCode ?? '').toLowerCase().includes(s);
+                        }).slice(0, 30).map((i) => (
+                          <option key={i.id} value={`${i.name} (${i.unit})`}>{i.itemCode ? `[${i.itemCode}] ` : ''}{i.name}</option>
+                        ))}
+                      </datalist>
+                      {preReadyMatch && (
+                        <p className="text-[#FFA726] font-body text-xs mt-1">This is a Pre-Ready item. Add it to Inventory to use in recipes.</p>
+                      )}
+                      {csvErrPR && (
+                        <p className="text-[#D62B2B] font-body text-[10px] mt-0.5">{csvErrPR}</p>
+                      )}
+                    </div>
+                    <div className="col-span-3">
+                      <input type="number" step="0.001" min="0" value={line.quantity} onChange={(e) => setRecipeLines((l) => l.map((item, i) => i === idx ? { ...item, quantity: e.target.value } : item))} className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+                    </div>
+                    <div className="col-span-3">
+                      <select
+                        value={line.unit}
+                        onChange={(e) => setRecipeLines((l) => l.map((item, i) => i === idx ? { ...item, unit: e.target.value } : item))}
+                        className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                      >
+                        {convertibleUnits.map((u) => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-1 flex justify-end">
+                      <button onClick={() => setRecipeLines((l) => l.filter((_, i) => i !== idx))} className="text-[#666] hover:text-[#D62B2B] font-body text-xs transition-colors">{'\u2715'}</button>
+                    </div>
+                  </div>
+                  {showConvHelper && (
+                    <p className="text-[#666] font-body text-xs pl-1">{convertedDisplay}</p>
+                  )}
+                </div>
+                );
+              })}
+              <button onClick={() => setRecipeLines((l) => [...l, { ingredientId: '', quantity: '0', unit: 'G' }])} className="text-[#666] hover:text-white font-body text-xs tracking-widest uppercase transition-colors border border-dashed border-[#2A2A2A] hover:border-[#D62B2B] w-full py-2">+ Add Ingredient</button>
+            </div>
+            {saveRecipeMut.error && <p className="text-[#F03535] text-xs font-body mt-2">{(saveRecipeMut.error as Error).message}</p>}
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => { setShowRecipe(null); setIngSearch({}); }} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
+              <button onClick={() => saveRecipeMut.mutate()} disabled={saveRecipeMut.isPending} className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2.5 transition-colors disabled:opacity-50">{saveRecipeMut.isPending ? 'Saving\u2026' : 'Save Recipe'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Production Dialog */}
+      {showCreateProd && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setShowCreateProd(false)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-xl text-white tracking-widest mb-6">NEW PRODUCTION ORDER</h2>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-1"><label className="text-[#666] text-xs font-body tracking-widest uppercase">Pre-Ready Item *</label><select value={prodForm.preReadyItemId} onChange={(e) => setProdForm((f) => ({ ...f, preReadyItemId: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"><option value="">-- Select --</option>{items.filter((i) => i.isActive).map((i) => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}</select></div>
+              <div className="flex flex-col gap-1"><label className="text-[#666] text-xs font-body tracking-widest uppercase">Quantity *</label><input type="number" step="0.01" min="0" value={prodForm.quantity} onChange={(e) => setProdForm((f) => ({ ...f, quantity: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" /></div>
+              <div className="flex flex-col gap-1"><label className="text-[#666] text-xs font-body tracking-widest uppercase">Notes</label><input value={prodForm.notes} onChange={(e) => setProdForm((f) => ({ ...f, notes: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" /></div>
+
+              {/* Estimated production cost */}
+              {(() => {
+                const selItem = items.find((i) => i.id === prodForm.preReadyItemId);
+                if (!selItem) return null;
+                const cost = calcPreReadyCost(selItem, ingredients);
+                if (!cost) return null;
+                const prodQty = parseFloat(prodForm.quantity) || 0;
+                const ratio = cost.yieldQty > 0 ? prodQty / cost.yieldQty : 0;
+                const totalCost = cost.recipeCost * ratio;
+                const costPerUnit = prodQty > 0 ? totalCost / prodQty : 0;
+                return (
+                  <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-1">
+                    <p className="text-[#D62B2B] text-[10px] font-body font-medium tracking-widest uppercase">Estimated Cost</p>
+                    <div className="flex justify-between">
+                      <span className="text-[#999] font-body text-xs">Recipe cost ({cost.yieldQty} {selItem.recipe?.yieldUnit ?? selItem.unit})</span>
+                      <span className="text-white font-body text-xs">{formatCurrency(cost.recipeCost)}</span>
+                    </div>
+                    {prodQty > 0 && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-[#999] font-body text-xs">Production ({prodQty} {selItem.unit}) × {ratio.toFixed(2)}</span>
+                          <span className="text-[#D62B2B] font-body text-sm font-medium">{formatCurrency(totalCost)}</span>
+                        </div>
+                        <div className="flex justify-between border-t border-[#2A2A2A] pt-1 mt-1">
+                          <span className="text-[#999] font-body text-xs">Cost per {selItem.unit}</span>
+                          <span className="text-white font-body text-xs font-medium">{formatCurrency(costPerUnit)}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowCreateProd(false)} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
+              <button onClick={() => createProdMut.mutate()} disabled={!prodForm.preReadyItemId || createProdMut.isPending} className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2.5 transition-colors disabled:opacity-50">{createProdMut.isPending ? 'Creating\u2026' : 'Create Order'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Complete Production Dialog */}
+      {completing && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setCompleting(null)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-xl text-white tracking-widest mb-1">COMPLETE PRODUCTION</h2>
+            <p className="text-[#999] font-body text-sm mb-6">{completing.preReadyItem?.name} -- {Number(completing.quantity).toFixed(2)} {completing.preReadyItem?.unit}</p>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-1"><label className="text-[#666] text-xs font-body tracking-widest uppercase">Making Date *</label><input type="date" value={completeForm.makingDate} onChange={(e) => setCompleteForm((f) => ({ ...f, makingDate: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" /></div>
+              <div className="flex flex-col gap-1"><label className="text-[#666] text-xs font-body tracking-widest uppercase">Expiry Date *</label><input type="date" value={completeForm.expiryDate} onChange={(e) => setCompleteForm((f) => ({ ...f, expiryDate: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" /></div>
+            </div>
+            {completeMut.error && <p className="text-[#F03535] text-xs font-body mt-3">{(completeMut.error as Error).message}</p>}
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setCompleting(null)} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
+              <button onClick={() => completeMut.mutate()} disabled={!completeForm.expiryDate || completeMut.isPending} className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2.5 transition-colors disabled:opacity-50">{completeMut.isPending ? 'Completing\u2026' : 'Complete'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Copy from existing recipe modal */}
+      {showCopyFromPR && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]" onClick={() => setShowCopyFromPR(false)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-[#2A2A2A]">
+              <h2 className="font-display text-lg text-white tracking-widest">COPY RECIPE FROM</h2>
+              <p className="text-[#666] font-body text-xs mt-1">Select an item to copy its recipe ingredients.</p>
+              <input
+                value={copySearchPR}
+                onChange={(e) => setCopySearchPR(e.target.value)}
+                placeholder="Search items…"
+                className="w-full mt-3 bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                autoFocus
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {allCopySources
+                .filter((s) => !copySearchPR || s.name.toLowerCase().includes(copySearchPR.toLowerCase()))
+                .map((source) => (
+                  <button
+                    key={`${source.type}-${source.id}`}
+                    onClick={() => source.type === 'menu' ? void handlePRCopyFromMenu(source.id) : handlePRCopyFromPreReady(source.id)}
+                    className="w-full text-left px-5 py-3 border-b border-[#2A2A2A] hover:bg-[#1F1F1F] transition-colors"
+                  >
+                    <span className="text-white font-body text-sm">{source.name}</span>
+                    <span className="text-[#666] font-body text-xs ml-2">{source.type === 'preready' ? 'Pre-Ready' : 'Menu Item'}</span>
+                  </button>
+                ))}
+              {allCopySources.filter((s) => !copySearchPR || s.name.toLowerCase().includes(copySearchPR.toLowerCase())).length === 0 && (
+                <p className="px-5 py-8 text-center text-[#666] font-body text-sm">No items with recipes found.</p>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-[#2A2A2A]">
+              <button onClick={() => setShowCopyFromPR(false)} className="w-full bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2 transition-colors">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * THEME TOKENS — populated at runtime by useApplyPosTheme() in lib/branding.ts.
+ * Defaults below match the "Sunrise" built-in theme so the page renders correctly
+ * on first paint before the API call returns. POS components should reference
+ * these via Tailwind utilities (bg-theme-accent, text-theme-text, etc.) once
+ * tailwind.config is wired in Phase 3.
+ */
+:root {
+  --theme-bg:                 #F5F5F5;
+  --theme-surface:            #FFFFFF;
+  --theme-surface-alt:        #F5F5F5;
+  --theme-border:             #EFEFEF;
+  --theme-text:               #171826;
+  --theme-text-muted:         #9F9F9E;
+  --theme-accent:             #FC8019;
+  --theme-accent-soft:        #FFE5D2;
+  --theme-accent-hover:       #E96E0A;
+  --theme-pop:                #09AA29;
+  --theme-pop-soft:           #E3F7E8;
+  --theme-warn:               #FFA726;
+  --theme-danger:             #E53935;
+  --theme-info:               #2196F3;
+  --theme-sidebar:            #FFFFFF;
+  --theme-sidebar-text:       #9F9F9E;
+  --theme-sidebar-active-bg:  #FFE5D2;
+  --theme-sidebar-active-text:#FC8019;
+  --theme-radius:             12px;
+  --theme-font-display:       'Inter', system-ui, sans-serif;
+  --theme-font-body:          'Inter', system-ui, sans-serif;
+}
+
+:root {
+  --white:        #FFFFFF;
+  --white-warm:   #FAF9F7;
+  --white-soft:   #F2F1EE;
+  --white-muted:  #E8E6E2;
+  --white-border: #DDD9D3;
+
+  --black:        #0D0D0D;
+  --black-rich:   #161616;
+  --black-mid:    #1F1F1F;
+  --black-lite:   #2A2A2A;
+  --black-text:   #111111;
+
+  --red:          #D62B2B;
+  --red-deep:     #A81F1F;
+  --red-bright:   #F03535;
+  --red-dim:      rgba(214,43,43,0.10);
+  --red-glow:     rgba(214,43,43,0.25);
+
+  --ff-display: 'Bebas Neue', sans-serif;
+  --ff-body:    'DM Sans', sans-serif;
+  --ff-mono:    'DM Mono', monospace;
+
+  --ease-expo:  cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-back:  cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --sp-xs:  4px;   --sp-sm:  8px;   --sp-md:  16px;
+  --sp-lg:  24px;  --sp-xl:  40px;  --sp-2xl: 64px;
+
+  --shadow-sm:  0 2px 8px rgba(0,0,0,0.06);
+  --shadow-md:  0 8px 24px rgba(0,0,0,0.10);
+  --shadow-red: 0 8px 24px rgba(214,43,43,0.25);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: var(--theme-font-body);
+  font-weight: 400;
+  background: var(--theme-bg);
+  color: var(--theme-text);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media print {
+  body * { visibility: hidden; }
+
+  .receipt-print-area,
+  .receipt-print-area *,
+  .bill-print-area,
+  .bill-print-area * { visibility: visible; }
+
+  .receipt-print-area,
+  .bill-print-area {
+    position: fixed;
+    inset: 0;
+    width: 80mm;
+    margin: 0 auto;
+    padding: 16px;
+    font-size: 12px;
+    overflow: visible;
+  }
+
+  .no-print { display: none !important; }
+}

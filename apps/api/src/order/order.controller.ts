@@ -1,0 +1,251 @@
+import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Headers, BadRequestException, NotFoundException } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+
+import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, JwtPayload } from '@restora/types';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { OrderService } from './order.service';
+import { PrismaService } from '../prisma/prisma.service';
+
+@ApiTags('Orders')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('orders')
+export class OrderController {
+  constructor(private readonly orderService: OrderService) {}
+
+  @Get()
+  findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query('tableId') tableId?: string,
+    @Query('status') status?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.orderService.findAll(user.branchId, tableId, status, from, to);
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.findOne(id, user.branchId);
+  }
+
+  @Get(':id/kitchen-ticket')
+  getKitchenTicket(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.getKitchenTicket(id, user.branchId);
+  }
+
+  @Post()
+  create(@Body() dto: CreateOrderDto, @CurrentUser() user: JwtPayload) {
+    return this.orderService.create(user.branchId, user.sub, dto);
+  }
+
+  @Post(':id/payment')
+  processPayment(@Param('id') id: string, @Body() dto: ProcessPaymentDto, @CurrentUser() user: JwtPayload) {
+    return this.orderService.processPayment(id, user.branchId, dto);
+  }
+
+  @Post(':id/items')
+  addItems(@Param('id') id: string, @Body() items: { menuItemId: string; quantity: number; notes?: string }[], @CurrentUser() user: JwtPayload) {
+    return this.orderService.addItemsToOrder(id, user.branchId, items);
+  }
+
+  @Post(':id/items/:itemId/void')
+  voidItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: VoidOrderItemDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.orderService.voidItem(id, itemId, user.branchId, dto);
+  }
+
+  @Post(':id/items/:itemId/cancel')
+  cancelItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.cancelItemByCustomer(id, itemId, user.branchId);
+  }
+
+  @Post(':id/accept')
+  acceptOrder(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.acceptOrder(id, user.branchId);
+  }
+
+  @Patch(':id/waiter')
+  setWaiter(@Param('id') id: string, @Body() dto: { waiterId: string }, @CurrentUser() user: JwtPayload) {
+    return this.orderService.setWaiter(id, user.branchId, dto.waiterId);
+  }
+
+  @Post(':id/move-table')
+  moveTable(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { tableId: string }) {
+    return this.orderService.moveTable(id, user.branchId, dto.tableId);
+  }
+
+  @Post(':id/items/:itemId/move-table')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  moveItemToTable(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { tableId: string },
+  ) {
+    return this.orderService.moveItemToTable(id, itemId, user.branchId, dto.tableId);
+  }
+
+  @Patch(':id/items/:itemId/notes')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  updateItemNotes(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: JwtPayload, @Body() dto: { notes: string }) {
+    return this.orderService.updateItemNotes(id, itemId, user.branchId, dto.notes);
+  }
+
+  @Post(':id/void')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  voidOrder(@Param('id') id: string, @Body() dto: VoidOrderDto, @CurrentUser() user: JwtPayload) {
+    return this.orderService.voidOrder(id, user.branchId, dto);
+  }
+
+  @Post(':id/approve-items')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  approveNewItems(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.approveNewItems(id, user.branchId);
+  }
+
+  @Post(':id/reject-items')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  rejectNewItems(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.rejectNewItems(id, user.branchId);
+  }
+
+  @Post(':id/apply-discount')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  applyDiscount(@Param('id') id: string, @Body() dto: { discountId: string }, @CurrentUser() user: JwtPayload) {
+    return this.orderService.applyDiscount(id, user.branchId, dto.discountId);
+  }
+
+  @Post(':id/remove-discount')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  removeDiscount(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.removeDiscount(id, user.branchId);
+  }
+
+  @Post(':id/apply-coupon')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  applyCouponFromPos(@Param('id') id: string, @Body() dto: { code: string }, @CurrentUser() user: JwtPayload) {
+    return this.orderService.applyCoupon(id, user.branchId, dto.code);
+  }
+
+  @Post(':id/items/:itemId/approve')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  approveItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.approveItem(id, itemId, user.branchId);
+  }
+
+  @Post(':id/items/:itemId/reject')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  rejectItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.rejectItem(id, itemId, user.branchId);
+  }
+}
+
+// ─── QR Order Controller (no JWT guard — public endpoint) ────────────────────
+
+@ApiTags('Orders')
+@Controller('orders')
+export class QrOrderController {
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  @Post('qr')
+  createQr(@Headers('x-branch-id') branchId: string, @Body() dto: CreateOrderDto) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    return this.orderService.createQrOrder(branchId, dto);
+  }
+
+  @Get('qr/:id/status')
+  async getOrderStatus(@Param('id') id: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id, deletedAt: null },
+      include: { items: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      tableNumber: order.tableNumber,
+      billRequested: order.billRequested,
+      subtotal: order.subtotal,
+      discountAmount: order.discountAmount,
+      discountName: order.discountName,
+      couponCode: order.couponCode,
+      couponId: order.couponId,
+      discountId: order.discountId,
+      taxAmount: order.taxAmount,
+      totalAmount: order.totalAmount,
+      items: order.items.map((i) => ({
+        id: i.id,
+        name: i.menuItemName,
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+        totalPrice: i.totalPrice,
+        notes: i.notes,
+        kitchenStatus: i.kitchenStatus,
+        voidedAt: i.voidedAt,
+      })),
+    };
+  }
+
+  @Post('qr/:id/items')
+  async addItems(
+    @Param('id') id: string,
+    @Headers('x-branch-id') branchId: string,
+    @Body() body: { items: { menuItemId: string; quantity: number; notes?: string }[] },
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    // If order is already accepted (not PENDING), new items need cashier approval
+    const order = await this.prisma.order.findFirst({ where: { id, deletedAt: null } });
+    if (!order) throw new NotFoundException('Order not found');
+    const needsApproval = order.status !== 'PENDING';
+    return this.orderService.addItemsToOrder(id, branchId, body.items, needsApproval);
+  }
+
+  @Post('qr/:id/items/:itemId/cancel')
+  cancelItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Headers('x-branch-id') branchId: string,
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    return this.orderService.cancelItemByCustomer(id, itemId, branchId);
+  }
+
+  @Post('qr/:id/request-bill')
+  requestBill(@Param('id') id: string, @Headers('x-branch-id') branchId: string) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    return this.orderService.requestBill(id, branchId);
+  }
+
+  @Post('qr/:id/apply-coupon')
+  applyCoupon(@Param('id') id: string, @Headers('x-branch-id') branchId: string, @Body() dto: { code: string }) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    return this.orderService.applyCoupon(id, branchId, dto.code);
+  }
+
+  @Patch('qr/:id/items/:itemId/notes')
+  updateItemNotesQr(
+    @Param('id') id: string, @Param('itemId') itemId: string,
+    @Headers('x-branch-id') branchId: string, @Body() dto: { notes: string },
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    return this.orderService.updateItemNotes(id, itemId, branchId, dto.notes);
+  }
+
+  @Post('qr/:id/remove-coupon')
+  removeCoupon(@Param('id') id: string, @Headers('x-branch-id') branchId: string) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    return this.orderService.removeDiscount(id, branchId);
+  }
+}

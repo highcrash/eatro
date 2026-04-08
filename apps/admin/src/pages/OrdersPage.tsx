@@ -1,0 +1,422 @@
+import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { X, Printer, Search } from 'lucide-react';
+
+import type { Order } from '@restora/types';
+import { formatCurrency, formatDateTime } from '@restora/utils';
+import { api } from '../lib/api';
+
+const STATUS_OPTIONS = ['ALL', 'PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'SERVED', 'PAID', 'VOID'] as const;
+const TYPE_OPTIONS = ['ALL', 'DINE_IN', 'TAKEAWAY', 'DELIVERY'] as const;
+
+// ─── Order Detail Modal ──────────────────────────────────────────────────────
+
+function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => void }) {
+  const activeItems = order.items.filter((i) => !i.voidedAt);
+  const voidedItems = order.items.filter((i) => i.voidedAt);
+  const subtotal = Number(order.subtotal);
+  const tax = Number(order.taxAmount);
+  const discount = Number(order.discountAmount);
+  const total = Number(order.totalAmount);
+
+  const handlePrint = () => {
+    const win = window.open('', '_blank', 'width=800,height=700');
+    if (!win) return;
+    win.document.write(`<html><head><title>Order ${order.orderNumber}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'DM Sans', Arial, sans-serif; font-size: 12px; color: #111; padding: 24px; max-width: 800px; margin: 0 auto; }
+        h1 { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 2px; }
+        .meta { font-size: 11px; color: #666; margin: 4px 0 16px; }
+        .meta span { margin-right: 16px; }
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+        th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #666; border-bottom: 1px solid #DDD; padding: 8px 6px; }
+        td { padding: 6px; border-bottom: 1px solid #F2F1EE; }
+        .text-right { text-align: right; }
+        .total-section { margin-top: 16px; border-top: 2px solid #111; padding-top: 12px; }
+        .total-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }
+        .total-row.grand { font-weight: 700; font-size: 14px; border-top: 1px solid #DDD; padding-top: 8px; margin-top: 4px; }
+        .voided { opacity: 0.4; text-decoration: line-through; }
+        .status-badge { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 2px 8px; font-weight: 600; }
+        @media print { body { padding: 10mm; } }
+      </style></head><body>
+        <h1>ORDER #${order.orderNumber}</h1>
+        <div class="meta">
+          <span>${formatDateTime(order.createdAt)}</span>
+          <span>${order.type.replace('_', ' ')}</span>
+          <span>${order.tableNumber ? 'Table ' + order.tableNumber : '—'}</span>
+          <span>Status: ${order.status}</span>
+        </div>
+        <table>
+          <thead><tr><th>#</th><th>Item</th><th>Qty</th><th class="text-right">Unit Price</th><th class="text-right">Total</th><th>Kitchen</th></tr></thead>
+          <tbody>
+            ${activeItems.map((i, idx) => `<tr>
+              <td>${idx + 1}</td><td>${i.menuItemName}</td><td>${i.quantity}</td>
+              <td class="text-right">${formatCurrency(Number(i.unitPrice))}</td>
+              <td class="text-right">${formatCurrency(Number(i.totalPrice))}</td>
+              <td>${i.kitchenStatus}</td>
+            </tr>`).join('')}
+            ${voidedItems.map((i) => `<tr class="voided">
+              <td>—</td><td>${i.menuItemName}</td><td>${i.quantity}</td>
+              <td class="text-right">${formatCurrency(Number(i.unitPrice))}</td>
+              <td class="text-right">${formatCurrency(Number(i.totalPrice))}</td>
+              <td>VOIDED</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <div class="total-section">
+          <div class="total-row"><span>Subtotal</span><span>${formatCurrency(subtotal)}</span></div>
+          <div class="total-row"><span>VAT</span><span>${formatCurrency(tax)}</span></div>
+          ${discount > 0 ? `<div class="total-row"><span>${(order as any).discountName || 'Discount'}${(order as any).couponCode ? ' (' + (order as any).couponCode + ')' : ''}</span><span style="color:#2e7d32">-${formatCurrency(discount)}</span></div>` : ''}
+          <div class="total-row grand"><span>Grand Total</span><span>${formatCurrency(total)}</span></div>
+        </div>
+        <div class="meta" style="margin-top:16px">
+          Payment: ${order.paymentMethod || '—'}
+          ${order.paidAt ? ' | Paid: ' + formatDateTime(order.paidAt) : ''}
+        </div>
+        <script>window.onload=function(){window.print();}<\/script>
+      </body></html>`);
+    win.document.close();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="bg-[#161616] w-[640px] max-h-[90vh] overflow-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-[#161616] px-6 py-4 border-b border-[#2A2A2A] flex items-center justify-between z-10">
+          <div>
+            <h3 className="font-display text-2xl text-white tracking-wide">ORDER #{order.orderNumber}</h3>
+            <p className="text-xs font-body text-[#666] mt-0.5">
+              {formatDateTime(order.createdAt)} • {order.type.replace('_', ' ')} • {order.tableNumber ? `Table ${order.tableNumber}` : 'No table'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={handlePrint} className="text-[#999] hover:text-white p-1.5" title="Print"><Printer size={16} /></button>
+            <button onClick={onClose} className="text-[#999] hover:text-white p-1.5"><X size={16} /></button>
+          </div>
+        </div>
+
+        {/* Status */}
+        <div className="px-6 py-3 border-b border-[#2A2A2A]">
+          <span className={`text-xs font-body font-medium tracking-widest uppercase px-2 py-1 ${
+            order.status === 'PAID' ? 'bg-green-600/20 text-green-500' :
+            order.status === 'VOID' ? 'bg-[#D62B2B]/20 text-[#D62B2B]' :
+            'bg-[#2A2A2A] text-[#999]'
+          }`}>
+            {order.status}
+          </span>
+          {order.paymentMethod && (
+            <span className="ml-3 text-xs font-body text-[#666]">Payment: {order.paymentMethod}</span>
+          )}
+          {order.paidAt && (
+            <span className="ml-3 text-xs font-body text-[#666]">Paid: {formatDateTime(order.paidAt)}</span>
+          )}
+        </div>
+
+        {/* Items */}
+        <div className="px-6 py-4">
+          <table className="w-full text-sm font-body">
+            <thead>
+              <tr className="text-left text-xs text-[#666] tracking-widest uppercase border-b border-[#2A2A2A]">
+                <th className="pb-2 font-medium">#</th>
+                <th className="pb-2 font-medium">Item</th>
+                <th className="pb-2 font-medium text-center">Qty</th>
+                <th className="pb-2 font-medium text-right">Unit Price</th>
+                <th className="pb-2 font-medium text-right">Total</th>
+                <th className="pb-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeItems.map((item, idx) => (
+                <tr key={item.id} className="border-b border-[#2A2A2A]/50">
+                  <td className="py-2 text-[#666]">{idx + 1}</td>
+                  <td className="py-2 text-white">{item.menuItemName}</td>
+                  <td className="py-2 text-center text-[#999]">{item.quantity}</td>
+                  <td className="py-2 text-right text-[#999]">{formatCurrency(Number(item.unitPrice))}</td>
+                  <td className="py-2 text-right text-white font-medium">{formatCurrency(Number(item.totalPrice))}</td>
+                  <td className="py-2">
+                    <span className={`text-[10px] tracking-widest uppercase ${
+                      item.kitchenStatus === 'DONE' ? 'text-green-500' :
+                      item.kitchenStatus === 'PREPARING' ? 'text-orange-400' :
+                      'text-[#666]'
+                    }`}>{item.kitchenStatus}</span>
+                  </td>
+                </tr>
+              ))}
+              {voidedItems.map((item) => (
+                <tr key={item.id} className="border-b border-[#2A2A2A]/50 opacity-40">
+                  <td className="py-2">—</td>
+                  <td className="py-2 text-white line-through">{item.menuItemName}</td>
+                  <td className="py-2 text-center">{item.quantity}</td>
+                  <td className="py-2 text-right">{formatCurrency(Number(item.unitPrice))}</td>
+                  <td className="py-2 text-right line-through">{formatCurrency(Number(item.totalPrice))}</td>
+                  <td className="py-2 text-[#D62B2B] text-[10px] tracking-widest uppercase">VOIDED</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Totals */}
+        <div className="px-6 py-4 border-t border-[#2A2A2A] space-y-1">
+          <div className="flex justify-between text-sm font-body text-[#999]">
+            <span>Subtotal</span>
+            <span>{formatCurrency(subtotal)}</span>
+          </div>
+          <div className="flex justify-between text-sm font-body text-[#999]">
+            <span>VAT</span>
+            <span>{formatCurrency(tax)}</span>
+          </div>
+          {discount > 0 && (
+            <div className="flex justify-between text-sm font-body text-green-500">
+              <span>{(order as any).discountName || 'Discount'}{(order as any).couponCode ? ` (${(order as any).couponCode})` : ''}</span>
+              <span>-{formatCurrency(discount)}</span>
+            </div>
+          )}
+          <div className="flex justify-between text-sm font-body font-medium text-white pt-2 border-t border-[#2A2A2A]">
+            <span>Grand Total</span>
+            <span className="font-display text-xl tracking-wide">{formatCurrency(total)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Orders Page ─────────────────────────────────────────────────────────────
+
+export default function OrdersPage() {
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [typeFilter, setTypeFilter] = useState('ALL');
+  const [paymentFilter, setPaymentFilter] = useState('');
+  const today = new Date().toISOString().split('T')[0];
+  const [dateFrom, setDateFrom] = useState(today);
+  const [dateTo, setDateTo] = useState(today);
+  const [itemSearch, setItemSearch] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  const { data: orders = [], isLoading } = useQuery<Order[]>({
+    queryKey: ['orders', dateFrom, dateTo],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (dateFrom) params.set('from', dateFrom);
+      if (dateTo) params.set('to', dateTo);
+      return api.get<Order[]>(`/orders?${params.toString()}`);
+    },
+  });
+
+  // Get unique payment methods for filter dropdown
+  const paymentMethods = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach((o) => { if (o.paymentMethod) set.add(o.paymentMethod); });
+    return [...set].sort();
+  }, [orders]);
+
+  // Apply filters
+  const filtered = useMemo(() => {
+    let result = orders;
+
+    if (statusFilter !== 'ALL') result = result.filter((o) => o.status === statusFilter);
+    if (typeFilter !== 'ALL') result = result.filter((o) => o.type === typeFilter);
+    if (paymentFilter) result = result.filter((o) => o.paymentMethod === paymentFilter);
+
+    if (itemSearch.trim()) {
+      const q = itemSearch.toLowerCase();
+      result = result.filter((o) => o.items.some((i) => i.menuItemName.toLowerCase().includes(q)));
+    }
+
+    return result;
+  }, [orders, statusFilter, typeFilter, paymentFilter, dateFrom, dateTo, itemSearch]);
+
+  const grandSubtotal = filtered.reduce((s, o) => s + Number(o.subtotal), 0);
+  const grandDiscount = filtered.reduce((s, o) => s + Number(o.discountAmount), 0);
+  const grandTax = filtered.reduce((s, o) => s + Number(o.taxAmount), 0);
+  const grandTotal = filtered.reduce((s, o) => s + Number(o.totalAmount), 0);
+
+  const handlePrintReport = () => {
+    const rows = filtered.map((o, idx) => `<tr>
+      <td>${idx + 1}</td>
+      <td>${o.orderNumber}</td>
+      <td>${formatDateTime(o.createdAt)}</td>
+      <td>${o.type.replace('_', ' ')}</td>
+      <td>${o.tableNumber || '—'}</td>
+      <td style="font-size:9px;color:#666">${o.items.filter((i) => !i.voidedAt).map((i) => i.quantity + '× ' + i.menuItemName).join(', ')}</td>
+      <td class="text-right">${formatCurrency(Number(o.subtotal))}</td>
+      <td class="text-right" style="color:${Number(o.discountAmount) > 0 ? '#2e7d32' : '#666'}">${Number(o.discountAmount) > 0 ? '-' + formatCurrency(Number(o.discountAmount)) : '—'}</td>
+      <td class="text-right">${formatCurrency(Number(o.taxAmount))}</td>
+      <td class="text-right" style="font-weight:500">${formatCurrency(Number(o.totalAmount))}</td>
+      <td>${o.paymentMethod || '—'}</td>
+      <td>${o.status}</td>
+    </tr>`).join('');
+
+    const win = window.open('', '_blank', 'width=1100,height=700');
+    if (!win) return;
+    win.document.write(`<html><head><title>Orders Report</title>
+      <style>
+        * { margin:0;padding:0;box-sizing:border-box; }
+        body { font-family:'DM Sans',Arial,sans-serif;font-size:10px;color:#111;padding:20px; }
+        h1 { font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:2px;margin-bottom:4px; }
+        .meta { font-size:10px;color:#666;margin-bottom:12px; }
+        table { width:100%;border-collapse:collapse; }
+        th { text-align:left;font-size:8px;text-transform:uppercase;letter-spacing:1px;color:#666;border-bottom:1px solid #DDD;padding:6px 4px;font-weight:600; }
+        td { padding:4px;border-bottom:1px solid #F2F1EE;font-size:9px; }
+        .text-right { text-align:right; }
+        .total td { border-top:2px solid #111;font-weight:700;font-size:10px;padding-top:8px; }
+        @media print { body { padding:8mm; } }
+      </style></head><body>
+      <h1>ORDERS REPORT</h1>
+      <div class="meta">${filtered.length} orders${dateFrom ? ' | From: ' + dateFrom : ''}${dateTo ? ' To: ' + dateTo : ''}</div>
+      <table>
+        <thead><tr><th>#</th><th>Order</th><th>Date</th><th>Type</th><th>Table</th><th>Items</th><th class="text-right">Subtotal</th><th class="text-right">Discount</th><th class="text-right">VAT</th><th class="text-right">Total</th><th>Payment</th><th>Status</th></tr></thead>
+        <tbody>${rows}
+        <tr class="total"><td colspan="6">GRAND TOTAL</td><td class="text-right">${formatCurrency(grandSubtotal)}</td><td class="text-right" style="color:#2e7d32">${grandDiscount > 0 ? '-' + formatCurrency(grandDiscount) : '—'}</td><td class="text-right">${formatCurrency(grandTax)}</td><td class="text-right">${formatCurrency(grandTotal)}</td><td colspan="2"></td></tr>
+        </tbody>
+      </table>
+      <script>window.onload=function(){window.print();}<\/script>
+    </body></html>`);
+    win.document.close();
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">History</p>
+          <h1 className="font-display text-4xl text-white tracking-wide">ORDERS</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-body text-[#999]">{filtered.length} orders</span>
+          <button onClick={handlePrintReport} className="flex items-center gap-1.5 border border-[#2A2A2A] px-3 py-1.5 text-xs font-body text-[#999] hover:border-[#D62B2B] hover:text-[#D62B2B] transition-colors">
+            <Printer size={12} /> Print
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-[#161616] border border-[#2A2A2A] p-4 space-y-3">
+        {/* Row 1: Status tabs */}
+        <div className="flex gap-0 border-b border-[#2A2A2A] -mx-4 px-4">
+          {STATUS_OPTIONS.map((s) => (
+            <button key={s} onClick={() => setStatusFilter(s)}
+              className={`px-3 py-2 text-[10px] font-body font-medium tracking-widest uppercase border-b-2 transition-colors ${
+                statusFilter === s ? 'border-[#D62B2B] text-[#D62B2B]' : 'border-transparent text-[#666]'
+              }`}
+            >{s}</button>
+          ))}
+        </div>
+
+        {/* Row 2: Other filters */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Date range */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-body text-[#666] tracking-widest uppercase">From</span>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              className="bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B]" />
+            <span className="text-[10px] font-body text-[#666] tracking-widest uppercase">To</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              className="bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B]" />
+          </div>
+
+          {/* Type */}
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
+            className="bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B]">
+            {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t === 'ALL' ? 'All Types' : t.replace('_', ' ')}</option>)}
+          </select>
+
+          {/* Payment */}
+          <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}
+            className="bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B]">
+            <option value="">All Payments</option>
+            {paymentMethods.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+
+          {/* Item search */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#555]" />
+            <input value={itemSearch} onChange={(e) => setItemSearch(e.target.value)}
+              placeholder="Search by menu item..."
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] pl-8 pr-3 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B] placeholder:text-[#555]" />
+          </div>
+
+          {/* Clear */}
+          {(dateFrom || dateTo || typeFilter !== 'ALL' || paymentFilter || itemSearch) && (
+            <button onClick={() => { setDateFrom(''); setDateTo(''); setTypeFilter('ALL'); setPaymentFilter(''); setItemSearch(''); }}
+              className="text-[10px] font-body text-[#D62B2B] hover:underline tracking-widest uppercase">
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-[#161616] border border-[#2A2A2A]">
+        <table className="w-full text-sm font-body">
+          <thead>
+            <tr className="text-left text-xs text-[#999] tracking-widest uppercase border-b border-[#2A2A2A]">
+              <th className="px-4 py-3 font-medium">#</th>
+              <th className="px-4 py-3 font-medium">Order</th>
+              <th className="px-4 py-3 font-medium">Date & Time</th>
+              <th className="px-4 py-3 font-medium">Type</th>
+              <th className="px-4 py-3 font-medium">Table</th>
+              <th className="px-4 py-3 font-medium">Items</th>
+              <th className="px-4 py-3 font-medium text-right">Subtotal</th>
+              <th className="px-4 py-3 font-medium text-right">Discount</th>
+              <th className="px-4 py-3 font-medium text-right">VAT</th>
+              <th className="px-4 py-3 font-medium text-right">Total</th>
+              <th className="px-4 py-3 font-medium">Payment</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr><td colSpan={12} className="px-4 py-8 text-center text-[#999]">Loading...</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={12} className="px-4 py-8 text-center text-[#999]">No orders found</td></tr>
+            ) : (
+              <>
+                {filtered.map((o, idx) => (
+                  <tr key={o.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F] cursor-pointer" onClick={() => setSelectedOrder(o)}>
+                    <td className="px-4 py-2.5 text-[#666] text-xs">{idx + 1}</td>
+                    <td className="px-4 py-2.5">
+                      <button className="text-[#D62B2B] font-medium text-xs hover:underline">{o.orderNumber}</button>
+                    </td>
+                    <td className="px-4 py-2.5 text-[#999] text-xs">{formatDateTime(o.createdAt)}</td>
+                    <td className="px-4 py-2.5 text-[#999] text-xs">{o.type.replace('_', ' ')}</td>
+                    <td className="px-4 py-2.5 text-[#999] text-xs">{o.tableNumber ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-[#666] text-[10px]">
+                      {o.items.filter((i) => !i.voidedAt).map((i) => `${i.quantity}× ${i.menuItemName}`).join(', ')}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-[#999] text-xs">{formatCurrency(Number(o.subtotal))}</td>
+                    <td className="px-4 py-2.5 text-right text-xs">{Number(o.discountAmount) > 0 ? <span className="text-green-600">-{formatCurrency(Number(o.discountAmount))}</span> : <span className="text-[#555]">—</span>}</td>
+                    <td className="px-4 py-2.5 text-right text-[#999] text-xs">{formatCurrency(Number(o.taxAmount))}</td>
+                    <td className="px-4 py-2.5 text-right text-white font-medium text-xs">{formatCurrency(Number(o.totalAmount))}</td>
+                    <td className="px-4 py-2.5 text-[#999] text-xs uppercase">{o.paymentMethod ?? '—'}</td>
+                    <td className="px-4 py-2.5">
+                      <span className={`text-[10px] font-medium tracking-widest uppercase ${
+                        o.status === 'PAID' ? 'text-green-600' :
+                        o.status === 'VOID' ? 'text-[#D62B2B]' :
+                        'text-[#999]'
+                      }`}>{o.status}</span>
+                    </td>
+                  </tr>
+                ))}
+                {/* Grand total */}
+                <tr className="bg-[#0D0D0D]">
+                  <td colSpan={6} className="px-4 py-3 text-xs font-body font-medium text-white tracking-widest uppercase">Grand Total</td>
+                  <td className="px-4 py-3 text-right text-xs font-medium text-white">{formatCurrency(grandSubtotal)}</td>
+                  <td className="px-4 py-3 text-right text-xs font-medium text-green-500">{grandDiscount > 0 ? `-${formatCurrency(grandDiscount)}` : '—'}</td>
+                  <td className="px-4 py-3 text-right text-xs font-medium text-white">{formatCurrency(grandTax)}</td>
+                  <td className="px-4 py-3 text-right text-xs font-medium text-[#D62B2B] font-display text-base tracking-wide">{formatCurrency(grandTotal)}</td>
+                  <td colSpan={2}></td>
+                </tr>
+              </>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {selectedOrder && <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />}
+    </div>
+  );
+}

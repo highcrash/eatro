@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --black: #0D0D0D; --black-rich: #161616; --black-mid: #1F1F1F; --black-lite: #2A2A2A;
+  --white: #FFFFFF; --white-warm: #FAF9F7; --white-border: #DDD9D3;
+  --red: #D62B2B; --red-bright: #F03535; --red-glow: rgba(214,43,43,0.25);
+  --ff-display: 'Bebas Neue', sans-serif; --ff-body: 'DM Sans', sans-serif;
+}
+* { box-sizing: border-box; border-radius: 0 !important; }
+body { font-family: var(--ff-body); font-weight: 300; background: var(--black); color: #fff; -webkit-font-smoothing: antialiased; overflow: hidden; }

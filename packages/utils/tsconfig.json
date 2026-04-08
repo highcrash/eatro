@@ -1,0 +1,15 @@
+{
+  "extends": "@restora/config/tsconfig/base",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@restora/types": ["../types/dist"],
+      "@restora/types/*": ["../types/dist/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

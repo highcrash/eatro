@@ -1,0 +1,786 @@
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+import type { Branch, UpdateBranchDto, StockUnit } from '@restora/types';
+import { api } from '../lib/api';
+import { useAuthStore } from '../store/auth.store';
+import BrandingSection from './settings/BrandingSection';
+import ThemingSection from './settings/ThemingSection';
+
+const UNITS: StockUnit[] = ['KG', 'G', 'L', 'ML', 'PCS', 'DOZEN', 'BOX'];
+
+interface UnitConversion {
+  id: string;
+  branchId: string;
+  fromUnit: string;
+  toUnit: string;
+  factor: number;
+}
+
+export default function SettingsPage() {
+  const { user } = useAuthStore();
+  const queryClient = useQueryClient();
+  const isOwner = user?.role === 'OWNER';
+
+  const { data: branches = [], isLoading } = useQuery<Branch[]>({
+    queryKey: ['branches'],
+    queryFn: () => api.get<Branch[]>('/branches'),
+  });
+
+  // Use the first branch as the primary branch to edit
+  const branch = branches[0] ?? null;
+
+  const [form, setForm] = useState<UpdateBranchDto>({});
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (branch) {
+      setForm({
+        name: branch.name,
+        address: branch.address,
+        phone: branch.phone,
+        email: branch.email ?? '',
+        currency: branch.currency,
+        timezone: branch.timezone,
+        taxRate: branch.taxRate,
+        stockPricingMethod: (branch as any).stockPricingMethod ?? 'LAST_PURCHASE',
+      });
+    }
+  }, [branch]);
+
+  const updateMutation = useMutation({
+    mutationFn: (dto: UpdateBranchDto) => api.patch<Branch>(`/branches/${branch!.id}`, dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['branches'] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    },
+  });
+
+  const handleChange = (field: keyof UpdateBranchDto, value: string | number) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!branch || !isOwner) return;
+    updateMutation.mutate(form);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <span className="text-[#DDD9D3] font-body text-sm">Loading…</span>
+      </div>
+    );
+  }
+
+  if (!branch) {
+    return (
+      <div>
+        <p className="font-body text-sm text-[#999]">No branch found.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div className="mb-8">
+        <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Configuration</p>
+        <h1 className="font-display text-4xl text-white tracking-wide">SETTINGS</h1>
+      </div>
+
+      {!isOwner && (
+        <div className="mb-6 border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-body text-amber-700">
+          You have read-only access. Only the Owner can update branch settings.
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit}>
+        {/* Branch details */}
+        <div className="bg-[#161616] border border-[#2A2A2A] mb-6">
+          <div className="px-5 py-4 border-b border-[#2A2A2A]">
+            <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Branch Details</p>
+          </div>
+          <div className="p-5 space-y-4">
+            <Field label="Branch Name" required>
+              <input
+                type="text"
+                value={form.name ?? ''}
+                onChange={(e) => handleChange('name', e.target.value)}
+                disabled={!isOwner}
+                className="input-base"
+                placeholder="e.g. Restora Downtown"
+              />
+            </Field>
+            <Field label="Address" required>
+              <input
+                type="text"
+                value={form.address ?? ''}
+                onChange={(e) => handleChange('address', e.target.value)}
+                disabled={!isOwner}
+                className="input-base"
+                placeholder="123 Main St, City"
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Phone" required>
+                <input
+                  type="tel"
+                  value={form.phone ?? ''}
+                  onChange={(e) => handleChange('phone', e.target.value)}
+                  disabled={!isOwner}
+                  className="input-base"
+                  placeholder="+1 555 000 0000"
+                />
+              </Field>
+              <Field label="Email">
+                <input
+                  type="email"
+                  value={form.email ?? ''}
+                  onChange={(e) => handleChange('email', e.target.value)}
+                  disabled={!isOwner}
+                  className="input-base"
+                  placeholder="contact@restaurant.com"
+                />
+              </Field>
+            </div>
+          </div>
+        </div>
+
+        {/* Financials */}
+        <div className="bg-[#161616] border border-[#2A2A2A] mb-6">
+          <div className="px-5 py-4 border-b border-[#2A2A2A]">
+            <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Financials & Locale</p>
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Currency Code">
+                <input
+                  type="text"
+                  value={form.currency ?? ''}
+                  onChange={(e) => handleChange('currency', e.target.value.toUpperCase())}
+                  disabled={!isOwner}
+                  className="input-base"
+                  placeholder="USD"
+                  maxLength={3}
+                />
+              </Field>
+              <Field label="Tax Rate (%)">
+                <input
+                  type="number"
+                  value={form.taxRate ?? 0}
+                  onChange={(e) => handleChange('taxRate', parseFloat(e.target.value) || 0)}
+                  disabled={!isOwner}
+                  className="input-base"
+                  placeholder="0"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                />
+              </Field>
+            </div>
+            <Field label="Timezone">
+              <input
+                type="text"
+                value={form.timezone ?? ''}
+                onChange={(e) => handleChange('timezone', e.target.value)}
+                disabled={!isOwner}
+                className="input-base"
+                placeholder="America/New_York"
+              />
+            </Field>
+          </div>
+        </div>
+
+        {/* Stock Pricing */}
+        <div className="bg-[#161616] border border-[#2A2A2A] mb-6">
+          <div className="px-5 py-4 border-b border-[#2A2A2A]">
+            <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Stock Pricing</p>
+          </div>
+          <div className="p-5 space-y-4">
+            <Field label="Pricing Method on Receive">
+              <select
+                value={(form as any).stockPricingMethod ?? 'LAST_PURCHASE'}
+                onChange={(e) => handleChange('stockPricingMethod' as keyof UpdateBranchDto, e.target.value)}
+                disabled={!isOwner}
+                className="input-base"
+              >
+                <option value="LAST_PURCHASE">Last Purchase Price — ingredient cost = latest receive price</option>
+                <option value="WEIGHTED_AVERAGE">Weighted Average — blended cost based on existing + new stock</option>
+              </select>
+            </Field>
+            <p className="text-[#666] font-body text-xs">
+              This determines how ingredient cost is updated when goods are received.
+              "Last Purchase Price" sets the cost to the latest unit price.
+              "Weighted Average" calculates: (existing stock x existing cost + new qty x new price) / total stock.
+            </p>
+          </div>
+        </div>
+
+        {isOwner && (
+          <div className="flex items-center gap-4">
+            <button
+              type="submit"
+              disabled={updateMutation.isPending}
+              className="bg-[#D62B2B] hover:bg-[#F03535] text-white px-8 py-3 font-body font-medium text-sm transition-colors disabled:opacity-40"
+            >
+              {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
+            </button>
+            {saved && (
+              <span className="text-sm font-body text-green-600">Changes saved.</span>
+            )}
+            {updateMutation.isError && (
+              <span className="text-sm font-body text-[#D62B2B]">
+                {(updateMutation.error as Error).message}
+              </span>
+            )}
+          </div>
+        )}
+      </form>
+
+      <BrandingSection isOwner={isOwner} />
+
+      <ThemingSection isOwner={isOwner} />
+
+      <SmsSettingsSection isOwner={isOwner} />
+
+      <UnitConversionSection isOwner={isOwner} />
+
+      <style>{`
+        .input-base {
+          width: 100%;
+          border: 1px solid #DDD9D3;
+          padding: 0.625rem 0.75rem;
+          font-family: inherit;
+          font-size: 0.875rem;
+          color: #111;
+          outline: none;
+          background: white;
+        }
+        .input-base:focus {
+          border-color: #111;
+        }
+        .input-base:disabled {
+          background: #F2F1EE;
+          color: #999;
+          cursor: not-allowed;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs font-body font-medium tracking-widest uppercase text-[#999] mb-1.5">
+        {label}{required && <span className="text-[#D62B2B] ml-0.5">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+// ─── SMS & Notification Settings ─────────────────────────────────────────────
+
+interface SmsSettings {
+  smsEnabled: boolean;
+  smsApiKey: string | null;
+  smsApiUrl: string;
+  notifyVoidOtp: boolean;
+}
+
+function SmsSettingsSection({ isOwner }: { isOwner: boolean }) {
+  const qc = useQueryClient();
+  const [localKey, setLocalKey] = useState('');
+  const [localUrl, setLocalUrl] = useState('');
+  const [keyLoaded, setKeyLoaded] = useState(false);
+  const [testPhone, setTestPhone] = useState('');
+  const [testResult, setTestResult] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const { data: settings, isLoading } = useQuery<SmsSettings>({
+    queryKey: ['sms-settings'],
+    queryFn: () => api.get('/settings/sms'),
+  });
+
+  // Sync local state when settings load
+  useEffect(() => {
+    if (settings && !keyLoaded) {
+      setLocalKey(settings.smsApiKey ?? '');
+      setLocalUrl(settings.smsApiUrl);
+      setKeyLoaded(true);
+    }
+  }, [settings, keyLoaded]);
+
+  const updateMut = useMutation({
+    mutationFn: (data: Partial<SmsSettings>) => api.patch('/settings/sms', data),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['sms-settings'] }),
+  });
+
+  const saveKeyUrl = () => {
+    updateMut.mutate({ smsApiKey: localKey, smsApiUrl: localUrl });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  const testMut = useMutation({
+    mutationFn: (phoneNumber: string) => api.post<{ sent: boolean }>('/settings/sms/test', { phoneNumber }),
+    onSuccess: (res) => setTestResult((res as any).sent ? 'SMS sent successfully!' : 'SMS sending failed — check API key and URL'),
+    onError: (err: Error) => setTestResult(err.message),
+  });
+
+  if (isLoading || !settings) return null;
+
+  return (
+    <div className="mt-8">
+      <div className="mb-4">
+        <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Communications</p>
+        <h2 className="font-display text-2xl text-white tracking-wide">SMS GATEWAY</h2>
+      </div>
+
+      <div className="bg-[#161616] border border-[#2A2A2A] mb-4">
+        <div className="px-5 py-4 border-b border-[#2A2A2A] flex items-center justify-between">
+          <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Gateway Configuration</p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <span className="text-xs font-body text-[#999]">{settings.smsEnabled ? 'Enabled' : 'Disabled'}</span>
+            <input type="checkbox" checked={settings.smsEnabled} disabled={!isOwner}
+              onChange={(e) => updateMut.mutate({ smsEnabled: e.target.checked })}
+              className="accent-[#D62B2B] w-4 h-4" />
+          </label>
+        </div>
+        <div className="p-5 space-y-4">
+          <Field label="API Key">
+            <input type="text" value={localKey} disabled={!isOwner}
+              onChange={(e) => setLocalKey(e.target.value)}
+              placeholder="sf_xxxxxxxxxxxxxxxxxxxxxxxx"
+              className="input-base font-mono text-xs" />
+          </Field>
+          <Field label="API URL">
+            <input type="url" value={localUrl} disabled={!isOwner}
+              onChange={(e) => setLocalUrl(e.target.value)}
+              className="input-base" />
+          </Field>
+          {isOwner && (
+            <div className="flex items-center gap-3">
+              <button onClick={saveKeyUrl} disabled={updateMut.isPending}
+                className="bg-[#D62B2B] hover:bg-[#F03535] text-white px-6 py-2.5 font-body text-sm transition-colors disabled:opacity-40">
+                {updateMut.isPending ? 'Saving...' : 'Save Gateway'}
+              </button>
+              {saved && <span className="text-xs font-body text-green-600">Saved!</span>}
+            </div>
+          )}
+
+          {/* Test SMS */}
+          {isOwner && settings.smsEnabled && (
+            <div className="border-t border-[#2A2A2A] pt-4">
+              <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999] mb-2">Test SMS</p>
+              <div className="flex gap-2">
+                <input value={testPhone} onChange={(e) => setTestPhone(e.target.value)}
+                  placeholder="+8801XXXXXXXXX" className="input-base flex-1" />
+                <button onClick={() => { setTestResult(''); testMut.mutate(testPhone); }} disabled={!testPhone || testMut.isPending}
+                  className="bg-[#2A2A2A] hover:bg-[#333] text-white px-4 py-2.5 font-body text-sm transition-colors disabled:opacity-40">
+                  {testMut.isPending ? 'Sending...' : 'Send Test'}
+                </button>
+              </div>
+              {testResult && <p className={`text-xs font-body mt-2 ${testResult.includes('success') ? 'text-green-600' : 'text-[#D62B2B]'}`}>{testResult}</p>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Notification Toggles */}
+      <div className="bg-[#161616] border border-[#2A2A2A]">
+        <div className="px-5 py-4 border-b border-[#2A2A2A]">
+          <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">SMS Notifications</p>
+          <p className="text-[#666] font-body text-[10px] mt-0.5">Choose which events trigger SMS notifications</p>
+        </div>
+        <div className="p-5 space-y-3">
+          <label className="flex items-center justify-between cursor-pointer py-2 border-b border-[#2A2A2A] last:border-0">
+            <div>
+              <p className="text-sm font-body text-white">Void Item OTP</p>
+              <p className="text-[10px] font-body text-[#666]">Send OTP to manager when cashier requests to void an item</p>
+            </div>
+            <input type="checkbox" checked={settings.notifyVoidOtp} disabled={!isOwner}
+              onChange={(e) => updateMut.mutate({ notifyVoidOtp: e.target.checked })}
+              className="accent-[#D62B2B] w-4 h-4" />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UnitConversionSection({ isOwner }: { isOwner: boolean }) {
+  const queryClient = useQueryClient();
+  const [convForm, setConvForm] = useState({ fromUnit: 'KG' as string, toUnit: 'G' as string, factor: '1000' });
+
+  const { data: conversions = [] } = useQuery<UnitConversion[]>({
+    queryKey: ['unit-conversions'],
+    queryFn: () => api.get('/unit-conversions'),
+  });
+
+  const upsertMut = useMutation({
+    mutationFn: (dto: { fromUnit: string; toUnit: string; factor: number }) =>
+      api.post('/unit-conversions', dto),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['unit-conversions'] }),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: ({ from, to }: { from: string; to: string }) =>
+      api.delete(`/unit-conversions?from=${from}&to=${to}`),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['unit-conversions'] }),
+  });
+
+  // Deduplicate: only show each pair once (fromUnit < toUnit alphabetically)
+  const uniqueConversions = conversions.filter((c) => c.fromUnit < c.toUnit);
+
+  const handleAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    const factor = parseFloat(convForm.factor);
+    if (!factor || factor <= 0 || convForm.fromUnit === convForm.toUnit) return;
+    upsertMut.mutate({ fromUnit: convForm.fromUnit, toUnit: convForm.toUnit, factor });
+  };
+
+  return (
+    <div className="mt-8">
+      <div className="mb-4">
+        <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Measurement</p>
+        <h2 className="font-display text-2xl text-white tracking-wide">UNIT CONVERSIONS</h2>
+      </div>
+      <p className="text-[#999] font-body text-sm mb-4">
+        Define conversion rates between measurement units. Both directions are created automatically.
+      </p>
+
+      {/* Existing conversions table */}
+      {uniqueConversions.length > 0 && (
+        <div className="bg-[#161616] border border-[#2A2A2A] mb-6">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[#2A2A2A]">
+                <th className="text-left px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">From</th>
+                <th className="text-left px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">To</th>
+                <th className="text-left px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">Factor</th>
+                {isOwner && <th className="text-right px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {uniqueConversions.map((c) => (
+                <tr key={c.id} className="border-b border-[#2A2A2A] last:border-0">
+                  <td className="px-4 py-3 font-body text-sm text-white">{c.fromUnit}</td>
+                  <td className="px-4 py-3 font-body text-sm text-white">{c.toUnit}</td>
+                  <td className="px-4 py-3 font-body text-sm text-white">
+                    1 {c.fromUnit} = {Number(c.factor).toFixed(6).replace(/\.?0+$/, '')} {c.toUnit}
+                  </td>
+                  {isOwner && (
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => deleteMut.mutate({ from: c.fromUnit, to: c.toUnit })}
+                        disabled={deleteMut.isPending}
+                        className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs tracking-widest uppercase transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {uniqueConversions.length === 0 && (
+        <div className="bg-[#161616] border border-[#2A2A2A] px-4 py-6 text-center mb-6">
+          <p className="text-[#999] font-body text-sm">No custom conversions defined yet. Built-in conversions (KG/G, L/ML, DOZEN/PCS) are always available.</p>
+        </div>
+      )}
+
+      {/* Add conversion form */}
+      {isOwner && (
+        <form onSubmit={handleAdd} className="bg-[#161616] border border-[#2A2A2A] p-5">
+          <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999] mb-3">Add Conversion</p>
+          <div className="grid grid-cols-4 gap-3 items-end">
+            <Field label="From Unit">
+              <select
+                value={convForm.fromUnit}
+                onChange={(e) => setConvForm((f) => ({ ...f, fromUnit: e.target.value }))}
+                className="input-base"
+              >
+                {UNITS.map((u) => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="To Unit">
+              <select
+                value={convForm.toUnit}
+                onChange={(e) => setConvForm((f) => ({ ...f, toUnit: e.target.value }))}
+                className="input-base"
+              >
+                {UNITS.map((u) => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Factor (1 From = X To)">
+              <input
+                type="number"
+                step="0.000001"
+                min="0.000001"
+                value={convForm.factor}
+                onChange={(e) => setConvForm((f) => ({ ...f, factor: e.target.value }))}
+                className="input-base"
+              />
+            </Field>
+            <button
+              type="submit"
+              disabled={upsertMut.isPending || convForm.fromUnit === convForm.toUnit}
+              className="bg-[#D62B2B] hover:bg-[#F03535] text-white px-4 py-2.5 font-body font-medium text-sm transition-colors disabled:opacity-40"
+            >
+              {upsertMut.isPending ? 'Saving...' : 'Add'}
+            </button>
+          </div>
+          {upsertMut.isError && (
+            <p className="text-sm font-body text-[#D62B2B] mt-2">
+              {(upsertMut.error as Error).message}
+            </p>
+          )}
+        </form>
+      )}
+
+      {/* Payment Methods */}
+      <PaymentMethodsSection />
+    </div>
+  );
+}
+
+// ─── Payment Methods Management (Two-Level: Categories + Options) ───────────
+
+interface PMOption {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  isDefault: boolean;
+  sortOrder: number;
+  account: { id: string; name: string; type: string } | null;
+}
+
+interface PMCategory {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  options: PMOption[];
+}
+
+interface AccountRef { id: string; name: string; type: string }
+
+function PaymentMethodsSection() {
+  const qc = useQueryClient();
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
+  const [addingOptionFor, setAddingOptionFor] = useState<string | null>(null);
+  const [optCode, setOptCode] = useState('');
+  const [optName, setOptName] = useState('');
+  const [optAccountId, setOptAccountId] = useState('');
+
+  const { data: categories = [] } = useQuery<PMCategory[]>({
+    queryKey: ['payment-methods'],
+    queryFn: () => api.get('/payment-methods'),
+  });
+
+  const { data: allAccounts = [] } = useQuery<AccountRef[]>({
+    queryKey: ['accounts'],
+    queryFn: () => api.get('/accounts'),
+    select: (d: any[]) => d.filter((a) => a.isActive !== false).map((a) => ({ id: a.id, name: a.name, type: a.type })),
+  });
+
+  const toggleCatMut = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => api.patch(`/payment-methods/${id}`, { isActive }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['payment-methods'] }),
+  });
+
+  const createOptMut = useMutation({
+    mutationFn: (dto: { categoryId: string; code: string; name: string; accountId?: string; isDefault?: boolean }) =>
+      api.post('/payment-methods/options', dto),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['payment-methods'] });
+      setAddingOptionFor(null);
+      setOptCode('');
+      setOptName('');
+      setOptAccountId('');
+    },
+  });
+
+  const updateOptMut = useMutation({
+    mutationFn: ({ id, ...dto }: { id: string; name?: string; accountId?: string | null; isActive?: boolean; isDefault?: boolean }) =>
+      api.patch(`/payment-methods/options/${id}`, dto),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['payment-methods'] }),
+  });
+
+  const deleteOptMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/payment-methods/options/${id}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['payment-methods'] }),
+  });
+
+  const toggleExpand = (catId: string) => {
+    setExpandedCat((prev) => (prev === catId ? null : catId));
+    setAddingOptionFor(null);
+  };
+
+  return (
+    <div className="bg-[#161616] border border-[#2A2A2A]">
+      <div className="px-5 py-4 border-b border-[#2A2A2A]">
+        <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Payment Methods</p>
+        <p className="text-[#666] font-body text-[10px] mt-0.5">Categories and their payment options. Click a category to manage its options.</p>
+      </div>
+      <div className="p-5 space-y-2">
+        {categories.map((cat) => {
+          const isExpanded = expandedCat === cat.id;
+          return (
+            <div key={cat.id} className="border border-[#2A2A2A]">
+              {/* Category header */}
+              <div
+                className="flex items-center justify-between bg-[#0D0D0D] px-4 py-3 cursor-pointer select-none"
+                onClick={() => toggleExpand(cat.id)}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-[#666] text-xs">{isExpanded ? '\u25BC' : '\u25B6'}</span>
+                  <span className="font-mono text-white text-xs bg-[#2A2A2A] px-2 py-0.5">{cat.code}</span>
+                  <span className="text-white font-body text-sm">{cat.name}</span>
+                  <span className="text-[#666] font-body text-[10px]">({cat.options.length} option{cat.options.length !== 1 ? 's' : ''})</span>
+                  {!cat.isActive && <span className="text-[#666] font-body text-[10px]">(inactive)</span>}
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleCatMut.mutate({ id: cat.id, isActive: !cat.isActive }); }}
+                  className={`font-body text-xs tracking-widest uppercase transition-colors ${cat.isActive ? 'text-[#FFA726] hover:text-white' : 'text-[#4CAF50] hover:text-white'}`}
+                >
+                  {cat.isActive ? 'Disable' : 'Enable'}
+                </button>
+              </div>
+
+              {/* Options list */}
+              {isExpanded && (
+                <div className="bg-[#111] px-4 py-3 space-y-2 border-t border-[#2A2A2A]">
+                  {cat.options.length === 0 && (
+                    <p className="text-[#666] font-body text-xs text-center py-2">No options yet. Add one below.</p>
+                  )}
+                  {cat.options.map((opt) => (
+                    <div key={opt.id} className="flex items-center justify-between bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2">
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-[#DDD9D3] text-[10px] bg-[#1A1A1A] px-1.5 py-0.5">{opt.code}</span>
+                        <span className="text-white font-body text-sm">{opt.name}</span>
+                        {opt.isDefault && <span className="text-[#4CAF50] font-body text-[10px]">(default)</span>}
+                        {!opt.isActive && <span className="text-[#666] font-body text-[10px]">(inactive)</span>}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {/* Account link */}
+                        <select
+                          value={opt.account?.id ?? ''}
+                          onChange={(e) => updateOptMut.mutate({ id: opt.id, accountId: e.target.value || null })}
+                          className="bg-[#161616] border border-[#2A2A2A] text-[#DDD9D3] text-[10px] font-body px-2 py-1 outline-none focus:border-[#D62B2B]"
+                        >
+                          <option value="">No account</option>
+                          {allAccounts.map((a) => (
+                            <option key={a.id} value={a.id}>{a.name} ({a.type})</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => updateOptMut.mutate({ id: opt.id, isActive: !opt.isActive })}
+                          className={`font-body text-[10px] tracking-widest uppercase transition-colors ${opt.isActive ? 'text-[#FFA726] hover:text-white' : 'text-[#4CAF50] hover:text-white'}`}
+                        >
+                          {opt.isActive ? 'Disable' : 'Enable'}
+                        </button>
+                        {!opt.isDefault && (
+                          <button
+                            onClick={() => updateOptMut.mutate({ id: opt.id, isDefault: true })}
+                            className="text-[#666] hover:text-white font-body text-[10px] tracking-widest uppercase transition-colors"
+                          >
+                            Set Default
+                          </button>
+                        )}
+                        <button
+                          onClick={() => { if (confirm(`Delete option "${opt.name}"?`)) deleteOptMut.mutate(opt.id); }}
+                          className="text-[#D62B2B] hover:text-[#F03535] font-body text-[10px] tracking-widest uppercase transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Add option form */}
+                  {addingOptionFor === cat.id ? (
+                    <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Code *</label>
+                          <input
+                            value={optCode}
+                            onChange={(e) => setOptCode(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+                            placeholder="e.g. BKASH"
+                            className="bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#D62B2B]"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Name *</label>
+                          <input
+                            value={optName}
+                            onChange={(e) => setOptName(e.target.value)}
+                            placeholder="e.g. bKash"
+                            className="bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-xs font-body focus:outline-none focus:border-[#D62B2B]"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Account</label>
+                          <select
+                            value={optAccountId}
+                            onChange={(e) => setOptAccountId(e.target.value)}
+                            className="bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-xs font-body focus:outline-none focus:border-[#D62B2B]"
+                          >
+                            <option value="">None</option>
+                            {allAccounts.map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      {createOptMut.error && <p className="text-[#D62B2B] font-body text-xs">{(createOptMut.error as Error).message}</p>}
+                      <div className="flex gap-2">
+                        <button onClick={() => setAddingOptionFor(null)} className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-xs px-3 py-1.5 transition-colors">Cancel</button>
+                        <button
+                          onClick={() => createOptMut.mutate({
+                            categoryId: cat.id,
+                            code: optCode,
+                            name: optName,
+                            accountId: optAccountId || undefined,
+                            isDefault: cat.options.length === 0,
+                          })}
+                          disabled={!optCode || !optName || createOptMut.isPending}
+                          className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-xs px-3 py-1.5 transition-colors disabled:opacity-50"
+                        >
+                          {createOptMut.isPending ? 'Creating...' : 'Add Option'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setAddingOptionFor(cat.id); setOptCode(''); setOptName(''); setOptAccountId(''); }}
+                      className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs transition-colors"
+                    >
+                      + Add Option
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {categories.length === 0 && <p className="text-[#666] font-body text-sm text-center py-4">No payment categories configured.</p>}
+      </div>
+    </div>
+  );
+}

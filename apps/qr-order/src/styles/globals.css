@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --white: #FFFFFF; --white-warm: #FAF9F7; --white-soft: #F2F1EE; --white-border: #DDD9D3;
+  --black: #0D0D0D; --black-text: #111111;
+  --red: #D62B2B; --red-deep: #A81F1F; --red-bright: #F03535;
+  --accent: #C8FF00;
+  --ff-display: 'Bebas Neue', sans-serif; --ff-body: 'DM Sans', sans-serif;
+}
+* { box-sizing: border-box; border-radius: 0 !important; }
+body { font-family: var(--ff-body); font-weight: 300; background: var(--black); color: var(--white); -webkit-font-smoothing: antialiased; max-width: 480px; margin: 0 auto; }
+
+/* Hide scrollbar on category pills */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
