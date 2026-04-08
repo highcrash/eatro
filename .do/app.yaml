@@ -31,7 +31,7 @@ region: sgp
 services:
   - name: api
     github:
-      repo: highcrash/restro    # ← change to your repo path
+      repo: highcrash/eatro    # ← change to your repo path
       branch: main
       deploy_on_push: true
     source_dir: /
@@ -103,7 +103,7 @@ static_sites:
 
   - name: web
     github:
-      repo: highcrash/restro
+      repo: highcrash/eatro
       branch: main
       deploy_on_push: true
     source_dir: /
@@ -121,7 +121,7 @@ static_sites:
       - { domain: www.eatrobd.com }
 
   - name: admin
-    github: { repo: highcrash/restro, branch: main, deploy_on_push: true }
+    github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
@@ -136,7 +136,7 @@ static_sites:
       - { domain: admin.eatrobd.com }
 
   - name: pos
-    github: { repo: highcrash/restro, branch: main, deploy_on_push: true }
+    github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
@@ -151,7 +151,7 @@ static_sites:
       - { domain: pos.eatrobd.com }
 
   - name: kds
-    github: { repo: highcrash/restro, branch: main, deploy_on_push: true }
+    github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
@@ -166,7 +166,7 @@ static_sites:
       - { domain: kds.eatrobd.com }
 
   - name: qr
-    github: { repo: highcrash/restro, branch: main, deploy_on_push: true }
+    github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
@@ -181,7 +181,7 @@ static_sites:
       - { domain: qr.eatrobd.com }
 
   - name: qr-order
-    github: { repo: highcrash/restro, branch: main, deploy_on_push: true }
+    github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
