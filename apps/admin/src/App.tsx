@@ -31,6 +31,7 @@ import CashierPermissionsPage from './pages/CashierPermissionsPage';
 import WebsitePage from './pages/WebsitePage';
 import DiscountsPage from './pages/DiscountsPage';
 import CustomersPage from './pages/CustomersPage';
+import DataCleanupPage from './pages/DataCleanupPage';
 
 export default function AdminApp() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -71,6 +72,7 @@ export default function AdminApp() {
         <Route path="/cashier-permissions" element={<CashierPermissionsPage />} />
         <Route path="/website" element={<WebsitePage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/data-cleanup" element={<DataCleanupPage />} />
       </Route>
     </Routes>
   );

@@ -92,6 +92,7 @@ const NAV_GROUPS = [
       { to: '/cashier-permissions', icon: ShieldCheck, label: 'Cashier Perms' },
       { to: '/website', icon: Globe, label: 'Website' },
       { to: '/settings', icon: Settings, label: 'Settings' },
+      { to: '/data-cleanup', icon: Trash2, label: 'Data Cleanup' },
     ],
   },
 ];

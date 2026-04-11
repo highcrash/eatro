@@ -36,6 +36,7 @@ import { BrandingModule } from './branding/branding.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { CashierOpsModule } from './cashier-ops/cashier-ops.module';
 import { WebsiteModule } from './website/website.module';
+import { CleanupModule } from './cleanup/cleanup.module';
 
 @Module({
   imports: [
@@ -127,6 +128,9 @@ import { WebsiteModule } from './website/website.module';
 
     // Public Website + CMS (Phase 4-5)
     WebsiteModule,
+
+    // Data Cleanup (OWNER-only destructive ops)
+    CleanupModule,
   ],
 })
 export class AppModule {}

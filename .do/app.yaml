@@ -40,10 +40,12 @@ services:
     http_port: 3001
 
     # Build: install workspace deps, generate Prisma client, build the API
+    # `turbo run build --filter=@restora/api` follows the dep graph and builds
+    # @restora/types and @restora/utils first.
     build_command: |
       pnpm install --frozen-lockfile
       pnpm prisma generate
-      pnpm --filter @restora/api build
+      pnpm exec turbo run build --filter=@restora/api
 
     # Start: run migrations then boot Nest
     run_command: |
@@ -109,7 +111,7 @@ static_sites:
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
-      pnpm --filter @restora/web build
+      pnpm exec turbo run build --filter=@restora/web
     output_dir: apps/web/dist
     catchall_document: index.html
     envs:
@@ -125,7 +127,7 @@ static_sites:
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
-      pnpm --filter @restora/admin build
+      pnpm exec turbo run build --filter=@restora/admin
     output_dir: apps/admin/dist
     catchall_document: index.html
     envs:
@@ -140,7 +142,7 @@ static_sites:
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
-      pnpm --filter @restora/pos build
+      pnpm exec turbo run build --filter=@restora/pos
     output_dir: apps/pos/dist
     catchall_document: index.html
     envs:
@@ -155,7 +157,7 @@ static_sites:
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
-      pnpm --filter @restora/kds build
+      pnpm exec turbo run build --filter=@restora/kds
     output_dir: apps/kds/dist
     catchall_document: index.html
     envs:
@@ -170,7 +172,7 @@ static_sites:
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
-      pnpm --filter @restora/qr build
+      pnpm exec turbo run build --filter=@restora/qr
     output_dir: apps/qr/dist
     catchall_document: index.html
     envs:
@@ -185,7 +187,7 @@ static_sites:
     source_dir: /
     build_command: |
       pnpm install --frozen-lockfile
-      pnpm --filter @restora/qr-order build
+      pnpm exec turbo run build --filter=@restora/qr-order
     output_dir: apps/qr-order/dist
     catchall_document: index.html
     envs:

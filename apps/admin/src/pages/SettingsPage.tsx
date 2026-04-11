@@ -586,6 +586,9 @@ function PaymentMethodsSection() {
   const [optCode, setOptCode] = useState('');
   const [optName, setOptName] = useState('');
   const [optAccountId, setOptAccountId] = useState('');
+  const [addingCat, setAddingCat] = useState(false);
+  const [newCatCode, setNewCatCode] = useState('');
+  const [newCatName, setNewCatName] = useState('');
 
   const { data: categories = [] } = useQuery<PMCategory[]>({
     queryKey: ['payment-methods'],
@@ -626,6 +629,21 @@ function PaymentMethodsSection() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['payment-methods'] }),
   });
 
+  const createCatMut = useMutation({
+    mutationFn: (dto: { code: string; name: string }) => api.post('/payment-methods', dto),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['payment-methods'] });
+      setAddingCat(false);
+      setNewCatCode('');
+      setNewCatName('');
+    },
+  });
+
+  const deleteCatMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/payment-methods/${id}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['payment-methods'] }),
+  });
+
   const toggleExpand = (catId: string) => {
     setExpandedCat((prev) => (prev === catId ? null : catId));
     setAddingOptionFor(null);
@@ -634,10 +652,54 @@ function PaymentMethodsSection() {
   return (
     <div className="bg-[#161616] border border-[#2A2A2A]">
       <div className="px-5 py-4 border-b border-[#2A2A2A]">
-        <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Payment Methods</p>
-        <p className="text-[#666] font-body text-[10px] mt-0.5">Categories and their payment options. Click a category to manage its options.</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Payment Methods</p>
+            <p className="text-[#666] font-body text-[10px] mt-0.5">Categories and their payment options. Click a category to manage its options.</p>
+          </div>
+          <button
+            onClick={() => setAddingCat(true)}
+            className="font-body text-xs tracking-widest uppercase text-[#FFA726] hover:text-white transition-colors"
+          >
+            + Add Category
+          </button>
+        </div>
       </div>
       <div className="p-5 space-y-2">
+        {addingCat && (
+          <div className="border border-[#FFA726] bg-[#0D0D0D] p-4 space-y-3">
+            <p className="text-white font-body text-sm font-semibold">New Payment Category</p>
+            <div className="flex gap-2">
+              <input
+                value={newCatCode}
+                onChange={(e) => setNewCatCode(e.target.value.toUpperCase())}
+                placeholder="Code (e.g. CASH)"
+                className="flex-1 bg-[#1A1A1A] border border-[#2A2A2A] text-white px-3 py-2 font-mono text-xs"
+              />
+              <input
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                placeholder="Name (e.g. Cash)"
+                className="flex-1 bg-[#1A1A1A] border border-[#2A2A2A] text-white px-3 py-2 font-body text-xs"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setAddingCat(false); setNewCatCode(''); setNewCatName(''); }}
+                className="font-body text-xs tracking-widest uppercase text-[#666] hover:text-white px-3 py-1"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => createCatMut.mutate({ code: newCatCode, name: newCatName })}
+                disabled={!newCatCode.trim() || !newCatName.trim() || createCatMut.isPending}
+                className="font-body text-xs tracking-widest uppercase bg-[#FFA726] text-black px-4 py-1 hover:bg-[#FFB74D] disabled:opacity-50"
+              >
+                {createCatMut.isPending ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        )}
         {categories.map((cat) => {
           const isExpanded = expandedCat === cat.id;
           return (
@@ -654,12 +716,22 @@ function PaymentMethodsSection() {
                   <span className="text-[#666] font-body text-[10px]">({cat.options.length} option{cat.options.length !== 1 ? 's' : ''})</span>
                   {!cat.isActive && <span className="text-[#666] font-body text-[10px]">(inactive)</span>}
                 </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); toggleCatMut.mutate({ id: cat.id, isActive: !cat.isActive }); }}
-                  className={`font-body text-xs tracking-widest uppercase transition-colors ${cat.isActive ? 'text-[#FFA726] hover:text-white' : 'text-[#4CAF50] hover:text-white'}`}
-                >
-                  {cat.isActive ? 'Disable' : 'Enable'}
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleCatMut.mutate({ id: cat.id, isActive: !cat.isActive }); }}
+                    className={`font-body text-xs tracking-widest uppercase transition-colors ${cat.isActive ? 'text-[#FFA726] hover:text-white' : 'text-[#4CAF50] hover:text-white'}`}
+                  >
+                    {cat.isActive ? 'Disable' : 'Enable'}
+                  </button>
+                  {cat.options.length === 0 && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); if (confirm(`Delete category "${cat.name}"?`)) deleteCatMut.mutate(cat.id); }}
+                      className="font-body text-xs tracking-widest uppercase text-red-500 hover:text-red-300 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Options list */}
