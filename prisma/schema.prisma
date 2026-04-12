@@ -936,6 +936,14 @@ model Ingredient {
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
+  // ─── Variant Support ───
+  parentId        String?                           // null = top-level (generic or standalone)
+  hasVariants     Boolean   @default(false)         // true = parent with brand variants; stock lives on children
+  brandName       String?                           // e.g. "Milk Butter", "Bread Pit"
+  packSize        String?                           // e.g. "250G", "1L" — display label
+  piecesPerPack   Int?                              // e.g. 10 pcs per pack
+  sku             String?                           // supplier barcode / SKU
+
   // Relations
   branch             Branch              @relation(fields: [branchId], references: [id])
   supplier           Supplier?           @relation(fields: [supplierId], references: [id])
@@ -946,9 +954,12 @@ model Ingredient {
   wasteLogs          WasteLog[]
   preReadyRecipeItems PreReadyRecipeItem[]
   returnItems         PurchaseReturnItem[]
+  parent             Ingredient?  @relation("IngredientVariants", fields: [parentId], references: [id])
+  variants           Ingredient[] @relation("IngredientVariants")
 
   @@index([branchId, isActive])
   @@index([itemCode])
+  @@index([parentId])
   @@map("ingredients")
 }
 

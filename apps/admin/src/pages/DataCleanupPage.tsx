@@ -5,9 +5,12 @@ import { useAuthStore } from '../store/auth.store';
 
 type Scope =
   | 'orders'
+  | 'work-periods'
   | 'accounts-transactions'
   | 'accounts-all'
   | 'expenses'
+  | 'discounts'
+  | 'coupons'
   | 'stock-zero'
   | 'stock-movements'
   | 'inventory-all'
@@ -43,6 +46,12 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'Daily Reports',
+    actions: [
+      { scope: 'work-periods', label: 'Delete all daily reports', desc: 'Removes all work period / daily closing records.' },
+    ],
+  },
+  {
     title: 'Accounts',
     actions: [
       { scope: 'accounts-transactions', label: 'Delete transactions & reset balances', desc: 'Wipes all account transactions and sets balances to 0.' },
@@ -61,6 +70,13 @@ const SECTIONS: Section[] = [
       { scope: 'stock-zero', label: 'Set all stock to 0', desc: 'Keeps ingredients but zeroes their stock and clears movements.' },
       { scope: 'stock-movements', label: 'Delete stock movements only', desc: 'Removes movement history; stock totals stay.' },
       { scope: 'inventory-all', label: 'Delete all inventory', desc: 'Removes ingredients, recipes, pre-ready recipes, movements, waste logs.', danger: true },
+    ],
+  },
+  {
+    title: 'Discounts & Coupons',
+    actions: [
+      { scope: 'discounts', label: 'Delete all discounts', desc: 'Removes all discount rules and menu item discounts.' },
+      { scope: 'coupons', label: 'Delete all coupons', desc: 'Removes all coupon codes.' },
     ],
   },
   {

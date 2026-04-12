@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import type { CreateIngredientDto, UpdateIngredientDto, AdjustStockDto } from '@restora/types';
+import type { CreateIngredientDto, UpdateIngredientDto, AdjustStockDto, CreateVariantDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
 
@@ -13,11 +13,16 @@ export class IngredientService {
   private readonly ingredientInclude = {
     supplier: true,
     suppliers: { include: { supplier: { select: { id: true, name: true } } } },
+    variants: {
+      where: { deletedAt: null },
+      include: { supplier: true },
+      orderBy: { createdAt: 'asc' as const },
+    },
   };
 
   findAll(branchId: string) {
     return this.prisma.ingredient.findMany({
-      where: { branchId, deletedAt: null },
+      where: { branchId, deletedAt: null, parentId: null },
       include: this.ingredientInclude,
       orderBy: { name: 'asc' },
     });
@@ -30,6 +35,119 @@ export class IngredientService {
     });
     if (!ingredient) throw new NotFoundException(`Ingredient ${id} not found`);
     return ingredient;
+  }
+
+  // ─── Variant Support ──────────────────────────────────────────────────────
+
+  async createVariant(parentId: string, branchId: string, dto: CreateVariantDto) {
+    const parent = await this.findOne(parentId, branchId);
+    if (!parent.hasVariants) {
+      throw new BadRequestException('Ingredient is not marked as having variants. Convert to parent first.');
+    }
+
+    return this.prisma.ingredient.create({
+      data: {
+        branchId,
+        parentId,
+        name: `${parent.name} — ${dto.brandName}`,
+        brandName: dto.brandName,
+        packSize: dto.packSize ?? null,
+        piecesPerPack: dto.piecesPerPack ?? null,
+        sku: dto.sku ?? null,
+        // Always inherit unit + purchaseUnit from parent
+        unit: parent.unit,
+        category: parent.category,
+        purchaseUnit: parent.purchaseUnit,
+        purchaseUnitQty: dto.piecesPerPack ?? (parent.purchaseUnitQty?.toNumber() ?? 1),
+        costPerPurchaseUnit: dto.costPerPurchaseUnit ?? 0,
+        supplierId: dto.supplierId ?? null,
+      },
+      include: { supplier: true },
+    });
+  }
+
+  async convertToParent(id: string, branchId: string) {
+    const ingredient = await this.findOne(id, branchId);
+    if (ingredient.hasVariants) throw new BadRequestException('Already a parent with variants');
+    if (ingredient.parentId) throw new BadRequestException('Cannot convert a variant to a parent');
+
+    const currentStock = ingredient.currentStock.toNumber();
+    const costPerUnit = ingredient.costPerUnit.toNumber();
+    const costPerPurchaseUnit = ingredient.costPerPurchaseUnit.toNumber();
+
+    return this.prisma.$transaction(async (tx) => {
+      // Mark as parent
+      await tx.ingredient.update({
+        where: { id },
+        data: { hasVariants: true },
+      });
+
+      // If had stock, create a default variant with that stock
+      if (currentStock > 0) {
+        await tx.ingredient.create({
+          data: {
+            branchId,
+            parentId: id,
+            name: `${ingredient.name} — Default`,
+            brandName: 'Default',
+            unit: ingredient.unit,
+            category: ingredient.category,
+            currentStock,
+            costPerUnit,
+            costPerPurchaseUnit,
+            purchaseUnit: ingredient.purchaseUnit,
+            purchaseUnitQty: ingredient.purchaseUnitQty,
+            supplierId: ingredient.supplierId,
+          },
+        });
+      }
+
+      return this.findOne(id, branchId);
+    });
+  }
+
+  async getVariants(id: string, branchId: string) {
+    await this.findOne(id, branchId);
+    return this.prisma.ingredient.findMany({
+      where: { parentId: id, deletedAt: null },
+      include: { supplier: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /** Recalculate parent's aggregate stock and weighted-average cost from variants.
+   *  Low-stock warning is based on parent's minimumStock vs aggregate of all variants. */
+  async syncParentStock(parentId: string, tx?: any) {
+    const db = tx ?? this.prisma;
+    const variants = await db.ingredient.findMany({
+      where: { parentId, deletedAt: null },
+      select: { currentStock: true, costPerUnit: true },
+    });
+
+    let totalStock = 0;
+    let totalValue = 0;
+    for (const v of variants) {
+      const stock = Number(v.currentStock);
+      totalStock += stock;
+      totalValue += stock * Number(v.costPerUnit);
+    }
+    const avgCost = totalStock > 0 ? totalValue / totalStock : (variants[0] ? Number(variants[0].costPerUnit) : 0);
+
+    const parent = await db.ingredient.update({
+      where: { id: parentId },
+      data: { currentStock: totalStock, costPerUnit: avgCost },
+    });
+
+    // Emit low-stock alert based on parent aggregate vs parent minimumStock
+    if (totalStock <= Number(parent.minimumStock)) {
+      this.ws.emitToBranch(parent.branchId, 'stock:low', {
+        ingredientId: parentId,
+        name: parent.name,
+        currentStock: totalStock,
+        minimumStock: parent.minimumStock,
+        unit: parent.unit,
+      });
+    }
   }
 
   async create(branchId: string, dto: CreateIngredientDto) {
@@ -59,7 +177,7 @@ export class IngredientService {
     });
   }
 
-  async update(id: string, branchId: string, dto: UpdateIngredientDto) {
+  async update(id: string, branchId: string, dto: UpdateIngredientDto & { brandName?: string; packSize?: string | null; piecesPerPack?: number | null; sku?: string | null }) {
     await this.findOne(id, branchId);
     return this.prisma.ingredient.update({
       where: { id },
@@ -75,6 +193,11 @@ export class IngredientService {
         ...(dto.purchaseUnit !== undefined ? { purchaseUnit: dto.purchaseUnit || null } : {}),
         ...(dto.purchaseUnitQty !== undefined ? { purchaseUnitQty: dto.purchaseUnitQty } : {}),
         ...(dto.costPerPurchaseUnit !== undefined ? { costPerPurchaseUnit: dto.costPerPurchaseUnit } : {}),
+        // Variant-specific fields
+        ...(dto.brandName !== undefined ? { brandName: dto.brandName } : {}),
+        ...(dto.packSize !== undefined ? { packSize: dto.packSize } : {}),
+        ...(dto.piecesPerPack !== undefined ? { piecesPerPack: dto.piecesPerPack } : {}),
+        ...(dto.sku !== undefined ? { sku: dto.sku } : {}),
       },
       include: this.ingredientInclude,
     });
@@ -159,7 +282,10 @@ export class IngredientService {
   }
 
   async adjustStock(id: string, branchId: string, staffId: string, dto: AdjustStockDto) {
-    await this.findOne(id, branchId);
+    const ingredient = await this.findOne(id, branchId);
+    if (ingredient.hasVariants) {
+      throw new BadRequestException('Cannot adjust stock on a parent ingredient. Adjust stock on a specific variant.');
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.stockMovement.create({
@@ -173,15 +299,23 @@ export class IngredientService {
         },
       });
 
-      return tx.ingredient.update({
+      const result = await tx.ingredient.update({
         where: { id },
         data: { currentStock: { increment: dto.quantity } },
         include: { supplier: true },
       });
+
+      // Sync parent if this is a variant
+      if (ingredient.parentId) {
+        await this.syncParentStock(ingredient.parentId, tx);
+      }
+
+      return result;
     });
 
-    // Emit low-stock alert if needed
-    if (updated.currentStock.toNumber() <= updated.minimumStock.toNumber()) {
+    // Emit low-stock alert — only for standalone ingredients (not variants).
+    // For variants, the parent sync in syncParentStock handles the alert.
+    if (!ingredient.parentId && updated.currentStock.toNumber() <= updated.minimumStock.toNumber()) {
       this.ws.emitToBranch(branchId, 'stock:low', {
         ingredientId: id,
         name: updated.name,

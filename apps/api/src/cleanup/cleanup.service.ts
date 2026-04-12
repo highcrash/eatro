@@ -5,9 +5,12 @@ import { PrismaService } from '../prisma/prisma.service';
 export type CleanupScope =
   | 'orders'
   | 'sales-summaries'
+  | 'work-periods'
   | 'accounts-transactions'
   | 'accounts-all'
   | 'expenses'
+  | 'discounts'
+  | 'coupons'
   | 'stock-zero'
   | 'stock-movements'
   | 'inventory-all'
@@ -64,8 +67,23 @@ export class CleanupService {
       }
 
       case 'sales-summaries': {
-        // No dedicated summary table — sales are computed from orders. Nothing to delete.
         deleted.note = 0;
+        break;
+      }
+
+      case 'work-periods': {
+        deleted.workPeriods = (await p.workPeriod.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'discounts': {
+        deleted.menuItemDiscounts = (await p.menuItemDiscount.deleteMany({ where: { menuItem: { branchId } } })).count;
+        deleted.discounts = (await p.discount.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'coupons': {
+        deleted.coupons = (await p.coupon.deleteMany({ where })).count;
         break;
       }
 
@@ -100,10 +118,14 @@ export class CleanupService {
       case 'inventory-all': {
         deleted.wasteLogs = (await p.wasteLog.deleteMany({ where })).count;
         deleted.stockMovements = (await p.stockMovement.deleteMany({ where })).count;
-        // RecipeItem cascades on Recipe delete
         deleted.recipes = (await p.recipe.deleteMany({ where: { menuItem: { branchId } } })).count;
-        // PreReadyRecipeItem cascades on PreReadyRecipe delete
         deleted.preReadyRecipes = (await p.preReadyRecipe.deleteMany({ where: { preReadyItem: { branchId } } })).count;
+        // Delete all FK references to ingredients before deleting them
+        deleted.purchaseOrderItems = (await p.purchaseOrderItem.deleteMany({ where: { ingredient: { branchId } } })).count;
+        deleted.purchaseReturnItems = (await p.purchaseReturnItem.deleteMany({ where: { ingredient: { branchId } } })).count;
+        deleted.ingredientSuppliers = (await p.ingredientSupplier.deleteMany({ where: { ingredient: { branchId } } })).count;
+        // Delete variants (children) before parents to satisfy self-referential FK
+        deleted.ingredientVariants = (await p.ingredient.deleteMany({ where: { branchId, parentId: { not: null } } })).count;
         deleted.ingredients = (await p.ingredient.deleteMany({ where })).count;
         break;
       }
@@ -115,14 +137,22 @@ export class CleanupService {
       }
 
       case 'menu-items': {
-        // Recipes reference menuItem — delete first
         deleted.recipes = (await p.recipe.deleteMany({ where: { menuItem: { branchId } } })).count;
+        deleted.comboItems = (await p.comboItem.deleteMany({ where: { comboMenu: { branchId } } })).count;
+        deleted.linkedItems = (await p.linkedItem.deleteMany({ where: { parentMenu: { branchId } } })).count;
+        deleted.menuItemDiscounts = (await p.menuItemDiscount.deleteMany({ where: { menuItem: { branchId } } })).count;
+        // OrderItem references menuItem without cascade — unlink by deleting orphaned refs
+        deleted.orderItems = (await p.orderItem.deleteMany({ where: { menuItem: { branchId } } })).count;
         deleted.menuItems = (await p.menuItem.deleteMany({ where })).count;
         break;
       }
 
       case 'menu-all': {
         deleted.recipes = (await p.recipe.deleteMany({ where: { menuItem: { branchId } } })).count;
+        deleted.comboItems = (await p.comboItem.deleteMany({ where: { comboMenu: { branchId } } })).count;
+        deleted.linkedItems = (await p.linkedItem.deleteMany({ where: { parentMenu: { branchId } } })).count;
+        deleted.menuItemDiscounts = (await p.menuItemDiscount.deleteMany({ where: { menuItem: { branchId } } })).count;
+        deleted.orderItems = (await p.orderItem.deleteMany({ where: { menuItem: { branchId } } })).count;
         deleted.menuItems = (await p.menuItem.deleteMany({ where })).count;
         deleted.menuCategories = (await p.menuCategory.deleteMany({ where })).count;
         break;

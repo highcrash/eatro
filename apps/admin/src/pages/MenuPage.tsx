@@ -614,6 +614,10 @@ export default function MenuPage() {
   const [linkedDialog, setLinkedDialog] = useState<{ open: boolean; item?: MenuItem }>({ open: false });
   const [activeParent, setActiveParent] = useState<string | null>(null);
   const [activeSub, setActiveSub] = useState<string | null>(null);
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [csvRows, setCsvRows] = useState<{ categoryName: string; name: string; type: string; price: number; description: string; tags: string }[]>([]);
+  const [csvResult, setCsvResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
+  const csvFileRef = useRef<HTMLInputElement>(null);
 
   const { data: categories = [] } = useQuery<MenuCategory[]>({
     queryKey: ['categories'],
@@ -649,6 +653,67 @@ export default function MenuPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['menu'] }),
   });
 
+  const bulkMut = useMutation({
+    mutationFn: (rows: typeof csvRows) => api.post<{ created: number; skipped: number; errors: string[] }>('/menu/bulk', { rows }),
+    onSuccess: (data) => {
+      setCsvResult(data);
+      void qc.invalidateQueries({ queryKey: ['menu'] });
+      void qc.invalidateQueries({ queryKey: ['categories'] });
+    },
+  });
+
+  const handleCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) return;
+      // Parse header
+      const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
+      const catIdx = headers.indexOf('category');
+      const nameIdx = headers.indexOf('name');
+      const typeIdx = headers.indexOf('type');
+      const priceIdx = headers.indexOf('price');
+      const descIdx = headers.indexOf('description');
+      const tagsIdx = headers.indexOf('tags');
+
+      if (nameIdx === -1 || priceIdx === -1 || catIdx === -1) {
+        alert('CSV must have columns: category, name, price. Optional: type, description, tags');
+        return;
+      }
+
+      const rows = lines.slice(1).map((line) => {
+        const cols = line.split(',').map((c) => c.trim());
+        return {
+          categoryName: cols[catIdx] || '',
+          name: cols[nameIdx] || '',
+          type: typeIdx >= 0 ? cols[typeIdx] || 'FOOD' : 'FOOD',
+          price: Number(cols[priceIdx]) || 0,
+          description: descIdx >= 0 ? cols[descIdx] || '' : '',
+          tags: tagsIdx >= 0 ? cols[tagsIdx] || '' : '',
+        };
+      }).filter((r) => r.name && r.categoryName);
+
+      setCsvRows(rows);
+      setCsvResult(null);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const downloadTemplate = () => {
+    const csv = 'category,name,type,price,description,tags\nAppetizer,Spring Roll,FOOD,150,Crispy vegetable spring roll,Popular\nBeverage,Mango Lassi,BEVERAGE,120,Fresh mango yogurt drink,New';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'menu_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleParentClick = (id: string | null) => {
     setActiveParent(id);
     setActiveSub(null);
@@ -663,6 +728,10 @@ export default function MenuPage() {
           <h1 className="font-display text-4xl text-white tracking-wide">MENU</h1>
         </div>
         <div className="flex gap-3">
+          <button onClick={() => { setCsvOpen(true); setCsvRows([]); setCsvResult(null); }}
+            className="flex items-center gap-1.5 border border-[#2A2A2A] px-4 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors">
+            <Upload size={14} /> CSV Import
+          </button>
           <button onClick={() => setCatDialog({ open: true })}
             className="flex items-center gap-1.5 border border-[#2A2A2A] px-4 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors">
             <Plus size={14} /> Category
@@ -821,6 +890,105 @@ export default function MenuPage() {
       {itemDialog.open && <ItemDialog categories={categories} initial={itemDialog.item} onClose={() => setItemDialog({ open: false })} />}
       {comboDialog.open && comboDialog.item && <ComboDialog item={comboDialog.item} allItems={menuItems} onClose={() => setComboDialog({ open: false })} />}
       {linkedDialog.open && linkedDialog.item && <LinkedDialog item={linkedDialog.item} allItems={menuItems} onClose={() => setLinkedDialog({ open: false })} />}
+
+      {/* CSV Import Modal */}
+      {csvOpen && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-3xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#2A2A2A]">
+              <div>
+                <p className="text-xs font-body font-medium tracking-widest uppercase text-[#D62B2B]">Bulk Import</p>
+                <h2 className="font-display text-xl text-white">CSV Menu Import</h2>
+              </div>
+              <button onClick={() => setCsvOpen(false)} className="text-[#666] hover:text-white"><X size={18} /></button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-auto flex-1">
+              <div className="flex items-center gap-3">
+                <button onClick={downloadTemplate}
+                  className="border border-[#2A2A2A] px-4 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors">
+                  Download Template
+                </button>
+                <button onClick={() => csvFileRef.current?.click()}
+                  className="flex items-center gap-1.5 bg-[#D62B2B] text-white px-4 py-2 text-sm font-body font-medium hover:bg-[#F03535] transition-colors">
+                  <Upload size={14} /> Choose CSV File
+                </button>
+                <input ref={csvFileRef} type="file" accept=".csv" onChange={handleCsvFile} className="hidden" />
+              </div>
+
+              <div className="text-[#666] text-xs font-body space-y-1">
+                <p>CSV columns: <span className="text-white">category</span>, <span className="text-white">name</span>, <span className="text-white">price</span> (required) &mdash; <span className="text-[#999]">type</span>, <span className="text-[#999]">description</span>, <span className="text-[#999]">tags</span> (optional)</p>
+                <p>Price in Taka (e.g. 150 = ৳150). Type: FOOD or BEVERAGE (defaults to FOOD). New categories are auto-created.</p>
+              </div>
+
+              {csvRows.length > 0 && (
+                <>
+                  <div className="border border-[#2A2A2A] overflow-auto max-h-[40vh]">
+                    <table className="w-full text-xs font-body">
+                      <thead className="bg-[#0D0D0D] sticky top-0">
+                        <tr className="text-[#999] uppercase tracking-widest">
+                          <th className="px-3 py-2 text-left">#</th>
+                          <th className="px-3 py-2 text-left">Category</th>
+                          <th className="px-3 py-2 text-left">Name</th>
+                          <th className="px-3 py-2 text-left">Type</th>
+                          <th className="px-3 py-2 text-right">Price</th>
+                          <th className="px-3 py-2 text-left">Description</th>
+                          <th className="px-3 py-2 text-left">Tags</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {csvRows.map((r, i) => (
+                          <tr key={i} className="border-t border-[#2A2A2A] text-white">
+                            <td className="px-3 py-1.5 text-[#666]">{i + 1}</td>
+                            <td className="px-3 py-1.5">{r.categoryName}</td>
+                            <td className="px-3 py-1.5">{r.name}</td>
+                            <td className="px-3 py-1.5 text-[#999]">{r.type}</td>
+                            <td className="px-3 py-1.5 text-right">{r.price}</td>
+                            <td className="px-3 py-1.5 text-[#999] max-w-[150px] truncate">{r.description}</td>
+                            <td className="px-3 py-1.5 text-[#999]">{r.tags}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <p className="text-white font-body text-sm">{csvRows.length} item{csvRows.length !== 1 ? 's' : ''} ready to import</p>
+                </>
+              )}
+
+              {csvResult && (
+                <div className="border border-[#2A2A2A] bg-[#0D0D0D] p-4 space-y-2">
+                  <p className="text-sm font-body">
+                    <span className="text-[#4CAF50]">{csvResult.created} created</span>
+                    {csvResult.skipped > 0 && <span className="text-[#FFA726] ml-3">{csvResult.skipped} skipped</span>}
+                  </p>
+                  {csvResult.errors.length > 0 && (
+                    <div className="text-xs text-red-400 font-body space-y-0.5 max-h-24 overflow-auto">
+                      {csvResult.errors.map((e, i) => <p key={i}>{e}</p>)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 justify-end px-5 py-4 border-t border-[#2A2A2A]">
+              <button onClick={() => setCsvOpen(false)}
+                className="border border-[#2A2A2A] px-5 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors">
+                {csvResult ? 'Done' : 'Cancel'}
+              </button>
+              {csvRows.length > 0 && !csvResult && (
+                <button
+                  onClick={() => bulkMut.mutate(csvRows)}
+                  disabled={bulkMut.isPending}
+                  className="bg-[#D62B2B] text-white px-5 py-2 text-sm font-body font-medium hover:bg-[#F03535] transition-colors disabled:opacity-40"
+                >
+                  {bulkMut.isPending ? 'Importing...' : `Import ${csvRows.length} Items`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

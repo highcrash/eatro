@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { WasteLog, WasteReason, Ingredient, MenuItem } from '@restora/types';
+import VariantPickerModal from '../components/VariantPickerModal';
 
 const WASTE_REASONS: { value: WasteReason; label: string }[] = [
   { value: 'SPOILAGE', label: 'Spoilage' },
@@ -41,6 +42,9 @@ export default function WastePage() {
     queryFn: () => api.get('/ingredients'),
     select: (d) => d.filter((i) => i.isActive),
   });
+
+  const [variantPicker, setVariantPicker] = useState<Ingredient | null>(null);
+  const [variantLabel, setVariantLabel] = useState<string | undefined>(undefined);
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -266,13 +270,22 @@ export default function WastePage() {
                 <label className="text-[#999] text-xs font-body font-medium tracking-widest uppercase">Ingredient *</label>
                 <input
                   list="waste-ing-list"
-                  value={wasteIngSearch !== undefined ? wasteIngSearch : (ingredients.find((i) => i.id === form.ingredientId) ? `${ingredients.find((i) => i.id === form.ingredientId)!.name} (${ingredients.find((i) => i.id === form.ingredientId)!.unit})` : '')}
+                  value={wasteIngSearch !== undefined ? wasteIngSearch : (variantLabel ?? (() => {
+                    const sel = ingredients.find((i) => i.id === form.ingredientId);
+                    return sel ? `${sel.name} (${sel.unit})` : '';
+                  })())}
                   onChange={(e) => {
                     const val = e.target.value;
                     setWasteIngSearch(val);
                     const match = ingredients.find((i) => `${i.name} (${i.unit})` === val || (i.itemCode ?? '') === val);
                     if (match) {
+                      if (match.hasVariants && match.variants && match.variants.length > 0) {
+                        setVariantPicker(match);
+                        setWasteIngSearch(undefined);
+                        return;
+                      }
                       setForm((f) => ({ ...f, ingredientId: match.id }));
+                      setVariantLabel(undefined);
                       setWasteIngSearch(undefined);
                     }
                   }}
@@ -285,7 +298,9 @@ export default function WastePage() {
                     const s = (wasteIngSearch ?? '').toLowerCase().trim();
                     return !s || i.name.toLowerCase().includes(s) || (i.itemCode ?? '').toLowerCase().includes(s);
                   }).slice(0, 30).map((i) => (
-                    <option key={i.id} value={`${i.name} (${i.unit})`}>Stock: {Number(i.currentStock).toFixed(2)} {i.unit}</option>
+                    <option key={i.id} value={`${i.name} (${i.unit})`}>
+                      {i.hasVariants ? `[${i.variants?.length ?? 0} variants] ` : ''}Stock: {Number(i.currentStock).toFixed(2)} {i.unit}
+                    </option>
                   ))}
                 </datalist>
                 {form.ingredientId && (() => {
@@ -336,6 +351,19 @@ export default function WastePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Variant Picker */}
+      {variantPicker && (
+        <VariantPickerModal
+          parent={variantPicker}
+          onSelect={(variant) => {
+            setForm((f) => ({ ...f, ingredientId: variant.id }));
+            setVariantLabel(`${variantPicker.name} → ${variant.brandName} ${variant.packSize ?? ''} (${variant.unit})`);
+            setVariantPicker(null);
+          }}
+          onClose={() => setVariantPicker(null)}
+        />
       )}
     </div>
   );

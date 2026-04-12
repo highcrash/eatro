@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { JwtPayload, CreateIngredientDto, UpdateIngredientDto, AdjustStockDto } from '@restora/types';
+import type { JwtPayload, CreateIngredientDto, UpdateIngredientDto, AdjustStockDto, CreateVariantDto } from '@restora/types';
 
 @Controller('ingredients')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -63,5 +63,25 @@ export class IngredientController {
   @Roles('OWNER', 'MANAGER')
   adjustStock(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: AdjustStockDto) {
     return this.ingredientService.adjustStock(id, user.branchId, user.sub, dto);
+  }
+
+  // ─── Variants ─────────────────────────────────────────────────────────────
+
+  @Get(':id/variants')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  getVariants(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.ingredientService.getVariants(id, user.branchId);
+  }
+
+  @Post(':id/variants')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  createVariant(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: CreateVariantDto) {
+    return this.ingredientService.createVariant(id, user.branchId, dto);
+  }
+
+  @Patch(':id/convert-to-parent')
+  @Roles('OWNER', 'MANAGER')
+  convertToParent(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.ingredientService.convertToParent(id, user.branchId);
   }
 }

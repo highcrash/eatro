@@ -40,6 +40,16 @@ export interface Ingredient {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  // Variant support
+  parentId: string | null;
+  hasVariants: boolean;
+  brandName: string | null;
+  packSize: string | null;
+  piecesPerPack: number | null;
+  sku: string | null;
+  variants?: Ingredient[];
+  parent?: Ingredient | null;
+  // Relations
   supplier?: Supplier | null;
   suppliers?: { id: string; ingredientId: string; supplierId: string; supplier: { id: string; name: string } }[];
 }
@@ -138,6 +148,15 @@ export interface UpdateIngredientDto {
   purchaseUnit?: string;
   purchaseUnitQty?: number;
   costPerPurchaseUnit?: number;
+}
+
+export interface CreateVariantDto {
+  brandName: string;
+  packSize?: string;
+  piecesPerPack?: number;   // 1 PACK = X PCS (inherits parent's unit)
+  sku?: string;
+  costPerPurchaseUnit?: number;
+  supplierId?: string;
 }
 
 export interface AdjustStockDto {

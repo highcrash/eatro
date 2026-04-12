@@ -3,11 +3,27 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 import type { Supplier, Ingredient } from '@restora/types';
+import VariantPickerModal from '../components/VariantPickerModal';
+
+interface ShoppingVariant {
+  id: string;
+  brandName: string | null;
+  packSize: string | null;
+  piecesPerPack: number | null;
+  currentStock: number;
+  costPerPurchaseUnit: number;
+  supplierId: string | null;
+  supplierName: string | null;
+}
 
 interface ShoppingItem {
   ingredientId: string;
+  parentId: string | null;
+  parentName: string | null;
   name: string;
   unit: string;
+  purchaseUnit: string | null;
+  purchaseUnitQty: number;
   currentStock: number;
   minimumStock: number;
   deficit: number;
@@ -16,16 +32,21 @@ interface ShoppingItem {
   supplierName: string | null;
   lastPurchaseRate: number;
   category: string;
+  hasVariants: boolean;
+  variants: ShoppingVariant[];
 }
 
 interface ListRow {
   ingredientId: string;
+  parentId: string | null;
   name: string;
-  unit: string;
-  currentStock: number;
+  unit: string;          // purchase unit (PACK, BOTTLE) or stock unit
+  currentStock: number;  // parent aggregate
   quantity: string;
   supplierId: string;
   unitCost: string;
+  hasVariants: boolean;
+  variants: ShoppingVariant[];
 }
 
 export default function ShoppingListPage() {
@@ -34,6 +55,8 @@ export default function ShoppingListPage() {
   const [loaded, setLoaded] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [addSearch, setAddSearch] = useState('');
+  const [shopVariantPicker, setShopVariantPicker] = useState<Ingredient | null>(null);
+  const [rowVariantPicker, setRowVariantPicker] = useState<{ idx: number; parent: Ingredient } | null>(null);
 
   const { data: shoppingList = [], isLoading } = useQuery<ShoppingItem[]>({
     queryKey: ['shopping-list'],
@@ -52,35 +75,40 @@ export default function ShoppingListPage() {
     select: (d) => d.filter((i) => i.isActive && !i.name.startsWith('[PR]')),
   });
 
-  const addManualItem = (ing: Ingredient) => {
-    // Don't add duplicates
+  const addManualItem = (ing: Ingredient, parentName?: string) => {
     if (rows.some((r) => r.ingredientId === ing.id)) return;
-    const hasPU = ing.purchaseUnit && Number(ing.purchaseUnitQty) > 0;
+    const pu = ing.purchaseUnit;
+    const hasPU = pu && Number(ing.purchaseUnitQty) > 0;
     setRows((prev) => [...prev, {
       ingredientId: ing.id,
-      name: ing.name,
-      unit: ing.purchaseUnit || ing.unit,
+      parentId: ing.parentId ?? null,
+      name: parentName ? `${parentName} → ${ing.brandName ?? ing.name}` : ing.name,
+      unit: pu || ing.unit,
       currentStock: Number(ing.currentStock),
       quantity: '1',
       supplierId: ing.supplierId ?? '',
       unitCost: hasPU && Number(ing.costPerPurchaseUnit) > 0
         ? (Number(ing.costPerPurchaseUnit) / 100).toFixed(2)
         : (Number(ing.costPerUnit) / 100).toFixed(2),
+      hasVariants: false,
+      variants: [],
     }]);
     setAddSearch('');
     if (!loaded) setLoaded(true);
   };
 
-  // Load shopping list into rows
   const loadList = () => {
     setRows(shoppingList.filter((item) => !item.name.startsWith('[PR]')).map((item) => ({
       ingredientId: item.ingredientId,
+      parentId: item.parentId,
       name: item.name,
-      unit: (item as any).purchaseUnit || item.unit,
+      unit: item.purchaseUnit || item.unit,
       currentStock: item.currentStock,
       quantity: item.suggestedQty.toFixed(2),
       supplierId: item.supplierId ?? '',
       unitCost: item.lastPurchaseRate > 0 ? (item.lastPurchaseRate / 100).toFixed(2) : '0',
+      hasVariants: item.hasVariants,
+      variants: item.variants,
     })));
     setLoaded(true);
     setSubmitted(false);
@@ -91,6 +119,20 @@ export default function ShoppingListPage() {
   };
 
   const removeRow = (idx: number) => setRows((r) => r.filter((_, i) => i !== idx));
+
+  const changeVariant = (idx: number, variant: ShoppingVariant, parentName: string, purchaseUnit: string | null) => {
+    setRows((r) => r.map((row, i) => {
+      if (i !== idx) return row;
+      return {
+        ...row,
+        ingredientId: variant.id,
+        name: `${parentName} → ${variant.brandName ?? ''} ${variant.packSize ?? ''}`.trim(),
+        supplierId: variant.supplierId ?? row.supplierId,
+        unitCost: variant.costPerPurchaseUnit > 0 ? (variant.costPerPurchaseUnit / 100).toFixed(2) : row.unitCost,
+        unit: purchaseUnit || row.unit,
+      };
+    }));
+  };
 
   const submitMutation = useMutation({
     mutationFn: () => {
@@ -111,7 +153,6 @@ export default function ShoppingListPage() {
     },
   });
 
-  // Group by supplier for print view
   const groupedBySupplier = useMemo(() => {
     const groups: Record<string, { supplierName: string; items: ListRow[] }> = {};
     for (const row of rows) {
@@ -179,12 +220,12 @@ export default function ShoppingListPage() {
             </div>
           </div>
 
-          {/* Editable Table (screen view) */}
+          {/* Editable Table */}
           <div className="bg-[#161616] border border-[#2A2A2A] no-print">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[#2A2A2A]">
-                  {['Ingredient', 'In Stock', 'Order Qty', 'Supplier', 'Rate', 'Total', ''].map((h) => (
+                  {['Ingredient', 'In Stock', 'Order Qty', 'Unit', 'Supplier', 'Rate', 'Total', ''].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
                   ))}
                 </tr>
@@ -192,11 +233,25 @@ export default function ShoppingListPage() {
               <tbody>
                 {rows.map((row, idx) => (
                   <tr key={idx} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
-                    <td className="px-4 py-2 text-white font-body text-sm">{row.name} <span className="text-[#999] text-xs">({row.unit})</span></td>
+                    <td className="px-4 py-2">
+                      <span className="text-white font-body text-sm">{row.name}</span>
+                      {row.hasVariants && row.variants.length > 0 && (
+                        <button
+                          onClick={() => {
+                            const parent = ingredients.find((i) => i.id === row.parentId);
+                            if (parent) setRowVariantPicker({ idx, parent });
+                          }}
+                          className="text-[#FFA726] hover:text-white font-body text-[10px] tracking-widest uppercase ml-2 transition-colors"
+                        >
+                          Change
+                        </button>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-[#666] font-body text-sm">{row.currentStock.toFixed(2)}</td>
                     <td className="px-4 py-2">
                       <input type="number" step="0.01" min="0" value={row.quantity} onChange={(e) => updateRow(idx, 'quantity', e.target.value)} className="w-24 bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-1 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
                     </td>
+                    <td className="px-4 py-2 text-[#999] font-body text-xs">{row.unit}</td>
                     <td className="px-4 py-2">
                       <select value={row.supplierId} onChange={(e) => updateRow(idx, 'supplierId', e.target.value)} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-1 text-sm font-body focus:outline-none focus:border-[#D62B2B]">
                         <option value="">-- Select --</option>
@@ -204,13 +259,17 @@ export default function ShoppingListPage() {
                       </select>
                     </td>
                     <td className="px-4 py-2">
-                      <input type="number" step="0.01" min="0" value={row.unitCost} onChange={(e) => updateRow(idx, 'unitCost', e.target.value)} className="w-24 bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-1 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+                      <div className="flex items-center gap-1">
+                        <span className="text-[#666] text-xs">৳</span>
+                        <input type="number" step="0.01" min="0" value={row.unitCost} onChange={(e) => updateRow(idx, 'unitCost', e.target.value)} className="w-24 bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-1 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+                        <span className="text-[#666] text-[10px]">/{row.unit}</span>
+                      </div>
                     </td>
                     <td className="px-4 py-2 text-[#666] font-body text-sm">{formatCurrency(parseFloat(row.quantity || '0') * parseFloat(row.unitCost || '0') * 100)}</td>
                     <td className="px-4 py-2"><button onClick={() => removeRow(idx)} className="text-[#999] hover:text-[#D62B2B] text-xs transition-colors">x</button></td>
                   </tr>
                 ))}
-                {rows.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-[#666] font-body text-sm">No items. All stock levels are sufficient.</td></tr>}
+                {rows.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-[#666] font-body text-sm">No items. All stock levels are sufficient.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -224,8 +283,15 @@ export default function ShoppingListPage() {
                 onChange={(e) => {
                   const val = e.target.value;
                   setAddSearch(val);
-                  const match = ingredients.find((i) => `${i.name} (${i.unit})` === val || (i.itemCode ?? '') === val);
-                  if (match) { addManualItem(match); }
+                  const match = ingredients.find((i) => `${i.name} (${i.purchaseUnit || i.unit})` === val || `${i.name} (${i.unit})` === val || (i.itemCode ?? '') === val);
+                  if (match) {
+                    if (match.hasVariants && match.variants && match.variants.length > 0) {
+                      setShopVariantPicker(match);
+                      setAddSearch('');
+                      return;
+                    }
+                    addManualItem(match);
+                  }
                 }}
                 onFocus={(e) => e.target.select()}
                 placeholder="+ Add item to shopping list — type name or code…"
@@ -236,7 +302,7 @@ export default function ShoppingListPage() {
                   const s = addSearch.toLowerCase().trim();
                   return !rows.some((r) => r.ingredientId === i.id) && (!s || i.name.toLowerCase().includes(s) || (i.itemCode ?? '').toLowerCase().includes(s));
                 }).slice(0, 30).map((i) => (
-                  <option key={i.id} value={`${i.name} (${i.unit})`}>{i.itemCode ? `[${i.itemCode}] ` : ''}{i.name} — Stock: {Number(i.currentStock).toFixed(1)}</option>
+                  <option key={i.id} value={`${i.name} (${i.purchaseUnit || i.unit})`}>{i.itemCode ? `[${i.itemCode}] ` : ''}{i.name} {i.hasVariants ? '[variants]' : ''} — Stock: {Number(i.currentStock).toFixed(1)}</option>
                 ))}
               </datalist>
             </div>
@@ -253,7 +319,7 @@ export default function ShoppingListPage() {
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr>
-                        {['Item', 'Unit', 'Qty'].map((h) => (
+                        {['Item', 'Unit', 'Qty', 'Rate', 'Total'].map((h) => (
                           <th key={h} style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #ccc', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: '#666' }}>{h}</th>
                         ))}
                       </tr>
@@ -264,6 +330,8 @@ export default function ShoppingListPage() {
                           <td style={{ padding: '4px 8px', borderBottom: '1px solid #eee' }}>{item.name}</td>
                           <td style={{ padding: '4px 8px', borderBottom: '1px solid #eee' }}>{item.unit}</td>
                           <td style={{ padding: '4px 8px', borderBottom: '1px solid #eee' }}>{parseFloat(item.quantity).toFixed(2)}</td>
+                          <td style={{ padding: '4px 8px', borderBottom: '1px solid #eee' }}>৳{parseFloat(item.unitCost || '0').toFixed(2)}</td>
+                          <td style={{ padding: '4px 8px', borderBottom: '1px solid #eee' }}>৳{(parseFloat(item.quantity || '0') * parseFloat(item.unitCost || '0')).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -276,6 +344,40 @@ export default function ShoppingListPage() {
           {submitMutation.error && <p className="text-[#D62B2B] text-xs font-body">{(submitMutation.error as Error).message}</p>}
           {submitted && <p className="text-green-700 font-body text-sm">Draft purchase orders created! Go to Purchasing to review and send.</p>}
         </>
+      )}
+
+      {/* Variant picker for manual add */}
+      {shopVariantPicker && (
+        <VariantPickerModal
+          parent={shopVariantPicker}
+          onSelect={(variant) => {
+            addManualItem(variant as Ingredient, shopVariantPicker.name);
+            setShopVariantPicker(null);
+          }}
+          onClose={() => setShopVariantPicker(null)}
+        />
+      )}
+
+      {/* Variant picker for changing variant in a row */}
+      {rowVariantPicker && (
+        <VariantPickerModal
+          parent={rowVariantPicker.parent}
+          onSelect={(variant) => {
+            const parent = rowVariantPicker.parent;
+            changeVariant(rowVariantPicker.idx, {
+              id: variant.id,
+              brandName: variant.brandName,
+              packSize: variant.packSize,
+              piecesPerPack: variant.piecesPerPack,
+              currentStock: Number(variant.currentStock),
+              costPerPurchaseUnit: Number(variant.costPerPurchaseUnit),
+              supplierId: variant.supplierId ?? null,
+              supplierName: variant.supplier?.name ?? null,
+            }, parent.name, parent.purchaseUnit ?? null);
+            setRowVariantPicker(null);
+          }}
+          onClose={() => setRowVariantPicker(null)}
+        />
       )}
     </div>
   );

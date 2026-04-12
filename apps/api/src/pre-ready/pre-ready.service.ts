@@ -2,12 +2,14 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import type { CreatePreReadyItemDto, UpsertPreReadyRecipeDto, CreateProductionOrderDto, CompleteProductionDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
+import { IngredientService } from '../ingredient/ingredient.service';
 
 @Injectable()
 export class PreReadyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly unitConversionService: UnitConversionService,
+    private readonly ingredientService: IngredientService,
   ) {}
 
   // ── Pre-Ready Items ───────────────────────────────────────────────────────
@@ -212,25 +214,55 @@ export class PreReadyService {
     // Cost per unit of produced pre-ready item (in paisa)
     const costPerProducedUnit = producedQty > 0 ? Math.round(totalProductionCost / producedQty) : 0;
 
-    return this.prisma.$transaction(async (tx) => {
+    const parentSyncIds = new Set<string>();
+
+    const txResult = await this.prisma.$transaction(async (tx) => {
       // 1. Deduct raw ingredients based on recipe (proportional to production qty)
       if (recipe && recipe.items.length > 0) {
         for (let idx = 0; idx < recipe.items.length; idx++) {
           const recipeItem = recipe.items[idx];
           const deductQty = conversions[idx];
-          await tx.ingredient.update({
-            where: { id: recipeItem.ingredientId },
-            data: { currentStock: { decrement: deductQty } },
-          });
-          await tx.stockMovement.create({
-            data: {
-              branchId,
-              ingredientId: recipeItem.ingredientId,
-              type: 'SALE',
-              quantity: -deductQty,
-              notes: `Pre-ready production: ${po.preReadyItem.name} x${producedQty}`,
-            },
-          });
+
+          // Check if ingredient has variants
+          const ingredient = await tx.ingredient.findUnique({ where: { id: recipeItem.ingredientId }, select: { hasVariants: true } });
+          if (ingredient?.hasVariants) {
+            // Resolve to variants (FIFO)
+            const variants = await tx.ingredient.findMany({
+              where: { parentId: recipeItem.ingredientId, isActive: true, deletedAt: null, currentStock: { gt: 0 } },
+              orderBy: { createdAt: 'asc' },
+            });
+            let remaining = deductQty;
+            for (const variant of variants) {
+              if (remaining <= 0) break;
+              const available = Number(variant.currentStock);
+              const deduct = Math.min(remaining, available);
+              await tx.ingredient.update({ where: { id: variant.id }, data: { currentStock: { decrement: deduct } } });
+              await tx.stockMovement.create({ data: { branchId, ingredientId: variant.id, type: 'SALE', quantity: -deduct, notes: `Pre-ready production: ${po.preReadyItem.name} x${producedQty}` } });
+              remaining -= deduct;
+            }
+            if (remaining > 0) {
+              const fallback = variants[0] ?? await tx.ingredient.findFirst({ where: { parentId: recipeItem.ingredientId, isActive: true, deletedAt: null }, orderBy: { createdAt: 'asc' } });
+              if (fallback) {
+                await tx.ingredient.update({ where: { id: fallback.id }, data: { currentStock: { decrement: remaining } } });
+                await tx.stockMovement.create({ data: { branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, notes: `Pre-ready production: ${po.preReadyItem.name} x${producedQty} (insufficient)` } });
+              }
+            }
+            parentSyncIds.add(recipeItem.ingredientId);
+          } else {
+            await tx.ingredient.update({
+              where: { id: recipeItem.ingredientId },
+              data: { currentStock: { decrement: deductQty } },
+            });
+            await tx.stockMovement.create({
+              data: {
+                branchId,
+                ingredientId: recipeItem.ingredientId,
+                type: 'SALE',
+                quantity: -deductQty,
+                notes: `Pre-ready production: ${po.preReadyItem.name} x${producedQty}`,
+              },
+            });
+          }
         }
       }
 
@@ -312,6 +344,13 @@ export class PreReadyService {
         },
       });
     });
+
+    // Sync parent aggregates for variant deductions
+    for (const parentId of parentSyncIds) {
+      await this.ingredientService.syncParentStock(parentId);
+    }
+
+    return txResult;
   }
 
   /**
@@ -352,31 +391,45 @@ export class PreReadyService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const wasteSyncIds = new Set<string>();
+
+    const wasteResult = await this.prisma.$transaction(async (tx) => {
       for (const c of conversions) {
-        await tx.ingredient.update({
-          where: { id: c.ingredientId },
-          data: { currentStock: { decrement: c.deductQty } },
-        });
-        await tx.stockMovement.create({
-          data: {
-            branchId,
-            ingredientId: c.ingredientId,
-            type: 'WASTE',
-            quantity: -c.deductQty,
-            notes: `Pre-ready production wasted: ${po.preReadyItem.name} x${producedQty}${dto.reason ? ` — ${dto.reason}` : ''}`,
-          },
-        });
-        await tx.wasteLog.create({
-          data: {
-            branchId,
-            ingredientId: c.ingredientId,
-            quantity: c.deductQty,
-            reason: 'PREPARATION_ERROR',
-            notes: `Pre-ready production wasted: ${po.preReadyItem.name} x${producedQty}${dto.reason ? ` — ${dto.reason}` : ''}`,
-            recordedById: dto.staffId,
-          },
-        });
+        const ing = await tx.ingredient.findUnique({ where: { id: c.ingredientId }, select: { hasVariants: true } });
+        const wasteNotes = `Pre-ready production wasted: ${po.preReadyItem.name} x${producedQty}${dto.reason ? ` — ${dto.reason}` : ''}`;
+
+        if (ing?.hasVariants) {
+          // Resolve to variants
+          const variants = await tx.ingredient.findMany({
+            where: { parentId: c.ingredientId, isActive: true, deletedAt: null, currentStock: { gt: 0 } },
+            orderBy: { createdAt: 'asc' },
+          });
+          let remaining = c.deductQty;
+          for (const v of variants) {
+            if (remaining <= 0) break;
+            const deduct = Math.min(remaining, Number(v.currentStock));
+            await tx.ingredient.update({ where: { id: v.id }, data: { currentStock: { decrement: deduct } } });
+            await tx.stockMovement.create({ data: { branchId, ingredientId: v.id, type: 'WASTE', quantity: -deduct, notes: wasteNotes } });
+            await tx.wasteLog.create({ data: { branchId, ingredientId: v.id, quantity: deduct, reason: 'PREPARATION_ERROR', notes: wasteNotes, recordedById: dto.staffId } });
+            remaining -= deduct;
+          }
+          if (remaining > 0) {
+            const fallback = variants[0] ?? await tx.ingredient.findFirst({ where: { parentId: c.ingredientId, isActive: true, deletedAt: null }, orderBy: { createdAt: 'asc' } });
+            if (fallback) {
+              await tx.ingredient.update({ where: { id: fallback.id }, data: { currentStock: { decrement: remaining } } });
+              await tx.stockMovement.create({ data: { branchId, ingredientId: fallback.id, type: 'WASTE', quantity: -remaining, notes: wasteNotes } });
+              await tx.wasteLog.create({ data: { branchId, ingredientId: fallback.id, quantity: remaining, reason: 'PREPARATION_ERROR', notes: wasteNotes, recordedById: dto.staffId } });
+            }
+          }
+          wasteSyncIds.add(c.ingredientId);
+        } else {
+          await tx.ingredient.update({
+            where: { id: c.ingredientId },
+            data: { currentStock: { decrement: c.deductQty } },
+          });
+          await tx.stockMovement.create({ data: { branchId, ingredientId: c.ingredientId, type: 'WASTE', quantity: -c.deductQty, notes: wasteNotes } });
+          await tx.wasteLog.create({ data: { branchId, ingredientId: c.ingredientId, quantity: c.deductQty, reason: 'PREPARATION_ERROR', notes: wasteNotes, recordedById: dto.staffId } });
+        }
       }
 
       return tx.productionOrder.update({
@@ -390,6 +443,12 @@ export class PreReadyService {
         },
       });
     });
+
+    for (const parentId of wasteSyncIds) {
+      await this.ingredientService.syncParentStock(parentId);
+    }
+
+    return wasteResult;
   }
 
   async cancelProduction(id: string, branchId: string) {

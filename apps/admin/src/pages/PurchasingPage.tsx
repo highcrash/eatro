@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { PurchaseOrder, Supplier, Ingredient, CreatePurchaseOrderDto, PurchaseReturn } from '@restora/types';
+import VariantPickerModal from '../components/VariantPickerModal';
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'text-[#FFA726] bg-[#3a2e00]',
@@ -122,6 +123,12 @@ export default function PurchasingPage() {
   const [receiveQtys, setReceiveQtys] = useState<Record<string, string>>({});
   const [receivePrices, setReceivePrices] = useState<Record<string, string>>({});
   const [receiveNotes, setReceiveNotes] = useState('');
+  // Override variant on receive: poItemId → { id, brandName, packSize }
+  const [receiveVariantOverrides, setReceiveVariantOverrides] = useState<Record<string, { id: string; brandName: string; packSize?: string }>>({});
+  const [receiveVariantPicker, setReceiveVariantPicker] = useState<{ poItemId: string; parent: Ingredient } | null>(null);
+  const [receiveExtras, setReceiveExtras] = useState<{ ingredientId: string; quantity: string; unitPrice: string }[]>([]);
+  const [receiveExtraSearch, setReceiveExtraSearch] = useState<Record<number, string>>({});
+  const [receiveExtraVariantPicker, setReceiveExtraVariantPicker] = useState<{ parent: Ingredient; idx: number } | null>(null);
 
   // Return form state
   const [showReturnForm, setShowReturnForm] = useState(false);
@@ -145,6 +152,25 @@ export default function PurchasingPage() {
     queryFn: () => api.get('/ingredients'),
     select: (d) => d.filter((i) => i.isActive),
   });
+
+  // For resolving variant display names
+  const [variantPicker, setVariantPicker] = useState<{ parent: Ingredient; lineIdx: number; context: 'po' | 'return' } | null>(null);
+  // Map variantId → display label for selected variants
+  const [variantLabels, setVariantLabels] = useState<Record<string, string>>({});
+
+  // Lookup helper: finds ingredient by id, including inside variants.
+  // For variants, inherits parent's purchaseUnit if variant's own is null.
+  const findIngredient = (id: string): (Ingredient & { _parentName?: string }) | undefined => {
+    const top = ingredients.find((i) => i.id === id);
+    if (top) return top;
+    for (const ing of ingredients) {
+      if (ing.variants) {
+        const v = ing.variants.find((vv) => vv.id === id);
+        if (v) return { ...v, purchaseUnit: v.purchaseUnit || ing.purchaseUnit, _parentName: ing.name } as any;
+      }
+    }
+    return undefined;
+  };
 
   const { data: returns = [] } = useQuery<PurchaseReturn[]>({
     queryKey: ['purchase-returns'],
@@ -176,8 +202,8 @@ export default function PurchasingPage() {
   });
 
   const receiveMutation = useMutation({
-    mutationFn: ({ id, items, notes }: { id: string; items: { purchaseOrderItemId: string; quantityReceived: number; unitPrice?: number }[]; notes: string }) =>
-      api.post(`/purchasing/${id}/receive`, { items, notes }),
+    mutationFn: ({ id, items, additionalItems, notes }: { id: string; items: { purchaseOrderItemId: string; quantityReceived: number; unitPrice?: number; ingredientIdOverride?: string }[]; additionalItems?: { ingredientId: string; quantityReceived: number; unitPrice?: number }[]; notes: string }) =>
+      api.post(`/purchasing/${id}/receive`, { items, additionalItems, notes }),
     onSuccess: (updated) => {
       void qc.invalidateQueries({ queryKey: ['purchase-orders'] });
       void qc.invalidateQueries({ queryKey: ['ingredients'] });
@@ -186,6 +212,8 @@ export default function PurchasingPage() {
       setReceiveQtys({});
       setReceivePrices({});
       setReceiveNotes('');
+      setReceiveVariantOverrides({});
+      setReceiveExtras([]);
     },
   });
 
@@ -269,10 +297,18 @@ export default function PurchasingPage() {
       .map((item) => {
         const priceStr = receivePrices[item.id];
         const unitPrice = priceStr ? Math.round(parseFloat(priceStr) * 100) : undefined; // Taka -> paisa
-        return { purchaseOrderItemId: item.id, quantityReceived: parseFloat(receiveQtys[item.id]), unitPrice };
+        const ingredientIdOverride = receiveVariantOverrides[item.id]?.id || undefined;
+        return { purchaseOrderItemId: item.id, quantityReceived: parseFloat(receiveQtys[item.id]), unitPrice, ingredientIdOverride };
       });
-    if (items.length === 0) return;
-    receiveMutation.mutate({ id: selectedPO.id, items, notes: receiveNotes });
+    const additionalItems = receiveExtras
+      .filter((e) => e.ingredientId && parseFloat(e.quantity) > 0)
+      .map((e) => ({
+        ingredientId: e.ingredientId,
+        quantityReceived: parseFloat(e.quantity),
+        unitPrice: e.unitPrice ? Math.round(parseFloat(e.unitPrice) * 100) : undefined,
+      }));
+    if (items.length === 0 && additionalItems.length === 0) return;
+    receiveMutation.mutate({ id: selectedPO.id, items, additionalItems: additionalItems.length > 0 ? additionalItems : undefined, notes: receiveNotes });
   };
 
   const [returnError, setReturnError] = useState('');
@@ -499,7 +535,7 @@ export default function PurchasingPage() {
               <div className="col-span-1"></div>
             </div>
             {lines.map((line, idx) => {
-              const selIng = ingredients.find((i) => i.id === line.ingredientId);
+              const selIng = findIngredient(line.ingredientId);
               const nativeUnit = selIng?.unit ?? 'PCS';
               const purchaseUnit = selIng?.purchaseUnit;
               // If purchaseUnit is set, only show that — no other units to avoid confusion
@@ -513,12 +549,18 @@ export default function PurchasingPage() {
                   <div className="col-span-3">
                     <input
                       list={`po-ing-${idx}`}
-                      value={ingSearchPO[idx] !== undefined ? ingSearchPO[idx] : (selIng ? `${selIng.name} (${selIng.purchaseUnit || selIng.unit})` : '')}
+                      value={ingSearchPO[idx] !== undefined ? ingSearchPO[idx] : (selIng ? (variantLabels[selIng.id] ?? `${selIng.name} (${selIng.purchaseUnit || selIng.unit})`) : '')}
                       onChange={(e) => {
                         const val = e.target.value;
                         setIngSearchPO((s) => ({ ...s, [idx]: val }));
                         const match = ingredients.find((i) => `${i.name} (${i.purchaseUnit || i.unit})` === val || `${i.name} (${i.unit})` === val || (i.itemCode ?? '') === val);
                         if (match) {
+                          // If parent with variants → open picker
+                          if (match.hasVariants && match.variants && match.variants.length > 0) {
+                            setVariantPicker({ parent: match, lineIdx: idx, context: 'po' });
+                            setIngSearchPO((s) => { const next = { ...s }; delete next[idx]; return next; });
+                            return;
+                          }
                           const pu = match.purchaseUnit && Number(match.purchaseUnitQty) > 0;
                           const cost = pu && Number(match.costPerPurchaseUnit) > 0
                             ? (Number(match.costPerPurchaseUnit) / 100).toFixed(2)
@@ -536,7 +578,9 @@ export default function PurchasingPage() {
                         const s = (ingSearchPO[idx] ?? '').toLowerCase().trim();
                         return !s || i.name.toLowerCase().includes(s) || (i.itemCode ?? '').toLowerCase().includes(s);
                       }).slice(0, 30).map((i) => (
-                        <option key={i.id} value={`${i.name} (${i.purchaseUnit || i.unit})`}>{i.itemCode ? `[${i.itemCode}] ` : ''}{i.name} {i.purchaseUnit ? `[${i.purchaseUnit}]` : ''} — Stock: {Number(i.currentStock).toFixed(1)} {i.unit}</option>
+                        <option key={i.id} value={`${i.name} (${i.purchaseUnit || i.unit})`}>
+                          {i.itemCode ? `[${i.itemCode}] ` : ''}{i.name} {i.hasVariants ? `[${(i.variants?.length ?? 0)} variants]` : ''} — Stock: {Number(i.currentStock).toFixed(1)} {i.unit}
+                        </option>
                       ))}
                     </datalist>
                   </div>
@@ -839,14 +883,28 @@ export default function PurchasingPage() {
                   const rqty = parseFloat(receiveQtys[item.id] ?? '0') || 0;
                   const rprice = parseFloat(receivePrices[item.id] ?? '') || (Number(item.unitCost) / 100);
                   const lineTotal = rqty * rprice;
+                  const override = receiveVariantOverrides[item.id];
+                  // Find the parent to check if this item has variants
+                  const origIng = findIngredient(item.ingredientId);
+                  const parentIng = origIng?.parentId ? ingredients.find((i) => i.variants?.some((v) => v.id === origIng.id)) : origIng?.hasVariants ? origIng : null;
                   return (
                     <div key={item.id} className="grid grid-cols-12 gap-3 items-center">
                       <div className="col-span-4">
-                        <p className="text-white font-body text-sm">{item.ingredient?.name}</p>
+                        <p className="text-white font-body text-sm">
+                          {override ? <><span className="text-[#FFA726]">{override.brandName}</span> {override.packSize && <span className="text-[#666]">{override.packSize}</span>}</> : item.ingredient?.name}
+                        </p>
                         <p className="text-[#666] font-body text-xs">
                           Ordered: {Number(item.quantityOrdered).toFixed(3)} | Received: {Number(item.quantityReceived).toFixed(3)}
                           {item.ingredient && <span className="ml-2 text-[#999]">Stock: {Number((item.ingredient as any).currentStock ?? 0).toFixed(1)}</span>}
                         </p>
+                        {parentIng && parentIng.hasVariants && (parentIng.variants?.length ?? 0) > 0 && (
+                          <button
+                            onClick={() => setReceiveVariantPicker({ poItemId: item.id, parent: parentIng })}
+                            className="text-[#FFA726] hover:text-white font-body text-[10px] tracking-widest uppercase mt-0.5 transition-colors"
+                          >
+                            {override ? 'Change variant' : 'Different variant?'}
+                          </button>
+                        )}
                       </div>
                       <div className="col-span-2">
                         <input
@@ -873,6 +931,72 @@ export default function PurchasingPage() {
                     </div>
                   );
                 })}
+                {/* Extra items — supplier sent items not in the PO */}
+                <div className="border-t border-[#2A2A2A] mt-3 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[#FFA726] text-xs font-body font-medium tracking-widest uppercase">Extra Items (not in PO)</p>
+                    <button onClick={() => setReceiveExtras((e) => [...e, { ingredientId: '', quantity: '0', unitPrice: '0' }])}
+                      className="text-[#FFA726] hover:text-white text-xs font-body tracking-widest uppercase transition-colors">+ Add</button>
+                  </div>
+                  {receiveExtras.map((extra, idx) => {
+                    const selExtra = extra.ingredientId ? findIngredient(extra.ingredientId) : undefined;
+                    return (
+                      <div key={idx} className="grid grid-cols-12 gap-3 items-center mb-2">
+                        <div className="col-span-4">
+                          <input
+                            list={`rcv-extra-${idx}`}
+                            value={receiveExtraSearch[idx] !== undefined ? receiveExtraSearch[idx] : (selExtra ? (selExtra._parentName ? `${selExtra._parentName} → ${selExtra.brandName}` : selExtra.name) : '')}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setReceiveExtraSearch((s) => ({ ...s, [idx]: val }));
+                              const match = ingredients.find((i) => `${i.name} (${i.purchaseUnit || i.unit})` === val || `${i.name} (${i.unit})` === val);
+                              if (match) {
+                                if (match.hasVariants && match.variants && match.variants.length > 0) {
+                                  setReceiveExtraVariantPicker({ parent: match, idx });
+                                  setReceiveExtraSearch((s) => { const next = { ...s }; delete next[idx]; return next; });
+                                  return;
+                                }
+                                const cost = Number(match.costPerPurchaseUnit) > 0 ? (Number(match.costPerPurchaseUnit) / 100).toFixed(2) : (Number(match.costPerUnit) / 100).toFixed(2);
+                                setReceiveExtras((l) => l.map((item, i) => i === idx ? { ...item, ingredientId: match.id, unitPrice: cost } : item));
+                                setReceiveExtraSearch((s) => { const next = { ...s }; delete next[idx]; return next; });
+                              }
+                            }}
+                            placeholder="Search ingredient…"
+                            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#FFA726]"
+                          />
+                          <datalist id={`rcv-extra-${idx}`}>
+                            {ingredients.filter((i) => {
+                              const s = (receiveExtraSearch[idx] ?? '').toLowerCase().trim();
+                              return !s || i.name.toLowerCase().includes(s);
+                            }).slice(0, 20).map((i) => (
+                              <option key={i.id} value={`${i.name} (${i.purchaseUnit || i.unit})`}>{i.name} {i.hasVariants ? `[variants]` : ''}</option>
+                            ))}
+                          </datalist>
+                        </div>
+                        <div className="col-span-2">
+                          <input type="number" step="0.001" min="0" placeholder="Qty"
+                            value={extra.quantity === '0' ? '' : extra.quantity}
+                            onChange={(e) => setReceiveExtras((l) => l.map((item, i) => i === idx ? { ...item, quantity: e.target.value } : item))}
+                            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#FFA726]" />
+                        </div>
+                        <div className="col-span-2">
+                          <input type="number" step="0.01" min="0" placeholder="৳ Price"
+                            value={extra.unitPrice === '0' ? '' : extra.unitPrice}
+                            onChange={(e) => setReceiveExtras((l) => l.map((item, i) => i === idx ? { ...item, unitPrice: e.target.value } : item))}
+                            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#FFA726]" />
+                        </div>
+                        <div className="col-span-2 text-right text-white font-body text-sm">
+                          {parseFloat(extra.quantity) > 0 ? `৳${(parseFloat(extra.quantity) * (parseFloat(extra.unitPrice) || 0)).toFixed(2)}` : '—'}
+                        </div>
+                        <div className="col-span-2 flex items-center gap-2">
+                          <span className="text-[#666] font-body text-xs">{selExtra?.purchaseUnit || selExtra?.unit || ''}</span>
+                          <button onClick={() => setReceiveExtras((l) => l.filter((_, i) => i !== idx))} className="text-[#D62B2B] hover:text-white text-xs">✕</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
                 <div className="flex flex-col gap-1 mt-2">
                   <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Notes</label>
                   <input
@@ -883,6 +1007,23 @@ export default function PurchasingPage() {
                   />
                 </div>
               </div>
+              {/* Grand Total */}
+              {(() => {
+                const poTotal = selectedPO.items.reduce((s, item) => {
+                  const q = parseFloat(receiveQtys[item.id] ?? '0') || 0;
+                  const p = parseFloat(receivePrices[item.id] ?? '') || (Number(item.unitCost) / 100);
+                  return s + q * p;
+                }, 0);
+                const extraTotal = receiveExtras.reduce((s, e) => s + (parseFloat(e.quantity) || 0) * (parseFloat(e.unitPrice) || 0), 0);
+                const total = poTotal + extraTotal;
+                return total > 0 ? (
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#2A2A2A]">
+                    <span className="text-[#999] font-body text-sm">Receive Total</span>
+                    <span className="text-white font-display text-xl">৳{total.toFixed(2)}</span>
+                  </div>
+                ) : null;
+              })()}
+
               {receiveMutation.error && (
                 <p className="text-[#F03535] text-xs font-body mt-2">{(receiveMutation.error as Error).message}</p>
               )}
@@ -1072,7 +1213,7 @@ export default function PurchasingPage() {
               <div className="col-span-1"></div>
             </div>
             {indReturnLines.map((line, idx) => {
-              const selIng = ingredients.find((i) => i.id === line.ingredientId);
+              const selIng = findIngredient(line.ingredientId);
               const qty = parseFloat(line.quantity) || 0;
               const price = parseFloat(line.unitPrice) || 0;
               return (
@@ -1080,11 +1221,16 @@ export default function PurchasingPage() {
                   <div className="col-span-5">
                     <input
                       list={`ret-ing-${idx}`}
-                      value={indReturnSearch[idx] !== undefined ? indReturnSearch[idx] : (selIng ? `${selIng.name} (${selIng.unit})` : '')}
+                      value={indReturnSearch[idx] !== undefined ? indReturnSearch[idx] : (selIng ? (variantLabels[selIng.id] ?? `${selIng.name} (${selIng.unit})`) : '')}
                       onChange={(e) => {
                         const val = e.target.value;
                         setIndReturnSearch((s) => ({ ...s, [idx]: val }));
                         const match = ingredients.find((i) => `${i.name} (${i.purchaseUnit || i.unit})` === val || `${i.name} (${i.unit})` === val || (i.itemCode ?? '') === val);
+                        if (match && match.hasVariants && match.variants && match.variants.length > 0) {
+                          setVariantPicker({ parent: match, lineIdx: idx, context: 'return' });
+                          setIndReturnSearch((s) => { const next = { ...s }; delete next[idx]; return next; });
+                          return;
+                        }
                         if (match) {
                           setIndReturnLines((l) => l.map((item, i) => i === idx ? { ...item, ingredientId: match.id, unitPrice: String((Number(match.costPerUnit) / 100).toFixed(2)) } : item));
                           setIndReturnSearch((s) => { const next = { ...s }; delete next[idx]; return next; });
@@ -1147,6 +1293,67 @@ export default function PurchasingPage() {
             {indReturnMutation.isPending ? 'Submitting…' : 'Submit Return Request'}
           </button>
         </div>
+      )}
+
+      {/* Extra Item Variant Picker */}
+      {receiveExtraVariantPicker && (
+        <VariantPickerModal
+          parent={receiveExtraVariantPicker.parent}
+          onSelect={(variant) => {
+            const parent = receiveExtraVariantPicker.parent;
+            const pu = parent.purchaseUnit || variant.purchaseUnit;
+            const cost = pu && Number(variant.costPerPurchaseUnit) > 0
+              ? (Number(variant.costPerPurchaseUnit) / 100).toFixed(2)
+              : (Number(variant.costPerUnit) / 100).toFixed(2);
+            setReceiveExtras((l) => l.map((item, i) => i === receiveExtraVariantPicker.idx ? { ...item, ingredientId: variant.id, unitPrice: cost } : item));
+            setReceiveExtraVariantPicker(null);
+          }}
+          onClose={() => setReceiveExtraVariantPicker(null)}
+        />
+      )}
+
+      {/* Receive Variant Picker */}
+      {receiveVariantPicker && (
+        <VariantPickerModal
+          parent={receiveVariantPicker.parent}
+          onSelect={(variant) => {
+            setReceiveVariantOverrides((prev) => ({
+              ...prev,
+              [receiveVariantPicker.poItemId]: { id: variant.id, brandName: variant.brandName ?? variant.name, packSize: variant.packSize ?? undefined },
+            }));
+            setReceiveVariantPicker(null);
+          }}
+          onClose={() => setReceiveVariantPicker(null)}
+        />
+      )}
+
+      {/* Variant Picker Popup */}
+      {variantPicker && (
+        <VariantPickerModal
+          parent={variantPicker.parent}
+          onSelect={(variant) => {
+            const parent = variantPicker.parent;
+            const pu = parent.purchaseUnit || variant.purchaseUnit;
+            const label = `${parent.name} → ${variant.brandName} ${variant.packSize ?? ''} (${pu || variant.unit})`;
+            setVariantLabels((prev) => ({ ...prev, [variant.id]: label }));
+
+            if (variantPicker.context === 'po') {
+              const hasPU = pu && Number(variant.purchaseUnitQty) > 0;
+              const cost = hasPU && Number(variant.costPerPurchaseUnit) > 0
+                ? (Number(variant.costPerPurchaseUnit) / 100).toFixed(2)
+                : (Number(variant.costPerUnit) / 100).toFixed(2);
+              setLines((l) => l.map((item, i) => i === variantPicker.lineIdx ? { ...item, ingredientId: variant.id, unit: pu || variant.unit, unitCost: cost } : item));
+            } else {
+              const hasPU = pu && Number(variant.purchaseUnitQty) > 0;
+              const cost = hasPU && Number(variant.costPerPurchaseUnit) > 0
+                ? (Number(variant.costPerPurchaseUnit) / 100).toFixed(2)
+                : (Number(variant.costPerUnit) / 100).toFixed(2);
+              setIndReturnLines((l) => l.map((item, i) => i === variantPicker.lineIdx ? { ...item, ingredientId: variant.id, unitPrice: cost } : item));
+            }
+            setVariantPicker(null);
+          }}
+          onClose={() => setVariantPicker(null)}
+        />
       )}
     </div>
   );

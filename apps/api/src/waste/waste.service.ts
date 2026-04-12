@@ -2,12 +2,14 @@ import { Injectable } from '@nestjs/common';
 import type { CreateWasteLogDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
+import { IngredientService } from '../ingredient/ingredient.service';
 
 @Injectable()
 export class WasteService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ws: RestoraPosGateway,
+    private readonly ingredientService: IngredientService,
   ) {}
 
   findAll(branchId: string, ingredientId?: string) {
@@ -60,6 +62,11 @@ export class WasteService {
 
       return { wasteLog, ingredient };
     });
+
+    // Sync parent if this is a variant
+    if (result.ingredient.parentId) {
+      await this.ingredientService.syncParentStock(result.ingredient.parentId);
+    }
 
     // Emit low-stock alert if needed
     if (result.ingredient.currentStock.toNumber() <= result.ingredient.minimumStock.toNumber()) {

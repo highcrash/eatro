@@ -57,6 +57,13 @@ export interface ReceiveGoodsDto {
     unitPrice?: number; // in paisa — if provided, updates ingredient cost
     makingDate?: string;
     expiryDate?: string;
+    ingredientIdOverride?: string; // receive as a different variant of the same parent
+  }[];
+  /** Extra items not in the original PO (supplier sent additional products) */
+  additionalItems?: {
+    ingredientId: string;
+    quantityReceived: number;
+    unitPrice?: number; // in paisa
   }[];
   notes?: string;
 }

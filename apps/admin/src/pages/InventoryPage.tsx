@@ -1,8 +1,9 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 import type { Ingredient, Supplier, StockMovement, StockUnit, IngredientCategory } from '@restora/types';
+import VariantDialog from '../components/VariantDialog';
 
 const INV_CSV_EXAMPLE = `name,code,category,unit,minimum_stock,cost_per_unit,purchase_unit,purchase_unit_qty,cost_per_purchase_unit
 Chicken Breast,MEA0030,RAW,KG,5,450,,,
@@ -205,6 +206,8 @@ export default function InventoryPage() {
   const [showCSVUpload, setShowCSVUpload] = useState(false);
   const [csvResult, setCsvResult] = useState<{ total: number; created: number; skipped: number; results: { name: string; status: string; reason?: string }[] } | null>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
+  const [expandedParent, setExpandedParent] = useState<string | null>(null);
+  const [variantDialog, setVariantDialog] = useState<{ parent: Ingredient; variant?: Ingredient } | null>(null);
 
   const { data: ingredients = [], isLoading } = useQuery<Ingredient[]>({
     queryKey: ['ingredients'],
@@ -287,6 +290,11 @@ export default function InventoryPage() {
       setDeleteError('');
     },
     onError: (err: Error) => setDeleteError(err.message),
+  });
+
+  const convertToParentMut = useMutation({
+    mutationFn: (id: string) => api.patch(`/ingredients/${id}/convert-to-parent`, {}),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ingredients'] }),
   });
 
   const bulkMutation = useMutation({
@@ -518,9 +526,22 @@ export default function InventoryPage() {
               <tbody>
                 {filteredIngredients.map((ing) => {
                   const isLow = Number(ing.currentStock) <= Number(ing.minimumStock);
+                  const hasVars = ing.hasVariants && (ing.variants?.length ?? 0) > 0;
+                  const isExpanded = expandedParent === ing.id;
                   return (
-                    <tr key={ing.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
-                      <td className="px-4 py-3 text-white font-body text-sm">{ing.name}</td>
+                    <React.Fragment key={ing.id}>
+                    <tr className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
+                      <td className="px-4 py-3 text-white font-body text-sm">
+                        <div className="flex items-center gap-2">
+                          {ing.hasVariants && (
+                            <button onClick={() => setExpandedParent(isExpanded ? null : ing.id)} className="text-[#666] text-xs">
+                              {isExpanded ? '▼' : '▶'}
+                            </button>
+                          )}
+                          {ing.name}
+                          {ing.hasVariants && <span className="text-[#FFA726] font-mono text-[10px] bg-[#FFA726]/10 px-1.5 py-0.5">{ing.variants?.length ?? 0} variants</span>}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-[#666] font-mono text-xs">{ing.itemCode ?? '—'}</td>
                       <td className="px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">{ing.category}</td>
                       <td className="px-4 py-3 text-[#999] font-body text-sm">{ing.unit}</td>
@@ -528,6 +549,7 @@ export default function InventoryPage() {
                         <span className={`font-body text-sm font-medium ${isLow ? 'text-[#D62B2B]' : 'text-white'}`}>
                           {Number(ing.currentStock).toFixed(2)}
                           {isLow && <span className="ml-1 text-xs text-[#D62B2B]">▼ LOW</span>}
+                          {ing.hasVariants && <span className="ml-1 text-[#666] text-[10px]">(agg)</span>}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-[#999] font-body text-sm">{Number(ing.minimumStock).toFixed(2)}</td>
@@ -537,16 +559,61 @@ export default function InventoryPage() {
                           ? ing.suppliers.map((s) => s.supplier.name).join(', ')
                           : ing.supplier?.name ?? '—'}
                       </td>
-                      <td className="px-4 py-3 flex gap-2">
-                        <button onClick={() => openAdjust(ing)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Adjust</button>
+                      <td className="px-4 py-3 flex gap-2 flex-wrap">
+                        {!ing.hasVariants && (
+                          <button onClick={() => openAdjust(ing)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Adjust</button>
+                        )}
                         <button onClick={() => openEditIng(ing)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Edit</button>
-                        {ing.isActive && Number(ing.currentStock) === 0 && (
+                        {!ing.hasVariants && !ing.parentId && (
+                          <button onClick={() => { if (confirm(`Convert "${ing.name}" to a parent with variants?`)) convertToParentMut.mutate(ing.id); }} className="text-[#FFA726] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Variants</button>
+                        )}
+                        {ing.isActive && Number(ing.currentStock) === 0 && !hasVars && (
                           <button onClick={() => { setDeleteError(''); if (confirm(`Delete "${ing.name}"? This cannot be undone.`)) deleteMutation.mutate(ing.id); }} className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs tracking-widest uppercase transition-colors">
                             Delete
                           </button>
                         )}
                       </td>
                     </tr>
+                    {/* Variant sub-rows */}
+                    {isExpanded && ing.variants?.map((v) => {
+                      return (
+                        <tr key={v.id} className="border-b border-[#2A2A2A] bg-[#0D0D0D]">
+                          <td className="pl-12 pr-4 py-2 font-body text-sm">
+                            <span className="text-[#FFA726]">{v.brandName}</span>
+                            {v.packSize && <span className="text-[#666] ml-1">{v.packSize}</span>}
+                            {v.piecesPerPack && <span className="text-[#666] ml-1">({v.piecesPerPack} {ing.unit}/{ing.purchaseUnit || 'PACK'})</span>}
+                          </td>
+                          <td className="px-4 py-2 text-[#666] font-mono text-xs">{v.sku ?? '—'}</td>
+                          <td className="px-4 py-2 text-[#999] font-body text-xs">{ing.purchaseUnit ?? '—'}</td>
+                          <td className="px-4 py-2 text-[#999] font-body text-sm">{v.unit}</td>
+                          <td className="px-4 py-2">
+                            <span className="font-body text-sm font-medium text-white">
+                              {Number(v.currentStock).toFixed(2)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-[#555] font-body text-sm">—</td>
+                          <td className="px-4 py-2 text-[#999] font-body text-sm">৳{(Number(v.costPerUnit) / 100).toFixed(2)}</td>
+                          <td className="px-4 py-2 text-[#999] font-body text-xs">
+                            {v.suppliers && v.suppliers.length > 0 ? v.suppliers.map((s) => s.supplier.name).join(', ') : v.supplier?.name ?? '—'}
+                          </td>
+                          <td className="px-4 py-2 flex gap-2">
+                            <button onClick={() => openAdjust(v as Ingredient)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Adjust</button>
+                            <button onClick={() => setVariantDialog({ parent: ing, variant: v as Ingredient })} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Edit</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {isExpanded && (
+                      <tr className="border-b border-[#2A2A2A] bg-[#0D0D0D]">
+                        <td colSpan={9} className="px-12 py-2">
+                          <button onClick={() => setVariantDialog({ parent: ing })}
+                            className="text-[#FFA726] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">
+                            + Add Variant
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
                 {filteredIngredients.length === 0 && (
@@ -820,6 +887,15 @@ export default function InventoryPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Variant Add/Edit Dialog */}
+      {variantDialog && (
+        <VariantDialog
+          parent={variantDialog.parent}
+          variant={variantDialog.variant}
+          onClose={() => setVariantDialog(null)}
+        />
       )}
     </div>
   );

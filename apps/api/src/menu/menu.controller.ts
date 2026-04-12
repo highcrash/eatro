@@ -31,6 +31,15 @@ export class MenuController {
     return this.menuService.create(user.branchId, dto);
   }
 
+  @Post('bulk')
+  @Roles('OWNER', 'MANAGER')
+  bulkCreate(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { rows: { categoryName: string; name: string; type: string; price: number; description?: string; tags?: string }[] },
+  ) {
+    return this.menuService.bulkCreate(user.branchId, dto.rows);
+  }
+
   @Patch(':id')
   @Roles('OWNER', 'MANAGER')
   update(@Param('id') id: string, @Body() dto: UpdateMenuItemDto, @CurrentUser() user: JwtPayload) {

@@ -2,12 +2,14 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { UpsertRecipeDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
+import { IngredientService } from '../ingredient/ingredient.service';
 
 @Injectable()
 export class RecipeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly unitConversionService: UnitConversionService,
+    private readonly ingredientService: IngredientService,
   ) {}
 
   async findByMenuItem(menuItemId: string, branchId: string) {
@@ -147,6 +149,7 @@ export class RecipeService {
     }[] = [];
 
     const stockUpdates: { id: string; decrement: number }[] = [];
+    const parentSyncIds = new Set<string>();
 
     for (const orderItem of items) {
       const recipe = recipes.find((r) => r.menuItemId === orderItem.menuItemId);
@@ -158,15 +161,40 @@ export class RecipeService {
         if (recipeItem.unit !== recipeItem.ingredient.unit) {
           totalQty = await this.unitConversionService.convert(branchId, totalQty, recipeItem.unit, recipeItem.ingredient.unit);
         }
-        movements.push({
-          branchId,
-          ingredientId: recipeItem.ingredientId,
-          type: 'SALE',
-          quantity: -totalQty,
-          orderId,
-          notes: `Auto-deducted for order`,
-        });
-        stockUpdates.push({ id: recipeItem.ingredientId, decrement: totalQty });
+
+        if (recipeItem.ingredient.hasVariants) {
+          // Resolve to variants — deduct from those with stock (FIFO)
+          const variants = await this.prisma.ingredient.findMany({
+            where: { parentId: recipeItem.ingredientId, isActive: true, deletedAt: null, currentStock: { gt: 0 } },
+            orderBy: { createdAt: 'asc' },
+          });
+
+          let remaining = totalQty;
+          for (const variant of variants) {
+            if (remaining <= 0) break;
+            const available = Number(variant.currentStock);
+            const deduct = Math.min(remaining, available);
+            movements.push({ branchId, ingredientId: variant.id, type: 'SALE', quantity: -deduct, orderId, notes: 'Auto-deducted for order' });
+            stockUpdates.push({ id: variant.id, decrement: deduct });
+            remaining -= deduct;
+          }
+          // If still remaining, allow negative on first variant (or any available)
+          if (remaining > 0) {
+            const fallback = variants[0] ?? await this.prisma.ingredient.findFirst({
+              where: { parentId: recipeItem.ingredientId, isActive: true, deletedAt: null },
+              orderBy: { createdAt: 'asc' },
+            });
+            if (fallback) {
+              movements.push({ branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, orderId, notes: 'Auto-deducted for order (insufficient stock)' });
+              stockUpdates.push({ id: fallback.id, decrement: remaining });
+            }
+          }
+          parentSyncIds.add(recipeItem.ingredientId);
+        } else {
+          // Standard ingredient (no variants) — existing logic
+          movements.push({ branchId, ingredientId: recipeItem.ingredientId, type: 'SALE', quantity: -totalQty, orderId, notes: 'Auto-deducted for order' });
+          stockUpdates.push({ id: recipeItem.ingredientId, decrement: totalQty });
+        }
       }
     }
 
@@ -181,6 +209,11 @@ export class RecipeService {
       ),
       this.prisma.stockMovement.createMany({ data: movements }),
     ]);
+
+    // Sync parent aggregates outside transaction
+    for (const parentId of parentSyncIds) {
+      await this.ingredientService.syncParentStock(parentId);
+    }
   }
 
   // Used by OrderService to restore stock on item void / order void
@@ -188,7 +221,7 @@ export class RecipeService {
     const menuItemIds = items.map((i) => i.menuItemId);
     const recipes = await this.prisma.recipe.findMany({
       where: { menuItemId: { in: menuItemIds } },
-      include: { items: true },
+      include: { items: { include: { ingredient: true } } },
     });
 
     if (recipes.length === 0) return;
@@ -202,6 +235,7 @@ export class RecipeService {
       orderId: string;
       notes: string;
     }[] = [];
+    const parentSyncIds = new Set<string>();
 
     for (const orderItem of items) {
       const recipe = recipes.find((r) => r.menuItemId === orderItem.menuItemId);
@@ -209,15 +243,40 @@ export class RecipeService {
 
       for (const recipeItem of recipe.items) {
         const totalQty = recipeItem.quantity.toNumber() * orderItem.quantity;
-        stockUpdates.push({ id: recipeItem.ingredientId, increment: totalQty });
-        movements.push({
-          branchId,
-          ingredientId: recipeItem.ingredientId,
-          type: 'VOID_RETURN',
-          quantity: totalQty,
-          orderId,
-          notes: `Stock returned on void`,
-        });
+
+        if (recipeItem.ingredient.hasVariants) {
+          // Look up the SALE movements for this order to find which variants were deducted
+          const saleMovements = await this.prisma.stockMovement.findMany({
+            where: {
+              orderId,
+              type: 'SALE',
+              ingredient: { parentId: recipeItem.ingredientId },
+            },
+          });
+
+          if (saleMovements.length > 0) {
+            // Restore to the exact variants that were deducted
+            for (const mv of saleMovements) {
+              const restoreQty = Math.abs(Number(mv.quantity));
+              stockUpdates.push({ id: mv.ingredientId, increment: restoreQty });
+              movements.push({ branchId, ingredientId: mv.ingredientId, type: 'VOID_RETURN', quantity: restoreQty, orderId, notes: 'Stock returned on void' });
+            }
+          } else {
+            // Fallback: restore to first variant
+            const firstVariant = await this.prisma.ingredient.findFirst({
+              where: { parentId: recipeItem.ingredientId, isActive: true, deletedAt: null },
+              orderBy: { createdAt: 'asc' },
+            });
+            if (firstVariant) {
+              stockUpdates.push({ id: firstVariant.id, increment: totalQty });
+              movements.push({ branchId, ingredientId: firstVariant.id, type: 'VOID_RETURN', quantity: totalQty, orderId, notes: 'Stock returned on void' });
+            }
+          }
+          parentSyncIds.add(recipeItem.ingredientId);
+        } else {
+          stockUpdates.push({ id: recipeItem.ingredientId, increment: totalQty });
+          movements.push({ branchId, ingredientId: recipeItem.ingredientId, type: 'VOID_RETURN', quantity: totalQty, orderId, notes: 'Stock returned on void' });
+        }
       }
     }
 
@@ -232,5 +291,9 @@ export class RecipeService {
       ),
       this.prisma.stockMovement.createMany({ data: movements }),
     ]);
+
+    for (const parentId of parentSyncIds) {
+      await this.ingredientService.syncParentStock(parentId);
+    }
   }
 }

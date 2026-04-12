@@ -25,6 +25,6 @@ select option {
 @media print {
   body * { visibility: hidden; }
   .shopping-list-print-area, .shopping-list-print-area * { visibility: visible; }
-  .shopping-list-print-area { position: fixed; inset: 0; background: white; padding: 20px; overflow: visible; display: block !important; }
+  .shopping-list-print-area { position: absolute; left: 0; top: 0; width: 100%; background: white; padding: 20px; overflow: visible; display: block !important; }
   .no-print { display: none !important; }
 }

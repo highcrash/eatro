@@ -2,12 +2,14 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import type { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, ReceiveGoodsDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
+import { IngredientService } from '../ingredient/ingredient.service';
 
 @Injectable()
 export class PurchasingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly unitConversion: UnitConversionService,
+    private readonly ingredientService: IngredientService,
   ) {}
 
   findAll(branchId: string, status?: string) {
@@ -122,7 +124,9 @@ export class PurchasingService {
     if (po.status === 'CANCELLED') throw new BadRequestException('Cannot receive a cancelled order');
     if (po.status === 'DRAFT') throw new BadRequestException('Order must be SENT before receiving');
 
-    return this.prisma.$transaction(async (tx) => {
+    const parentSyncIds = new Set<string>();
+
+    const result = await this.prisma.$transaction(async (tx) => {
       let allReceived = true;
       const stockMovements: {
         branchId: string;
@@ -153,7 +157,9 @@ export class PurchasingService {
         });
 
         // Update ingredient stock + cost per unit
-        const ingredient = await tx.ingredient.findUniqueOrThrow({ where: { id: poItem.ingredientId } });
+        // Allow receiving as a different variant (supplier sent a different brand)
+        const targetIngredientId = receipt.ingredientIdOverride ?? poItem.ingredientId;
+        const ingredient = await tx.ingredient.findUniqueOrThrow({ where: { id: targetIngredientId } });
         const hasPurchaseUnit = ingredient.purchaseUnit && ingredient.purchaseUnitQty.toNumber() > 0;
         const purchaseUnitQty = hasPurchaseUnit ? ingredient.purchaseUnitQty.toNumber() : 1;
 
@@ -208,13 +214,18 @@ export class PurchasingService {
         }
 
         await tx.ingredient.update({
-          where: { id: poItem.ingredientId },
+          where: { id: targetIngredientId },
           data: ingredientUpdate,
         });
 
+        // Track parent for sync if this is a variant
+        if (ingredient.parentId) {
+          parentSyncIds.add(ingredient.parentId);
+        }
+
         stockMovements.push({
           branchId,
-          ingredientId: poItem.ingredientId,
+          ingredientId: targetIngredientId,
           type: 'PURCHASE',
           quantity: stockQtyReceived, // in stock units (not purchase units)
           orderId: null,
@@ -236,6 +247,49 @@ export class PurchasingService {
         }
       }
 
+      // Process additional items (not in original PO — supplier sent extras)
+      if (dto.additionalItems && dto.additionalItems.length > 0) {
+        for (const extra of dto.additionalItems) {
+          if (!extra.ingredientId || extra.quantityReceived <= 0) continue;
+          const ingredient = await tx.ingredient.findUnique({ where: { id: extra.ingredientId } });
+          if (!ingredient) continue;
+          const hasPurchaseUnit = ingredient.purchaseUnit && ingredient.purchaseUnitQty.toNumber() > 0;
+          const purchaseUnitQty = hasPurchaseUnit ? ingredient.purchaseUnitQty.toNumber() : 1;
+          const stockQtyReceived = hasPurchaseUnit ? extra.quantityReceived * purchaseUnitQty : extra.quantityReceived;
+
+          const ingredientUpdate: Record<string, unknown> = { currentStock: { increment: stockQtyReceived } };
+          if (extra.unitPrice && extra.unitPrice > 0) {
+            const conversionFactor = stockQtyReceived / extra.quantityReceived;
+            ingredientUpdate.costPerUnit = Math.round(extra.unitPrice / conversionFactor);
+            if (hasPurchaseUnit) ingredientUpdate.costPerPurchaseUnit = extra.unitPrice;
+          }
+
+          await tx.ingredient.update({ where: { id: extra.ingredientId }, data: ingredientUpdate });
+          if (ingredient.parentId) parentSyncIds.add(ingredient.parentId);
+
+          // Add PO item record so it appears in the PO
+          await tx.purchaseOrderItem.create({
+            data: {
+              purchaseOrderId: id,
+              ingredientId: extra.ingredientId,
+              quantityOrdered: extra.quantityReceived,
+              quantityReceived: extra.quantityReceived,
+              unitCost: extra.unitPrice ?? 0,
+            },
+          });
+
+          stockMovements.push({
+            branchId,
+            ingredientId: extra.ingredientId,
+            type: 'PURCHASE',
+            quantity: stockQtyReceived,
+            orderId: null,
+            staffId,
+            notes: dto.notes ?? `Extra item received with PO ${po.id.slice(-8)}`,
+          });
+        }
+      }
+
       if (stockMovements.length > 0) {
         await tx.stockMovement.createMany({ data: stockMovements });
       }
@@ -247,6 +301,12 @@ export class PurchasingService {
         if (poItem && receipt.quantityReceived > 0) {
           const price = (receipt.unitPrice !== undefined && receipt.unitPrice > 0) ? receipt.unitPrice : poItem.unitCost.toNumber();
           receiptTotal += price * receipt.quantityReceived;
+        }
+      }
+      // Add additional items cost
+      for (const extra of (dto.additionalItems ?? [])) {
+        if (extra.quantityReceived > 0 && extra.unitPrice && extra.unitPrice > 0) {
+          receiptTotal += extra.unitPrice * extra.quantityReceived;
         }
       }
 
@@ -271,59 +331,122 @@ export class PurchasingService {
         },
       });
     });
+
+    // Sync parent aggregates for any variants that received stock
+    for (const parentId of parentSyncIds) {
+      await this.ingredientService.syncParentStock(parentId);
+    }
+
+    return result;
   }
 
   async generateShoppingList(branchId: string) {
-    // Get all low-stock ingredients
+    // Get all top-level ingredients (not variants — low stock is checked on parent aggregate)
     const ingredients = await this.prisma.ingredient.findMany({
-      where: { branchId, deletedAt: null, isActive: true },
-      include: { supplier: { select: { id: true, name: true } } },
+      where: { branchId, deletedAt: null, isActive: true, parentId: null },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        variants: {
+          where: { deletedAt: null, isActive: true },
+          include: { supplier: { select: { id: true, name: true } } },
+          orderBy: [{ currentStock: 'desc' }, { createdAt: 'desc' }],
+        },
+      },
     });
 
     const lowStock = ingredients.filter(
-      (i) => i.currentStock.toNumber() <= i.minimumStock.toNumber() && !i.name.startsWith('[PR]'),
+      (i) => i.minimumStock.toNumber() > 0 && i.currentStock.toNumber() <= i.minimumStock.toNumber() && !i.name.startsWith('[PR]'),
     );
 
-    // Get last purchase price for each ingredient
-    const lastPrices: Record<string, number> = {};
+    const results = [];
     for (const ing of lowStock) {
-      const lastPOItem = await this.prisma.purchaseOrderItem.findFirst({
-        where: { ingredientId: ing.id, purchaseOrder: { status: { in: ['RECEIVED', 'PARTIAL'] } } },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (lastPOItem) {
-        lastPrices[ing.id] = lastPOItem.unitCost.toNumber();
+      const purchaseUnit = ing.purchaseUnit;
+      const deficit = Math.max(0, ing.minimumStock.toNumber() - ing.currentStock.toNumber());
+      const suggestedStockQty = Math.max(0, ing.minimumStock.toNumber() * 2 - ing.currentStock.toNumber());
+
+      if (ing.hasVariants && ing.variants.length > 0) {
+        // Pick the best variant: most stock first, then most recent
+        const bestVariant = ing.variants[0];
+        const puQty = bestVariant.purchaseUnitQty.toNumber();
+        const suggestedPurchaseQty = purchaseUnit && puQty > 0
+          ? Math.ceil(suggestedStockQty / puQty)
+          : suggestedStockQty;
+
+        // Get last purchase price for this variant
+        const lastPOItem = await this.prisma.purchaseOrderItem.findFirst({
+          where: { ingredientId: bestVariant.id, purchaseOrder: { status: { in: ['RECEIVED', 'PARTIAL'] } } },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        results.push({
+          ingredientId: bestVariant.id,
+          parentId: ing.id,
+          parentName: ing.name,
+          name: `${ing.name} → ${bestVariant.brandName ?? ''} ${bestVariant.packSize ?? ''}`.trim(),
+          unit: ing.unit,
+          purchaseUnit,
+          purchaseUnitQty: puQty,
+          costPerPurchaseUnit: bestVariant.costPerPurchaseUnit.toNumber(),
+          currentStock: ing.currentStock.toNumber(), // parent aggregate
+          minimumStock: ing.minimumStock.toNumber(),
+          deficit,
+          suggestedQty: suggestedPurchaseQty,
+          supplierId: bestVariant.supplierId ?? ing.supplierId,
+          supplierName: bestVariant.supplier?.name ?? ing.supplier?.name ?? null,
+          lastPurchaseRate: bestVariant.costPerPurchaseUnit.toNumber() > 0
+            ? bestVariant.costPerPurchaseUnit.toNumber()
+            : lastPOItem?.unitCost.toNumber() ?? 0,
+          category: ing.category,
+          hasVariants: true,
+          variants: ing.variants.map((v) => ({
+            id: v.id,
+            brandName: v.brandName,
+            packSize: v.packSize,
+            piecesPerPack: v.piecesPerPack,
+            currentStock: v.currentStock.toNumber(),
+            costPerPurchaseUnit: v.costPerPurchaseUnit.toNumber(),
+            supplierId: v.supplierId,
+            supplierName: v.supplier?.name ?? null,
+          })),
+        });
+      } else {
+        // Standard ingredient (no variants)
+        const purchaseUnitQty = ing.purchaseUnitQty.toNumber();
+        const suggestedPurchaseQty = purchaseUnit && purchaseUnitQty > 0
+          ? Math.ceil(suggestedStockQty / purchaseUnitQty)
+          : suggestedStockQty;
+
+        const lastPOItem = await this.prisma.purchaseOrderItem.findFirst({
+          where: { ingredientId: ing.id, purchaseOrder: { status: { in: ['RECEIVED', 'PARTIAL'] } } },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        results.push({
+          ingredientId: ing.id,
+          parentId: null,
+          parentName: null,
+          name: ing.name,
+          unit: ing.unit,
+          purchaseUnit,
+          purchaseUnitQty,
+          costPerPurchaseUnit: ing.costPerPurchaseUnit.toNumber(),
+          currentStock: ing.currentStock.toNumber(),
+          minimumStock: ing.minimumStock.toNumber(),
+          deficit,
+          suggestedQty: suggestedPurchaseQty,
+          supplierId: ing.supplierId,
+          supplierName: ing.supplier?.name ?? null,
+          lastPurchaseRate: purchaseUnit && ing.costPerPurchaseUnit.toNumber() > 0
+            ? ing.costPerPurchaseUnit.toNumber()
+            : lastPOItem?.unitCost.toNumber() ?? 0,
+          category: ing.category,
+          hasVariants: false,
+          variants: [],
+        });
       }
     }
 
-    return lowStock.map((ing) => {
-      const purchaseUnitQty = ing.purchaseUnitQty.toNumber();
-      const deficit = Math.max(0, ing.minimumStock.toNumber() - ing.currentStock.toNumber());
-      const suggestedStockQty = Math.max(0, ing.minimumStock.toNumber() * 2 - ing.currentStock.toNumber());
-      // Convert suggested qty to purchase units if available
-      const suggestedPurchaseQty = ing.purchaseUnit && purchaseUnitQty > 0
-        ? Math.ceil(suggestedStockQty / purchaseUnitQty)
-        : suggestedStockQty;
-
-      return {
-        ingredientId: ing.id,
-        name: ing.name,
-        unit: ing.unit,
-        purchaseUnit: ing.purchaseUnit,
-        purchaseUnitQty,
-        costPerPurchaseUnit: ing.costPerPurchaseUnit.toNumber(),
-        currentStock: ing.currentStock.toNumber(),
-        minimumStock: ing.minimumStock.toNumber(),
-        deficit,
-        suggestedQty: suggestedPurchaseQty,
-        supplierId: ing.supplierId,
-        supplierName: ing.supplier?.name ?? null,
-        lastPurchaseRate: ing.purchaseUnit && ing.costPerPurchaseUnit.toNumber() > 0
-          ? ing.costPerPurchaseUnit.toNumber()
-          : lastPrices[ing.id] ?? 0,
-        category: ing.category,
-      };
-    });
+    return results;
   }
 
   async submitShoppingList(

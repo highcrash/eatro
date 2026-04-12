@@ -55,6 +55,71 @@ export class MenuService {
     });
   }
 
+  // ─── Bulk Import ────────────────────────────────────────────────────────────
+
+  async bulkCreate(
+    branchId: string,
+    rows: { categoryName: string; name: string; type: string; price: number; description?: string; tags?: string }[],
+  ) {
+    // 1. Collect unique category names and resolve/create them
+    const catNames = [...new Set(rows.map((r) => r.categoryName.trim()).filter(Boolean))];
+    const existingCats = await this.prisma.menuCategory.findMany({
+      where: { branchId, deletedAt: null },
+    });
+    const catMap = new Map<string, string>();
+    for (const c of existingCats) catMap.set(c.name.toLowerCase(), c.id);
+
+    for (const name of catNames) {
+      if (!catMap.has(name.toLowerCase())) {
+        const created = await this.prisma.menuCategory.create({
+          data: { branchId, name, sortOrder: catMap.size },
+        });
+        catMap.set(name.toLowerCase(), created.id);
+      }
+    }
+
+    // 2. Create menu items
+    let created = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const categoryId = catMap.get(row.categoryName.trim().toLowerCase());
+      if (!categoryId) {
+        errors.push(`Row ${i + 1}: category "${row.categoryName}" not found`);
+        skipped++;
+        continue;
+      }
+      const itemType = row.type?.toUpperCase() === 'BEVERAGE' ? 'BEVERAGE' : 'FOOD';
+      const price = Math.round(Number(row.price) * 100); // convert to paisa
+      if (isNaN(price) || price < 0) {
+        errors.push(`Row ${i + 1}: invalid price "${row.price}"`);
+        skipped++;
+        continue;
+      }
+      try {
+        await this.prisma.menuItem.create({
+          data: {
+            branchId,
+            categoryId,
+            name: row.name.trim(),
+            type: itemType as any,
+            price,
+            description: row.description?.trim() || null,
+            tags: row.tags?.trim() || null,
+          },
+        });
+        created++;
+      } catch (e: any) {
+        errors.push(`Row ${i + 1} ("${row.name}"): ${e.message?.slice(0, 80)}`);
+        skipped++;
+      }
+    }
+
+    return { created, skipped, errors };
+  }
+
   // ─── Combo Items ───────────────────────────────────────────────────────────
 
   async setComboItems(

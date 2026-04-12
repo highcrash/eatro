@@ -7,6 +7,7 @@ import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
 import { useCashierPermissions } from '../lib/permissions';
 import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
+import VariantPickerModal from '../components/VariantPickerModal';
 
 interface Supplier { id: string; name: string; totalDue: number }
 interface Ingredient {
@@ -17,8 +18,17 @@ interface Ingredient {
   purchaseUnit: string | null;
   purchaseUnitQty: number;
   currentStock: number;
+  minimumStock: number;
   costPerUnit: number;
   costPerPurchaseUnit: number;
+  hasVariants: boolean;
+  parentId: string | null;
+  brandName: string | null;
+  packSize: string | null;
+  piecesPerPack: number | null;
+  isActive: boolean;
+  variants?: Ingredient[];
+  supplier?: { name: string } | null;
 }
 
 type Tab = 'create-po' | 'receive' | 'returns' | 'pay';
@@ -44,6 +54,18 @@ function ingredientLabel(i: Ingredient) {
  * Find a single ingredient that matches the user's free-text search.
  * Accepts exact label, name, or itemCode (case-insensitive).
  */
+/** Look up ingredient by ID, including inside variant children.
+ *  For variants, inherits parent's purchaseUnit if variant's own is null. */
+function findIngredient(list: Ingredient[], id: string): Ingredient | null {
+  const top = list.find((i) => i.id === id);
+  if (top) return top;
+  for (const ing of list) {
+    const v = ing.variants?.find((vv) => vv.id === id);
+    if (v) return { ...v, purchaseUnit: v.purchaseUnit || ing.purchaseUnit };
+  }
+  return null;
+}
+
 function matchIngredient(list: Ingredient[], q: string): Ingredient | null {
   const t = q.trim().toLowerCase();
   if (!t) return null;
@@ -219,6 +241,7 @@ function CreatePoTab({ suppliers, ingredients, guardAndRun, qc }: {
   const [lines, setLines] = useState<POLine[]>([{ ingredientId: '', quantity: '', unit: '', unitCost: '' }]);
   const [search, setSearch] = useState<Record<number, string>>({});
   const [error, setError] = useState('');
+  const [poVariantPicker, setPoVariantPicker] = useState<{ parent: Ingredient; idx: number } | null>(null);
 
   const total = lines.reduce((s, l) => s + (parseFloat(l.quantity || '0') * parseFloat(l.unitCost || '0')), 0);
 
@@ -230,6 +253,11 @@ function CreatePoTab({ suppliers, ingredients, guardAndRun, qc }: {
     setSearch((s) => ({ ...s, [idx]: val }));
     const match = matchIngredient(ingredients, val);
     if (match) {
+      if (match.hasVariants && (match as any).variants?.length > 0) {
+        setPoVariantPicker({ parent: match as any, idx });
+        setSearch((s) => { const next = { ...s }; delete next[idx]; return next; });
+        return;
+      }
       const hasPU = !!match.purchaseUnit && Number(match.purchaseUnitQty) > 0;
       const unit = match.purchaseUnit || match.unit;
       const cost = hasPU
@@ -310,7 +338,7 @@ function CreatePoTab({ suppliers, ingredients, guardAndRun, qc }: {
           <span />
         </div>
         {lines.map((line, idx) => {
-          const ing = ingredients.find((i) => i.id === line.ingredientId) ?? null;
+          const ing = findIngredient(ingredients, line.ingredientId);
           const units = ing
             ? (ing.purchaseUnit ? [ing.purchaseUnit] : convertibleUnits(ing.unit))
             : [];
@@ -390,6 +418,21 @@ function CreatePoTab({ suppliers, ingredients, guardAndRun, qc }: {
       >
         {mut.isPending ? 'Creating…' : 'Create Purchase Order'}
       </button>
+
+      {poVariantPicker && (
+        <VariantPickerModal
+          parent={poVariantPicker.parent as any}
+          onSelect={(variant) => {
+            const pu = poVariantPicker.parent.purchaseUnit || variant.purchaseUnit;
+            const hasPU = !!pu && Number(variant.purchaseUnitQty) > 0;
+            const unit = pu || variant.unit;
+            const cost = hasPU && Number(variant.costPerPurchaseUnit) > 0 ? (Number(variant.costPerPurchaseUnit) / 100).toFixed(2) : (Number(variant.costPerUnit) / 100).toFixed(2);
+            updateLine(poVariantPicker.idx, { ingredientId: variant.id, unit, unitCost: cost });
+            setPoVariantPicker(null);
+          }}
+          onClose={() => setPoVariantPicker(null)}
+        />
+      )}
     </div>
   );
 }
@@ -400,7 +443,7 @@ function poUnit(ingredient?: { unit?: string; purchaseUnit?: string | null } | n
   return itemUnit || ingredient?.purchaseUnit || ingredient?.unit || '';
 }
 
-function ReceiveTab({ openPOs, guardAndRun, qc }: {
+function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
   openPOs: PurchaseOrder[];
   ingredients: Ingredient[];
   mode: ApprovalMode;
@@ -413,14 +456,19 @@ function ReceiveTab({ openPOs, guardAndRun, qc }: {
   const [receivePrices, setReceivePrices] = useState<Record<string, string>>({});
   const [receiveNotes, setReceiveNotes] = useState('');
   const [error, setError] = useState('');
+  const [rcvVariantOverrides, setRcvVariantOverrides] = useState<Record<string, { id: string; brandName: string; packSize?: string }>>({});
+  const [rcvVariantPicker, setRcvVariantPicker] = useState<{ poItemId: string; parent: Ingredient } | null>(null);
+  const [rcvExtras, setRcvExtras] = useState<{ ingredientId: string; quantity: string; unitPrice: string }[]>([]);
+  const [rcvExtraSearch, setRcvExtraSearch] = useState<Record<number, string>>({});
+  const [rcvExtraVariantPicker, setRcvExtraVariantPicker] = useState<{ parent: Ingredient; idx: number } | null>(null);
 
-  const grandTotal = po
+  const grandTotal = (po
     ? po.items.reduce((sum, item) => {
         const qty = parseFloat(receiveQtys[item.id] || '0') || 0;
         const price = parseFloat(receivePrices[item.id] || '') || (Number(item.unitCost) / 100);
         return sum + qty * price;
       }, 0)
-    : 0;
+    : 0) + rcvExtras.reduce((sum, e) => sum + (parseFloat(e.quantity) || 0) * (parseFloat(e.unitPrice) || 0), 0);
 
   const mut = useMutation({
     mutationFn: (body: object) => api.post('/cashier-ops/purchase-order/receive', body),
@@ -448,13 +496,18 @@ function ReceiveTab({ openPOs, guardAndRun, qc }: {
           purchaseOrderItemId: i.id,
           quantityReceived: parseFloat(receiveQtys[i.id]),
           unitPrice,
+          ingredientIdOverride: rcvVariantOverrides[i.id]?.id || undefined,
         };
       });
-    if (!items.length) return setError('Enter at least one received quantity');
+    const additionalItems = rcvExtras
+      .filter((e) => e.ingredientId && parseFloat(e.quantity) > 0)
+      .map((e) => ({ ingredientId: e.ingredientId, quantityReceived: parseFloat(e.quantity), unitPrice: e.unitPrice ? Math.round(parseFloat(e.unitPrice) * 100) : undefined }));
+    if (!items.length && !additionalItems.length) return setError('Enter at least one received quantity');
     guardAndRun('receivePurchaseOrder', `Receive PO #${po.id.slice(-6).toUpperCase()} · ${po.supplier?.name ?? ''}`, (otp) => {
       mut.mutate({
         purchaseOrderId: po.id,
         items,
+        additionalItems: additionalItems.length > 0 ? additionalItems : undefined,
         notes: receiveNotes || undefined,
         actionOtp: otp ?? undefined,
       });
@@ -496,13 +549,24 @@ function ReceiveTab({ openPOs, guardAndRun, qc }: {
             const lineTotal = rqty * rprice;
             const remaining = Number(item.quantityOrdered) - Number(item.quantityReceived);
             const unitLabel = poUnit(item.ingredient, (item as { unit?: string }).unit);
+            const override = rcvVariantOverrides[item.id];
+            const origIng = findIngredient(ingredients, item.ingredientId);
+            const parentIng = origIng?.parentId ? ingredients.find((i) => i.variants?.some((v) => v.id === origIng.id)) : origIng?.hasVariants ? origIng : null;
             return (
               <div key={item.id} className="grid grid-cols-[3fr_120px_120px_110px_70px] gap-3 items-center bg-theme-bg rounded-theme p-3">
                 <div>
-                  <p className="text-sm font-semibold text-theme-text">{item.ingredient?.name ?? '—'}</p>
+                  <p className="text-sm font-semibold text-theme-text">
+                    {override ? <><span className="text-theme-accent">{override.brandName}</span> {override.packSize && <span className="text-theme-text-muted">{override.packSize}</span>}</> : (item.ingredient?.name ?? '—')}
+                  </p>
                   <p className="text-[11px] text-theme-text-muted">
                     Ordered {Number(item.quantityOrdered).toFixed(3)} · Received {Number(item.quantityReceived).toFixed(3)} · Remaining {remaining.toFixed(3)}
                   </p>
+                  {parentIng && parentIng.hasVariants && (parentIng.variants?.length ?? 0) > 0 && (
+                    <button onClick={() => setRcvVariantPicker({ poItemId: item.id, parent: parentIng })}
+                      className="text-theme-accent text-[10px] font-bold uppercase tracking-wider mt-0.5 hover:opacity-80">
+                      {override ? 'Change variant' : 'Different variant?'}
+                    </button>
+                  )}
                 </div>
                 <input
                   type="number" step="0.001" min="0" placeholder="0"
@@ -524,6 +588,58 @@ function ReceiveTab({ openPOs, guardAndRun, qc }: {
               </div>
             );
           })}
+
+          {/* Extra items — supplier sent items not in the PO */}
+          <div className="border-t border-theme-border mt-3 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-theme-accent">Extra Items (not in PO)</span>
+              <button onClick={() => setRcvExtras((e) => [...e, { ingredientId: '', quantity: '', unitPrice: '' }])}
+                className="text-theme-accent text-[10px] font-bold uppercase tracking-wider hover:opacity-80">+ Add</button>
+            </div>
+            {rcvExtras.map((extra, idx) => {
+              const sel = extra.ingredientId ? findIngredient(ingredients, extra.ingredientId) : null;
+              return (
+                <div key={idx} className="grid grid-cols-[3fr_100px_100px_40px] gap-2 items-center mb-2">
+                  <div>
+                    <input
+                      list={`rcv-ext-${idx}`}
+                      value={rcvExtraSearch[idx] !== undefined ? rcvExtraSearch[idx] : (sel ? sel.name : '')}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRcvExtraSearch((s) => ({ ...s, [idx]: val }));
+                        const match = matchIngredient(ingredients, val);
+                        if (match) {
+                          if (match.hasVariants && (match as any).variants?.length > 0) {
+                            setRcvExtraVariantPicker({ parent: match as any, idx });
+                            setRcvExtraSearch((s) => { const n = { ...s }; delete n[idx]; return n; });
+                            return;
+                          }
+                          const pu = match.purchaseUnit && Number(match.purchaseUnitQty) > 0;
+                          const cost = pu ? (Number(match.costPerPurchaseUnit) / 100).toFixed(2) : (Number(match.costPerUnit) / 100).toFixed(2);
+                          setRcvExtras((l) => l.map((item, i) => i === idx ? { ...item, ingredientId: match.id, unitPrice: cost } : item));
+                          setRcvExtraSearch((s) => { const n = { ...s }; delete n[idx]; return n; });
+                        }
+                      }}
+                      placeholder="Search item…"
+                      className="w-full bg-theme-bg rounded-theme px-2 py-2 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent"
+                    />
+                    <datalist id={`rcv-ext-${idx}`}>
+                      {ingredients.filter((i) => { const s = (rcvExtraSearch[idx] ?? '').toLowerCase(); return !s || i.name.toLowerCase().includes(s); }).slice(0, 20).map((i) => (
+                        <option key={i.id} value={ingredientLabel(i)}>{i.name}</option>
+                      ))}
+                    </datalist>
+                  </div>
+                  <input type="number" step="0.001" min="0" placeholder="Qty" value={extra.quantity}
+                    onChange={(e) => setRcvExtras((l) => l.map((item, i) => i === idx ? { ...item, quantity: e.target.value } : item))}
+                    className="bg-theme-bg rounded-theme px-2 py-2 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent text-right" />
+                  <input type="number" step="0.01" min="0" placeholder="৳ Price" value={extra.unitPrice}
+                    onChange={(e) => setRcvExtras((l) => l.map((item, i) => i === idx ? { ...item, unitPrice: e.target.value } : item))}
+                    className="bg-theme-bg rounded-theme px-2 py-2 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent text-right" />
+                  <button onClick={() => setRcvExtras((l) => l.filter((_, i) => i !== idx))} className="text-theme-danger text-sm hover:opacity-80">✕</button>
+                </div>
+              );
+            })}
+          </div>
 
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-1.5 mt-2">Notes</label>
@@ -553,6 +669,32 @@ function ReceiveTab({ openPOs, guardAndRun, qc }: {
       >
         {mut.isPending ? 'Receiving…' : 'Confirm Receipt'}
       </button>
+
+      {rcvVariantPicker && (
+        <VariantPickerModal
+          parent={rcvVariantPicker.parent as any}
+          onSelect={(variant) => {
+            setRcvVariantOverrides((prev) => ({
+              ...prev,
+              [rcvVariantPicker.poItemId]: { id: variant.id, brandName: variant.brandName ?? variant.name, packSize: variant.packSize ?? undefined },
+            }));
+            setRcvVariantPicker(null);
+          }}
+          onClose={() => setRcvVariantPicker(null)}
+        />
+      )}
+      {rcvExtraVariantPicker && (
+        <VariantPickerModal
+          parent={rcvExtraVariantPicker.parent as any}
+          onSelect={(variant) => {
+            const pu = rcvExtraVariantPicker.parent.purchaseUnit || variant.purchaseUnit;
+            const cost = pu && Number(variant.costPerPurchaseUnit) > 0 ? (Number(variant.costPerPurchaseUnit) / 100).toFixed(2) : (Number(variant.costPerUnit) / 100).toFixed(2);
+            setRcvExtras((l) => l.map((item, i) => i === rcvExtraVariantPicker.idx ? { ...item, ingredientId: variant.id, unitPrice: cost } : item));
+            setRcvExtraVariantPicker(null);
+          }}
+          onClose={() => setRcvExtraVariantPicker(null)}
+        />
+      )}
     </div>
   );
 }
@@ -571,6 +713,7 @@ function ReturnsTab({ suppliers, ingredients, guardAndRun, qc }: {
   const [lines, setLines] = useState<POLine[]>([{ ingredientId: '', quantity: '', unit: '', unitCost: '' }]);
   const [search, setSearch] = useState<Record<number, string>>({});
   const [error, setError] = useState('');
+  const [retVariantPicker, setRetVariantPicker] = useState<{ parent: Ingredient; idx: number } | null>(null);
 
   const total = lines.reduce((s, l) => s + (parseFloat(l.quantity || '0') * parseFloat(l.unitCost || '0')), 0);
 
@@ -582,6 +725,11 @@ function ReturnsTab({ suppliers, ingredients, guardAndRun, qc }: {
     setSearch((s) => ({ ...s, [idx]: val }));
     const match = matchIngredient(ingredients, val);
     if (match) {
+      if (match.hasVariants && (match as any).variants?.length > 0) {
+        setRetVariantPicker({ parent: match as any, idx });
+        setSearch((s2) => { const next = { ...s2 }; delete next[idx]; return next; });
+        return;
+      }
       const hasPU = !!match.purchaseUnit && Number(match.purchaseUnitQty) > 0;
       const unit = match.purchaseUnit || match.unit;
       const cost = hasPU
@@ -662,7 +810,7 @@ function ReturnsTab({ suppliers, ingredients, guardAndRun, qc }: {
           <span />
         </div>
         {lines.map((line, idx) => {
-          const ing = ingredients.find((i) => i.id === line.ingredientId) ?? null;
+          const ing = findIngredient(ingredients, line.ingredientId);
           const units = ing
             ? (ing.purchaseUnit ? [ing.purchaseUnit] : convertibleUnits(ing.unit))
             : [];
@@ -742,6 +890,21 @@ function ReturnsTab({ suppliers, ingredients, guardAndRun, qc }: {
       >
         {mut.isPending ? 'Recording…' : 'Record Return'}
       </button>
+
+      {retVariantPicker && (
+        <VariantPickerModal
+          parent={retVariantPicker.parent as any}
+          onSelect={(variant) => {
+            const pu = retVariantPicker.parent.purchaseUnit || variant.purchaseUnit;
+            const hasPU = !!pu && Number(variant.purchaseUnitQty) > 0;
+            const unit = pu || variant.unit;
+            const cost = hasPU && Number(variant.costPerPurchaseUnit) > 0 ? (Number(variant.costPerPurchaseUnit) / 100).toFixed(2) : (Number(variant.costPerUnit) / 100).toFixed(2);
+            updateLine(retVariantPicker.idx, { ingredientId: variant.id, unit, unitCost: cost });
+            setRetVariantPicker(null);
+          }}
+          onClose={() => setRetVariantPicker(null)}
+        />
+      )}
     </div>
   );
 }
