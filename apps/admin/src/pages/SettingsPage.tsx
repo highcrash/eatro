@@ -552,6 +552,9 @@ function UnitConversionSection({ isOwner }: { isOwner: boolean }) {
 
       {/* Payment Methods */}
       <PaymentMethodsSection />
+
+      {/* Reservation Settings */}
+      <ReservationSettingsSection />
     </div>
   );
 }
@@ -852,6 +855,110 @@ function PaymentMethodsSection() {
           );
         })}
         {categories.length === 0 && <p className="text-[#666] font-body text-sm text-center py-4">No payment categories configured.</p>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Reservation Settings ────────────────────────────────────────────────────
+
+function ReservationSettingsSection() {
+  const qc = useQueryClient();
+
+  const { data: settings } = useQuery<Record<string, any>>({
+    queryKey: ['reservation-settings'],
+    queryFn: () => api.get('/reservations/settings'),
+  });
+
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
+
+  if (settings && !loaded) {
+    setForm({
+      openingTime: settings.openingTime ?? '09:00',
+      closingTime: settings.closingTime ?? '23:00',
+      reservationSlotMinutes: String(settings.reservationSlotMinutes ?? 90),
+      reservationBlockMinutes: String(settings.reservationBlockMinutes ?? 60),
+      reservationMaxBookingsPerSlot: String(settings.reservationMaxBookingsPerSlot ?? 12),
+      reservationMaxPersonsPerSlot: String(settings.reservationMaxPersonsPerSlot ?? 40),
+      reservationAutoReserveMinutes: String(settings.reservationAutoReserveMinutes ?? 30),
+      reservationLateThresholdMinutes: String(settings.reservationLateThresholdMinutes ?? 30),
+      reservationReminderMinutes: String(settings.reservationReminderMinutes ?? 60),
+      reservationSmsEnabled: settings.reservationSmsEnabled ? 'true' : 'false',
+      reservationSmsConfirmTemplate: settings.reservationSmsConfirmTemplate ?? '',
+      reservationSmsRejectTemplate: settings.reservationSmsRejectTemplate ?? '',
+      reservationSmsReminderTemplate: settings.reservationSmsReminderTemplate ?? '',
+      reservationTermsOfService: settings.reservationTermsOfService ?? '',
+    });
+    setLoaded(true);
+  }
+
+  const saveMut = useMutation({
+    mutationFn: () => api.patch('/reservations/settings', {
+      openingTime: form.openingTime,
+      closingTime: form.closingTime,
+      reservationSlotMinutes: parseInt(form.reservationSlotMinutes) || 90,
+      reservationBlockMinutes: parseInt(form.reservationBlockMinutes) || 60,
+      reservationMaxBookingsPerSlot: parseInt(form.reservationMaxBookingsPerSlot) || 12,
+      reservationMaxPersonsPerSlot: parseInt(form.reservationMaxPersonsPerSlot) || 40,
+      reservationAutoReserveMinutes: parseInt(form.reservationAutoReserveMinutes) || 30,
+      reservationLateThresholdMinutes: parseInt(form.reservationLateThresholdMinutes) || 30,
+      reservationReminderMinutes: parseInt(form.reservationReminderMinutes) || 60,
+      reservationSmsEnabled: form.reservationSmsEnabled === 'true',
+      reservationSmsConfirmTemplate: form.reservationSmsConfirmTemplate || null,
+      reservationSmsRejectTemplate: form.reservationSmsRejectTemplate || null,
+      reservationSmsReminderTemplate: form.reservationSmsReminderTemplate || null,
+      reservationTermsOfService: form.reservationTermsOfService || null,
+    }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['reservation-settings'] }),
+  });
+
+  const set = (key: string, val: string) => setForm((f) => ({ ...f, [key]: val }));
+  const inputCls = 'bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] w-full';
+  const labelCls = 'text-[#999] text-xs font-body font-medium tracking-widest uppercase block mb-1';
+
+  return (
+    <div className="bg-[#161616] border border-[#2A2A2A]">
+      <div className="px-5 py-4 border-b border-[#2A2A2A]">
+        <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Reservation Settings</p>
+        <p className="text-[#666] font-body text-[10px] mt-0.5">Configure online booking, time slots, SMS notifications, and terms of service.</p>
+      </div>
+      <div className="p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div><label className={labelCls}>Opening Time</label><input type="time" value={form.openingTime ?? ''} onChange={(e) => set('openingTime', e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls}>Closing Time</label><input type="time" value={form.closingTime ?? ''} onChange={(e) => set('closingTime', e.target.value)} className={inputCls} /></div>
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div><label className={labelCls}>Slot Interval (min)</label><input type="number" min="15" value={form.reservationSlotMinutes ?? ''} onChange={(e) => set('reservationSlotMinutes', e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls}>Block from Open/Close (min)</label><input type="number" min="0" value={form.reservationBlockMinutes ?? ''} onChange={(e) => set('reservationBlockMinutes', e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls}>Reminder Before (min)</label><input type="number" min="0" value={form.reservationReminderMinutes ?? ''} onChange={(e) => set('reservationReminderMinutes', e.target.value)} className={inputCls} /></div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div><label className={labelCls}>Max Bookings per Slot</label><input type="number" min="1" value={form.reservationMaxBookingsPerSlot ?? ''} onChange={(e) => set('reservationMaxBookingsPerSlot', e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls}>Max Persons per Slot</label><input type="number" min="1" value={form.reservationMaxPersonsPerSlot ?? ''} onChange={(e) => set('reservationMaxPersonsPerSlot', e.target.value)} className={inputCls} /></div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div><label className={labelCls}>Auto-Reserve Table Before (min)</label><input type="number" min="0" value={form.reservationAutoReserveMinutes ?? ''} onChange={(e) => set('reservationAutoReserveMinutes', e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls}>Late Threshold for Red (min)</label><input type="number" min="1" value={form.reservationLateThresholdMinutes ?? ''} onChange={(e) => set('reservationLateThresholdMinutes', e.target.value)} className={inputCls} /></div>
+        </div>
+        <div className="flex items-center gap-3 border-t border-[#2A2A2A] pt-4">
+          <label className={labelCls}>Reservation SMS</label>
+          <select value={form.reservationSmsEnabled ?? 'true'} onChange={(e) => set('reservationSmsEnabled', e.target.value)} className={inputCls + ' w-24'}>
+            <option value="true">ON</option>
+            <option value="false">OFF</option>
+          </select>
+        </div>
+        <div className="space-y-3">
+          <div><label className={labelCls}>Confirm SMS Template</label><textarea rows={2} value={form.reservationSmsConfirmTemplate ?? ''} onChange={(e) => set('reservationSmsConfirmTemplate', e.target.value)} placeholder="Your reservation at {branch} on {date} at {time} for {partySize} guest(s) is confirmed. {table}" className={inputCls} /></div>
+          <div><label className={labelCls}>Reject SMS Template</label><textarea rows={2} value={form.reservationSmsRejectTemplate ?? ''} onChange={(e) => set('reservationSmsRejectTemplate', e.target.value)} placeholder="Sorry, your reservation at {branch} for {date} could not be confirmed." className={inputCls} /></div>
+          <div><label className={labelCls}>Reminder SMS Template</label><textarea rows={2} value={form.reservationSmsReminderTemplate ?? ''} onChange={(e) => set('reservationSmsReminderTemplate', e.target.value)} placeholder="Reminder: Your reservation at {branch} is in {minutes} minutes." className={inputCls} /></div>
+          <p className="text-[#555] text-[10px] font-body">Placeholders: {'{branch}'} {'{date}'} {'{time}'} {'{name}'} {'{partySize}'} {'{table}'} {'{minutes}'}</p>
+        </div>
+        <div><label className={labelCls}>Terms of Service</label><textarea rows={4} value={form.reservationTermsOfService ?? ''} onChange={(e) => set('reservationTermsOfService', e.target.value)} placeholder="By making a reservation, you agree to arrive within 30 minutes..." className={inputCls} /></div>
+        <button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}
+          className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-6 py-2.5 transition-colors disabled:opacity-50">
+          {saveMut.isPending ? 'Saving…' : saveMut.isSuccess ? 'Saved ✓' : 'Save Reservation Settings'}
+        </button>
       </div>
     </div>
   );

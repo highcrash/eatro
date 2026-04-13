@@ -5,6 +5,7 @@ import { Plus, Pencil, Trash2, X, Package, Link2, Image, Upload } from 'lucide-r
 import type { MenuItem, MenuCategory, CreateMenuItemDto, LinkedItemType } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
+import { resizeImage } from '../lib/image-resize';
 
 /** Resolve image path — uploaded files are served at /uploads/x.jpg (proxied to API in dev) */
 function resolveImageUrl(url: string) {
@@ -206,6 +207,12 @@ function ItemDialog({
     cookingStationId: initial?.cookingStationId ?? '',
     tags: initial?.tags ?? '',
     imageUrl: initial?.imageUrl ?? '',
+    pieces: initial?.pieces ?? '',
+    prepTime: initial?.prepTime ?? '',
+    spiceLevel: initial?.spiceLevel ?? '',
+    websiteVisible: initial?.websiteVisible ?? true,
+    seoTitle: (initial as any)?.seoTitle ?? '',
+    seoDescription: (initial as any)?.seoDescription ?? '',
   });
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -221,7 +228,8 @@ function ItemDialog({
     if (!file.type.startsWith('image/')) return;
     setUploading(true);
     try {
-      const result = await api.upload<{ url: string }>('/upload/image', file);
+      const resized = await resizeImage(file, 'menuItem');
+      const result = await api.upload<{ url: string }>('/upload/image', resized);
       set('imageUrl', result.url);
     } catch (err) {
       alert((err as Error).message || 'Upload failed');
@@ -249,7 +257,15 @@ function ItemDialog({
         tags: form.tags || undefined,
         imageUrl: form.imageUrl || undefined,
       };
-      if (initial) return api.patch(`/menu/${initial.id}`, { ...dto, isAvailable: form.isAvailable });
+      const extra = {
+        pieces: form.pieces || null,
+        prepTime: form.prepTime || null,
+        spiceLevel: form.spiceLevel || null,
+        websiteVisible: form.websiteVisible,
+        seoTitle: form.seoTitle || null,
+        seoDescription: form.seoDescription || null,
+      };
+      if (initial) return api.patch(`/menu/${initial.id}`, { ...dto, ...extra, isAvailable: form.isAvailable });
       return api.post('/menu', dto);
     },
     onSuccess: () => {
@@ -383,6 +399,45 @@ function ItemDialog({
 
           {/* Tags */}
           <TagsInput value={form.tags} onChange={(v) => set('tags', v)} />
+
+          {/* Website Detail Fields */}
+          <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-3">
+            <p className="text-[#D62B2B] text-[10px] font-body font-medium tracking-widest uppercase">Website Display</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Pieces</label>
+                <input value={form.pieces} onChange={(e) => set('pieces', e.target.value)} placeholder="e.g. 4-6"
+                  className="bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Prep Time</label>
+                <input value={form.prepTime} onChange={(e) => set('prepTime', e.target.value)} placeholder="e.g. 15 min"
+                  className="bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Spice Level</label>
+                <select value={form.spiceLevel} onChange={(e) => set('spiceLevel', e.target.value)}
+                  className="bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-sm font-body focus:outline-none focus:border-[#D62B2B]">
+                  <option value="">None</option>
+                  <option value="Mild">Mild</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Hot">Hot</option>
+                  <option value="Very Hot">Very Hot</option>
+                </select>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm font-body text-[#999]">
+              <input type="checkbox" checked={form.websiteVisible} onChange={(e) => set('websiteVisible', e.target.checked)} className="accent-[#D62B2B]" />
+              Show on website
+            </label>
+            <div className="border-t border-[#2A2A2A] pt-2 mt-2 space-y-2">
+              <p className="text-[#666] text-[10px] font-body tracking-widest uppercase">SEO (optional)</p>
+              <input value={form.seoTitle} onChange={(e) => set('seoTitle', e.target.value)} placeholder="Custom title tag for this item"
+                className="w-full bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-xs font-body focus:outline-none focus:border-[#D62B2B]" />
+              <input value={form.seoDescription} onChange={(e) => set('seoDescription', e.target.value)} placeholder="Custom meta description for this item"
+                className="w-full bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-xs font-body focus:outline-none focus:border-[#D62B2B]" />
+            </div>
+          </div>
 
           {initial && (
             <label className="flex items-center gap-2 text-sm font-body text-[#999]">

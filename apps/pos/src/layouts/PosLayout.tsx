@@ -9,6 +9,7 @@ import {
   Truck,
   Wallet,
   Flame,
+  Calendar,
 } from 'lucide-react';
 
 import { useAuthStore } from '../store/auth.store';
@@ -28,6 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/customers',     label: 'Customers', Icon: Users },
   { to: '/kitchen',       label: 'Kitchen',   Icon: Flame },
   { to: '/reports/sales', label: 'Reports',   Icon: BarChart3 },
+  { to: '/reservations', label: 'Bookings',  Icon: Calendar },
 ];
 
 const PURCHASING_ITEM: NavItem = { to: '/purchasing', label: 'Purchasing', Icon: Truck };

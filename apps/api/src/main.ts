@@ -23,7 +23,11 @@ async function bootstrap(): Promise<void> {
   app.set('trust proxy', 1);
 
   // Serve locally-uploaded files for dev. In production uploads go to DO Spaces.
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), { prefix: '/uploads/' });
+  app.useStaticAssets(join(process.cwd(), 'apps', 'api', 'uploads'), { prefix: '/uploads/' });
+
+  // Body size limits
+  app.useBodyParser('json', { limit: '50mb' });
+  app.useBodyParser('urlencoded', { extended: true, limit: '50mb' });
 
   // Security
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));

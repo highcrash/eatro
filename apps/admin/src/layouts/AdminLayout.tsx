@@ -50,6 +50,7 @@ const NAV_GROUPS = [
       { to: '/orders', icon: ClipboardList, label: 'Orders' },
       { to: '/recipes', icon: BookOpen, label: 'Recipes' },
       { to: '/pre-ready', icon: ChefHat, label: 'Pre-Ready' },
+      { to: '/reservations', icon: CalendarDays, label: 'Reservations' },
       { to: '/qr-codes', icon: QrCode, label: 'QR Codes' },
     ],
   },

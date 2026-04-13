@@ -37,6 +37,8 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { CashierOpsModule } from './cashier-ops/cashier-ops.module';
 import { WebsiteModule } from './website/website.module';
 import { CleanupModule } from './cleanup/cleanup.module';
+import { ReservationModule } from './reservation/reservation.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -131,6 +133,10 @@ import { CleanupModule } from './cleanup/cleanup.module';
 
     // Data Cleanup (OWNER-only destructive ops)
     CleanupModule,
+
+    // Reservation System
+    ScheduleModule.forRoot(),
+    ReservationModule,
   ],
 })
 export class AppModule {}

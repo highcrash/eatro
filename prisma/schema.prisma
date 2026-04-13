@@ -95,6 +95,15 @@ enum TableStatus {
   CLEANING
 }
 
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  ARRIVED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
 enum KitchenTicketStatus {
   NEW
   PENDING_APPROVAL
@@ -179,6 +188,7 @@ model Branch {
   coupons               Coupon[]
   customers             Customer[]
   reviews               Review[]
+  reservations          Reservation[]
   settings              BranchSetting?
   websiteContent        WebsiteContent?
 
@@ -201,6 +211,21 @@ model BranchSetting {
   customThemes     String? // JSON array of custom theme objects (slug, name, scope, tokens)
   // Cashier permissions (Phase 6)
   cashierPermissions String? // JSON: per-action enabled+approval mode
+  // ── Reservation Settings ──
+  openingTime                     String  @default("09:00")
+  closingTime                     String  @default("23:00")
+  reservationSlotMinutes          Int     @default(90)
+  reservationBlockMinutes         Int     @default(60)
+  reservationMaxBookingsPerSlot   Int     @default(12)
+  reservationMaxPersonsPerSlot    Int     @default(40)
+  reservationAutoReserveMinutes   Int     @default(30)
+  reservationLateThresholdMinutes Int     @default(30)
+  reservationSmsEnabled           Boolean @default(true)
+  reservationReminderMinutes      Int     @default(60)
+  reservationSmsConfirmTemplate   String?
+  reservationSmsRejectTemplate    String?
+  reservationSmsReminderTemplate  String?
+  reservationTermsOfService       String?
 
   branch Branch @relation(fields: [branchId], references: [id])
 
@@ -215,16 +240,71 @@ model WebsiteContent {
   heroTitle     String   @default("Welcome")
   heroSubtitle  String?
   heroImageUrl  String?
+  heroVideoUrl  String?                          // MP4 URL for hero background video
   heroCtaText   String   @default("View Menu")
   // About
   aboutTitle    String   @default("About Us")
   aboutBody     String   @default("")
   aboutImageUrl String?
+  aboutPoint1   String?                          // numbered about card 1
+  aboutPoint2   String?
+  aboutPoint3   String?
+  aboutPoint4   String?
+  openingHours  String?                          // "Daily 11:00 - 23:00"
   // Contact
   contactNote   String?
   mapEmbedUrl   String?
   // Featured menu (JSON array of MenuCategory ids)
   featuredCategoryIds String?
+  // Section visibility toggles
+  showReservation     Boolean @default(true)
+  showReviews         Boolean @default(true)
+  showGallery         Boolean @default(true)
+  showKeyIngredients  Boolean @default(true)
+  showPieces          Boolean @default(true)
+  showPrepTime        Boolean @default(true)
+  showSpiceLevel      Boolean @default(true)
+  // Gallery
+  galleryImages       String?                    // JSON array of image URLs
+  // Section backgrounds (admin uploads image/video)
+  menuSectionBg       String?
+  aboutSectionBg      String?
+  reviewsSectionBg    String?
+  reservationSectionBg String?
+  contactSectionBg    String?
+  bannerBg            String?                    // full-width banner image
+  bannerText          String?                    // banner large text
+  // Theme & Colors
+  websiteMode         String  @default("dark")   // "dark" | "light"
+  maintenanceMode     Boolean @default(false)    // when true, website shows maintenance page
+  maintenanceBg       String?                    // background image for maintenance page
+  maintenanceText     String?                    // custom maintenance text
+  notFoundBg          String?                    // background image for 404 page
+  notFoundText        String?                    // custom 404 text
+  // SEO — Global
+  seoSiteName         String?                    // e.g. "EATRO Restaurant"
+  seoHomeTitle        String?                    // Home page title tag
+  seoHomeDescription  String?                    // Home page meta description
+  seoHomeKeywords     String?                    // comma-separated keywords
+  seoMenuTitle        String?                    // Menu page title
+  seoMenuDescription  String?
+  seoAboutTitle       String?
+  seoAboutDescription String?
+  seoContactTitle     String?
+  seoContactDescription String?
+  seoReservationTitle String?
+  seoReservationDescription String?
+  seoOgImage          String?                    // default Open Graph image
+  seoFavicon          String?                    // favicon URL
+  accentColor         String  @default("#D62B2B")
+  buttonColor         String  @default("#D62B2B")
+  textColor           String?                    // override (null = mode default)
+  bgColor             String?                    // override (null = mode default)
+  // Menu visibility
+  recommendedTag      String  @default("Chef Special")
+  hiddenCategoryIds   String?                    // JSON array of category IDs
+  hiddenItemIds       String?                    // JSON array of item IDs
+  //
   updatedAt     DateTime @updatedAt
 
   branch Branch @relation(fields: [branchId], references: [id])
@@ -272,6 +352,7 @@ model Staff {
   workPeriodsEnded          WorkPeriod[]       @relation("WorkPeriodEnder")
   ordersAsWaiter            Order[]            @relation("OrderWaiter")
   returnsRequested          PurchaseReturn[]   @relation("ReturnRequester")
+  reservationsConfirmed     Reservation[]      @relation("ReservationConfirmer")
 
   @@index([branchId, isActive])
   @@index([email])
@@ -295,8 +376,9 @@ model DiningTable {
   deletedAt   DateTime?
 
   // Relations
-  branch Branch  @relation(fields: [branchId], references: [id])
-  orders Order[]
+  branch       Branch        @relation(fields: [branchId], references: [id])
+  orders       Order[]
+  reservations Reservation[]
 
   @@unique([branchId, tableNumber])
   @@index([branchId, status])
@@ -312,12 +394,15 @@ model MenuCategory {
   branchId  String
   parentId  String?
   name      String
+  slug      String?   // SEO-friendly URL slug (auto-generated from name)
   icon      String?   // emoji or icon name (e.g. "🍗", "🍕", "☕")
   sortOrder Int       @default(0)
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  websiteVisible Boolean @default(true)  // hide entire category from public website
 
   // Relations
   branch    Branch         @relation(fields: [branchId], references: [id])
@@ -334,6 +419,9 @@ model MenuItem {
   branchId    String
   categoryId  String
   name        String
+  slug        String?                              // SEO-friendly URL slug
+  seoTitle    String?                              // custom SEO title for this item
+  seoDescription String?                           // custom meta description
   description String?
   type        MenuItemType @default(FOOD)
   price       Decimal      @db.Decimal(14, 2)   // stored in paisa
@@ -348,6 +436,11 @@ model MenuItem {
 
   isCombo           Boolean      @default(false)
   cookingStationId  String?
+  // Website detail fields
+  pieces            String?                        // e.g. "4-6" — null = don't show
+  prepTime          String?                        // e.g. "15 min"
+  spiceLevel        String?                        // e.g. "Mild", "Medium", "Hot"
+  websiteVisible    Boolean      @default(true)    // hide from website without affecting POS
 
   // Relations
   branch           Branch          @relation(fields: [branchId], references: [id])
@@ -423,9 +516,10 @@ model Customer {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  branch  Branch   @relation(fields: [branchId], references: [id])
-  orders  Order[]
-  reviews Review[]
+  branch       Branch        @relation(fields: [branchId], references: [id])
+  orders       Order[]
+  reviews      Review[]
+  reservations Reservation[]
 
   @@unique([branchId, phone])
   @@index([branchId, phone])
@@ -450,6 +544,45 @@ model Review {
 
   @@index([branchId])
   @@map("reviews")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESERVATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Reservation {
+  id              String            @id @default(cuid())
+  branchId        String
+  customerId      String?
+  customerName    String
+  customerPhone   String
+  date            DateTime          @db.Date
+  timeSlot        String                            // "HH:mm" start time
+  partySize       Int
+  status          ReservationStatus @default(PENDING)
+  tableId         String?
+  tableIds        String?                           // JSON array of table IDs for multi-table bookings
+  notes           String?
+  confirmedById   String?
+  confirmedAt     DateTime?
+  arrivedAt       DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  agreedTerms     Boolean           @default(true)
+  reminderSentAt  DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  branch      Branch       @relation(fields: [branchId], references: [id])
+  customer    Customer?    @relation(fields: [customerId], references: [id])
+  table       DiningTable? @relation(fields: [tableId], references: [id])
+  confirmedBy Staff?       @relation("ReservationConfirmer", fields: [confirmedById], references: [id])
+
+  @@index([branchId, date, status])
+  @@index([branchId, status])
+  @@index([customerPhone])
+  @@map("reservations")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -943,6 +1076,9 @@ model Ingredient {
   packSize        String?                           // e.g. "250G", "1L" — display label
   piecesPerPack   Int?                              // e.g. 10 pcs per pack
   sku             String?                           // supplier barcode / SKU
+  // Website display
+  imageUrl        String?                           // square image for website ingredient display
+  showOnWebsite   Boolean   @default(true)          // show ingredient name on website menu detail pages
 
   // Relations
   branch             Branch              @relation(fields: [branchId], references: [id])

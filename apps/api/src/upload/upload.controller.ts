@@ -12,7 +12,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_SIZE = 20 * 1024 * 1024; // 20 MB
 
 // ─── Storage selector ──────────────────────────────────────────────────────
 // In production we use DigitalOcean Spaces (S3-compatible). In dev, fall back
@@ -53,7 +53,7 @@ if (useSpaces) {
   }) as StorageEngine;
 } else {
   storage = diskStorage({
-    destination: join(__dirname, '..', '..', 'uploads'),
+    destination: join(process.cwd(), 'apps', 'api', 'uploads'),
     filename: (_req, file, cb) => {
       const ext = extname(file.originalname).toLowerCase() || '.jpg';
       cb(null, `${randomUUID()}${ext}`);
@@ -72,7 +72,7 @@ interface UploadedFileWithLocation extends Express.Multer.File {
 @Controller('upload')
 export class UploadController {
   @Post('image')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
   @UseInterceptors(
     FileInterceptor('file', {
       storage,

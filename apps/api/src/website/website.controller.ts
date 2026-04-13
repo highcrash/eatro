@@ -1,10 +1,10 @@
-import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, UseGuards, ValidationPipe } from '@nestjs/common';
 import type { JwtPayload } from '@restora/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { WebsiteService, type WebsiteContentDto } from './website.service';
+import { WebsiteService } from './website.service';
 
 /** Authenticated admin endpoints — read + write the active branch's website content. */
 @Controller('website')
@@ -19,7 +19,7 @@ export class WebsiteController {
   }
 
   @Patch()
-  update(@CurrentUser() user: JwtPayload, @Body() dto: WebsiteContentDto) {
+  update(@CurrentUser() user: JwtPayload, @Body(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false, transform: false })) dto: Record<string, unknown>) {
     return this.service.updateContent(user.branchId, dto);
   }
 }

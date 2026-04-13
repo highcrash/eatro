@@ -53,4 +53,7 @@ export type WsEvent =
   | 'kds:ticket:recalled'
   | 'kds:ticket:preparing'
   | 'stock:low'
-  | 'bill:requested';
+  | 'bill:requested'
+  | 'reservation:created'
+  | 'reservation:updated'
+  | 'reservation:cancelled';

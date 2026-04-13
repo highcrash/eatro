@@ -2,29 +2,76 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ------------------------------------------------------------------ */
+/*  CSS Custom Properties — dark / light mode                          */
+/* ------------------------------------------------------------------ */
+
 :root {
-  --color-bg: #0D0D0D;
-  --color-card: #161616;
-  --color-hover: #1F1F1F;
-  --color-border: #2A2A2A;
-  --color-accent: #D62B2B;
-  --color-accent-hover: #F03535;
-  --color-text: #FFFFFF;
-  --color-muted: #999999;
-  --color-dim: #666666;
+  --accent: #D62B2B;
+  --btn: #D62B2B;
 }
+
+.dark {
+  --bg: #0D0D0D;
+  --card: #161616;
+  --hover: #1F1F1F;
+  --border: #2A2A2A;
+  --text: #fff;
+  --muted: #999;
+}
+
+.light {
+  --bg: #FAF9F7;
+  --card: #fff;
+  --hover: #F2F1EE;
+  --border: #DDD9D3;
+  --text: #111;
+  --muted: #666;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Base                                                                */
+/* ------------------------------------------------------------------ */
 
 * { box-sizing: border-box; }
+
 body {
   margin: 0;
-  background-color: #0D0D0D;
-  color: white;
+  background-color: var(--bg, #0D0D0D);
+  color: var(--text, #fff);
   font-family: 'DM Sans', sans-serif;
   -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.3s, color 0.3s;
 }
-.font-display { font-family: 'Bebas Neue', sans-serif; }
-.font-body { font-family: 'DM Sans', sans-serif; }
 
-/* Hide scrollbar for category tabs */
+/* ------------------------------------------------------------------ */
+/*  Typography helpers                                                  */
+/* ------------------------------------------------------------------ */
+
+.font-display { font-family: 'Bebas Neue', sans-serif; }
+.font-body    { font-family: 'DM Sans', sans-serif; }
+.font-serif   { font-family: 'Playfair Display', serif; }
+
+/* ------------------------------------------------------------------ */
+/*  Glass-morphism                                                      */
+/* ------------------------------------------------------------------ */
+
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Scrollbar helpers                                                   */
+/* ------------------------------------------------------------------ */
+
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ------------------------------------------------------------------ */
+/*  Smooth scroll for the whole page                                    */
+/* ------------------------------------------------------------------ */
+
+html { scroll-behavior: smooth; }

@@ -32,19 +32,27 @@ export class MenuService {
   }
 
   create(branchId: string, dto: CreateMenuItemDto) {
+    const slug = this.slugify(dto.name);
     return this.prisma.menuItem.create({
-      data: { ...dto, branchId },
+      data: { ...dto, branchId, slug },
       include: comboAndLinkedInclude,
     });
   }
 
   async update(id: string, branchId: string, dto: UpdateMenuItemDto) {
     await this.findOne(id, branchId);
+    const data: any = { ...dto };
+    // Auto-update slug if name changes and no custom slug
+    if (dto.name && !data.slug) data.slug = this.slugify(dto.name);
     return this.prisma.menuItem.update({
       where: { id },
-      data: dto,
+      data,
       include: comboAndLinkedInclude,
     });
+  }
+
+  private slugify(text: string): string {
+    return text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').trim();
   }
 
   async remove(id: string, branchId: string) {

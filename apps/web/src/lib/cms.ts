@@ -7,13 +7,37 @@ export interface WebsiteContent {
   heroTitle: string;
   heroSubtitle: string | null;
   heroImageUrl: string | null;
+  heroVideoUrl: string | null;
   heroCtaText: string;
   aboutTitle: string;
   aboutBody: string;
   aboutImageUrl: string | null;
+  aboutSectionBg: string | null;
+  aboutPoint1: string | null;
+  aboutPoint2: string | null;
+  aboutPoint3: string | null;
+  aboutPoint4: string | null;
+  openingHours: string | null;
+  bannerBg: string | null;
+  bannerText: string | null;
   contactNote: string | null;
   mapEmbedUrl: string | null;
   featuredCategoryIds: string[];
+  galleryImages: string | null;       // JSON array of image URLs
+  showGallery: boolean;
+  showReviews: boolean;
+  showReservation: boolean;
+  showKeyIngredients: boolean;
+  showPieces: boolean;
+  showPrepTime: boolean;
+  showSpiceLevel: boolean;
+  accentColor: string | null;
+  buttonColor: string | null;
+  maintenanceMode: boolean;
+  maintenanceBg: string | null;
+  maintenanceText: string | null;
+  notFoundBg: string | null;
+  notFoundText: string | null;
 }
 
 export interface PublicBranding {
@@ -39,18 +63,25 @@ export interface PublicBranding {
 
 export const DEFAULT_BRANCH = 'branch-main';
 
-export function useBranding(branchId = DEFAULT_BRANCH) {
+/** Get the active branch ID from localStorage (set by BranchSelector) */
+export function getActiveBranchId(): string {
+  return localStorage.getItem('eatro-branch') || DEFAULT_BRANCH;
+}
+
+export function useBranding(branchId?: string) {
+  const id = branchId ?? getActiveBranchId();
   return useQuery<PublicBranding>({
-    queryKey: ['public-branding', branchId],
-    queryFn: () => api.getJson<PublicBranding>(`/public/branding/${branchId}`),
+    queryKey: ['public-branding', id],
+    queryFn: () => api.getJson<PublicBranding>(`/public/branding/${id}`),
     staleTime: 60_000,
   });
 }
 
-export function useWebsiteContent(branchId = DEFAULT_BRANCH) {
+export function useWebsiteContent(branchId?: string) {
+  const id = branchId ?? getActiveBranchId();
   return useQuery<WebsiteContent>({
-    queryKey: ['public-website', branchId],
-    queryFn: () => api.getJson<WebsiteContent>(`/public/website/${branchId}`),
+    queryKey: ['public-website', id],
+    queryFn: () => api.getJson<WebsiteContent>(`/public/website/${id}`),
     staleTime: 60_000,
   });
 }

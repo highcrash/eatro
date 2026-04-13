@@ -198,6 +198,9 @@ export class IngredientService {
         ...(dto.packSize !== undefined ? { packSize: dto.packSize } : {}),
         ...(dto.piecesPerPack !== undefined ? { piecesPerPack: dto.piecesPerPack } : {}),
         ...(dto.sku !== undefined ? { sku: dto.sku } : {}),
+        // Website display fields
+        ...((dto as any).imageUrl !== undefined ? { imageUrl: (dto as any).imageUrl } : {}),
+        ...((dto as any).showOnWebsite !== undefined ? { showOnWebsite: (dto as any).showOnWebsite } : {}),
       },
       include: this.ingredientInclude,
     });

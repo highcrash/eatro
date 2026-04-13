@@ -181,9 +181,11 @@ interface IngredientForm {
   purchaseUnit: string;
   purchaseUnitQty: string;
   costPerPurchaseUnit: string;
+  showOnWebsite: boolean;
+  ingredientImageUrl: string;
 }
 
-const emptyIngForm: IngredientForm = { name: '', unit: 'G', minimumStock: '0', costPerUnit: '0', supplierId: '', supplierIds: [], itemCode: '', category: 'RAW', purchaseUnit: '', purchaseUnitQty: '1', costPerPurchaseUnit: '0' };
+const emptyIngForm: IngredientForm = { name: '', unit: 'G', minimumStock: '0', costPerUnit: '0', supplierId: '', supplierIds: [], itemCode: '', category: 'RAW', purchaseUnit: '', purchaseUnitQty: '1', costPerPurchaseUnit: '0', showOnWebsite: true, ingredientImageUrl: '' };
 
 interface AdjustForm {
   quantity: string;
@@ -251,6 +253,8 @@ export default function InventoryPage() {
         purchaseUnit: data.purchaseUnit || undefined,
         purchaseUnitQty: parseFloat(data.purchaseUnitQty) || 1,
         costPerPurchaseUnit: Math.round((parseFloat(data.costPerPurchaseUnit) || 0) * 100),
+        showOnWebsite: data.showOnWebsite,
+        imageUrl: data.ingredientImageUrl || null,
       };
       const result = editingIng
         ? await api.patch<{ id: string }>(`/ingredients/${editingIng.id}`, payload)
@@ -371,6 +375,8 @@ export default function InventoryPage() {
       purchaseUnit: ing.purchaseUnit ?? '',
       purchaseUnitQty: String(ing.purchaseUnitQty ?? 1),
       costPerPurchaseUnit: String(Number(ing.costPerPurchaseUnit ?? 0) / 100),
+      showOnWebsite: (ing as any).showOnWebsite ?? true,
+      ingredientImageUrl: (ing as any).imageUrl ?? '',
     });
     setShowIngDialog(true);
   };
@@ -777,6 +783,35 @@ export default function InventoryPage() {
                     {parseFloat(ingForm.costPerPurchaseUnit) > 0 && ` | ৳${ingForm.costPerPurchaseUnit}/${ingForm.purchaseUnit} = ৳${(parseFloat(ingForm.costPerPurchaseUnit) / parseFloat(ingForm.purchaseUnitQty)).toFixed(2)}/${ingForm.unit}`}
                   </p>
                 )}
+              </div>
+
+              {/* Website Display */}
+              <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-3">
+                <p className="text-[#D62B2B] text-[10px] font-body font-medium tracking-widest uppercase">Website Display</p>
+                <label className="flex items-center gap-2 text-sm font-body text-[#999]">
+                  <input type="checkbox" checked={ingForm.showOnWebsite ?? true}
+                    onChange={(e) => setIngForm((f) => ({ ...f, showOnWebsite: e.target.checked }))} className="accent-[#D62B2B]" />
+                  Show ingredient name on website menu pages
+                </label>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Ingredient Image (square, for website)</label>
+                  {ingForm.ingredientImageUrl && (
+                    <div className="flex items-center gap-2 mb-1">
+                      <img src={ingForm.ingredientImageUrl} alt="" className="w-12 h-12 object-cover border border-[#2A2A2A]" />
+                      <button onClick={() => setIngForm((f) => ({ ...f, ingredientImageUrl: '' }))} className="text-[#D62B2B] text-xs">Remove</button>
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const { resizeImage: resize } = await import('../lib/image-resize');
+                      const resized = await resize(file, 'ingredient');
+                      const result = await api.upload<{ url: string }>('/upload/image', resized);
+                      setIngForm((f) => ({ ...f, ingredientImageUrl: result.url }));
+                    } catch { /* */ }
+                  }} className="text-[#666] text-xs" />
+                </div>
               </div>
 
               <div className="flex flex-col gap-1">

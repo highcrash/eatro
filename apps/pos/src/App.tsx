@@ -11,6 +11,7 @@ import PosCustomersPage from './pages/PosCustomersPage';
 import PosPurchasingPage from './pages/PosPurchasingPage';
 import PosFinancePage from './pages/PosFinancePage';
 import PosPreReadyPage from './pages/PosPreReadyPage';
+import PosReservationsPage from './pages/PosReservationsPage';
 
 export default function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/purchasing" element={<PosPurchasingPage />} />
         <Route path="/finance" element={<PosFinancePage />} />
         <Route path="/pre-ready" element={<PosPreReadyPage />} />
+        <Route path="/reservations" element={<PosReservationsPage />} />
         <Route path="/kitchen" element={<KitchenPage />} />
         <Route path="/reports/sales" element={<SalesReportPage />} />
       </Route>

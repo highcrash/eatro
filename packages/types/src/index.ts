@@ -12,3 +12,4 @@ export * from './expense';
 export * from './account';
 export * from './pre-ready';
 export * from './permissions';
+export * from './reservation';

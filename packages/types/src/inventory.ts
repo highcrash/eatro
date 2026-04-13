@@ -47,6 +47,8 @@ export interface Ingredient {
   packSize: string | null;
   piecesPerPack: number | null;
   sku: string | null;
+  imageUrl: string | null;
+  showOnWebsite: boolean;
   variants?: Ingredient[];
   parent?: Ingredient | null;
   // Relations

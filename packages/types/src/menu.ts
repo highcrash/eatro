@@ -10,6 +10,7 @@ export interface MenuCategory extends AuditFields {
   icon: string | null;
   sortOrder: number;
   isActive: boolean;
+  websiteVisible: boolean;
   children?: MenuCategory[];
 }
 
@@ -33,6 +34,10 @@ export interface MenuItem extends AuditFields {
   isCombo: boolean;
   cookingStationId: string | null;
   sortOrder: number;
+  pieces: string | null;
+  prepTime: string | null;
+  spiceLevel: string | null;
+  websiteVisible: boolean;
   comboItems?: ComboItem[];
   linkedItems?: LinkedItem[];
 }
@@ -76,6 +81,10 @@ export interface CreateMenuItemDto {
 export interface UpdateMenuItemDto extends Partial<CreateMenuItemDto> {
   isAvailable?: boolean;
   sortOrder?: number;
+  pieces?: string | null;
+  prepTime?: string | null;
+  spiceLevel?: string | null;
+  websiteVisible?: boolean;
 }
 
 // ─── Table ────────────────────────────────────────────────────────────────────
