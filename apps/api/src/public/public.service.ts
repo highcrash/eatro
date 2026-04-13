@@ -25,12 +25,21 @@ export class PublicService {
 
     return items.map((item) => {
       const discount = activeDiscounts.find((d) => d.menuItemId === item.id);
-      if (!discount) return { ...item, discountedPrice: null, discountType: null, discountValue: null };
+      if (!discount) return { ...item, discountedPrice: null, discountType: null, discountValue: null, discountEndDate: null, discountApplicableDays: null };
       const price = Number(item.price);
       const discountedPrice = discount.type === 'FLAT'
         ? Math.max(0, price - Number(discount.value))
         : Math.round(price * (1 - Number(discount.value) / 100));
-      return { ...item, discountedPrice, discountType: discount.type, discountValue: Number(discount.value) };
+      let applicableDays: string[] | null = null;
+      try { applicableDays = discount.applicableDays ? JSON.parse(discount.applicableDays) : null; } catch { /* */ }
+      return {
+        ...item,
+        discountedPrice,
+        discountType: discount.type,
+        discountValue: Number(discount.value),
+        discountEndDate: discount.endDate.toISOString(),
+        discountApplicableDays: applicableDays,
+      };
     });
   }
 
@@ -183,6 +192,33 @@ export class PublicService {
       include: { category: true },
     });
     return this.applyDiscounts(branchId, fallbackItems);
+  }
+
+  async getDiscountedItems(branchId: string) {
+    const now = new Date();
+    const dayName = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
+    const discounts = await this.prisma.menuItemDiscount.findMany({
+      where: { isActive: true, startDate: { lte: now }, endDate: { gte: now }, menuItem: { branchId, deletedAt: null, isAvailable: true, websiteVisible: true } },
+      include: { menuItem: { include: { category: true } } },
+    });
+    const active = discounts.filter((d) => {
+      if (!d.applicableDays) return true;
+      try { return (JSON.parse(d.applicableDays) as string[]).includes(dayName); } catch { return true; }
+    });
+    return active.map((d) => {
+      const price = Number(d.menuItem.price);
+      const discountedPrice = d.type === 'FLAT' ? Math.max(0, price - Number(d.value)) : Math.round(price * (1 - Number(d.value) / 100));
+      let applicableDays: string[] | null = null;
+      try { applicableDays = d.applicableDays ? JSON.parse(d.applicableDays) : null; } catch { /* */ }
+      return {
+        ...d.menuItem,
+        discountedPrice,
+        discountType: d.type,
+        discountValue: Number(d.value),
+        discountEndDate: d.endDate.toISOString(),
+        discountApplicableDays: applicableDays,
+      };
+    });
   }
 
   async getReviews(branchId: string) {

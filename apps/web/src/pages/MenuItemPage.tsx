@@ -25,6 +25,10 @@ interface MenuItemDetail {
   description: string | null;
   price: number;
   discountedPrice?: number;
+  discountType?: string | null;
+  discountValue?: number | null;
+  discountEndDate?: string | null;
+  discountApplicableDays?: string[] | null;
   imageUrl: string | null;
   categoryId: string;
   categoryName?: string;
@@ -143,14 +147,55 @@ export default function MenuItemPage() {
         </h1>
 
         {/* Price */}
-        <div className="mt-4 flex items-baseline gap-3">
-          {hasDiscount ? (
-            <>
-              <span className="font-display text-4xl text-accent">{formatCurrency(item.discountedPrice!)}</span>
-              <span className="text-muted text-lg line-through">{formatCurrency(Number(item.price))}</span>
-            </>
-          ) : (
-            <span className="font-display text-4xl text-accent">{formatCurrency(Number(item.price))}</span>
+        <div className="mt-4">
+          <div className="flex items-baseline gap-3">
+            {hasDiscount ? (
+              <>
+                <span className="font-display text-4xl text-accent">{formatCurrency(item.discountedPrice!)}</span>
+                <span className="text-muted text-lg line-through">{formatCurrency(Number(item.price))}</span>
+                {item.discountType === 'PERCENTAGE' && item.discountValue && (
+                  <span className="bg-accent/20 text-accent text-xs font-semibold px-2 py-0.5">{item.discountValue}% OFF</span>
+                )}
+              </>
+            ) : (
+              <span className="font-display text-4xl text-accent">{formatCurrency(Number(item.price))}</span>
+            )}
+          </div>
+          {hasDiscount && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {(() => {
+                const tags: { label: string; color: string }[] = [];
+                // Day-specific tag
+                if (item.discountApplicableDays && item.discountApplicableDays.length > 0 && item.discountApplicableDays.length < 7) {
+                  const days = item.discountApplicableDays.map(d => d.slice(0, 3)).join(', ');
+                  tags.push({ label: `${days} Only`, color: 'bg-accent/20 text-accent' });
+                }
+                if (item.discountEndDate) {
+                  const end = new Date(item.discountEndDate);
+                  const now = new Date();
+                  const diffMs = end.getTime() - now.getTime();
+                  const diffDays = Math.floor(diffMs / 86400000);
+                  const diffHours = Math.floor((diffMs % 86400000) / 3600000);
+                  const diffMins = Math.floor((diffMs % 3600000) / 60000);
+
+                  const formatted = end.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+                  tags.push({ label: `Valid ${formatted}`, color: 'bg-border text-muted' });
+
+                  if (diffDays <= 7 && diffMs > 0) {
+                    const countdown = diffDays > 0
+                      ? `${diffDays}D ${diffHours}H ${diffMins}M left`
+                      : `${diffHours}H ${diffMins}M left`;
+                    tags.push({ label: countdown, color: 'bg-accent text-white' });
+                  }
+                }
+                if (tags.length === 0) tags.push({ label: 'Limited Offer', color: 'bg-accent/20 text-accent' });
+                return tags.map((t, i) => (
+                  <span key={i} className={`${t.color} text-xs font-bold px-3 py-1 inline-flex items-center`}>
+                    {t.label}
+                  </span>
+                ));
+              })()}
+            </div>
           )}
         </div>
 

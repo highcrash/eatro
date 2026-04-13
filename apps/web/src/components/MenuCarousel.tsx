@@ -64,6 +64,11 @@ export default function MenuCarousel({ items, onItemClick }: MenuCarouselProps) 
               className="flex-shrink-0 w-56 bg-card border border-border hover:border-accent/40 transition-colors text-left group/card"
             >
               <div className="aspect-square bg-hover relative overflow-hidden">
+                {hasDiscount && (
+                  <span className="absolute top-2 right-2 z-10 bg-accent text-white text-xs font-bold px-2 py-1">
+                    {item.discountedPrice != null ? `-${Math.round((1 - item.discountedPrice / item.price) * 100)}%` : 'SALE'}
+                  </span>
+                )}
                 {item.imageUrl ? (
                   <img
                     src={item.imageUrl}

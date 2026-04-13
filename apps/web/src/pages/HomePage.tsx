@@ -79,6 +79,11 @@ export default function HomePage() {
     enabled: content?.showReviews !== false,
   });
 
+  const { data: discountedItems = [] } = useQuery<RecommendedItem[]>({
+    queryKey: ['discounted', getActiveBranchId()],
+    queryFn: () => api.getJson<RecommendedItem[]>(`/public/menu/${getActiveBranchId()}/discounted`),
+  });
+
   const logo = resolveLogoUrl(branding?.logoUrl);
   const brandName = branding?.name ?? 'Restora';
 
@@ -171,13 +176,20 @@ export default function HomePage() {
       {/* ================================================================ */}
       {/*  2. CHEF'S SPECIALS (Recommended)                                 */}
       {/* ================================================================ */}
-      {recommended && recommended.length > 0 && (
+      {(content as any)?.showChefsSpecial !== false && recommended && recommended.length > 0 && (
         <section className="py-20 px-6">
           <div className="max-w-7xl mx-auto">
             <p className="font-serif italic text-accent text-center mb-2">From the Kitchen</p>
-            <h2 className="font-display text-5xl md:text-6xl tracking-wider text-center mb-12">
-              CHEF&apos;S SPECIALS
-            </h2>
+            <div className="flex items-center justify-center gap-4 mb-12">
+              <h2 className="font-display text-5xl md:text-6xl tracking-wider">
+                CHEF&apos;S SPECIALS
+              </h2>
+              {recommended.length > 3 && (
+                <Link to="/chefs-special" className="text-accent text-xs font-body tracking-widest uppercase hover:text-white transition-colors whitespace-nowrap">
+                  View All →
+                </Link>
+              )}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {recommended.slice(0, 3).map((item) => {
                 const hasDiscount = item.discountedPrice != null && item.discountedPrice < item.price;
@@ -241,13 +253,19 @@ export default function HomePage() {
             </h2>
 
             {categories.slice(0, 5).map((cat) => {
-              const catItems = items
-                .filter((i) => i.categoryId === cat.id)
-                .slice(0, 10);
+              const allCatItems = items.filter((i) => i.categoryId === cat.id);
+              const catItems = allCatItems.slice(0, 10);
               if (catItems.length === 0) return null;
               return (
                 <div key={cat.id} className="mb-10">
-                  <h3 className="font-display text-2xl tracking-wider text-text mb-4">{cat.name}</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-display text-2xl tracking-wider text-text">{cat.name}</h3>
+                    {allCatItems.length > 6 && (
+                      <Link to="/menu" className="text-accent text-xs font-body tracking-widest uppercase hover:text-white transition-colors">
+                        View All →
+                      </Link>
+                    )}
+                  </div>
                   <MenuCarousel
                     items={catItems}
                     onItemClick={(id) => navigate(`/menu/${id}`)}
@@ -264,6 +282,31 @@ export default function HomePage() {
                 View Full Menu
               </Link>
             </div>
+          </div>
+        </section>
+      )}
+
+      {/* ================================================================ */}
+      {/*  DEALS / DISCOUNTS                                                */}
+      {/* ================================================================ */}
+      {(content as any)?.showDeals !== false && discountedItems.length > 0 && (
+        <section className="py-20 px-6">
+          <div className="max-w-7xl mx-auto">
+            <div className="flex items-center justify-center gap-4 mb-12">
+              <div className="text-center">
+                <p className="font-serif italic text-accent mb-2">Limited Time</p>
+                <h2 className="font-display text-5xl md:text-6xl tracking-wider">TODAY'S DEALS</h2>
+              </div>
+              {discountedItems.length > 4 && (
+                <Link to="/deals" className="text-accent text-xs font-body tracking-widest uppercase hover:text-white transition-colors whitespace-nowrap">
+                  View All →
+                </Link>
+              )}
+            </div>
+            <MenuCarousel
+              items={discountedItems.slice(0, 10).map((it) => ({ ...it, slug: (it as any).slug }))}
+              onItemClick={(id) => navigate(`/menu/${id}`)}
+            />
           </div>
         </section>
       )}

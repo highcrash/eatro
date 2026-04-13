@@ -36,6 +36,8 @@ interface WebsiteContent {
   showPieces: boolean;
   showPrepTime: boolean;
   showSpiceLevel: boolean;
+  showDeals: boolean;
+  showChefsSpecial: boolean;
   // Gallery
   galleryImages: string | null;
   // Section backgrounds
@@ -234,6 +236,8 @@ export default function WebsitePage() {
       showPieces: content.showPieces,
       showPrepTime: content.showPrepTime,
       showSpiceLevel: content.showSpiceLevel,
+      showDeals: content.showDeals,
+      showChefsSpecial: content.showChefsSpecial,
       galleryImages: content.galleryImages,
       menuSectionBg: content.menuSectionBg,
       aboutSectionBg: content.aboutSectionBg,
@@ -386,6 +390,11 @@ export default function WebsitePage() {
               <ToggleField label="Pieces / Quantity" checked={content.showPieces ?? true} onChange={(v) => update('showPieces', v)} />
               <ToggleField label="Prep Time" checked={content.showPrepTime ?? true} onChange={(v) => update('showPrepTime', v)} />
               <ToggleField label="Spice Level" checked={content.showSpiceLevel ?? true} onChange={(v) => update('showSpiceLevel', v)} />
+            </div>
+            <p className="text-[#666] text-[10px] font-body mt-3 mb-1">Homepage Sections</p>
+            <div className="grid grid-cols-2 gap-2">
+              <ToggleField label="Today's Deals Section" checked={content.showDeals ?? true} onChange={(v) => update('showDeals', v)} />
+              <ToggleField label="Chef's Special Section" checked={content.showChefsSpecial ?? true} onChange={(v) => update('showChefsSpecial', v)} />
             </div>
           </div>
         </CollapsibleSection>

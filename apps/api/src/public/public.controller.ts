@@ -18,6 +18,11 @@ export class PublicController {
     return this.publicService.getBranches();
   }
 
+  @Get('menu/:branchId/discounted')
+  getDiscounted(@Param('branchId') branchId: string) {
+    return this.publicService.getDiscountedItems(branchId);
+  }
+
   @Get('menu/:branchId/recommended')
   getRecommended(@Param('branchId') branchId: string, @Query('categoryId') categoryId?: string) {
     return this.publicService.getRecommended(branchId, categoryId);

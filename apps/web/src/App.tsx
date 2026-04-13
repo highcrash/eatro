@@ -7,6 +7,8 @@ import MenuItemPage from './pages/MenuItemPage';
 import AboutPage from './pages/AboutPage';
 import ContactPage from './pages/ContactPage';
 import ReservationPage from './pages/ReservationPage';
+import ChefsSpecialPage from './pages/ChefsSpecialPage';
+import DiscountsPage from './pages/DiscountsPage';
 import NotFoundPage from './pages/NotFoundPage';
 import MaintenancePage from './pages/MaintenancePage';
 import { useWebsiteContent } from './lib/cms';
@@ -34,6 +36,8 @@ export default function WebApp() {
         <Route path="/" element={<HomePage />} />
         <Route path="/menu" element={<MenuPage />} />
         <Route path="/menu/:itemId" element={<MenuItemPage />} />
+        <Route path="/chefs-special" element={<ChefsSpecialPage />} />
+        <Route path="/deals" element={<DiscountsPage />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="/contact" element={<ContactPage />} />
         <Route path="/reservation" element={<ReservationPage />} />

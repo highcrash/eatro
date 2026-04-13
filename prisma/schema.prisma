@@ -264,6 +264,8 @@ model WebsiteContent {
   showPieces          Boolean @default(true)
   showPrepTime        Boolean @default(true)
   showSpiceLevel      Boolean @default(true)
+  showDeals           Boolean @default(true)
+  showChefsSpecial    Boolean @default(true)
   // Gallery
   galleryImages       String?                    // JSON array of image URLs
   // Section backgrounds (admin uploads image/video)
