@@ -102,17 +102,17 @@ export default function MenuItemPage() {
         image={item.imageUrl || undefined}
       />
       {/* Hero image header */}
-      <section className="relative h-[50vh] min-h-[350px] overflow-hidden">
+      <section className="relative h-[50vh] md:h-[60vh] min-h-[400px] overflow-hidden bg-card">
         {item.imageUrl ? (
           <img
             src={item.imageUrl}
             alt={item.name}
-            className="absolute inset-0 w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full object-contain p-8 md:p-16"
           />
         ) : (
           <div className="absolute inset-0 bg-hover" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-bg/80" />
 
         {/* Back button */}
         <div className="absolute top-20 left-6 z-10">
