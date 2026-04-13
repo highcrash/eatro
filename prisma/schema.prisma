@@ -1506,3 +1506,31 @@ model PurchaseReturnItem {
 
   @@map("purchase_return_items")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BACKUP SYSTEM — OWNER-only database backups
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BackupRecord {
+  id         String   @id @default(cuid())
+  filename   String
+  fileUrl    String
+  sizeBytes  Int
+  type       String   @default("MANUAL") // MANUAL | AUTO
+  createdAt  DateTime @default(now())
+  createdById String?
+
+  @@index([createdAt])
+  @@map("backup_records")
+}
+
+model BackupSchedule {
+  id        String    @id @default("default")
+  frequency String    @default("OFF") // OFF | DAILY | WEEKLY | MONTHLY
+  timeHour  Int       @default(2)     // 0-23, server local time
+  retention Int       @default(10)    // keep N most recent AUTO backups
+  lastRunAt DateTime?
+  updatedAt DateTime  @updatedAt
+
+  @@map("backup_schedule")
+}

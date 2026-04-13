@@ -32,6 +32,7 @@ import WebsitePage from './pages/WebsitePage';
 import DiscountsPage from './pages/DiscountsPage';
 import CustomersPage from './pages/CustomersPage';
 import DataCleanupPage from './pages/DataCleanupPage';
+import BackupPage from './pages/BackupPage';
 import ReservationsPage from './pages/ReservationsPage';
 
 export default function AdminApp() {
@@ -75,6 +76,7 @@ export default function AdminApp() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/reservations" element={<ReservationsPage />} />
         <Route path="/data-cleanup" element={<DataCleanupPage />} />
+        <Route path="/backups" element={<BackupPage />} />
       </Route>
     </Routes>
   );

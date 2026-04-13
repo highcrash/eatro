@@ -66,4 +66,18 @@ export const api = {
     formData.append(fieldName, file);
     return request<T>(path, { method: 'POST', body: formData });
   },
+  uploadWithFields: <T>(path: string, file: File, fields: Record<string, string>, fieldName = 'file') => {
+    const formData = new FormData();
+    formData.append(fieldName, file);
+    for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+    return request<T>(path, { method: 'POST', body: formData });
+  },
+  downloadBlob: async (path: string): Promise<{ blob: Blob; filename: string }> => {
+    const token = useAuthStore.getState().accessToken;
+    const res = await fetch(`${BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+    const cd = res.headers.get('content-disposition') ?? '';
+    const match = /filename="([^"]+)"/.exec(cd);
+    return { blob: await res.blob(), filename: match?.[1] ?? 'backup.json.gz' };
+  },
 };

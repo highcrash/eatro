@@ -58,5 +58,11 @@ packages/*/src/**/*.d.ts.map
 # Uploaded files
 apps/api/uploads/
 
+# Database backups (sensitive — contains all data)
+apps/api/backups/
+
+# Stray nested path created when the api is started with a non-root cwd
+apps/api/apps/
+
 # Claude Code local settings
 .claude/settings.local.json

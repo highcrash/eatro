@@ -84,7 +84,7 @@ interface WebsiteContent {
   updatedAt: string;
 }
 
-interface MenuCategory { id: string; name: string }
+interface MenuCategory { id: string; name: string; parentId?: string | null }
 
 // Parse a JSON string array safely
 function parseJsonArray(val: string | null): string[] {
@@ -485,48 +485,26 @@ export default function WebsitePage() {
             placeholder="Chef Special"
           />
           <div className="pt-4 border-t border-[#2A2A2A]">
-            <p className="text-[#666] text-xs font-body font-medium tracking-widest uppercase mb-2">Featured Categories</p>
+            <p className="text-[#666] text-xs font-body font-medium tracking-widest uppercase mb-2">Visible Categories</p>
             <p className="text-[10px] font-body text-[#666] mb-2">
-              Pick which categories appear on the public Home page.
+              Check the categories you want to show on the public website. Leave ALL unchecked to show every category (default).
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              {categories.map((c) => (
-                <label key={c.id} className="flex items-center gap-2 bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={featuredCategoryIds.includes(c.id)}
-                    onChange={() => toggleCategory(c.id)}
-                    className="w-3.5 h-3.5 accent-[#D62B2B]"
-                  />
-                  <span className="text-xs font-body text-white">{c.name}</span>
-                </label>
-              ))}
-              {categories.length === 0 && (
-                <p className="col-span-2 text-xs font-body text-[#666]">No menu categories yet.</p>
-              )}
-            </div>
+            <CategoryTree
+              categories={categories}
+              checkedIds={featuredCategoryIds}
+              onToggle={toggleCategory}
+            />
           </div>
           <div className="pt-4 border-t border-[#2A2A2A]">
-            <p className="text-[#666] text-xs font-body font-medium tracking-widest uppercase mb-2">Hidden Categories</p>
+            <p className="text-[#666] text-xs font-body font-medium tracking-widest uppercase mb-2">Hide Specific Categories</p>
             <p className="text-[10px] font-body text-[#666] mb-2">
-              Categories checked here will be hidden from the public website.
+              Optional extra filter — categories checked here are force-hidden from the website even if they appear in the Visible list above.
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              {categories.map((c) => (
-                <label key={c.id} className="flex items-center gap-2 bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={hiddenCategoryIds.includes(c.id)}
-                    onChange={() => toggleHiddenCategory(c.id)}
-                    className="w-3.5 h-3.5 accent-[#D62B2B]"
-                  />
-                  <span className="text-xs font-body text-white">{c.name}</span>
-                </label>
-              ))}
-              {categories.length === 0 && (
-                <p className="col-span-2 text-xs font-body text-[#666]">No menu categories yet.</p>
-              )}
-            </div>
+            <CategoryTree
+              categories={categories}
+              checkedIds={hiddenCategoryIds}
+              onToggle={toggleHiddenCategory}
+            />
             <p className="text-[10px] font-body text-[#555] mt-2 italic">
               Individual items can be hidden from the Menu page.
             </p>
@@ -644,6 +622,61 @@ export default function WebsitePage() {
 /* ------------------------------------------------------------------ */
 /*  Reusable sub-components                                           */
 /* ------------------------------------------------------------------ */
+
+function CategoryTree({
+  categories,
+  checkedIds,
+  onToggle,
+}: {
+  categories: MenuCategory[];
+  checkedIds: string[];
+  onToggle: (id: string) => void;
+}) {
+  if (categories.length === 0) {
+    return <p className="text-xs font-body text-[#666]">No menu categories yet.</p>;
+  }
+
+  const parents = categories.filter((c) => !c.parentId);
+  const childrenOf = new Map<string, MenuCategory[]>();
+  for (const c of categories) {
+    if (c.parentId) {
+      const existing = childrenOf.get(c.parentId) ?? [];
+      existing.push(c);
+      childrenOf.set(c.parentId, existing);
+    }
+  }
+
+  const Row = ({ c, isChild }: { c: MenuCategory; isChild?: boolean }) => (
+    <label
+      className={`flex items-center gap-2 bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 cursor-pointer ${isChild ? 'ml-5' : ''}`}
+    >
+      <input
+        type="checkbox"
+        checked={checkedIds.includes(c.id)}
+        onChange={() => onToggle(c.id)}
+        className="w-3.5 h-3.5 accent-[#D62B2B]"
+      />
+      {isChild && <span className="text-[#666] text-xs font-body select-none">↳</span>}
+      <span className={`text-xs font-body ${isChild ? 'text-[#CCC]' : 'text-white font-medium'}`}>{c.name}</span>
+    </label>
+  );
+
+  return (
+    <div className="space-y-1">
+      {parents.map((p) => {
+        const kids = childrenOf.get(p.id) ?? [];
+        return (
+          <div key={p.id} className="space-y-1">
+            <Row c={p} />
+            {kids.map((child) => (
+              <Row key={child.id} c={child} isChild />
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function CollapsibleSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);

@@ -88,22 +88,56 @@ export class PublicService {
   async getMenu(branchId: string) {
     // Get website visibility settings
     const content = await this.prisma.websiteContent.findUnique({ where: { branchId } });
-    const hiddenCatIds: string[] = content?.hiddenCategoryIds ? JSON.parse(content.hiddenCategoryIds) : [];
-    const hiddenItemIds: string[] = content?.hiddenItemIds ? JSON.parse(content.hiddenItemIds) : [];
+    const hiddenCatIds: string[] = content?.hiddenCategoryIds ? this.safeParseArray(content.hiddenCategoryIds) : [];
+    const hiddenItemIds: string[] = content?.hiddenItemIds ? this.safeParseArray(content.hiddenItemIds) : [];
+    const featuredCatIds: string[] = content?.featuredCategoryIds ? this.safeParseArray(content.featuredCategoryIds) : [];
+
+    // If admin selected specific categories to show, build the allowlist
+    // (include children of any selected parent categories automatically)
+    let allowCatIds: string[] | null = null;
+    if (featuredCatIds.length > 0) {
+      const children = await this.prisma.menuCategory.findMany({
+        where: { branchId, deletedAt: null, parentId: { in: featuredCatIds } },
+        select: { id: true },
+      });
+      allowCatIds = Array.from(new Set([...featuredCatIds, ...children.map((c) => c.id)]));
+    }
+
+    const catWhere: any = {
+      branchId,
+      isActive: true,
+      deletedAt: null,
+      websiteVisible: true,
+    };
+    if (hiddenCatIds.length > 0) catWhere.id = { notIn: hiddenCatIds };
+    if (allowCatIds) catWhere.id = { ...(catWhere.id ?? {}), in: allowCatIds };
+
+    const itemWhere: any = {
+      branchId,
+      isAvailable: true,
+      deletedAt: null,
+      websiteVisible: true,
+    };
+    if (hiddenItemIds.length > 0) itemWhere.id = { notIn: hiddenItemIds };
+    if (allowCatIds) itemWhere.categoryId = { in: allowCatIds };
 
     const [categories, items] = await Promise.all([
-      this.prisma.menuCategory.findMany({
-        where: { branchId, isActive: true, deletedAt: null, websiteVisible: true, id: { notIn: hiddenCatIds.length > 0 ? hiddenCatIds : undefined } },
-        orderBy: { sortOrder: 'asc' },
-      }),
-      this.prisma.menuItem.findMany({
-        where: { branchId, isAvailable: true, deletedAt: null, websiteVisible: true, id: { notIn: hiddenItemIds.length > 0 ? hiddenItemIds : undefined } },
-        orderBy: { sortOrder: 'asc' },
-      }),
+      this.prisma.menuCategory.findMany({ where: catWhere, orderBy: { sortOrder: 'asc' } }),
+      this.prisma.menuItem.findMany({ where: itemWhere, orderBy: { sortOrder: 'asc' } }),
     ]);
 
     const itemsWithDiscount = await this.applyDiscounts(branchId, items);
     return { categories, items: itemsWithDiscount };
+  }
+
+  private safeParseArray(raw: string | null | undefined): string[] {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
   }
 
   async getMenuItem(branchId: string, itemIdOrSlug: string) {

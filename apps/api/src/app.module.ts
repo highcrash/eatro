@@ -38,6 +38,7 @@ import { CashierOpsModule } from './cashier-ops/cashier-ops.module';
 import { WebsiteModule } from './website/website.module';
 import { CleanupModule } from './cleanup/cleanup.module';
 import { ReservationModule } from './reservation/reservation.module';
+import { BackupModule } from './backup/backup.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -133,6 +134,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // Data Cleanup (OWNER-only destructive ops)
     CleanupModule,
+
+    // Database Backup/Restore (OWNER-only)
+    BackupModule,
 
     // Reservation System
     ScheduleModule.forRoot(),
