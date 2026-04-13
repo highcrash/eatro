@@ -266,7 +266,7 @@ function ItemDialog({
         seoDescription: form.seoDescription || null,
       };
       if (initial) return api.patch(`/menu/${initial.id}`, { ...dto, ...extra, isAvailable: form.isAvailable });
-      return api.post('/menu', dto);
+      return api.post('/menu', { ...dto, ...extra });
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['menu'] });

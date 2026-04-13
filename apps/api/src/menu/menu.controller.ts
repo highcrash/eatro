@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Delete, Param, Body, UseGuards, ValidationPipe } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 
 import type { CreateMenuItemDto, UpdateMenuItemDto, JwtPayload } from '@restora/types';
@@ -27,8 +27,8 @@ export class MenuController {
 
   @Post()
   @Roles('OWNER', 'MANAGER')
-  create(@Body() dto: CreateMenuItemDto, @CurrentUser() user: JwtPayload) {
-    return this.menuService.create(user.branchId, dto);
+  create(@Body(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false })) dto: CreateMenuItemDto, @CurrentUser() user: JwtPayload) {
+    return this.menuService.create(user.branchId, dto as any);
   }
 
   @Post('bulk')
@@ -42,7 +42,7 @@ export class MenuController {
 
   @Patch(':id')
   @Roles('OWNER', 'MANAGER')
-  update(@Param('id') id: string, @Body() dto: UpdateMenuItemDto, @CurrentUser() user: JwtPayload) {
+  update(@Param('id') id: string, @Body(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false })) dto: UpdateMenuItemDto, @CurrentUser() user: JwtPayload) {
     return this.menuService.update(id, user.branchId, dto);
   }
 
