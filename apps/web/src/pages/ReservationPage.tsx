@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
-import { getActiveBranchId } from '../lib/cms';
+import { getActiveBranchId, useBranding, useWebsiteContent } from '../lib/cms';
+import SEO from '../components/SEO';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -83,6 +84,9 @@ type Step = 'date' | 'slots' | 'otp' | 'confirm' | 'success';
 
 export default function ReservationPage() {
   const branchId = getActiveBranchId();
+  const { data: branding } = useBranding();
+  const { data: wContent } = useWebsiteContent();
+  const siteName = (wContent as any)?.seoSiteName || branding?.name || 'EATRO';
 
   /* Step state */
   const [step, setStep] = useState<Step>('date');
@@ -235,6 +239,10 @@ export default function ReservationPage() {
 
   return (
     <div>
+      <SEO
+        title={(wContent as any)?.seoReservationTitle || `${siteName} — Reserve a Table`}
+        description={(wContent as any)?.seoReservationDescription || `Book your table at ${siteName}. Reserve online for an unforgettable dining experience.`}
+      />
       {/* Hero banner */}
       <section className="py-24 px-6 bg-card border-b border-border">
         <div className="max-w-7xl mx-auto text-center">

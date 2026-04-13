@@ -16,11 +16,22 @@ function resolveImageUrl(url: string) {
 // ─── Emoji Icon Picker ───────────────────────────────────────────────────────
 
 const EMOJI_LIST = [
-  '🍗', '🍕', '☕', '🥗', '🍜', '🥩', '🍰', '🍹', '🔥', '⭐',
-  '🍔', '🌮', '🍣', '🥘', '🧁', '🍝', '🥪', '🍱', '🫔', '🥐',
-  '🍩', '🧆', '🥧', '🍦', '🫕', '🍿', '🥤', '🍷', '🍺', '🧃',
-  '🫖', '🧋', '🥂', '🍵', '🫗', '🫐', '🍇', '🥑', '🌶️', '🧀',
-  '🥚', '🥓', '🌽', '🥕', '🍤', '🦐', '🦀', '🐟', '🍖', '🫓',
+  // Food
+  '🍗', '🍕', '🍔', '🌮', '🍣', '🥘', '🍝', '🥪', '🍱', '🍜',
+  '🥩', '🍖', '🥓', '🧆', '🫔', '🥐', '🫓', '🥙', '🌯', '🥟',
+  '🍤', '🦐', '🦀', '🐟', '🦞', '🦑', '🐙', '🍥', '🍘', '🍙',
+  // Sides & Snacks
+  '🍟', '🧇', '🥞', '🧈', '🥨', '🥯', '🫕', '🍿', '🥜', '🌰',
+  // Fruits & Vegetables
+  '🥗', '🥑', '🍇', '🫐', '🍓', '🍎', '🍊', '🥭', '🍋', '🍌',
+  '🌶️', '🧀', '🥚', '🌽', '🥕', '🧅', '🧄', '🥦', '🍅', '🥬',
+  // Desserts & Sweets
+  '🍰', '🧁', '🥧', '🍩', '🍦', '🍮', '🍫', '🍬', '🍭', '🎂',
+  // Drinks
+  '☕', '🍹', '🥤', '🍷', '🍺', '🧃', '🫖', '🧋', '🥂', '🍵',
+  '🥛', '🍶', '🫗', '🍸', '🧉', '🥃',
+  // Misc
+  '🔥', '⭐', '💎', '👨‍🍳', '🏆', '❤️', '🌿', '🌾', '🎉', '✨',
 ];
 
 function IconPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -150,22 +161,22 @@ function CategoryDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div className="bg-[#161616] w-[400px] p-6 space-y-4 max-h-[90vh] overflow-auto">
         <div className="flex items-center justify-between">
-          <h3 className="font-display text-xl tracking-wide">{initial ? 'EDIT' : 'ADD'} CATEGORY</h3>
+          <h3 className="font-display text-xl tracking-wide text-white">{initial ? 'EDIT' : 'ADD'} CATEGORY</h3>
           <button onClick={onClose} className="text-[#999] hover:text-white"><X size={16} /></button>
         </div>
         <input
           type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Category name"
-          className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white"
+          className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white placeholder:text-[#666]"
           autoFocus
         />
         <div>
           <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Parent Category</label>
           <select
             value={parentId} onChange={(e) => setParentId(e.target.value)}
-            className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#161616]"
+            className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white"
           >
-            <option value="">None (top-level)</option>
-            {parentOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value="" className="bg-[#0D0D0D] text-white">None (top-level)</option>
+            {parentOptions.map((c) => <option key={c.id} value={c.id} className="bg-[#0D0D0D] text-white">{c.name}</option>)}
           </select>
         </div>
         <IconPicker value={icon} onChange={setIcon} />
@@ -275,15 +286,18 @@ function ItemDialog({
   });
 
   // Build flat list with indentation for sub-categories
-  const allCats = categories.flatMap((c) => {
-    const result = [{ id: c.id, label: `${c.icon ? c.icon + ' ' : ''}${c.name}` }];
-    if (c.children) {
-      for (const child of c.children) {
-        result.push({ id: child.id, label: `  └ ${child.icon ? child.icon + ' ' : ''}${child.name}` });
+  // Build flat list from top-level parents + their children only (no duplicates)
+  const allCats = categories
+    .filter((c) => !c.parentId)
+    .flatMap((c) => {
+      const result = [{ id: c.id, label: `${c.icon ? c.icon + ' ' : ''}${c.name}` }];
+      if (c.children) {
+        for (const child of c.children) {
+          result.push({ id: child.id, label: `  └ ${child.icon ? child.icon + ' ' : ''}${child.name}` });
+        }
       }
-    }
-    return result;
-  });
+      return result;
+    });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
@@ -669,6 +683,7 @@ export default function MenuPage() {
   const [linkedDialog, setLinkedDialog] = useState<{ open: boolean; item?: MenuItem }>({ open: false });
   const [activeParent, setActiveParent] = useState<string | null>(null);
   const [activeSub, setActiveSub] = useState<string | null>(null);
+  const [menuSearch, setMenuSearch] = useState('');
   const [csvOpen, setCsvOpen] = useState(false);
   const [csvRows, setCsvRows] = useState<{ categoryName: string; name: string; type: string; price: number; description: string; tags: string }[]>([]);
   const [csvResult, setCsvResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
@@ -688,14 +703,23 @@ export default function MenuPage() {
   const selectedParent = topCategories.find((c) => c.id === activeParent);
   const subCategories = selectedParent?.children ?? [];
 
-  // Filter items based on selection
+  // Filter items based on category selection + search
   const filtered = (() => {
-    if (activeSub) return menuItems.filter((m) => m.categoryId === activeSub);
-    if (activeParent) {
+    let items = menuItems;
+    if (activeSub) items = items.filter((m) => m.categoryId === activeSub);
+    else if (activeParent) {
       const childIds = (selectedParent?.children ?? []).map((c) => c.id);
-      return menuItems.filter((m) => m.categoryId === activeParent || childIds.includes(m.categoryId));
+      items = items.filter((m) => m.categoryId === activeParent || childIds.includes(m.categoryId));
     }
-    return menuItems;
+    if (menuSearch.trim()) {
+      const q = menuSearch.trim().toLowerCase();
+      items = items.filter((m) =>
+        m.name.toLowerCase().includes(q) ||
+        (m.tags ?? '').toLowerCase().includes(q) ||
+        (m.description ?? '').toLowerCase().includes(q)
+      );
+    }
+    return items;
   })();
 
   const deleteCat = useMutation({
@@ -782,7 +806,14 @@ export default function MenuPage() {
           <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Management</p>
           <h1 className="font-display text-4xl text-white tracking-wide">MENU</h1>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          <input
+            type="text"
+            value={menuSearch}
+            onChange={(e) => setMenuSearch(e.target.value)}
+            placeholder="Search menu..."
+            className="border border-[#2A2A2A] bg-[#0D0D0D] text-white px-3 py-2 text-sm font-body placeholder:text-[#555] focus:outline-none focus:border-[#D62B2B] w-48 transition-colors"
+          />
           <button onClick={() => { setCsvOpen(true); setCsvRows([]); setCsvResult(null); }}
             className="flex items-center gap-1.5 border border-[#2A2A2A] px-4 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors">
             <Upload size={14} /> CSV Import

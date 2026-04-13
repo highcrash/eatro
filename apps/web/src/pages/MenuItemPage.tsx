@@ -91,7 +91,7 @@ export default function MenuItemPage() {
   }
 
   const siteName = (content as any)?.seoSiteName || branding?.name || 'EATRO';
-  const itemTitle = item.seoTitle || `${item.name} — ${siteName}`;
+  const itemTitle = item.seoTitle || `${siteName} — ${item.name}`;
   const itemDesc = item.seoDescription || item.description || `${item.name} at ${siteName}. ${formatCurrency(Number(item.price))}`;
 
   return (

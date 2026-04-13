@@ -12,7 +12,7 @@ export default function AboutPage() {
   return (
     <div>
       <SEO
-        title={(content as any)?.seoAboutTitle || `About Us — ${siteName}`}
+        title={(content as any)?.seoAboutTitle || `${siteName} — About Us`}
         description={(content as any)?.seoAboutDescription || `Learn about ${siteName}. Our story, values, and commitment to culinary excellence.`}
       />
       {/* Hero header */}

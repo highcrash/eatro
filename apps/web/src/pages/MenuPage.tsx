@@ -54,7 +54,7 @@ export default function MenuPage() {
   return (
     <div>
       <SEO
-        title={(content as any)?.seoMenuTitle || `Menu — ${siteName}`}
+        title={(content as any)?.seoMenuTitle || `${siteName} — Menu`}
         description={(content as any)?.seoMenuDescription || `Explore the full menu at ${siteName}. Fresh ingredients, made-to-order daily.`}
       />
       {/* Header */}

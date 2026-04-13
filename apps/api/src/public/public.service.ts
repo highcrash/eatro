@@ -40,6 +40,13 @@ export class PublicService {
     });
   }
 
+  async getBranchById(branchId: string) {
+    return this.prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { id: true, name: true, address: true, phone: true, logoUrl: true },
+    });
+  }
+
   async getMenu(branchId: string) {
     const now = new Date();
 

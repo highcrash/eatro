@@ -9,7 +9,7 @@ export default function ContactPage() {
   return (
     <div>
       <SEO
-        title={(content as any)?.seoContactTitle || `Contact — ${siteName}`}
+        title={(content as any)?.seoContactTitle || `${siteName} — Contact`}
         description={(content as any)?.seoContactDescription || `Visit ${siteName}. Find our address, phone number, and opening hours.`}
       />
       {/* Hero header */}
