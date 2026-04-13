@@ -5,6 +5,35 @@ import { PrismaService } from '../prisma/prisma.service';
 export class PublicService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Calculate discounted prices for menu items based on active MenuItemDiscounts */
+  private async applyDiscounts<T extends { id: string; price: any }>(branchId: string, items: T[]): Promise<(T & { discountedPrice: number | null; discountType: string | null; discountValue: number | null })[]> {
+    if (items.length === 0) return items.map((i) => ({ ...i, discountedPrice: null, discountType: null, discountValue: null }));
+    const now = new Date();
+    const dayName = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
+    const discounts = await this.prisma.menuItemDiscount.findMany({
+      where: {
+        isActive: true,
+        startDate: { lte: now },
+        endDate: { gte: now },
+        menuItem: { branchId },
+      },
+    });
+    const activeDiscounts = discounts.filter((d) => {
+      if (!d.applicableDays) return true;
+      try { const days: string[] = JSON.parse(d.applicableDays); return days.includes(dayName); } catch { return true; }
+    });
+
+    return items.map((item) => {
+      const discount = activeDiscounts.find((d) => d.menuItemId === item.id);
+      if (!discount) return { ...item, discountedPrice: null, discountType: null, discountValue: null };
+      const price = Number(item.price);
+      const discountedPrice = discount.type === 'FLAT'
+        ? Math.max(0, price - Number(discount.value))
+        : Math.round(price * (1 - Number(discount.value) / 100));
+      return { ...item, discountedPrice, discountType: discount.type, discountValue: Number(discount.value) };
+    });
+  }
+
   async getTableInfo(tableId: string) {
     const table = await this.prisma.diningTable.findFirst({
       where: { id: tableId, deletedAt: null },
@@ -48,14 +77,12 @@ export class PublicService {
   }
 
   async getMenu(branchId: string) {
-    const now = new Date();
-
     // Get website visibility settings
     const content = await this.prisma.websiteContent.findUnique({ where: { branchId } });
     const hiddenCatIds: string[] = content?.hiddenCategoryIds ? JSON.parse(content.hiddenCategoryIds) : [];
     const hiddenItemIds: string[] = content?.hiddenItemIds ? JSON.parse(content.hiddenItemIds) : [];
 
-    const [categories, items, menuDiscounts] = await Promise.all([
+    const [categories, items] = await Promise.all([
       this.prisma.menuCategory.findMany({
         where: { branchId, isActive: true, deletedAt: null, websiteVisible: true, id: { notIn: hiddenCatIds.length > 0 ? hiddenCatIds : undefined } },
         orderBy: { sortOrder: 'asc' },
@@ -64,34 +91,9 @@ export class PublicService {
         where: { branchId, isAvailable: true, deletedAt: null, websiteVisible: true, id: { notIn: hiddenItemIds.length > 0 ? hiddenItemIds : undefined } },
         orderBy: { sortOrder: 'asc' },
       }),
-      this.prisma.menuItemDiscount.findMany({
-        where: {
-          isActive: true,
-          startDate: { lte: now },
-          endDate: { gte: now },
-          menuItem: { branchId },
-        },
-      }),
     ]);
 
-    // Calculate active discounted prices
-    const dayName = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
-    const activeDiscounts = menuDiscounts.filter((d) => {
-      if (!d.applicableDays) return true;
-      const days: string[] = JSON.parse(d.applicableDays);
-      return days.includes(dayName);
-    });
-
-    const itemsWithDiscount = items.map((item) => {
-      const discount = activeDiscounts.find((d) => d.menuItemId === item.id);
-      if (!discount) return { ...item, discountedPrice: null, discountType: null, discountValue: null };
-      const price = Number(item.price);
-      const discountedPrice = discount.type === 'FLAT'
-        ? Math.max(0, price - Number(discount.value))
-        : Math.round(price * (1 - Number(discount.value) / 100));
-      return { ...item, discountedPrice, discountType: discount.type, discountValue: Number(discount.value) };
-    });
-
+    const itemsWithDiscount = await this.applyDiscounts(branchId, items);
     return { categories, items: itemsWithDiscount };
   }
 
@@ -118,6 +120,9 @@ export class PublicService {
     });
     if (!item) return null;
 
+    // Apply discount
+    const [itemWithDiscount] = await this.applyDiscounts(branchId, [item]);
+
     // Filter ingredients by showOnWebsite
     const ingredients = item.recipe?.items
       .filter((ri) => ri.ingredient.showOnWebsite)
@@ -129,7 +134,7 @@ export class PublicService {
         unit: ri.unit,
       })) ?? [];
 
-    return { ...item, ingredients };
+    return { ...itemWithDiscount, ingredients };
   }
 
   async getRecommended(branchId: string, categoryId?: string) {
@@ -148,10 +153,11 @@ export class PublicService {
       });
       const ids = topItems.map((t) => t.menuItemId);
       if (ids.length > 0) {
-        return this.prisma.menuItem.findMany({
+        const items = await this.prisma.menuItem.findMany({
           where: { id: { in: ids }, deletedAt: null },
           include: { category: true },
         });
+        return this.applyDiscounts(branchId, items);
       }
     }
 
@@ -161,7 +167,7 @@ export class PublicService {
       include: { category: true },
       take: 10,
     });
-    if (tagged.length > 0) return tagged;
+    if (tagged.length > 0) return this.applyDiscounts(branchId, tagged);
 
     // Fallback: top selling items
     const topAll = await this.prisma.orderItem.groupBy({
@@ -172,10 +178,11 @@ export class PublicService {
       take: 10,
     });
     const fallbackIds = topAll.map((t) => t.menuItemId);
-    return this.prisma.menuItem.findMany({
+    const fallbackItems = await this.prisma.menuItem.findMany({
       where: { id: { in: fallbackIds }, deletedAt: null },
       include: { category: true },
     });
+    return this.applyDiscounts(branchId, fallbackItems);
   }
 
   async getReviews(branchId: string) {
