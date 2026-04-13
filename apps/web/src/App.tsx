@@ -1,4 +1,5 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import SiteLayout from './components/SiteLayout';
 import HomePage from './pages/HomePage';
 import MenuPage from './pages/MenuPage';
@@ -10,6 +11,13 @@ import NotFoundPage from './pages/NotFoundPage';
 import MaintenancePage from './pages/MaintenancePage';
 import { useWebsiteContent } from './lib/cms';
 
+/** Scroll to top on every route change */
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+}
+
 export default function WebApp() {
   const { data: content } = useWebsiteContent();
 
@@ -19,6 +27,8 @@ export default function WebApp() {
   }
 
   return (
+    <>
+    <ScrollToTop />
     <Routes>
       <Route element={<SiteLayout />}>
         <Route path="/" element={<HomePage />} />
@@ -30,5 +40,6 @@ export default function WebApp() {
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
+    </>
   );
 }

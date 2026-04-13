@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 import MenuCarousel from '../components/MenuCarousel';
 import SEO from '../components/SEO';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -86,6 +86,8 @@ export default function HomePage() {
     if (!content?.galleryImages) return [];
     try { return JSON.parse(content.galleryImages); } catch { return []; }
   }, [content?.galleryImages]);
+
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const categories = menu?.categories ?? [];
   const items = menu?.items?.filter((i) => i.isAvailable) ?? [];
@@ -345,14 +347,14 @@ export default function HomePage() {
             </h2>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
               {galleryImages.map((src, i) => (
-                <div key={i} className="aspect-square overflow-hidden">
+                <button key={i} className="aspect-square overflow-hidden cursor-pointer" onClick={() => setLightbox(src)}>
                   <img
                     src={src}
                     alt=""
                     className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
                     loading="lazy"
                   />
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -528,6 +530,52 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Gallery Lightbox Modal */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            onClick={() => setLightbox(null)}
+            className="absolute top-6 right-6 text-white/60 hover:text-white text-4xl font-light transition-colors z-10"
+          >
+            &times;
+          </button>
+          {/* Prev/Next arrows */}
+          {galleryImages.length > 1 && (
+            <>
+              <button
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white text-5xl font-light transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const idx = galleryImages.indexOf(lightbox);
+                  setLightbox(galleryImages[(idx - 1 + galleryImages.length) % galleryImages.length]);
+                }}
+              >
+                &#8249;
+              </button>
+              <button
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white text-5xl font-light transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const idx = galleryImages.indexOf(lightbox);
+                  setLightbox(galleryImages[(idx + 1) % galleryImages.length]);
+                }}
+              >
+                &#8250;
+              </button>
+            </>
+          )}
+          <img
+            src={lightbox}
+            alt=""
+            className="max-w-full max-h-[90vh] object-contain cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
