@@ -86,22 +86,13 @@ export class PublicService {
   }
 
   async getMenu(branchId: string) {
-    // Get website visibility settings
+    // Menu page = ALL categories the admin hasn't explicitly hidden.
+    // featuredCategoryIds only controls the HOMEPAGE preview (applied client-side
+    // on the web app), never the full menu page — admin wants the complete menu
+    // browsable even when a subset is featured on the home page.
     const content = await this.prisma.websiteContent.findUnique({ where: { branchId } });
     const hiddenCatIds: string[] = content?.hiddenCategoryIds ? this.safeParseArray(content.hiddenCategoryIds) : [];
     const hiddenItemIds: string[] = content?.hiddenItemIds ? this.safeParseArray(content.hiddenItemIds) : [];
-    const featuredCatIds: string[] = content?.featuredCategoryIds ? this.safeParseArray(content.featuredCategoryIds) : [];
-
-    // If admin selected specific categories to show, build the allowlist
-    // (include children of any selected parent categories automatically)
-    let allowCatIds: string[] | null = null;
-    if (featuredCatIds.length > 0) {
-      const children = await this.prisma.menuCategory.findMany({
-        where: { branchId, deletedAt: null, parentId: { in: featuredCatIds } },
-        select: { id: true },
-      });
-      allowCatIds = Array.from(new Set([...featuredCatIds, ...children.map((c) => c.id)]));
-    }
 
     const catWhere: any = {
       branchId,
@@ -110,7 +101,6 @@ export class PublicService {
       websiteVisible: true,
     };
     if (hiddenCatIds.length > 0) catWhere.id = { notIn: hiddenCatIds };
-    if (allowCatIds) catWhere.id = { ...(catWhere.id ?? {}), in: allowCatIds };
 
     const itemWhere: any = {
       branchId,
@@ -119,7 +109,6 @@ export class PublicService {
       websiteVisible: true,
     };
     if (hiddenItemIds.length > 0) itemWhere.id = { notIn: hiddenItemIds };
-    if (allowCatIds) itemWhere.categoryId = { in: allowCatIds };
 
     const [categories, items] = await Promise.all([
       this.prisma.menuCategory.findMany({ where: catWhere, orderBy: { sortOrder: 'asc' } }),

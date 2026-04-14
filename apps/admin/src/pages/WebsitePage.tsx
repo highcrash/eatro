@@ -485,9 +485,9 @@ export default function WebsitePage() {
             placeholder="Chef Special"
           />
           <div className="pt-4 border-t border-[#2A2A2A]">
-            <p className="text-[#666] text-xs font-body font-medium tracking-widest uppercase mb-2">Visible Categories</p>
+            <p className="text-[#666] text-xs font-body font-medium tracking-widest uppercase mb-2">Homepage Featured Categories</p>
             <p className="text-[10px] font-body text-[#666] mb-2">
-              Check the categories you want to show on the public website. Leave ALL unchecked to show every category (default).
+              Pick categories to feature on the public Home page menu preview. The full Menu page always shows every category (minus hidden ones).
             </p>
             <CategoryTree
               categories={categories}

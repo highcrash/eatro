@@ -68,7 +68,7 @@ export class BackupController {
     return this.svc.restore({ recordId: id, ownerId: user.sub, password: dto.password });
   }
 
-  @Post('restore/upload')
+  @Post('upload')
   @Roles('OWNER')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -76,14 +76,12 @@ export class BackupController {
       limits: { fileSize: MAX_BACKUP_UPLOAD },
     }),
   )
-  restoreFromUpload(
+  uploadBackupFile(
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: JwtPayload,
-    @Body() dto: { password: string },
   ) {
     if (!file) throw new BadRequestException('No file provided');
-    if (!dto?.password) throw new BadRequestException('Password required');
-    return this.svc.restore({ uploadedFile: file, ownerId: user.sub, password: dto.password });
+    return this.svc.storeUploadedFile(file, user.sub);
   }
 
   @Get('schedule')

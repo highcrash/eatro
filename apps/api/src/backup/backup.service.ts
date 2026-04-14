@@ -104,6 +104,41 @@ export class BackupService {
     return record;
   }
 
+  /** Persist an uploaded .json.gz file as a BackupRecord (type UPLOAD).
+   *  Validates the file is a readable gzipped JSON backup before saving. */
+  async storeUploadedFile(file: Express.Multer.File, createdById?: string) {
+    await this.ensureDir();
+
+    // Quick validation — must decompress and parse, and have our expected shape.
+    try {
+      const decompressed = await gunzip(file.buffer);
+      const parsed = JSON.parse(decompressed.toString('utf8'));
+      if (!parsed?.version || !parsed?.data || typeof parsed.data !== 'object') {
+        throw new Error('missing version/data fields');
+      }
+    } catch (e) {
+      throw new BadRequestException(`Not a valid backup file: ${(e as Error).message}`);
+    }
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+    const filename = `backup-upload-${ts}-${safeName}`;
+    const fullPath = join(BACKUP_DIR, filename);
+    await fs.writeFile(fullPath, file.buffer);
+
+    const record = await this.prisma.backupRecord.create({
+      data: {
+        filename,
+        fileUrl: `backups/${filename}`,
+        sizeBytes: file.buffer.length,
+        type: 'UPLOAD',
+        createdById: createdById ?? null,
+      },
+    });
+    this.logger.log(`Uploaded backup stored: ${filename} (${(file.buffer.length / 1024).toFixed(1)} KB)`);
+    return record;
+  }
+
   private async pruneAutoBackups() {
     const schedule = await this.getSchedule();
     const keep = schedule.retention;

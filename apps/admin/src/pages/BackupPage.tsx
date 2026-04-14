@@ -75,23 +75,14 @@ export default function BackupPage() {
   });
 
   const [restoreTargetId, setRestoreTargetId] = useState<string | null>(null);
-  const [restoreUploadFile, setRestoreUploadFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');
+  const [uploading, setUploading] = useState(false);
 
   const restoreMut = useMutation({
-    mutationFn: async () => {
-      if (restoreTargetId) {
-        return api.post(`/backup/restore/${restoreTargetId}`, { password });
-      }
-      if (restoreUploadFile) {
-        return api.uploadWithFields('/backup/restore/upload', restoreUploadFile, { password });
-      }
-      throw new Error('No target');
-    },
+    mutationFn: () => api.post(`/backup/restore/${restoreTargetId}`, { password }),
     onSuccess: () => {
       alert('Restore complete. Data has been replaced from the backup.');
       setRestoreTargetId(null);
-      setRestoreUploadFile(null);
       setPassword('');
       qc.invalidateQueries();
     },
@@ -114,16 +105,27 @@ export default function BackupPage() {
 
   const handleUploadClick = () => fileRef.current?.click();
 
-  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) setRestoreUploadFile(f);
     e.target.value = '';
+    if (!f) return;
+    setUploading(true);
+    try {
+      const record = await api.upload<BackupRecord>('/backup/upload', f);
+      await qc.invalidateQueries({ queryKey: ['backups'] });
+      // Open the restore confirm modal targeting the just-uploaded record.
+      setRestoreTargetId(record.id);
+    } catch (err) {
+      alert(`Upload failed: ${(err as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
   };
 
-  const restoreDialogOpen = restoreTargetId !== null || restoreUploadFile !== null;
+  const restoreDialogOpen = restoreTargetId !== null;
   const restoreLabel = restoreTargetId
     ? backups.find((b) => b.id === restoreTargetId)?.filename
-    : restoreUploadFile?.name;
+    : undefined;
 
   return (
     <div className="h-full flex flex-col">
@@ -138,9 +140,10 @@ export default function BackupPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleUploadClick}
-            className="flex items-center gap-2 bg-[#1A1A1A] border border-[#2A2A2A] text-white px-4 py-2.5 text-xs font-body font-medium hover:bg-[#222] transition-colors tracking-widest uppercase"
+            disabled={uploading}
+            className="flex items-center gap-2 bg-[#1A1A1A] border border-[#2A2A2A] text-white px-4 py-2.5 text-xs font-body font-medium hover:bg-[#222] transition-colors tracking-widest uppercase disabled:opacity-40"
           >
-            <Upload size={14} /> Restore from file
+            <Upload size={14} /> {uploading ? 'Uploading...' : 'Restore from file'}
           </button>
           <button
             onClick={() => createMut.mutate()}
@@ -311,7 +314,6 @@ export default function BackupPage() {
               <button
                 onClick={() => {
                   setRestoreTargetId(null);
-                  setRestoreUploadFile(null);
                   setPassword('');
                 }}
                 disabled={restoreMut.isPending}

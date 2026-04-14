@@ -97,6 +97,31 @@ export default function HomePage() {
   const categories = menu?.categories ?? [];
   const items = menu?.items?.filter((i) => i.isAvailable) ?? [];
 
+  // Admin-picked "Visible Categories" filter — applies ONLY to the home page
+  // menu preview. Menu page still shows everything.
+  const featuredIds: string[] = useMemo(() => {
+    const raw = (content as any)?.featuredCategoryIds;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; }
+  }, [content]);
+
+  // Expand selection: include children of selected parents AND parents of
+  // selected children, so sub-categories don't get orphaned.
+  const featuredCategories = useMemo(() => {
+    if (featuredIds.length === 0) return categories;
+    const byId = new Map(categories.map((c) => [c.id, c]));
+    const set = new Set(featuredIds);
+    for (const id of featuredIds) {
+      const cat = byId.get(id);
+      if (cat?.parentId) set.add(cat.parentId);
+    }
+    for (const c of categories) {
+      if (c.parentId && set.has(c.parentId)) set.add(c.id);
+    }
+    return categories.filter((c) => set.has(c.id));
+  }, [categories, featuredIds]);
+
   const siteName = (content as any)?.seoSiteName || branding?.name || 'EATRO';
 
   return (
@@ -238,7 +263,7 @@ export default function HomePage() {
       {/* ================================================================ */}
       {/*  3. MENU PREVIEW                                                  */}
       {/* ================================================================ */}
-      {categories.length > 0 && items.length > 0 && (
+      {featuredCategories.length > 0 && items.length > 0 && (
         <section className="py-20 px-6 bg-card relative overflow-hidden">
           {(content as any)?.menuSectionBg && (
             <>
@@ -252,7 +277,7 @@ export default function HomePage() {
               OUR MENU
             </h2>
 
-            {categories.slice(0, 5).map((cat) => {
+            {featuredCategories.slice(0, 5).map((cat) => {
               const allCatItems = items.filter((i) => i.categoryId === cat.id);
               const catItems = allCatItems.slice(0, 10);
               if (catItems.length === 0) return null;
