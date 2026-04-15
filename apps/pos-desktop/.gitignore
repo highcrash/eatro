@@ -3,3 +3,7 @@ release/
 out/
 *.tsbuildinfo
 node_modules/
+
+# SumatraPDF portable is downloaded at build time by scripts/fetch-sumatra.cjs.
+# ~16 MB binary — not tracked in git.
+resources/SumatraPDF.exe

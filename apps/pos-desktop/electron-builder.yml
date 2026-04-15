@@ -19,6 +19,14 @@ files:
 # Native modules must be rebuilt against Electron's Node ABI at package time.
 npmRebuild: true
 
+# Bundle SumatraPDF portable so the silent PDF-print path works on every
+# Windows box out of the box, regardless of which PDF viewer is installed.
+# Copied to Resources/SumatraPDF.exe next to the app; pdf-print.ts resolves
+# it via process.resourcesPath.
+extraResources:
+  - from: resources/SumatraPDF.exe
+    to: SumatraPDF.exe
+
 # better-sqlite3 + any other .node binaries can't live inside asar.
 asar: true
 asarUnpack:

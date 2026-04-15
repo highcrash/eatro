@@ -1,13 +1,14 @@
 {
   "name": "@restora/pos-desktop",
-  "version": "0.7.14",
+  "version": "0.7.15",
   "private": true,
   "description": "Windows cashier terminal — Electron shell that wraps the web POS and adds native printing, cash drawer, and offline sync.",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "electron-rebuild -w better-sqlite3 && electron-vite dev",
     "build": "electron-rebuild -w better-sqlite3 && electron-vite build",
-    "dist": "electron-rebuild -w better-sqlite3 && electron-vite build && electron-builder --win --config electron-builder.yml",
+    "fetch-resources": "node scripts/fetch-sumatra.cjs",
+    "dist": "pnpm fetch-resources && electron-rebuild -w better-sqlite3 && electron-vite build && electron-builder --win --config electron-builder.yml",
     "rebuild:native": "electron-rebuild -w better-sqlite3",
     "virtual-printer": "node scripts/virtual-thermal-printer.cjs",
     "type-check": "tsc --noEmit -p tsconfig.json",
