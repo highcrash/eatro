@@ -51,6 +51,7 @@ export async function printHtmlToDevice(
   // producing the confusing "Object has been destroyed" error.
   const sanitized = html.replace(/<script[\s\S]*?<\/script>/gi, '');
   writeFileSync(tmpPath, sanitized, 'utf8');
+  log.info(`[print] html bytes written: ${sanitized.length}`);
 
   const win = new BrowserWindow({
     show: false,
@@ -73,24 +74,31 @@ export async function printHtmlToDevice(
 
     await win.loadFile(tmpPath);
 
-    // loadFile() already resolves on did-finish-load, but silent jobs have
-    // been observed to ship blank pages on slow-rendering pages. A 50 ms
-    // settle gives Chromium time to lay out final fonts / tables before we
-    // capture for print.
-    await new Promise<void>((r) => setTimeout(r, 50));
+    // Windows BrowserWindows created with show: false sometimes skip paint
+    // work, so silent webContents.print() captures a blank surface even
+    // though the job was "accepted" by the driver. Nudging the window to
+    // offscreen-visible forces a full paint pass on every driver we've
+    // seen, while the coordinates keep it off the taskbar / screen.
+    win.setBounds({ x: -32000, y: -32000, width: 600, height: 900 });
+    win.showInactive();
+
+    // 500 ms settle: ~16 ms is enough on fast machines but receipts with
+    // webfont-ish monospace stacks need longer, and silent:true has no
+    // built-in "ready" signal. 500 ms is cheap and fixes the blank-print
+    // case.
+    await new Promise<void>((r) => setTimeout(r, 500));
 
     await new Promise<void>((resolve, reject) => {
       try {
-        // Only pass pageSize when the caller really wants one. Leaving the
-        // option out entirely lets Electron fall back to the printer's
-        // configured default paper, which is what every thermal driver on
-        // Windows wants to receive.
         const printOpts: Electron.WebContentsPrintOptions = {
           silent: true,
           printBackground: true,
           deviceName,
           landscape: opts.landscape ?? false,
-          margins: { marginType: 'none' },
+          // 'default' (not 'none') — some thermal drivers treat 'none' as
+          // "empty page" because Electron passes 0-width borders they
+          // can't parse.
+          margins: { marginType: 'default' },
         };
         if (opts.pageSize) printOpts.pageSize = opts.pageSize;
 
