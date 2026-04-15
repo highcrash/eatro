@@ -141,12 +141,20 @@ function handleOffline(
     const orderFilter = parseOrderListPath(input.path);
     if (orderFilter) {
       const cached = getCached(method, input.path);
-      const base = Array.isArray(cached?.body) ? (cached!.body as Array<{ id: string }>) : [];
-      const shadows = listShadowOrders(orderFilter).map((s) => s.body).filter((b) => b != null) as Array<{ id: string }>;
-      const byId = new Map<string, unknown>();
+      const base = Array.isArray(cached?.body) ? (cached!.body as Array<{ id: string; status?: string }>) : [];
+      const shadows = listShadowOrders(orderFilter).map((s) => s.body).filter((b) => b != null) as Array<{ id: string; status?: string }>;
+      const byId = new Map<string, { id: string; status?: string }>();
       for (const o of base) byId.set(o.id, o);
       for (const o of shadows) byId.set(o.id, o); // shadow wins — newer
-      return { status: 200, ok: true, body: Array.from(byId.values()) };
+      // Apply the server's default exclusion: if the URL did NOT set an
+      // explicit status filter, hide PAID and VOID. Keeps a just-paid
+      // offline order from lingering on the OrderPage until drain.
+      const hasExplicitStatus = !!(orderFilter.statuses && orderFilter.statuses.length);
+      const all = Array.from(byId.values()).filter((o) => {
+        if (hasExplicitStatus) return true;
+        return o.status !== 'PAID' && o.status !== 'VOID';
+      });
+      return { status: 200, ok: true, body: all };
     }
     // /orders/<id> detail — check shadow first, then cache.
     const detailMatch = /^\/orders\/([^/?]+)$/.exec(input.path);

@@ -84,6 +84,11 @@ export function listShadowOrders(filter: { tableId?: string | null; statuses?: s
   if (filter.statuses && filter.statuses.length) {
     clauses.push(`status IN (${filter.statuses.map(() => '?').join(',')})`);
     params.push(...filter.statuses);
+  } else {
+    // Match the server's default: /orders?tableId=X implicitly excludes
+    // PAID and VOID orders. Without this, a freshly paid offline order
+    // would stay visible on the OrderPage until the drain clears shadow.
+    clauses.push(`status NOT IN ('PAID','VOID')`);
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = getLocalDb()

@@ -85,9 +85,11 @@ function now(): string { return new Date().toISOString(); }
  */
 function findMenuItem(menuItemId: string): MenuItemLite | null {
   const cached = getCached('GET', '/menu');
-  const items = Array.isArray(cached?.body) ? (cached!.body as Array<{ id: string; name: string; price: number }>) : [];
+  const items = Array.isArray(cached?.body) ? (cached!.body as Array<{ id: string; name: string; price: number | string }>) : [];
   const hit = items.find((i) => i?.id === menuItemId);
-  return hit ? { id: hit.id, name: hit.name, price: hit.price } : null;
+  // Prisma serializes Decimal as a string, so coerce — otherwise `price *
+  // quantity` silently becomes string concatenation later.
+  return hit ? { id: hit.id, name: hit.name, price: Number(hit.price) || 0 } : null;
 }
 
 function findTableNumber(tableId: string | null | undefined): string | null {
@@ -124,12 +126,22 @@ function inferTaxRate(): number {
   return 0;
 }
 
+function normalizeItems(items: OrderItem[]): OrderItem[] {
+  return items.map((it) => ({
+    ...it,
+    unitPrice: Number(it.unitPrice) || 0,
+    totalPrice: Number(it.totalPrice) || 0,
+  }));
+}
+
 function computeTotals(items: OrderItem[], discountAmount = 0): { subtotal: number; taxAmount: number; totalAmount: number } {
-  const subtotal = items.reduce((s, it) => s + it.totalPrice, 0);
+  // Number() every field — server-cached items come back as Prisma Decimal
+  // strings, and `0 + "38000"` is string concatenation, not addition.
+  const subtotal = items.reduce((s, it) => s + (Number(it.totalPrice) || 0), 0);
   const rate = inferTaxRate();
-  const taxable = Math.max(0, subtotal - discountAmount);
+  const taxable = Math.max(0, subtotal - Number(discountAmount || 0));
   const taxAmount = Math.round(taxable * rate);
-  return { subtotal, taxAmount, totalAmount: Math.max(0, subtotal - discountAmount + taxAmount) };
+  return { subtotal, taxAmount, totalAmount: Math.max(0, subtotal - Number(discountAmount || 0) + taxAmount) };
 }
 
 /**
@@ -237,19 +249,27 @@ function indexOrder(order: Order): void {
     if (/^\/orders\/[^/?]+(?:[/?].*)?$/.test(path) && !path.startsWith('/orders?')) continue;
     updateCachedBody('GET', path, (body) => {
       const list = Array.isArray(body) ? (body as Order[]) : [];
+      const tableMatch = /tableId=([^&]+)/.exec(path);
+      const statusMatch = /status=([^&]+)/.exec(path);
+      const allowedStatuses = statusMatch ? statusMatch[1].split(',').map(decodeURIComponent) : null;
+      const tableMatches = !tableMatch || tableMatch[1] === order.tableId;
+      const statusMatches = allowedStatuses
+        ? allowedStatuses.includes(order.status)
+        // No explicit status filter: mirror server's default — exclude PAID/VOID.
+        : order.status !== 'PAID' && order.status !== 'VOID';
+      const belongs = tableMatches && statusMatches;
       const idx = list.findIndex((o) => o?.id === order.id);
       if (idx >= 0) {
+        if (!belongs) {
+          // Order no longer belongs in this filter (e.g. just got paid and
+          // this list only shows CONFIRMED/PREPARING/READY/SERVED). Drop it.
+          return list.filter((o) => o?.id !== order.id);
+        }
         const next = list.slice();
         next[idx] = order;
         return next;
       }
-      const tableMatch = /tableId=([^&]+)/.exec(path);
-      if (tableMatch && tableMatch[1] !== order.tableId) return list;
-      const statusMatch = /status=([^&]+)/.exec(path);
-      if (statusMatch) {
-        const allowed = statusMatch[1].split(',').map(decodeURIComponent);
-        if (!allowed.includes(order.status)) return list;
-      }
+      if (!belongs) return list;
       return [...list, order];
     });
   }
@@ -282,7 +302,7 @@ export function buildAddItemsResponse(
       updatedAt: now(),
     };
   });
-  const items = [...(base.items ?? []), ...newItems];
+  const items = [...normalizeItems(base.items ?? []), ...newItems];
   const totals = computeTotals(items, base.discountAmount ?? 0);
   const updated: Order = {
     ...base,
@@ -319,6 +339,11 @@ export function buildPaymentResponse(
   });
   const updated: Order = {
     ...base,
+    items: normalizeItems(base.items ?? []),
+    subtotal: Number(base.subtotal) || 0,
+    taxAmount: Number(base.taxAmount) || 0,
+    discountAmount: Number(base.discountAmount) || 0,
+    totalAmount: Number(base.totalAmount) || 0,
     status: 'PAID',
     payments: [...(base.payments ?? []), ...payments],
     paymentMethod: body.method,
@@ -338,8 +363,8 @@ export function buildApplyDiscountResponse(
   // We don't know the discount rules offline — best-effort: if the POS supplied
   // an amount, honor it. Otherwise zero it out and let the server recompute
   // on drain.
-  const amount = Math.max(0, body.discountAmount ?? 0);
-  const totals = computeTotals(base.items ?? [], amount);
+  const amount = Math.max(0, Number(body.discountAmount ?? 0) || 0);
+  const totals = computeTotals(normalizeItems(base.items ?? []), amount);
   const updated: Order = {
     ...base,
     discountId: body.discountId,
