@@ -31,7 +31,7 @@ export interface ReceiptInput {
   taxAmount?: number;
   totalAmount: number;
   paymentMethod?: string;
-  currencySymbol?: string; // defaults to BDT's Taka sign
+  currencySymbol?: string; // defaults to "Tk" — Bengali Taka (৳) isn't in PC437 and prints as garbage on ESC/POS
   footerText?: string;
 }
 
@@ -110,7 +110,10 @@ function pickNetwork(slot: { mode: string; host?: string; port?: number }): { mo
 
 function buildReceiptJob(receipt: ReceiptInput, openCashDrawer: boolean): ThermalJob {
   const job: ThermalJob = { lines: [], openCashDrawer };
-  const currency = receipt.currencySymbol ?? '৳';
+  // ESC/POS printers use PC437 by default, which has no Bengali Taka
+  // glyph — so "৳" either prints as "?" or gets swallowed. Default to
+  // "Tk" which is what handwritten Bengali receipts traditionally use.
+  const currency = receipt.currencySymbol ?? 'Tk';
   const createdAt = new Date(receipt.createdAt);
 
   job.lines.push({ kind: 'align-center' });

@@ -45,8 +45,11 @@ public static class RawPrinterHelper {
   [DllImport("winspool.Drv", EntryPoint = "ClosePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
   public static extern bool ClosePrinter(IntPtr hPrinter);
 
+  // Pass DOCINFOA by ref so the struct is marshalled as a pointer-to-struct
+  // exactly as StartDocPrinterA expects. The LPStruct attribute we had was
+  // silently wrong on some .NET runtimes and caused StartDocPrinter to fail.
   [DllImport("winspool.Drv", EntryPoint = "StartDocPrinterA", SetLastError = true, CharSet = CharSet.Ansi, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
-  public static extern bool StartDocPrinter(IntPtr hPrinter, int level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFOA di);
+  public static extern bool StartDocPrinter(IntPtr hPrinter, int level, ref DOCINFOA di);
 
   [DllImport("winspool.Drv", EntryPoint = "EndDocPrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
   public static extern bool EndDocPrinter(IntPtr hPrinter);
@@ -60,22 +63,34 @@ public static class RawPrinterHelper {
   [DllImport("winspool.Drv", EntryPoint = "WritePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
   public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, int dwCount, out int dwWritten);
 
-  public static bool Send(string printer, byte[] data) {
+  public static string Send(string printer, byte[] data) {
     IntPtr h;
-    if (!OpenPrinter(printer, out h, IntPtr.Zero)) return false;
+    if (!OpenPrinter(printer, out h, IntPtr.Zero)) {
+      return "OpenPrinter failed (Win32 " + Marshal.GetLastWin32Error() + ")";
+    }
     try {
       DOCINFOA di = new DOCINFOA();
       di.pDocName = "Restora POS ESC/POS";
       di.pDataType = "RAW";
-      if (!StartDocPrinter(h, 1, di)) return false;
+      if (!StartDocPrinter(h, 1, ref di)) {
+        return "StartDocPrinter failed (Win32 " + Marshal.GetLastWin32Error() + ")";
+      }
       try {
-        if (!StartPagePrinter(h)) return false;
+        if (!StartPagePrinter(h)) {
+          return "StartPagePrinter failed (Win32 " + Marshal.GetLastWin32Error() + ")";
+        }
         try {
           IntPtr buf = Marshal.AllocCoTaskMem(data.Length);
           Marshal.Copy(data, 0, buf, data.Length);
           try {
             int written;
-            return WritePrinter(h, buf, data.Length, out written) && written == data.Length;
+            if (!WritePrinter(h, buf, data.Length, out written)) {
+              return "WritePrinter failed (Win32 " + Marshal.GetLastWin32Error() + ")";
+            }
+            if (written != data.Length) {
+              return "WritePrinter wrote " + written + " of " + data.Length + " bytes";
+            }
+            return "OK " + written;
           } finally { Marshal.FreeCoTaskMem(buf); }
         } finally { EndPagePrinter(h); }
       } finally { EndDocPrinter(h); }
@@ -86,25 +101,32 @@ public static class RawPrinterHelper {
 
 Add-Type -TypeDefinition $source -Language CSharp | Out-Null
 $bytes = [System.IO.File]::ReadAllBytes($File)
-if ([RawPrinterHelper]::Send($Printer, $bytes)) {
-  Write-Output "OK"
-  exit 0
-} else {
-  $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-  Write-Error "WritePrinter failed (Win32 error $err)"
-  exit 1
-}
+$result = [RawPrinterHelper]::Send($Printer, $bytes)
+Write-Output $result
+if ($result -like "OK*") { exit 0 } else { exit 1 }
 `;
 
 export async function sendRawToWindowsPrinter(deviceName: string, bytes: Buffer): Promise<void> {
   if (!deviceName) throw new Error('No printer selected.');
   if (!bytes || bytes.length === 0) throw new Error('Nothing to send.');
 
+  // Prepend ESC @ (init) and append a feed-and-cut tail. Some ESC/POS
+  // printers hold the buffer in a funny state without an explicit init —
+  // sending one costs 2 bytes and fixes mystery "printer took bytes but
+  // printed nothing" cases.
+  const INIT = Buffer.from([0x1b, 0x40]);
+  const TAIL_FEED = Buffer.from([0x0a, 0x0a, 0x0a, 0x0a]);
+  const FULL_CUT = Buffer.from([0x1d, 0x56, 0x00]);
+  const framed = Buffer.concat([INIT, bytes, TAIL_FEED, FULL_CUT]);
+
   const tmpDir = join(app.getPath('userData'), 'print-tmp');
   mkdirSync(tmpDir, { recursive: true });
   const binPath = join(tmpDir, `${randomBytes(6).toString('hex')}.escpos`);
-  writeFileSync(binPath, bytes);
-  log.info(`[raw-print] ${bytes.length} bytes -> "${deviceName}" (bin=${binPath})`);
+  writeFileSync(binPath, framed);
+  const previewLen = Math.min(40, framed.length);
+  const hex = Array.from(framed.subarray(0, previewLen)).map((b) => b.toString(16).padStart(2, '0')).join(' ');
+  log.info(`[raw-print] ${framed.length} bytes -> "${deviceName}" (bin=${binPath})`);
+  log.info(`[raw-print] first ${previewLen} bytes: ${hex}`);
 
   try {
     await new Promise<void>((resolve, reject) => {
