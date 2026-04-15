@@ -58,8 +58,12 @@ export async function printHtmlToPdfThenShell(
     await loaded;
     await new Promise<void>((r) => setTimeout(r, 200));
 
+    // Much shorter page (80mm × 200mm) so the driver doesn't see a huge
+    // sheet with 2/3 whitespace. The receipt HTML only fills the top
+    // ~50mm anyway; the rest was overhead that some drivers use as an
+    // excuse to print a blank strip and cut.
     const pdfData = await renderWin.webContents.printToPDF({
-      pageSize: opts.pageSize ?? { width: 80_000, height: 297_000 },
+      pageSize: opts.pageSize ?? { width: 80_000, height: 200_000 },
       printBackground: true,
       landscape: opts.landscape ?? false,
       margins: { top: 2, bottom: 2, left: 2, right: 2 },
@@ -79,9 +83,13 @@ export async function printHtmlToPdfThenShell(
   }
   log.info(`[pdf-print] spawn: "${sumatra}" -print-to "${deviceName}" -silent "${pdfPath}"`);
   await new Promise<void>((resolve, reject) => {
+    // No -print-settings passed: SumatraPDF defaults to "fit", which
+    // scales the rendered PDF to match whatever paper the driver is
+    // configured for. noscale was pushing our 80mm page straight at the
+    // driver which some thermal drivers then discarded.
     const child = spawn(
       sumatra,
-      ['-print-to', deviceName, '-silent', '-print-settings', 'noscale', pdfPath],
+      ['-print-to', deviceName, '-silent', pdfPath],
       { windowsHide: true },
     );
     let stderr = '';
