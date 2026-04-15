@@ -4,6 +4,8 @@ import { ChefHat, Plus, X, Check, Trash2 } from 'lucide-react';
 
 import type { CashierAction, PreReadyItem, ProductionOrder } from '@restora/types';
 import { api } from '../lib/api';
+import { useIsOnline } from '../lib/online';
+import { OfflineBanner } from '../components/OfflineHint';
 import { useCashierPermissions } from '../lib/permissions';
 import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
 
@@ -12,6 +14,7 @@ type Tab = 'items' | 'active';
 export default function PosPreReadyPage() {
   const qc = useQueryClient();
   const { data: perms } = useCashierPermissions();
+  const online = useIsOnline();
 
   const enabled = !!perms && perms.createPreReadyKT.enabled && perms.createPreReadyKT.approval !== 'NONE';
   const mode = perms?.createPreReadyKT.approval ?? 'AUTO';
@@ -38,6 +41,10 @@ export default function PosPreReadyPage() {
   );
 
   const guardAndRun = (action: CashierAction, summary: string, run: (otp: string | null) => void) => {
+    if (!online) {
+      alert('This action needs internet — reconnect to create pre-ready tickets.');
+      return;
+    }
     if (mode === 'AUTO' || mode === 'NONE') { run(null); return; }
     setPendingAction({ action, summary, run });
   };
@@ -62,6 +69,12 @@ export default function PosPreReadyPage() {
         <h1 className="text-xl font-extrabold text-theme-text">Pre-Ready Production</h1>
         <div className="flex-1" />
       </header>
+
+      {!online && (
+        <div className="px-6 pt-4 shrink-0">
+          <OfflineBanner message="Pre-Ready production is disabled while offline — tickets need a live kitchen connection." />
+        </div>
+      )}
 
       <div className="px-6 pt-5 pb-4 shrink-0 flex justify-center">
         <div className="flex gap-1 bg-theme-surface rounded-theme p-1 border border-theme-border">

@@ -5,6 +5,8 @@ import { Plus, X, Truck, Package, Undo2, Wallet, ClipboardList } from 'lucide-re
 import type { CashierAction, ApprovalMode, PurchaseOrder } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
+import { useIsOnline } from '../lib/online';
+import { OfflineBanner } from '../components/OfflineHint';
 import { useCashierPermissions } from '../lib/permissions';
 import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
 import VariantPickerModal from '../components/VariantPickerModal';
@@ -88,6 +90,7 @@ const TAB_LABELS: Record<Tab, { label: string; Icon: typeof Truck }> = {
 export default function PosPurchasingPage() {
   const qc = useQueryClient();
   const { data: perms } = useCashierPermissions();
+  const online = useIsOnline();
 
   const enabledTabs = useMemo<Tab[]>(() => {
     if (!perms) return [];
@@ -128,6 +131,10 @@ export default function PosPurchasingPage() {
   const [pendingAction, setPendingAction] = useState<null | { action: CashierAction; summary: string; run: (otp: string | null) => void }>(null);
 
   const guardAndRun = (action: CashierAction, summary: string, run: (otp: string | null) => void) => {
+    if (!online) {
+      alert('This action needs internet — reconnect to use Purchasing.');
+      return;
+    }
     const cfg = perms?.[action];
     if (!cfg || !cfg.enabled || cfg.approval === 'NONE') return;
     if (cfg.approval === 'AUTO') { run(null); return; }
@@ -155,6 +162,12 @@ export default function PosPurchasingPage() {
         <h1 className="text-xl font-extrabold text-theme-text">Purchasing</h1>
         <div className="flex-1" />
       </header>
+
+      {!online && (
+        <div className="px-6 pt-4 shrink-0">
+          <OfflineBanner message="Purchasing is disabled while offline — create, receive, return, and supplier payment all need live server checks." />
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="px-6 pt-5 pb-4 shrink-0 flex justify-center">

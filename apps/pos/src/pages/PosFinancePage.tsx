@@ -5,6 +5,8 @@ import { Receipt, Wallet, Wallet2 } from 'lucide-react';
 import type { CashierAction, ExpenseCategory, Payroll } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
+import { useIsOnline } from '../lib/online';
+import { OfflineBanner } from '../components/OfflineHint';
 import { useCashierPermissions } from '../lib/permissions';
 import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
 
@@ -24,6 +26,7 @@ const ALL_CATEGORIES: ExpenseCategory[] = [
 export default function PosFinancePage() {
   const qc = useQueryClient();
   const { data: perms } = useCashierPermissions();
+  const online = useIsOnline();
 
   const enabledTabs = useMemo<Tab[]>(() => {
     if (!perms) return [];
@@ -39,6 +42,10 @@ export default function PosFinancePage() {
   const [pendingAction, setPendingAction] = useState<null | { action: CashierAction; summary: string; run: (otp: string | null) => void }>(null);
 
   const guardAndRun = (action: CashierAction, summary: string, run: (otp: string | null) => void) => {
+    if (!online) {
+      alert('This action needs internet — reconnect to use Finance.');
+      return;
+    }
     const cfg = perms?.[action];
     if (!cfg || !cfg.enabled || cfg.approval === 'NONE') return;
     if (cfg.approval === 'AUTO') { run(null); return; }
@@ -66,6 +73,12 @@ export default function PosFinancePage() {
         <h1 className="text-xl font-extrabold text-theme-text">Finance</h1>
         <div className="flex-1" />
       </header>
+
+      {!online && (
+        <div className="px-6 pt-4 shrink-0">
+          <OfflineBanner message="Finance is disabled while offline — expenses and payroll need live server checks." />
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="px-6 pt-5 pb-4 shrink-0 flex justify-center">

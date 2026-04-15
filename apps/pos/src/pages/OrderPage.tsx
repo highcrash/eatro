@@ -7,6 +7,8 @@ import type { MenuItem, Order, OrderItem, CreateOrderDto, VoidOrderItemDto, Wast
 import { formatCurrency, printKitchenTicket as printKitchenTicketUtil } from '@restora/utils';
 import { useBranchSettings } from '../hooks/useBranchSettings';
 import { isPlainCharKey } from '../lib/keyboard';
+import { useIsOnline } from '../lib/online';
+import { OfflineInlineHint } from '../components/OfflineHint';
 import { useAuthStore } from '../store/auth.store';
 import { api } from '../lib/api';
 import PaymentModal from '../components/PaymentModal';
@@ -584,6 +586,7 @@ function ActiveOrderView({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: branchSettings } = useBranchSettings();
+  const online = useIsOnline();
   const isCashier = user?.role === 'CASHIER' || user?.role === 'KITCHEN' || user?.role === 'WAITER';
 
   const [order, setOrder] = useState<Order>(initialOrder);
@@ -1097,9 +1100,11 @@ function ActiveOrderView({
                         <span className="text-theme-border">·</span>
                         <button
                           onClick={() => setVoidingItem(item)}
-                          className="text-[10px] text-theme-text-muted hover:text-theme-danger transition-colors"
+                          disabled={!online}
+                          title={online ? undefined : 'Voids need internet (manager approval)'}
+                          className="text-[10px] text-theme-text-muted hover:text-theme-danger disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-theme-text-muted transition-colors"
                         >
-                          Void
+                          Void{!online ? ' · offline' : ''}
                         </button>
                       </div>
                     )}
@@ -1159,19 +1164,28 @@ function ActiveOrderView({
         </div>
         {/* Discount / Coupon controls */}
         {discount === 0 && order.status !== 'PAID' && order.status !== 'VOID' && (
-          <div className="flex items-center gap-2 pt-2">
-            <button
-              onClick={() => { setShowDiscountPicker(true); setShowCouponInput(false); }}
-              className="flex-1 bg-theme-bg hover:bg-theme-surface-alt text-theme-text font-semibold py-2 rounded-theme text-xs transition-colors"
-            >
-              + Discount
-            </button>
-            <button
-              onClick={() => { setShowCouponInput(true); setShowDiscountPicker(false); }}
-              className="flex-1 bg-theme-bg hover:bg-theme-surface-alt text-theme-text font-semibold py-2 rounded-theme text-xs transition-colors"
-            >
-              + Coupon
-            </button>
+          <div className="pt-2 space-y-1">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setShowDiscountPicker(true); setShowCouponInput(false); }}
+                className="flex-1 bg-theme-bg hover:bg-theme-surface-alt text-theme-text font-semibold py-2 rounded-theme text-xs transition-colors"
+              >
+                + Discount
+              </button>
+              <button
+                onClick={() => { setShowCouponInput(true); setShowDiscountPicker(false); }}
+                disabled={!online}
+                title={online ? undefined : 'Coupon codes need internet to validate'}
+                className="flex-1 bg-theme-bg hover:bg-theme-surface-alt disabled:opacity-40 disabled:cursor-not-allowed text-theme-text font-semibold py-2 rounded-theme text-xs transition-colors"
+              >
+                + Coupon
+              </button>
+            </div>
+            {!online && (
+              <div className="flex justify-end pr-1">
+                <OfflineInlineHint label="Coupon needs internet" />
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -53,6 +53,25 @@ function cuid32(): string { return randomBytes(16).toString('hex'); }
  * what the cashier's hot path needs; voids and approvals fall through to the
  * plain queue and will replay when online.
  */
+/**
+ * Mutations that require server-side logic (coupon validation, void
+ * approval, stock counts, supplier lookups) and are NOT safe to queue
+ * offline: they'd just fail on drain and litter Sync Issues. We reject
+ * them up front with a 503 + OFFLINE_UNSUPPORTED so the POS can show a
+ * clean "needs internet" message instead.
+ */
+function offlineUnsupported(method: string, path: string): boolean {
+  if (method === 'POST') {
+    if (/^\/orders\/[^/]+\/apply-coupon$/.test(path)) return true;
+    if (/^\/orders\/[^/]+\/items\/[^/]+\/(?:void|approve|reject)$/.test(path)) return true;
+    if (path.startsWith('/void-otp/')) return true;
+    if (path.startsWith('/cashier-ops/')) return true;
+    if (path === '/customers') return true;
+    if (path === '/customers/assign-order') return true;
+  }
+  return false;
+}
+
 function offlineSynthesizable(method: string, path: string): 'create-order' | 'add-items' | 'pay' | 'apply-discount' | 'table-status' | null {
   if (method === 'POST') {
     if (path === '/orders') return 'create-order';
@@ -168,6 +187,20 @@ function handleOffline(
     const cached = getCached(method, input.path);
     if (cached) return { status: cached.status, ok: true, body: cached.body };
     return { status: 200, ok: true, body: emptyShapeFor(input.path) };
+  }
+
+  // Hard-block paths that can't be safely queued offline. Better to surface
+  // a clear error up front than stuff the outbox with requests that will
+  // 400 on drain (wrong coupon, void without approval, etc.).
+  if (offlineUnsupported(method, input.path)) {
+    return {
+      status: 503,
+      ok: false,
+      body: {
+        code: 'OFFLINE_UNSUPPORTED',
+        message: 'This action needs internet — reconnect to use it.',
+      },
+    };
   }
 
   // Mutations: try to synthesize a believable response for the ones the POS
