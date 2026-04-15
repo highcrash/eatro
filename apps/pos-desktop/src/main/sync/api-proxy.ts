@@ -12,8 +12,33 @@ import { enqueue } from './outbox';
  * Central HTTP proxy that every renderer API call flows through. Handles:
  *   - attaching session tokens and Idempotency-Key headers
  *   - queueing mutations when offline (synthetic 202 response)
- *   - returning 503 for GETs when offline (renderer falls back to cache)
+ *   - serving GETs from an in-memory cache when offline so the POS can
+ *     keep rendering instead of throwing into a white screen
+ *   - transparent 401 refresh
  */
+
+// In-memory response cache for GETs. Key = "GET <path>". Survives until
+// process exit; that's fine — a desktop terminal stays open all day, and a
+// fresh restart re-fetches everything once online again.
+const responseCache = new Map<string, { status: number; body: unknown; ts: number }>();
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function cacheKey(method: string, path: string): string { return `${method} ${path}`; }
+
+function getCached(method: string, path: string) {
+  const entry = responseCache.get(cacheKey(method, path));
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CACHE_TTL_MS) {
+    responseCache.delete(cacheKey(method, path));
+    return null;
+  }
+  return entry;
+}
+
+function setCached(method: string, path: string, status: number, body: unknown): void {
+  if (status < 200 || status >= 300) return;
+  responseCache.set(cacheKey(method, path), { status, body, ts: Date.now() });
+}
 
 export interface ApiFetchInput {
   method: string;
@@ -57,8 +82,17 @@ export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
 
   if (!onlineDetector.isOnline()) {
     if (!isMutation) {
-      // GET while offline — caller should fall back to its cache.
-      return { status: 503, ok: false, body: { offline: true } };
+      // Serve from the offline cache when we have it; that keeps
+      // menu / tables / branding / staff queries rendering instead of
+      // throwing the POS into a white screen on connection drop.
+      const cached = getCached(method, input.path);
+      if (cached) {
+        return { status: cached.status, ok: true, body: cached.body };
+      }
+      // No cached snapshot — return an empty payload that React Query treats
+      // as a successful empty list/object. Better than throwing for the
+      // common "first load while offline" case.
+      return { status: 200, ok: true, body: emptyShapeFor(input.path) };
     }
     enqueue({
       method,
@@ -103,6 +137,7 @@ export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
 
     const text = await res.text();
     const parsed = text ? safeParse(text) : null;
+    if (!isMutation) setCached(method, input.path, res.status, parsed);
     return { status: res.status, ok: res.ok, body: parsed, idempotencyKey };
   } catch (err) {
     // Network blew up mid-request. For mutations, outbox and report queued.
@@ -122,12 +157,35 @@ export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
         idempotencyKey,
       };
     }
-    return { status: 0, ok: false, body: { message: (err as Error).message } };
+    // Network blew up on a GET — fall back to cache or an empty payload
+    // so render code doesn't crash on undefined.
+    const cached = getCached(method, input.path);
+    if (cached) {
+      return { status: cached.status, ok: true, body: cached.body };
+    }
+    return { status: 200, ok: true, body: emptyShapeFor(input.path) };
   }
 }
 
 function safeParse(text: string): unknown {
   try { return JSON.parse(text); } catch { return text; }
+}
+
+/**
+ * Best-guess empty payload for offline first-load. The POS treats arrays
+ * and objects very differently when rendering; returning the wrong shape
+ * is what crashes pages. These heuristics handle the common endpoints.
+ */
+function emptyShapeFor(path: string): unknown {
+  // Branding / website content / single-record endpoints expect an object.
+  if (
+    path === '/branding' ||
+    path === '/branch-settings' ||
+    path === '/auth/me' ||
+    /^\/menu\/(item|category)\//.test(path)
+  ) return {};
+  // Everything else assumed to be a list.
+  return [];
 }
 
 // Cache a single in-flight refresh promise so a burst of 401s doesn't trigger

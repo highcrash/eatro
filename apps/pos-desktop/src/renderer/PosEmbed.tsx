@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import PosApp from '@pos/App';
 import { useAuthStore } from '@pos/store/auth.store';
 import type { SessionUser } from './desktop-api';
+import { OfflineErrorBoundary } from './OfflineErrorBoundary';
 
 /**
  * Embeds the full apps/pos React tree and publishes `window.__desktop` so
@@ -104,10 +105,12 @@ export function PosEmbed(props: Props): JSX.Element {
   }, [user]);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <PosApp />
-      </MemoryRouter>
-    </QueryClientProvider>
+    <OfflineErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <PosApp />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </OfflineErrorBoundary>
   );
 }
