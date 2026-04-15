@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import log from 'electron-log';
 import { readConfig, getPrinters } from './config/store';
 import { onlineDetector } from './sync/online-detector';
 import { counts, listFailed, listPending } from './sync/outbox';
@@ -57,6 +58,9 @@ export interface DiagnosticsSnapshot {
   localDb: {
     pathHint: string; // %APPDATA%/Restora POS/local.db — no absolute path for privacy
     tables: Array<{ name: string; rows: number }>;
+  };
+  logs: {
+    mainLogPath: string; // where electron-log writes — handy for printer / sync issues
   };
   printers: {
     kitchen: PrinterSlotSnapshot;
@@ -163,6 +167,9 @@ export async function captureDiagnosticsSnapshot(): Promise<DiagnosticsSnapshot>
       ...counts(),
       oldestPendingAtMs: oldestPending,
       failedSamples: failed,
+    },
+    logs: {
+      mainLogPath: log.transports.file.getFile().path,
     },
     localDb: {
       pathHint: '%APPDATA%/Restora POS/local.db',

@@ -1,4 +1,8 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, app } from 'electron';
+import { writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { randomBytes } from 'crypto';
+import log from 'electron-log';
 
 /**
  * Tracks the app's main renderer window so we can query printers from it
@@ -34,6 +38,14 @@ export async function printHtmlToDevice(
     throw new Error('No printer selected for this slot.');
   }
 
+  // Write the HTML to a temp file and loadFile(). data: URLs past a few
+  // kilobytes get truncated by Chromium on Windows in ways that show as
+  // "blank page printed" or silent failures with no callback feedback.
+  const tmpDir = join(app.getPath('userData'), 'print-tmp');
+  mkdirSync(tmpDir, { recursive: true });
+  const tmpPath = join(tmpDir, `${randomBytes(6).toString('hex')}.html`);
+  writeFileSync(tmpPath, html, 'utf8');
+
   const win = new BrowserWindow({
     show: false,
     webPreferences: {
@@ -46,48 +58,52 @@ export async function printHtmlToDevice(
   const safeClose = () => {
     try {
       if (!win.isDestroyed()) win.close();
-    } catch {
-      /* already gone */
-    }
+    } catch { /* already gone */ }
+    try { unlinkSync(tmpPath); } catch { /* temp already gone */ }
   };
 
   try {
-    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
-    await win.loadURL(dataUrl);
+    log.info(`[print] job -> "${deviceName}" (tmp: ${tmpPath}, pageSize: ${opts.pageSize ? JSON.stringify(opts.pageSize) : 'driver default'})`);
 
-    // Wait for the first paint so Chromium has laid out the page before
-    // asking it to print — otherwise silent:true jobs can ship a blank page.
-    await new Promise<void>((resolve) => {
-      if (win.webContents.isLoadingMainFrame()) {
-        win.webContents.once('did-finish-load', () => resolve());
-      } else {
-        resolve();
-      }
-    });
+    await win.loadFile(tmpPath);
+
+    // loadFile() already resolves on did-finish-load, but silent jobs have
+    // been observed to ship blank pages on slow-rendering pages. A 50 ms
+    // settle gives Chromium time to lay out final fonts / tables before we
+    // capture for print.
+    await new Promise<void>((r) => setTimeout(r, 50));
 
     await new Promise<void>((resolve, reject) => {
       try {
-        win.webContents.print(
-          {
-            silent: true,
-            printBackground: true,
-            deviceName,
-            pageSize: opts.pageSize ?? 'A4',
-            landscape: opts.landscape ?? false,
-            margins: { marginType: 'minimum' },
-          },
-          (success, failureReason) => {
-            if (success) resolve();
-            else reject(new Error(failureReason || 'Print job failed'));
-          },
-        );
+        // Only pass pageSize when the caller really wants one. Leaving the
+        // option out entirely lets Electron fall back to the printer's
+        // configured default paper, which is what every thermal driver on
+        // Windows wants to receive.
+        const printOpts: Electron.WebContentsPrintOptions = {
+          silent: true,
+          printBackground: true,
+          deviceName,
+          landscape: opts.landscape ?? false,
+          margins: { marginType: 'none' },
+        };
+        if (opts.pageSize) printOpts.pageSize = opts.pageSize;
+
+        win.webContents.print(printOpts, (success, failureReason) => {
+          if (success) {
+            log.info(`[print] accepted by "${deviceName}"`);
+            resolve();
+          } else {
+            log.error(`[print] rejected by "${deviceName}": ${failureReason}`);
+            reject(new Error(`Printer "${deviceName}" rejected the job: ${failureReason || 'no reason given'}`));
+          }
+        });
       } catch (err) {
+        log.error(`[print] threw:`, err);
         reject(err as Error);
       }
     });
   } finally {
-    // Give Chromium a tick to finish spooling before tearing the window down.
-    setTimeout(safeClose, 50);
+    setTimeout(safeClose, 150);
   }
 }
 

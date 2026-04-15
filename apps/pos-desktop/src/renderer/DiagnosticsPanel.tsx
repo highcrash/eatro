@@ -214,6 +214,10 @@ export function DiagnosticsPanel({ onClose }: Props): JSX.Element {
           ))}
         </Section>
 
+        <Section title="Logs">
+          <Row k="Main log" v={snap.logs.mainLogPath} mono />
+        </Section>
+
         <Section title="Auto-update">
           <Row k="State" v={describeUpdate(snap.update)} />
         </Section>

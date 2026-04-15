@@ -115,6 +115,7 @@ export interface DiagnosticsSnapshot {
   online: { status: 'unknown' | 'online' | 'offline'; isOnline: boolean; lastProbeAtMs: number | null; lastProbeLatencyMs: number | null; lastError: string | null; consecutiveFails: number };
   outbox: { pending: number; failed: number; oldestPendingAtMs: number | null; failedSamples: Array<{ id: string; method: string; path: string; attempts: number; lastError: string | null; createdAtMs: number }> };
   localDb: { pathHint: string; tables: Array<{ name: string; rows: number }> };
+  logs: { mainLogPath: string };
   printers: {
     kitchen: PrinterSlotSnapshot;
     bill: PrinterSlotSnapshot;
