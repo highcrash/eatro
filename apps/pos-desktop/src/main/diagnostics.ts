@@ -6,6 +6,7 @@ import { getLocalDb } from './db/local-db';
 import { getLastUpdateStatus } from './updater';
 import { getSessionUser } from './session/session';
 import type { UpdateStatus } from './updater';
+import { probe as probePrinterHealth, type PrinterHealthStatus } from './printing/printer-health';
 
 /**
  * One-shot snapshot of every moving part a troubleshooter might want:
@@ -58,12 +59,20 @@ export interface DiagnosticsSnapshot {
     tables: Array<{ name: string; rows: number }>;
   };
   printers: {
-    kitchen: string;
-    bill: string;
-    reports: string;
+    kitchen: PrinterSlotSnapshot;
+    bill: PrinterSlotSnapshot;
+    reports: PrinterSlotSnapshot;
     openCashDrawerOnCashPayment: boolean;
   };
   update: UpdateStatus;
+}
+
+export interface PrinterSlotSnapshot {
+  label: string;
+  health: PrinterHealthStatus;
+  latencyMs: number | null;
+  lastError: string | null;
+  lastCheckedAtMs: number | null;
 }
 
 function humanSlot(slot: { mode: string; host?: string; port?: number; deviceName?: string }): string {
@@ -71,6 +80,21 @@ function humanSlot(slot: { mode: string; host?: string; port?: number; deviceNam
   if (slot.mode === 'network') return `Network ${slot.host}:${slot.port}`;
   if (slot.mode === 'os-printer') return `OS printer "${slot.deviceName}"`;
   return slot.mode;
+}
+
+async function snapshotSlot(slot: Parameters<typeof humanSlot>[0]): Promise<PrinterSlotSnapshot> {
+  const label = humanSlot(slot);
+  if (slot.mode === 'disabled') {
+    return { label, health: 'unknown', latencyMs: null, lastError: null, lastCheckedAtMs: null };
+  }
+  const h = await probePrinterHealth(slot as unknown as Parameters<typeof probePrinterHealth>[0]);
+  return {
+    label,
+    health: h.status,
+    latencyMs: h.latencyMs,
+    lastError: h.lastError,
+    lastCheckedAtMs: h.lastCheckedAtMs,
+  };
 }
 
 function rowCount(table: string): number {
@@ -152,9 +176,9 @@ export async function captureDiagnosticsSnapshot(): Promise<DiagnosticsSnapshot>
       ],
     },
     printers: {
-      kitchen: humanSlot(printers.kitchen),
-      bill: humanSlot(printers.bill),
-      reports: humanSlot(printers.reports),
+      kitchen: await snapshotSlot(printers.kitchen),
+      bill: await snapshotSlot(printers.bill),
+      reports: await snapshotSlot(printers.reports),
       openCashDrawerOnCashPayment: printers.openCashDrawerOnCashPayment,
     },
     update: getLastUpdateStatus(),

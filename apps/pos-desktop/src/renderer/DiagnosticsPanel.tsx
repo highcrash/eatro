@@ -182,20 +182,23 @@ export function DiagnosticsPanel({ onClose }: Props): JSX.Element {
         </Section>
 
         <Section title="Printers">
-          <Row
-            k="Kitchen"
-            v={snap.printers.kitchen}
-            actions={<button disabled={testing === 'kitchen'} onClick={() => void runPrinterTest('kitchen')} style={styles.btnLinkSmall}>{testing === 'kitchen' ? '…' : 'Test'}</button>}
+          <PrinterRow
+            label="Kitchen"
+            slot={snap.printers.kitchen}
+            busy={testing === 'kitchen'}
+            onTest={() => void runPrinterTest('kitchen')}
           />
-          <Row
-            k="Bill"
-            v={snap.printers.bill}
-            actions={<button disabled={testing === 'bill'} onClick={() => void runPrinterTest('bill')} style={styles.btnLinkSmall}>{testing === 'bill' ? '…' : 'Test'}</button>}
+          <PrinterRow
+            label="Bill"
+            slot={snap.printers.bill}
+            busy={testing === 'bill'}
+            onTest={() => void runPrinterTest('bill')}
           />
-          <Row
-            k="Reports"
-            v={snap.printers.reports}
-            actions={<button disabled={testing === 'reports'} onClick={() => void runPrinterTest('reports')} style={styles.btnLinkSmall}>{testing === 'reports' ? '…' : 'Test'}</button>}
+          <PrinterRow
+            label="Reports"
+            slot={snap.printers.reports}
+            busy={testing === 'reports'}
+            onTest={() => void runPrinterTest('reports')}
           />
           <Row
             k="Drawer on cash"
@@ -244,6 +247,31 @@ function Section({
       </div>
       <div style={styles.sectionBody}>{children}</div>
     </section>
+  );
+}
+
+function PrinterRow({
+  label, slot, busy, onTest,
+}: {
+  label: string;
+  slot: DiagnosticsSnapshot['printers']['kitchen'];
+  busy: boolean;
+  onTest: () => void;
+}) {
+  const color = slot.health === 'online' ? '#2DB36A' : slot.health === 'unreachable' ? '#D62B2B' : '#666';
+  const latency = slot.latencyMs != null ? ` · ${slot.latencyMs}ms` : '';
+  const hint = slot.lastError ?? (slot.health === 'online' ? 'Reachable' : 'Status unknown');
+  return (
+    <div style={styles.row}>
+      <span style={styles.rowKey}>{label}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flex: 1 }} title={hint}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block' }} />
+        <span style={{ ...styles.rowValue, flex: 'unset' }}>{slot.label}{latency}</span>
+      </span>
+      <button disabled={busy} onClick={onTest} style={styles.btnLinkSmall}>
+        {busy ? '…' : 'Test'}
+      </button>
+    </div>
   );
 }
 

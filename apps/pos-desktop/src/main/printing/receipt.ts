@@ -1,6 +1,8 @@
 import { getPrinters } from '../config/store';
-import { sendThermalJob, type ThermalJob } from './escpos';
+import { sendThermalJob, ThermalError, type ThermalJob } from './escpos';
 import { printHtmlToDevice } from './html-print';
+import { probe } from './printer-health';
+import log from 'electron-log';
 
 export interface ReceiptInput {
   brandName: string;
@@ -60,13 +62,48 @@ export async function printReceipt(receipt: ReceiptInput, opts: PrintReceiptOpti
   });
 }
 
-/** Standalone cash-drawer kick (when no receipt print is happening). */
+/**
+ * Standalone cash-drawer kick. Tries the bill slot first; if that slot is
+ * disabled or currently unreachable, falls back to the kitchen slot — which
+ * is typically wired to the drawer in a single-printer shop. Either way
+ * throws a ThermalError if nothing works, so the POS can surface an error.
+ */
 export async function openCashDrawer(): Promise<void> {
-  const slot = (await getPrinters()).bill;
-  if (slot.mode !== 'network') {
-    throw new Error('Cash drawer kick requires a network-mode bill printer.');
+  const cfg = await getPrinters();
+  const candidates: ReturnType<typeof pickNetwork>[] = [pickNetwork(cfg.bill), pickNetwork(cfg.kitchen)].filter(
+    (s) => s != null,
+  ) as ReturnType<typeof pickNetwork>[];
+  if (candidates.length === 0) {
+    throw new Error('Cash drawer kick requires a network-mode thermal printer on either the bill or kitchen slot.');
   }
-  await sendThermalJob(slot, { lines: [{ kind: 'newline' }], openCashDrawer: true });
+
+  let lastError: unknown = null;
+  for (const slot of candidates) {
+    const health = await probe(slot);
+    if (health.status === 'unreachable') {
+      lastError = new Error(health.lastError ?? 'unreachable');
+      log.warn(`[drawer] slot ${slot.host}:${slot.port} unreachable, trying next`);
+      continue;
+    }
+    try {
+      await sendThermalJob(slot, { lines: [{ kind: 'newline' }], openCashDrawer: true });
+      return;
+    } catch (err) {
+      lastError = err;
+      if (!(err instanceof ThermalError) || (err.kind !== 'timeout' && err.kind !== 'unreachable')) {
+        throw err; // protocol / config errors won't succeed on another slot.
+      }
+      log.warn(`[drawer] slot ${slot.host}:${slot.port} threw ${err.kind}, trying next`);
+    }
+  }
+  throw lastError ?? new Error('All configured drawer-capable printers failed');
+}
+
+function pickNetwork(slot: { mode: string; host?: string; port?: number }): { mode: 'network'; host: string; port: number } | null {
+  if (slot.mode === 'network' && slot.host && slot.port) {
+    return { mode: 'network', host: slot.host, port: slot.port };
+  }
+  return null;
 }
 
 /* ── Builders ─────────────────────────────────────────────────────────── */

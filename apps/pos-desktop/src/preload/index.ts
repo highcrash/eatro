@@ -96,6 +96,14 @@ export interface AppVersionInfo {
   isPackaged: boolean;
 }
 
+export interface PrinterSlotSnapshot {
+  label: string;
+  health: 'online' | 'unreachable' | 'unknown';
+  latencyMs: number | null;
+  lastError: string | null;
+  lastCheckedAtMs: number | null;
+}
+
 // Shape mirrors captureDiagnosticsSnapshot() in main/diagnostics.ts. Kept
 // minimally typed in the bridge so a schema change on the main side shows
 // up as a TS error here first.
@@ -107,7 +115,12 @@ export interface DiagnosticsSnapshot {
   online: { status: 'unknown' | 'online' | 'offline'; isOnline: boolean; lastProbeAtMs: number | null; lastProbeLatencyMs: number | null; lastError: string | null; consecutiveFails: number };
   outbox: { pending: number; failed: number; oldestPendingAtMs: number | null; failedSamples: Array<{ id: string; method: string; path: string; attempts: number; lastError: string | null; createdAtMs: number }> };
   localDb: { pathHint: string; tables: Array<{ name: string; rows: number }> };
-  printers: { kitchen: string; bill: string; reports: string; openCashDrawerOnCashPayment: boolean };
+  printers: {
+    kitchen: PrinterSlotSnapshot;
+    bill: PrinterSlotSnapshot;
+    reports: PrinterSlotSnapshot;
+    openCashDrawerOnCashPayment: boolean;
+  };
   update: UpdateStatus;
 }
 
