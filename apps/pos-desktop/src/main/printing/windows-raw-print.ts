@@ -21,10 +21,14 @@ import log from 'electron-log';
  */
 
 const PS_SCRIPT = String.raw`
+# Called via powershell.exe -File <this>.ps1 -Printer "X" -File2 "Y".
+# -File2 (not -File) because PowerShell's own -File arg is what loads
+# the script itself; -File as a script param would clash.
 param(
   [Parameter(Mandatory=$true)] [string] $Printer,
-  [Parameter(Mandatory=$true)] [string] $File
+  [Parameter(Mandatory=$true)] [string] $File2
 )
+$File = $File2
 
 $source = @'
 using System;
@@ -128,29 +132,44 @@ export async function sendRawToWindowsPrinter(deviceName: string, bytes: Buffer)
   log.info(`[raw-print] ${framed.length} bytes -> "${deviceName}" (bin=${binPath})`);
   log.info(`[raw-print] first ${previewLen} bytes: ${hex}`);
 
+  // Write the PowerShell script to a temp .ps1 and invoke it via -File so
+  // the script's `param(...)` block is bound properly. Passing named
+  // parameters after -Command only works sometimes and was silently
+  // failing to bind $Printer / $File on this terminal.
+  const ps1Path = binPath.replace(/\.escpos$/, '.ps1');
+  writeFileSync(ps1Path, PS_SCRIPT);
+
   try {
     await new Promise<void>((resolve, reject) => {
       const child = spawn(
         'powershell.exe',
-        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', PS_SCRIPT, '-Printer', deviceName, '-File', binPath],
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1Path, '-Printer', deviceName, '-File2', binPath],
         { windowsHide: true },
       );
       let stderr = '';
       let stdout = '';
+      const settle = setTimeout(() => {
+        log.warn(`[raw-print] PowerShell still running after 15s — killing`);
+        try { child.kill(); } catch { /* noop */ }
+      }, 15_000);
       child.stdout?.on('data', (b) => { stdout += String(b); });
       child.stderr?.on('data', (b) => { stderr += String(b); });
-      child.on('error', (err) => reject(err));
-      child.on('exit', (code) => {
+      child.on('error', (err) => { clearTimeout(settle); reject(err); });
+      child.on('exit', (code, signal) => {
+        clearTimeout(settle);
         if (code === 0) {
           log.info(`[raw-print] spooled to "${deviceName}": ${stdout.trim()}`);
           resolve();
         } else {
-          log.error(`[raw-print] PowerShell exit ${code}: ${stderr.trim()}`);
-          reject(new Error(`Raw print failed: ${stderr.trim() || 'no output'}`));
+          log.error(`[raw-print] PowerShell exit=${code} signal=${signal}  stdout="${stdout.trim()}"  stderr="${stderr.trim()}"`);
+          reject(new Error(`Raw print failed (exit ${code}): ${(stderr || stdout).trim() || 'no output'}`));
         }
       });
     });
   } finally {
-    setTimeout(() => { try { unlinkSync(binPath); } catch { /* noop */ } }, 30_000);
+    setTimeout(() => {
+      try { unlinkSync(binPath); } catch { /* noop */ }
+      try { unlinkSync(ps1Path); } catch { /* noop */ }
+    }, 30_000);
   }
 }
