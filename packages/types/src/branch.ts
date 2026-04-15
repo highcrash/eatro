@@ -20,6 +20,9 @@ export interface Branch extends AuditFields {
   websiteTagline: string | null;
   billHeaderText: string | null;
   billFooterText: string | null;
+  bin: string | null;
+  mushakVersion: string | null;
+  wifiPass: string | null;
   facebookUrl: string | null;
   instagramUrl: string | null;
   isActive: boolean;
@@ -43,6 +46,9 @@ export interface UpdateBranchDto extends Partial<CreateBranchDto> {
   websiteTagline?: string | null;
   billHeaderText?: string | null;
   billFooterText?: string | null;
+  bin?: string | null;
+  mushakVersion?: string | null;
+  wifiPass?: string | null;
   facebookUrl?: string | null;
   instagramUrl?: string | null;
 }
@@ -96,6 +102,9 @@ export interface Branding {
   websiteTagline: string | null;
   billHeaderText: string | null;
   billFooterText: string | null;
+  bin: string | null;
+  mushakVersion: string | null;
+  wifiPass: string | null;
   facebookUrl: string | null;
   instagramUrl: string | null;
   posTheme: string;

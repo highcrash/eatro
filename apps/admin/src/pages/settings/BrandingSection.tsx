@@ -14,6 +14,9 @@ interface Form {
   websiteTagline: string;
   billHeaderText: string;
   billFooterText: string;
+  bin: string;
+  mushakVersion: string;
+  wifiPass: string;
   facebookUrl: string;
   instagramUrl: string;
 }
@@ -21,6 +24,7 @@ interface Form {
 const empty: Form = {
   name: '', address: '', phone: '', email: '',
   websiteTagline: '', billHeaderText: '', billFooterText: '',
+  bin: '', mushakVersion: '', wifiPass: '',
   facebookUrl: '', instagramUrl: '',
 };
 
@@ -44,6 +48,9 @@ export default function BrandingSection({ isOwner }: Props) {
       websiteTagline: branding.websiteTagline ?? '',
       billHeaderText: branding.billHeaderText ?? '',
       billFooterText: branding.billFooterText ?? '',
+      bin: branding.bin ?? '',
+      mushakVersion: branding.mushakVersion ?? '',
+      wifiPass: branding.wifiPass ?? '',
       facebookUrl: branding.facebookUrl ?? '',
       instagramUrl: branding.instagramUrl ?? '',
     });
@@ -60,6 +67,9 @@ export default function BrandingSection({ isOwner }: Props) {
       websiteTagline: form.websiteTagline || null,
       billHeaderText: form.billHeaderText || null,
       billFooterText: form.billFooterText || null,
+      bin: form.bin || null,
+      mushakVersion: form.mushakVersion || null,
+      wifiPass: form.wifiPass || null,
       facebookUrl: form.facebookUrl || null,
       instagramUrl: form.instagramUrl || null,
       logoUrl,
@@ -208,6 +218,17 @@ export default function BrandingSection({ isOwner }: Props) {
               className="input-base resize-y"
               placeholder={'Thank you for dining with us!\nVisit: www.example.com · Use code REPEAT10 next time'}
             />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="BIN (optional)">
+              <input value={form.bin} onChange={(e) => setForm((f) => ({ ...f, bin: e.target.value }))} disabled={!isOwner} className="input-base" placeholder="e.g. 000929179-0101" />
+            </Field>
+            <Field label="Mushak / Tax Software Version (optional)">
+              <input value={form.mushakVersion} onChange={(e) => setForm((f) => ({ ...f, mushakVersion: e.target.value }))} disabled={!isOwner} className="input-base" placeholder="e.g. Mushak-6.3" />
+            </Field>
+          </div>
+          <Field label="Wi-Fi Password (optional, printed on bill)">
+            <input value={form.wifiPass} onChange={(e) => setForm((f) => ({ ...f, wifiPass: e.target.value }))} disabled={!isOwner} className="input-base" placeholder="e.g. eatrobadda" />
           </Field>
         </div>
       </div>

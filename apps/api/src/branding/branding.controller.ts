@@ -45,6 +45,9 @@ export class BrandingController {
       websiteTagline?: string | null;
       billHeaderText?: string | null;
       billFooterText?: string | null;
+      bin?: string | null;
+      mushakVersion?: string | null;
+      wifiPass?: string | null;
       facebookUrl?: string | null;
       instagramUrl?: string | null;
     },

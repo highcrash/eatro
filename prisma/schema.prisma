@@ -150,6 +150,9 @@ model Branch {
   websiteTagline  String?    // hero tagline for the public website
   billHeaderText  String?    // optional header text rendered above items on bill/receipt
   billFooterText  String?    // free text shown at bottom of bills/receipts (multi-line)
+  bin             String?    // Bangladesh Business Identification Number, shown under phone
+  mushakVersion   String?    // e.g. "Mushak-6.3" — printed below BIN on paper bills
+  wifiPass        String?    // guest Wi-Fi password, optionally printed on the bill
   facebookUrl     String?
   instagramUrl    String?
   isActive  Boolean  @default(true)

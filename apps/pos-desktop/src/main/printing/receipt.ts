@@ -13,11 +13,18 @@ export interface ReceiptInput {
   branchName: string;
   branchAddress?: string;
   branchPhone?: string;
+  bin?: string;                          // Business Identification Number (Bangladesh); prints below phone
+  mushakVersion?: string;                // e.g. "Mushak-6.3"; optional audit line under BIN
   orderNumber: string;
   tableNumber?: string | null;
   type: string;
   createdAt: string | Date;
   cashierName?: string;
+  waiterName?: string;
+  guestCount?: number;
+  wifiPass?: string;                     // printed as "WIFI PASS:xxx" line
+  /** "Paid BILL" / "Customer Copy" / etc. Shown under the table + waiter block. */
+  statusLabel?: string;
   items: Array<{
     quantity: number;
     menuItemName: string;
@@ -29,10 +36,18 @@ export interface ReceiptInput {
   discountAmount?: number;
   discountName?: string | null;
   taxAmount?: number;
+  taxRatePct?: number;                   // e.g. 5 for 5%
+  roundAdjustment?: number;              // +/- rounding applied to the total (paisa)
   totalAmount: number;
-  paymentMethod?: string;
-  currencySymbol?: string; // defaults to "Tk" — Bengali Taka (৳) isn't in PC437 and prints as garbage on ESC/POS
+  /** Final paid bill — drives the Payments block. Empty/absent for a bill copy. */
+  payments?: Array<{ method: string; amount: number; reference?: string | null }>;
+  /** Tendered − total (cash change). Positive = change returned to customer. */
+  changeReturned?: number;
+  paymentMethod?: string;                // legacy single-method fallback when `payments` is missing
+  currencySymbol?: string;               // defaults to "Tk" — Bengali Taka (৳) isn't in PC437 and prints as garbage on ESC/POS
+  headerText?: string;                   // optional marketing line above the main separator
   footerText?: string;
+  notes?: string;                        // free-form "Notes:" block at the very bottom
 }
 
 export interface PrintReceiptOptions {
@@ -112,14 +127,11 @@ function pickNetwork(slot: { mode: string; host?: string; port?: number }): { mo
 // characters per line in the default Font A (12 × 24 at 12 cpi).
 const LINE_WIDTH = 48;
 
-/** Money values arrive in paisa / minor units. Thermal receipts show
- *  "Tk 380.00" style, so divide by 100 and format to 2 decimals. */
 function money(currency: string, paisa: number): string {
   return `${currency}${(paisa / 100).toFixed(2)}`;
 }
 
-/** Left label + right-aligned value across the full line width, with at
- *  least one space between. Truncates label if needed. */
+/** Full-width key/value row with right-aligned value. */
 function row(label: string, value: string): string {
   const maxLabel = LINE_WIDTH - value.length - 1;
   const trimmedLabel = label.length > maxLabel ? label.slice(0, maxLabel) : label;
@@ -127,58 +139,179 @@ function row(label: string, value: string): string {
   return `${trimmedLabel}${' '.repeat(Math.max(1, spaces))}${value}`;
 }
 
+/** Left + right segments aligned at start and end. Used for header lines
+ *  like "Date:16-Apr-26            Time:05:29 PM". */
+function splitLine(left: string, right: string): string {
+  const spaces = Math.max(1, LINE_WIDTH - left.length - right.length);
+  return `${left}${' '.repeat(spaces)}${right}`;
+}
+
+/** Item row with 4 columns: qty, name, unit price, line total. Matches
+ *  the reference bill layout:
+ *    "  1 Nantan Chicken               390.00   390.00" */
+function itemRow(qty: number, name: string, unit: string, total: string): string {
+  const qtyCol = String(qty).padStart(3, ' ');
+  const unitCol = unit.padStart(9, ' ');
+  const totalCol = total.padStart(9, ' ');
+  // Remaining width for the name: 48 − 3 − 1 − 9 − 1 − 9 = 25 chars.
+  const nameWidth = LINE_WIDTH - qtyCol.length - 1 - unitCol.length - 1 - totalCol.length;
+  const nameCol = (name.length > nameWidth ? name.slice(0, nameWidth - 1) + '.' : name)
+    .padEnd(nameWidth, ' ');
+  return `${qtyCol} ${nameCol}${unitCol} ${totalCol}`;
+}
+
+/** A wider "====" divider matching the reference design. */
+function doubleDivider(): string {
+  return '='.repeat(LINE_WIDTH);
+}
+
+function formatDate(d: Date): string {
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const day = String(d.getDate()).padStart(2, '0');
+  const mon = months[d.getMonth()];
+  const yr = String(d.getFullYear()).slice(-2);
+  return `${day}-${mon}-${yr}`;
+}
+
+function formatTime(d: Date): string {
+  let h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${String(h).padStart(2, '0')}:${m} ${ampm}`;
+}
+
 function buildReceiptJob(receipt: ReceiptInput, openCashDrawer: boolean): ThermalJob {
   const job: ThermalJob = { lines: [], openCashDrawer };
-  // ESC/POS printers use PC437 by default; no Bengali Taka glyph there, so
-  // default to "Tk" which renders reliably.
   const currency = receipt.currencySymbol ?? 'Tk';
   const createdAt = new Date(receipt.createdAt);
 
+  // ── Header (centered): brand, address, phone, BIN, Mushak ────────────
   job.lines.push({ kind: 'align-center' });
   job.lines.push({ kind: 'text', text: receipt.brandName, bold: true, size: 'large' });
-  job.lines.push({ kind: 'text', text: receipt.branchName });
   if (receipt.branchAddress) job.lines.push({ kind: 'text', text: receipt.branchAddress });
-  if (receipt.branchPhone) job.lines.push({ kind: 'text', text: receipt.branchPhone });
+  if (receipt.branchPhone) job.lines.push({ kind: 'text', text: `Phone:${receipt.branchPhone}` });
+  if (receipt.bin) job.lines.push({ kind: 'text', text: `BIN:${receipt.bin}` });
+  if (receipt.mushakVersion) job.lines.push({ kind: 'text', text: receipt.mushakVersion });
 
-  job.lines.push({ kind: 'divider' });
+  // Optional marketing header line between the brand block and the separator.
+  if (receipt.headerText) {
+    job.lines.push({ kind: 'text', text: receipt.headerText });
+  }
+
+  job.lines.push({ kind: 'text', text: doubleDivider() });
+
+  // ── Table / Waiter / Status (left-aligned) ────────────────────────────
   job.lines.push({ kind: 'align-left' });
-  job.lines.push({ kind: 'text', text: `Order #${receipt.orderNumber}` });
+  if (receipt.tableNumber) job.lines.push({ kind: 'text', text: `Table: ${receipt.tableNumber}` });
+  else job.lines.push({ kind: 'text', text: `Type : ${receipt.type}` });
+  if (receipt.waiterName) job.lines.push({ kind: 'text', text: `Waiter:${receipt.waiterName}` });
+  if (receipt.statusLabel) {
+    job.lines.push({ kind: 'align-center' });
+    job.lines.push({ kind: 'text', text: receipt.statusLabel, bold: true });
+    job.lines.push({ kind: 'align-left' });
+  }
+
+  job.lines.push({ kind: 'text', text: doubleDivider() });
+
+  // ── Date / Time / Invoice / Guests ────────────────────────────────────
   job.lines.push({
     kind: 'text',
-    text: receipt.tableNumber ? `Table: ${receipt.tableNumber}` : `Type : ${receipt.type}`,
+    text: splitLine(`Date:${formatDate(createdAt)}`, `Time:${formatTime(createdAt)}`),
   });
-  job.lines.push({ kind: 'text', text: createdAt.toLocaleString() });
-  if (receipt.cashierName) job.lines.push({ kind: 'text', text: `Cashier: ${receipt.cashierName}` });
+  const invoiceLine = splitLine(
+    `Invoice No:(${receipt.orderNumber})`,
+    `Number Of Guests:${receipt.guestCount ?? 0}`,
+  );
+  job.lines.push({ kind: 'text', text: invoiceLine });
+  if (receipt.cashierName) job.lines.push({ kind: 'text', text: `Cashier:${receipt.cashierName}` });
 
-  job.lines.push({ kind: 'divider' });
-  for (const it of receipt.items) {
-    const lineTotal = money(currency, it.lineTotal);
-    const name = `${it.quantity}x ${it.menuItemName}`;
-    job.lines.push({ kind: 'text', text: row(name, lineTotal) });
-    if (it.quantity > 1) {
-      // Secondary "@ Tk unit" line, indented so it reads as a sub-item.
-      job.lines.push({ kind: 'text', text: `   @ ${money(currency, it.unitPrice)}` });
-    }
-    if (it.notes) job.lines.push({ kind: 'text', text: `   (${it.notes})` });
+  if (receipt.wifiPass) {
+    job.lines.push({ kind: 'text', text: doubleDivider() });
+    job.lines.push({ kind: 'align-center' });
+    job.lines.push({ kind: 'text', text: `WIFI PASS:${receipt.wifiPass}` });
+    job.lines.push({ kind: 'align-left' });
   }
 
-  job.lines.push({ kind: 'divider' });
-  job.lines.push({ kind: 'text', text: row('Subtotal', money(currency, receipt.subtotal)) });
+  job.lines.push({ kind: 'text', text: doubleDivider() });
+
+  // ── Items table ───────────────────────────────────────────────────────
+  // Header row: Qty [name 25w]     Price  T.Price — widths match itemRow().
+  const nameHeader = 'Item Name'.padEnd(LINE_WIDTH - 3 - 1 - 9 - 1 - 9, ' ');
+  job.lines.push({
+    kind: 'text',
+    text: `Qty ${nameHeader}${'Price'.padStart(9, ' ')} ${'T.Price'.padStart(9, ' ')}`,
+    bold: true,
+  });
+  for (const it of receipt.items) {
+    job.lines.push({
+      kind: 'text',
+      text: itemRow(
+        it.quantity,
+        it.menuItemName,
+        money(currency, it.unitPrice).replace(currency, ''),
+        money(currency, it.lineTotal).replace(currency, ''),
+      ),
+    });
+    if (it.notes) job.lines.push({ kind: 'text', text: `    (${it.notes})` });
+  }
+
+  job.lines.push({ kind: 'text', text: doubleDivider() });
+
+  // ── Totals block ──────────────────────────────────────────────────────
+  job.lines.push({ kind: 'text', text: row('Ticket Total:', money(currency, receipt.subtotal)) });
   if (receipt.discountAmount && receipt.discountAmount > 0) {
-    const label = receipt.discountName ? `Discount (${receipt.discountName})` : 'Discount';
+    const label = receipt.discountName ? `${receipt.discountName}:` : 'Special Discount:';
     job.lines.push({ kind: 'text', text: row(label, `-${money(currency, receipt.discountAmount)}`) });
   }
+
+  const netTotal = receipt.subtotal - (receipt.discountAmount ?? 0);
+  job.lines.push({ kind: 'text', text: doubleDivider() });
+  job.lines.push({ kind: 'text', text: row('Net Total:', money(currency, netTotal)) });
+
   if (receipt.taxAmount && receipt.taxAmount > 0) {
-    job.lines.push({ kind: 'text', text: row('Tax', money(currency, receipt.taxAmount)) });
+    const taxLabel = receipt.taxRatePct != null ? `Vat-${receipt.taxRatePct.toFixed(2)}%:` : 'Tax:';
+    job.lines.push({ kind: 'text', text: row(taxLabel, money(currency, receipt.taxAmount)) });
   }
-  job.lines.push({ kind: 'text', text: row('TOTAL', money(currency, receipt.totalAmount)), bold: true });
-  if (receipt.paymentMethod) {
-    job.lines.push({ kind: 'text', text: `Paid via: ${receipt.paymentMethod}` });
+  if (receipt.roundAdjustment && Math.abs(receipt.roundAdjustment) > 0) {
+    const sign = receipt.roundAdjustment >= 0 ? '+' : '-';
+    const label = `Auto Round${sign}/-1.00:`;
+    job.lines.push({ kind: 'text', text: row(label, money(currency, Math.abs(receipt.roundAdjustment))) });
   }
 
-  job.lines.push({ kind: 'divider' });
-  job.lines.push({ kind: 'align-center' });
-  job.lines.push({ kind: 'text', text: receipt.footerText ?? 'Thank you!' });
+  job.lines.push({ kind: 'text', text: doubleDivider() });
+  job.lines.push({ kind: 'text', text: row('Gross Total:', money(currency, receipt.totalAmount)), bold: true });
+
+  // ── Payments block (only on paid copies) ──────────────────────────────
+  const payments = receipt.payments ?? [];
+  if (payments.length > 0) {
+    job.lines.push({ kind: 'text', text: 'Payments:' });
+    let totalPaid = 0;
+    for (const p of payments) {
+      totalPaid += p.amount;
+      job.lines.push({ kind: 'text', text: row(` -${p.method}:`, money(currency, p.amount)) });
+    }
+    job.lines.push({ kind: 'text', text: row('-TOTAL PAYMENT:', money(currency, totalPaid)), bold: true });
+    if (receipt.changeReturned != null) {
+      job.lines.push({ kind: 'text', text: row('RETURNED AMOUNT:', money(currency, receipt.changeReturned)) });
+    }
+  } else {
+    // Bill copy — show remaining amount instead of payments.
+    job.lines.push({ kind: 'text', text: row('REMAINING AMOUNT:', money(currency, receipt.totalAmount)) });
+  }
+
+  if (receipt.notes && receipt.notes.trim()) {
+    job.lines.push({ kind: 'text', text: `Notes: ${receipt.notes.trim()}` });
+  } else {
+    job.lines.push({ kind: 'text', text: 'Notes:' });
+  }
+
+  // ── Footer ────────────────────────────────────────────────────────────
+  if (receipt.footerText) {
+    job.lines.push({ kind: 'newline' });
+    job.lines.push({ kind: 'align-center' });
+    job.lines.push({ kind: 'text', text: receipt.footerText });
+  }
   job.lines.push({ kind: 'newline' });
   job.lines.push({ kind: 'cut' });
 

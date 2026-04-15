@@ -14,6 +14,11 @@ interface Branding {
   address?: string | null;
   phone?: string | null;
   billFooterText?: string | null;
+  billHeaderText?: string | null;
+  bin?: string | null;
+  mushakVersion?: string | null;
+  wifiPass?: string | null;
+  taxRate?: number | string | null;
 }
 
 interface DesktopReceiptInput {
@@ -21,11 +26,17 @@ interface DesktopReceiptInput {
   branchName: string;
   branchAddress?: string;
   branchPhone?: string;
+  bin?: string;
+  mushakVersion?: string;
   orderNumber: string;
   tableNumber?: string | null;
   type: string;
   createdAt: string | Date;
   cashierName?: string;
+  waiterName?: string;
+  guestCount?: number;
+  wifiPass?: string;
+  statusLabel?: string;
   items: Array<{
     quantity: number;
     menuItemName: string;
@@ -37,10 +48,16 @@ interface DesktopReceiptInput {
   discountAmount?: number;
   discountName?: string | null;
   taxAmount?: number;
+  taxRatePct?: number;
+  roundAdjustment?: number;
   totalAmount: number;
+  payments?: Array<{ method: string; amount: number; reference?: string | null }>;
+  changeReturned?: number;
   paymentMethod?: string;
   currencySymbol?: string;
+  headerText?: string;
   footerText?: string;
+  notes?: string;
 }
 
 interface DesktopPrintApi {
@@ -59,16 +76,40 @@ export function isDesktop(): boolean {
 }
 
 export function orderToReceiptInput(order: Order, branding: Branding | undefined): DesktopReceiptInput {
+  // Split payments from the Order's payments array — this is what lets the
+  // thermal receipt show the proper "Payments: -Cash: ... -Card: ..." block.
+  const rawPayments = (order.payments ?? []) as Array<{ method: string; amount: number; reference?: string | null }>;
+  const payments = rawPayments.length
+    ? rawPayments.map((p) => ({
+        method: p.method,
+        amount: Number(p.amount),
+        reference: p.reference ?? null,
+      }))
+    : undefined;
+
+  const totalPaid = payments ? payments.reduce((s, p) => s + p.amount, 0) : 0;
+  const change = payments && totalPaid > Number(order.totalAmount) ? totalPaid - Number(order.totalAmount) : 0;
+
+  const taxRatePct = branding?.taxRate != null ? Number(branding.taxRate) : undefined;
+  const isPaid = order.status === 'PAID' || (payments?.length ?? 0) > 0;
+
   return {
     brandName: branding?.name ?? 'Restora',
     branchName: branding?.name ?? '',
     branchAddress: branding?.address ?? undefined,
     branchPhone: branding?.phone ?? undefined,
+    bin: branding?.bin ?? undefined,
+    mushakVersion: branding?.mushakVersion ?? undefined,
+    wifiPass: branding?.wifiPass ?? undefined,
     orderNumber: order.orderNumber,
     tableNumber: order.tableNumber ?? null,
     type: order.type,
     createdAt: order.paidAt ?? order.createdAt ?? new Date().toISOString(),
-    cashierName: undefined,
+    cashierName: (order as unknown as { cashierName?: string }).cashierName ?? undefined,
+    waiterName: (order as unknown as { waiterName?: string; waiter?: { name?: string } }).waiterName
+      ?? (order as unknown as { waiter?: { name?: string } }).waiter?.name,
+    guestCount: (order as unknown as { guestCount?: number }).guestCount,
+    statusLabel: isPaid ? 'Paid BILL' : undefined,
     items: order.items.map((i) => ({
       quantity: Number(i.quantity),
       menuItemName: i.menuItemName,
@@ -80,8 +121,12 @@ export function orderToReceiptInput(order: Order, branding: Branding | undefined
     discountAmount: order.discountAmount ? Number(order.discountAmount) : undefined,
     discountName: (order as unknown as { discountName?: string | null }).discountName ?? null,
     taxAmount: order.taxAmount ? Number(order.taxAmount) : undefined,
+    taxRatePct: Number.isFinite(taxRatePct) ? taxRatePct : undefined,
     totalAmount: Number(order.totalAmount),
+    payments,
+    changeReturned: isPaid ? change : undefined,
     paymentMethod: order.paymentMethod ?? undefined,
+    headerText: branding?.billHeaderText ?? undefined,
     footerText: branding?.billFooterText ?? undefined,
   };
 }

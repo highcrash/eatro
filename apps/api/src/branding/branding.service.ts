@@ -41,6 +41,9 @@ export class BrandingService {
       websiteTagline: branch.websiteTagline,
       billHeaderText: branch.billHeaderText,
       billFooterText: branch.billFooterText,
+      bin: branch.bin,
+      mushakVersion: branch.mushakVersion,
+      wifiPass: branch.wifiPass,
       facebookUrl: branch.facebookUrl,
       instagramUrl: branch.instagramUrl,
       posTheme: settings.posTheme,
@@ -66,6 +69,9 @@ export class BrandingService {
       websiteTagline?: string | null;
       billHeaderText?: string | null;
       billFooterText?: string | null;
+      bin?: string | null;
+      mushakVersion?: string | null;
+      wifiPass?: string | null;
       facebookUrl?: string | null;
       instagramUrl?: string | null;
     },
