@@ -10,6 +10,7 @@ import {
 } from './outbox';
 import { isSynthetic, mapSyntheticToReal, rewritePath } from './id-remap';
 import { getLocalDb } from '../db/local-db';
+import { clearShadowOrders } from './shadow-orders';
 
 /**
  * Drains pending outbox rows to the server in order. Runs:
@@ -63,6 +64,7 @@ export async function forceDrain(): Promise<{ drained: number; failed: number; r
     // cached in case the terminal drops offline again before the next pull.
     if (drained > 0 && listPending().length === 0) {
       getLocalDb().prepare(`DELETE FROM response_cache WHERE path_key LIKE 'GET /orders%'`).run();
+      clearShadowOrders();
     }
     return { drained, failed, remaining: listPending().length };
   } finally {

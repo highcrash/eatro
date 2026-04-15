@@ -15,6 +15,7 @@ import {
   buildPaymentResponse,
   buildApplyDiscountResponse,
 } from './synthetic';
+import { listShadowOrders, getShadowOrder, parseOrderListPath } from './shadow-orders';
 
 /**
  * Central HTTP proxy that every renderer API call flows through. Handles:
@@ -134,6 +135,25 @@ function handleOffline(
   branchId: string,
 ): ApiFetchResult {
   if (!isMutation) {
+    // Handle /orders list specially: merge cached server orders with locally
+    // synthesized ones, so a cashier who went offline before ever visiting a
+    // table page still sees their new order on refetch.
+    const orderFilter = parseOrderListPath(input.path);
+    if (orderFilter) {
+      const cached = getCached(method, input.path);
+      const base = Array.isArray(cached?.body) ? (cached!.body as Array<{ id: string }>) : [];
+      const shadows = listShadowOrders(orderFilter).map((s) => s.body).filter((b) => b != null) as Array<{ id: string }>;
+      const byId = new Map<string, unknown>();
+      for (const o of base) byId.set(o.id, o);
+      for (const o of shadows) byId.set(o.id, o); // shadow wins — newer
+      return { status: 200, ok: true, body: Array.from(byId.values()) };
+    }
+    // /orders/<id> detail — check shadow first, then cache.
+    const detailMatch = /^\/orders\/([^/?]+)$/.exec(input.path);
+    if (detailMatch) {
+      const shadow = getShadowOrder(detailMatch[1]);
+      if (shadow?.body) return { status: 200, ok: true, body: shadow.body };
+    }
     const cached = getCached(method, input.path);
     if (cached) return { status: cached.status, ok: true, body: cached.body };
     return { status: 200, ok: true, body: emptyShapeFor(input.path) };

@@ -82,6 +82,26 @@ function migrate(db: BetterSqlite): void {
       kind          TEXT NOT NULL,                  -- 'order' | 'item' | 'payment'
       created_at_ms INTEGER NOT NULL
     );
+
+    -- Offline-created orders kept in their full synthetic Order shape, keyed
+    -- by the synthetic id. Offline GET /orders queries union these with the
+    -- cached server list so the POS's refetch after a synthetic mutation
+    -- still sees the new order even if there was no prior cache for the
+    -- specific table/status filter.
+    --
+    -- Rows are cleared once the outbox has drained — by then the server has
+    -- the authoritative copy and React Query will refetch real data.
+    CREATE TABLE IF NOT EXISTS shadow_orders (
+      id            TEXT PRIMARY KEY,
+      table_id      TEXT,
+      branch_id     TEXT NOT NULL,
+      status        TEXT NOT NULL,
+      body          TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS shadow_orders_table_idx ON shadow_orders(table_id);
+    CREATE INDEX IF NOT EXISTS shadow_orders_status_idx ON shadow_orders(status);
   `);
 }
 
