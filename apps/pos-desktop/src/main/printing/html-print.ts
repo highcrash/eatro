@@ -53,12 +53,25 @@ export async function printHtmlToDevice(
   writeFileSync(tmpPath, sanitized, 'utf8');
   log.info(`[print] html bytes written: ${sanitized.length}`);
 
+  // Create the print window with explicit dimensions matching the page we
+  // want Chromium to lay out. Positioning it offscreen (but visible) forces
+  // the compositor to actually paint — show:false windows have been observed
+  // to ship blank surfaces to webContents.print on some Windows driver
+  // combos.
   const win = new BrowserWindow({
+    x: -32000,
+    y: -32000,
+    width: 320,   // ~80 mm at 96 DPI
+    height: 1200,
     show: false,
+    frame: false,
+    skipTaskbar: true,
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      offscreen: false,
     },
   });
 
@@ -72,21 +85,35 @@ export async function printHtmlToDevice(
   try {
     log.info(`[print] job -> "${deviceName}" (tmp: ${tmpPath}, pageSize: ${opts.pageSize ? JSON.stringify(opts.pageSize) : 'driver default'})`);
 
-    await win.loadFile(tmpPath);
+    // Set up the did-finish-load listener BEFORE loadFile so we don't miss
+    // the event on fast local files.
+    const finished = new Promise<void>((resolve) => {
+      if (!win.webContents.isLoading()) resolve();
+      else win.webContents.once('did-finish-load', () => resolve());
+    });
 
-    // Windows BrowserWindows created with show: false sometimes skip paint
-    // work, so silent webContents.print() captures a blank surface even
-    // though the job was "accepted" by the driver. Nudging the window to
-    // offscreen-visible forces a full paint pass on every driver we've
-    // seen, while the coordinates keep it off the taskbar / screen.
-    win.setBounds({ x: -32000, y: -32000, width: 600, height: 900 });
+    await win.loadFile(tmpPath);
+    await finished;
+
+    // Show the window so paint happens. showInactive keeps it from stealing
+    // focus; the offscreen x,y keeps it out of sight.
     win.showInactive();
 
-    // 500 ms settle: ~16 ms is enough on fast machines but receipts with
-    // webfont-ish monospace stacks need longer, and silent:true has no
-    // built-in "ready" signal. 500 ms is cheap and fixes the blank-print
-    // case.
-    await new Promise<void>((r) => setTimeout(r, 500));
+    // 800 ms settle gives the compositor time for the first paint cycle.
+    await new Promise<void>((r) => setTimeout(r, 800));
+
+    // Diagnostic snapshot: capture what Chromium actually rendered and save
+    // it next to the HTML. If the PNG is blank we have a render problem;
+    // if it has the receipt, we have a print-pipeline problem. Saves the
+    // guessing game.
+    try {
+      const image = await win.webContents.capturePage();
+      const pngPath = tmpPath.replace(/\.html$/, '.png');
+      writeFileSync(pngPath, image.toPNG());
+      log.info(`[print] render snapshot saved: ${pngPath} (${image.getSize().width}x${image.getSize().height})`);
+    } catch (err) {
+      log.warn(`[print] capturePage failed: ${(err as Error).message}`);
+    }
 
     await new Promise<void>((resolve, reject) => {
       try {
@@ -95,9 +122,6 @@ export async function printHtmlToDevice(
           printBackground: true,
           deviceName,
           landscape: opts.landscape ?? false,
-          // 'default' (not 'none') — some thermal drivers treat 'none' as
-          // "empty page" because Electron passes 0-width borders they
-          // can't parse.
           margins: { marginType: 'default' },
         };
         if (opts.pageSize) printOpts.pageSize = opts.pageSize;
@@ -117,7 +141,17 @@ export async function printHtmlToDevice(
       }
     });
   } finally {
-    setTimeout(safeClose, 150);
+    // Keep the html + png around for 30 seconds so an owner can inspect the
+    // render, then clean up. Skipping the unlink in safeClose for temp
+    // files so they survive long enough to be useful.
+    setTimeout(() => {
+      try { if (!win.isDestroyed()) win.close(); } catch { /* noop */ }
+    }, 150);
+    setTimeout(() => {
+      try { unlinkSync(tmpPath); } catch { /* noop */ }
+      try { unlinkSync(tmpPath.replace(/\.html$/, '.png')); } catch { /* noop */ }
+    }, 30_000);
+    void safeClose;
   }
 }
 
