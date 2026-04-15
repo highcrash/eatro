@@ -2,19 +2,26 @@ import { BrowserWindow, app } from 'electron';
 import { writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
-import { spawn } from 'child_process';
 import log from 'electron-log';
 
 /**
- * Print HTML to a named OS printer by rendering the HTML to a PDF via
- * Chromium's printToPDF (reliable — runs offscreen, no paint race) and
- * then shell-invoking the system's default PDF handler with the
- * `PrintTo` verb. Works for any thermal / office printer driver that
- * accepts PDF (every Windows 10/11 default PDF handler: Edge, Adobe,
- * Foxit, SumatraPDF).
+ * Print HTML to a named OS printer in two stages, both driven by
+ * Chromium so the Windows shell / PDF-viewer registration doesn't
+ * matter:
  *
- * This replaces the webContents.print() path that shipped blank pages
- * on some thermal drivers even after every paint / page-size tweak.
+ *   1. Render HTML → PDF bytes via webContents.printToPDF. This is a
+ *      DOM capture path, not paint-dependent, so it can't silently
+ *      ship a blank bitmap the way webContents.print() could.
+ *   2. Load the PDF into a fresh BrowserWindow (Chromium's built-in
+ *      PDF viewer renders it) and drive that window with
+ *      webContents.print({silent:true, deviceName}). The printer now
+ *      receives a fully-rasterized PDF page instead of an HTML render
+ *      that could still be in-flight.
+ *
+ * Why this works when the prior HTML-direct path didn't: the paint
+ * race lived in the HTML render pipeline; by the time the PDF viewer
+ * has a PDF loaded, the content is pre-rendered as a bitmap inside
+ * the plugin and webContents.print captures that pristine surface.
  */
 
 export async function printHtmlToPdfThenShell(
@@ -30,41 +37,30 @@ export async function printHtmlToPdfThenShell(
   const htmlPath = join(tmpDir, `${stem}.html`);
   const pdfPath = join(tmpDir, `${stem}.pdf`);
 
-  // Strip any auto-print / auto-close scripts the shared templates embed
-  // for the web-POS popup flow — same reason as the webContents.print path.
   const sanitized = html.replace(/<script[\s\S]*?<\/script>/gi, '');
   writeFileSync(htmlPath, sanitized, 'utf8');
   log.info(`[pdf-print] html bytes: ${sanitized.length}, html=${htmlPath}`);
 
-  const win = new BrowserWindow({
-    x: -32000,
-    y: -32000,
-    width: 320,
-    height: 1200,
+  // Stage 1: render HTML → PDF bytes.
+  const renderWin = new BrowserWindow({
+    x: -32000, y: -32000,
+    width: 320, height: 1200,
     show: false,
     frame: false,
     skipTaskbar: true,
     paintWhenInitiallyHidden: true,
-    webPreferences: {
-      sandbox: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    webPreferences: { sandbox: false, contextIsolation: true, nodeIntegration: false },
   });
-
   try {
-    const finished = new Promise<void>((resolve) => {
-      if (!win.webContents.isLoading()) resolve();
-      else win.webContents.once('did-finish-load', () => resolve());
+    const loaded = new Promise<void>((resolve) => {
+      if (!renderWin.webContents.isLoading()) resolve();
+      else renderWin.webContents.once('did-finish-load', () => resolve());
     });
-    await win.loadFile(htmlPath);
-    await finished;
-    await new Promise<void>((r) => setTimeout(r, 300));
+    await renderWin.loadFile(htmlPath);
+    await loaded;
+    await new Promise<void>((r) => setTimeout(r, 200));
 
-    // printToPDF is a bitmap-capture path that doesn't depend on the
-    // BrowserWindow being painted, so we don't need the offscreen-visible
-    // gymnastics — it renders from the DOM directly to a PDF buffer.
-    const pdfData = await win.webContents.printToPDF({
+    const pdfData = await renderWin.webContents.printToPDF({
       pageSize: opts.pageSize ?? { width: 80_000, height: 297_000 },
       printBackground: true,
       landscape: opts.landscape ?? false,
@@ -73,36 +69,71 @@ export async function printHtmlToPdfThenShell(
     writeFileSync(pdfPath, pdfData);
     log.info(`[pdf-print] pdf bytes: ${pdfData.length}, pdf=${pdfPath}`);
   } finally {
-    try { if (!win.isDestroyed()) win.close(); } catch { /* noop */ }
+    try { if (!renderWin.isDestroyed()) renderWin.close(); } catch { /* noop */ }
   }
 
-  // Shell out to PowerShell's Start-Process with the PrintTo verb. This
-  // uses whatever app is registered as the default PDF handler (Edge
-  // on a fresh Windows 10/11, Adobe / Foxit / SumatraPDF if installed).
-  // The verb targets a specific printer by name — no print dialog.
-  await new Promise<void>((resolve, reject) => {
-    const cmd = `Start-Process -FilePath '${pdfPath.replace(/'/g, "''")}' -Verb PrintTo -ArgumentList '"${deviceName.replace(/'/g, "''")}"' -WindowStyle Hidden`;
-    log.info(`[pdf-print] shell: powershell -NoProfile -Command "${cmd}"`);
-    const ps = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', cmd], {
-      windowsHide: true,
-      detached: false,
-    });
-    let stderr = '';
-    ps.stderr?.on('data', (chunk) => { stderr += String(chunk); });
-    ps.on('error', (err) => reject(err));
-    ps.on('exit', (code) => {
-      if (code === 0) {
-        log.info(`[pdf-print] accepted by "${deviceName}"`);
-        resolve();
-      } else {
-        log.error(`[pdf-print] PowerShell exit ${code}: ${stderr.trim()}`);
-        reject(new Error(`PrintTo failed (exit ${code}): ${stderr.trim() || 'no output'}`));
-      }
-    });
+  // Stage 2: load the PDF into a new window (Chromium renders it via the
+  // built-in PDF viewer plugin) and silent-print that.
+  const viewerWin = new BrowserWindow({
+    x: -32000, y: -32000,
+    width: 320, height: 1200,
+    show: false,
+    frame: false,
+    skipTaskbar: true,
+    paintWhenInitiallyHidden: true,
+    webPreferences: {
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      plugins: true,
+    },
   });
 
-  // Keep html + pdf around for 30 s so an owner can inspect them if the
-  // print still goes wrong. Then clean up.
+  try {
+    const pdfLoaded = new Promise<void>((resolve) => {
+      if (!viewerWin.webContents.isLoading()) resolve();
+      else viewerWin.webContents.once('did-finish-load', () => resolve());
+    });
+    await viewerWin.loadFile(pdfPath);
+    await pdfLoaded;
+
+    // The PDF viewer plugin needs a moment to rasterize the first page.
+    viewerWin.showInactive();
+    await new Promise<void>((r) => setTimeout(r, 800));
+
+    await new Promise<void>((resolve, reject) => {
+      try {
+        viewerWin.webContents.print(
+          {
+            silent: true,
+            printBackground: true,
+            deviceName,
+            margins: { marginType: 'default' },
+            ...(opts.pageSize ? { pageSize: opts.pageSize } : {}),
+          },
+          (success, failureReason) => {
+            if (success) {
+              log.info(`[pdf-print] accepted by "${deviceName}"`);
+              resolve();
+            } else {
+              log.error(`[pdf-print] rejected by "${deviceName}": ${failureReason}`);
+              reject(new Error(`Printer "${deviceName}" rejected the job: ${failureReason || 'no reason'}`));
+            }
+          },
+        );
+      } catch (err) {
+        log.error(`[pdf-print] threw`, err);
+        reject(err as Error);
+      }
+    });
+  } finally {
+    setTimeout(() => {
+      try { if (!viewerWin.isDestroyed()) viewerWin.close(); } catch { /* noop */ }
+    }, 200);
+  }
+
+  // Keep html + pdf around for 30 s so an owner can inspect the PDF
+  // manually if the print still goes wrong.
   setTimeout(() => {
     try { unlinkSync(htmlPath); } catch { /* noop */ }
     try { unlinkSync(pdfPath); } catch { /* noop */ }
