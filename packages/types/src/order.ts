@@ -57,6 +57,7 @@ export interface Order extends AuditFields {
   cashierId: string;
   cashierName: string;
   waiterId: string | null;
+  guestCount: number;
   billRequested: boolean;
   paymentMethod: PaymentMethod | null;
   paidAt: Date | null;
@@ -77,6 +78,7 @@ export interface CreateOrderDto {
   type: OrderType;
   items: CreateOrderItemDto[];
   notes?: string;
+  guestCount?: number;
 }
 
 export interface AddOrderItemDto {

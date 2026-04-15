@@ -108,7 +108,7 @@ export function orderToReceiptInput(order: Order, branding: Branding | undefined
     cashierName: (order as unknown as { cashierName?: string }).cashierName ?? undefined,
     waiterName: (order as unknown as { waiterName?: string; waiter?: { name?: string } }).waiterName
       ?? (order as unknown as { waiter?: { name?: string } }).waiter?.name,
-    guestCount: (order as unknown as { guestCount?: number }).guestCount,
+    guestCount: Number((order as unknown as { guestCount?: number }).guestCount ?? 0) || undefined,
     statusLabel: isPaid ? 'Paid BILL' : undefined,
     items: order.items.map((i) => ({
       quantity: Number(i.quantity),

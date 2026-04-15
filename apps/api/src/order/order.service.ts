@@ -164,6 +164,7 @@ export class OrderService {
         customerName,
         customerPhone,
         waiterId: dto.waiterId ?? null,
+        guestCount: dto.guestCount ?? 0,
         type: dto.type,
         status: 'CONFIRMED',
         notes: dto.notes ?? null,
@@ -813,6 +814,21 @@ export class OrderService {
       include: { items: true, payments: true },
     });
 
+    this.ws.emitToBranch(branchId, 'order:updated', updated);
+    return updated;
+  }
+
+  async setGuestCount(orderId: string, branchId: string, guestCount: number) {
+    const order = await this.findOne(orderId, branchId);
+    if (order.status === 'PAID' || order.status === 'VOID') {
+      throw new BadRequestException('Cannot update a completed order');
+    }
+    const clamped = Math.max(0, Math.min(999, Math.floor(Number(guestCount) || 0)));
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { guestCount: clamped },
+      include: { items: true, payments: true },
+    });
     this.ws.emitToBranch(branchId, 'order:updated', updated);
     return updated;
   }

@@ -764,6 +764,15 @@ function ActiveOrderView({
     },
   });
 
+  const setGuestCountMut = useMutation({
+    mutationFn: (guestCount: number) =>
+      api.patch<Order>(`/orders/${order.id}/guest-count`, { guestCount }),
+    onSuccess: (updated) => {
+      setOrder(updated);
+      void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+    },
+  });
+
   const [showDiscountPicker, setShowDiscountPicker] = useState(false);
   const [showCouponInput, setShowCouponInput] = useState(false);
   const [posCouponCode, setPosCouponCode] = useState('');
@@ -939,6 +948,30 @@ function ActiveOrderView({
                 <option value="">— Select —</option>
                 {orderWaiters.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
+            </div>
+            <div className="h-6 w-px bg-theme-border" />
+          </>
+        )}
+        {order.tableId && (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase text-theme-text-muted">Guests</span>
+              <input
+                type="number"
+                min={0}
+                max={99}
+                defaultValue={(order as unknown as { guestCount?: number }).guestCount ?? 0}
+                onBlur={(e) => {
+                  const v = Math.max(0, Math.min(99, Number(e.target.value) || 0));
+                  if (v !== ((order as unknown as { guestCount?: number }).guestCount ?? 0)) {
+                    setGuestCountMut.mutate(v);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+                className="w-14 text-sm font-semibold bg-theme-bg rounded-theme px-2 py-1.5 border-0 text-theme-text outline-none text-center"
+              />
             </div>
             <div className="h-6 w-px bg-theme-border" />
           </>
@@ -1564,6 +1597,7 @@ function NewOrderView({
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [waiterId, setWaiterId] = useState<string>('');
+  const [guestCount, setGuestCount] = useState<number>(0);
   const [hoverIdx, setHoverIdx] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -1712,6 +1746,7 @@ function NewOrderView({
     createOrderMutation.mutate({
       tableId,
       waiterId: waiterId || undefined,
+      guestCount: guestCount > 0 ? guestCount : undefined,
       type: tableId ? 'DINE_IN' : 'TAKEAWAY',
       items: cart.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity, notes: c.notes || undefined })),
     });
@@ -1775,6 +1810,20 @@ function NewOrderView({
                   <option key={w.id} value={w.id}>{w.name}</option>
                 ))}
               </select>
+            </div>
+          )}
+          {tableId && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase text-theme-text-muted">Guests</span>
+              <input
+                type="number"
+                min={0}
+                max={99}
+                value={guestCount || ''}
+                onChange={(e) => setGuestCount(Math.max(0, Math.min(99, Number(e.target.value) || 0)))}
+                placeholder="0"
+                className="w-16 text-sm font-semibold bg-theme-surface rounded-theme px-3 py-2 border border-theme-border text-theme-text outline-none text-center"
+              />
             </div>
           )}
         </div>

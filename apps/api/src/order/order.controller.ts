@@ -77,6 +77,11 @@ export class OrderController {
     return this.orderService.setWaiter(id, user.branchId, dto.waiterId);
   }
 
+  @Patch(':id/guest-count')
+  setGuestCount(@Param('id') id: string, @Body() dto: { guestCount: number }, @CurrentUser() user: JwtPayload) {
+    return this.orderService.setGuestCount(id, user.branchId, dto.guestCount);
+  }
+
   @Post(':id/move-table')
   moveTable(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { tableId: string }) {
     return this.orderService.moveTable(id, user.branchId, dto.tableId);

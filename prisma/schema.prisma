@@ -621,6 +621,7 @@ model Order {
   customerName   String?       // denormalized — "Walk-in" or customer name
   customerPhone  String?       // denormalized
   waiterId       String?
+  guestCount     Int           @default(0)         // number of guests at the table (printed on bill/receipt)
   billRequested  Boolean       @default(false)
   voidReason     String?
   voidedById     String?
