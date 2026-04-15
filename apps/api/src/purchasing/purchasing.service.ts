@@ -541,13 +541,59 @@ export class PurchasingService {
 
   // ─── Purchase Returns ──────────────────────────────────────────────────────
 
-  async createReturn(branchId: string, staffId: string, dto: { purchaseOrderId?: string; supplierId?: string; items: { ingredientId: string; quantity: number; unitPrice: number }[]; notes?: string }) {
+  async createReturn(
+    branchId: string,
+    staffId: string,
+    dto: {
+      purchaseOrderId?: string;
+      supplierId?: string;
+      items: { ingredientId: string; quantity: number; unitPrice: number; unit?: string | null }[];
+      notes?: string;
+    },
+  ) {
     let supplierId = dto.supplierId;
     if (dto.purchaseOrderId) {
       const po = await this.findOne(dto.purchaseOrderId, branchId);
       supplierId = po.supplierId;
     }
     if (!supplierId) throw new BadRequestException('Supplier ID is required for independent returns');
+
+    // Convert each line's quantity to the ingredient's STOCK unit. The POS
+    // form lets a cashier enter "1 PACK" or "1 KG" (purchase unit), but
+    // currentStock is tracked in the smaller stock unit (10 pcs, 1000 g).
+    // Without this conversion, returning 1 PACK only deducts 1 pcs and the
+    // printed return doc shows "1 PACK" while the actual stock movement
+    // was 1 unit. Receive flow already does this — applied the same logic
+    // here for symmetry.
+    const itemsInStockUnit: Array<{ ingredientId: string; quantity: number; unitPrice: number }> = [];
+    for (const line of dto.items) {
+      const ingredient = await this.prisma.ingredient.findFirst({
+        where: { id: line.ingredientId, branchId, deletedAt: null },
+      });
+      if (!ingredient) throw new BadRequestException(`Ingredient ${line.ingredientId} not found`);
+      const hasPurchaseUnit = !!ingredient.purchaseUnit && ingredient.purchaseUnitQty.toNumber() > 0;
+      const inputUnit = (line.unit ?? '').trim() || null;
+      let stockQty = line.quantity;
+      // Case 1: caller said the qty is in the purchase unit, convert by purchaseUnitQty.
+      if (hasPurchaseUnit && inputUnit && inputUnit === ingredient.purchaseUnit) {
+        stockQty = line.quantity * ingredient.purchaseUnitQty.toNumber();
+      } else if (inputUnit && inputUnit !== ingredient.unit) {
+        // Case 2: a different unit (e.g. KG vs G with no purchaseUnitQty set);
+        // run it through the branch's UnitConversion table.
+        try {
+          stockQty = await this.unitConversion.convert(branchId, line.quantity, inputUnit, ingredient.unit);
+        } catch {
+          // No conversion defined — fall back to the raw qty so the cashier
+          // can still record the return; admin can audit later.
+          stockQty = line.quantity;
+        }
+      }
+      itemsInStockUnit.push({
+        ingredientId: line.ingredientId,
+        quantity: stockQty,
+        unitPrice: line.unitPrice,
+      });
+    }
 
     return this.prisma.purchaseReturn.create({
       data: {
@@ -557,11 +603,7 @@ export class PurchasingService {
         requestedById: staffId,
         notes: dto.notes ?? null,
         items: {
-          create: dto.items.map((i) => ({
-            ingredientId: i.ingredientId,
-            quantity: i.quantity,
-            unitPrice: i.unitPrice,
-          })),
+          create: itemsInStockUnit,
         },
       },
       include: {

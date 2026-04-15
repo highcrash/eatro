@@ -83,7 +83,12 @@ function printPO(po: PurchaseOrder, includePrice: boolean) {
 
 function printReturn(ret: PurchaseReturn) {
   const rows = ret.items.map((item) => {
-    const qty = `${Number(item.quantity).toFixed(2)} ${poUnit(item.ingredient)}`;
+    // Returns persist quantity in the ingredient's STOCK unit (the API
+    // converts from purchase unit on intake) so the print shows the same
+    // unit the actual stock movement used. Showing purchase unit here
+    // would be misleading — e.g. "1.00 KG" when the deduction was 1000 G.
+    const stockUnit = item.ingredient?.unit ?? '';
+    const qty = `${Number(item.quantity).toFixed(2)} ${stockUnit}`;
     const price = `৳${(Number(item.unitPrice) / 100).toFixed(2)}`;
     const total = `৳${((Number(item.unitPrice) / 100) * Number(item.quantity)).toFixed(2)}`;
     return `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">${item.ingredient?.name ?? ''}</td><td style="text-align:right;padding:4px 8px;border-bottom:1px solid #eee">${qty}</td><td style="text-align:right;padding:4px 8px;border-bottom:1px solid #eee">${price}</td><td style="text-align:right;padding:4px 8px;border-bottom:1px solid #eee">${total}</td></tr>`;
@@ -848,7 +853,7 @@ export default function PurchasingPage() {
                           {ret.items.map((item) => (
                             <tr key={item.id} className="border-b border-[#2A2A2A] last:border-0">
                               <td className="px-2 py-2 text-white font-body text-xs">{item.ingredient?.name}</td>
-                              <td className="px-2 py-2 text-[#999] font-body text-xs">{Number(item.quantity).toFixed(3)} {poUnit(item.ingredient)}</td>
+                              <td className="px-2 py-2 text-[#999] font-body text-xs">{Number(item.quantity).toFixed(3)} {item.ingredient?.unit ?? ''}</td>
                               <td className="px-2 py-2 text-[#999] font-body text-xs">৳{(Number(item.unitPrice) / 100).toFixed(2)}</td>
                               <td className="px-2 py-2 text-[#D62B2B] font-body text-xs">৳{((Number(item.unitPrice) / 100) * Number(item.quantity)).toFixed(2)}</td>
                             </tr>
