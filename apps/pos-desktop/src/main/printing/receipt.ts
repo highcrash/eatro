@@ -108,11 +108,29 @@ function pickNetwork(slot: { mode: string; host?: string; port?: number }): { mo
 
 /* ── Builders ─────────────────────────────────────────────────────────── */
 
+// Rongta RP335A (and most 80 mm ESC/POS thermal printers) fit 48
+// characters per line in the default Font A (12 × 24 at 12 cpi).
+const LINE_WIDTH = 48;
+
+/** Money values arrive in paisa / minor units. Thermal receipts show
+ *  "Tk 380.00" style, so divide by 100 and format to 2 decimals. */
+function money(currency: string, paisa: number): string {
+  return `${currency}${(paisa / 100).toFixed(2)}`;
+}
+
+/** Left label + right-aligned value across the full line width, with at
+ *  least one space between. Truncates label if needed. */
+function row(label: string, value: string): string {
+  const maxLabel = LINE_WIDTH - value.length - 1;
+  const trimmedLabel = label.length > maxLabel ? label.slice(0, maxLabel) : label;
+  const spaces = LINE_WIDTH - trimmedLabel.length - value.length;
+  return `${trimmedLabel}${' '.repeat(Math.max(1, spaces))}${value}`;
+}
+
 function buildReceiptJob(receipt: ReceiptInput, openCashDrawer: boolean): ThermalJob {
   const job: ThermalJob = { lines: [], openCashDrawer };
-  // ESC/POS printers use PC437 by default, which has no Bengali Taka
-  // glyph — so "৳" either prints as "?" or gets swallowed. Default to
-  // "Tk" which is what handwritten Bengali receipts traditionally use.
+  // ESC/POS printers use PC437 by default; no Bengali Taka glyph there, so
+  // default to "Tk" which renders reliably.
   const currency = receipt.currencySymbol ?? 'Tk';
   const createdAt = new Date(receipt.createdAt);
 
@@ -124,39 +142,36 @@ function buildReceiptJob(receipt: ReceiptInput, openCashDrawer: boolean): Therma
 
   job.lines.push({ kind: 'divider' });
   job.lines.push({ kind: 'align-left' });
-  job.lines.push({ kind: 'text', text: `Order: #${receipt.orderNumber}` });
+  job.lines.push({ kind: 'text', text: `Order #${receipt.orderNumber}` });
   job.lines.push({
     kind: 'text',
     text: receipt.tableNumber ? `Table: ${receipt.tableNumber}` : `Type : ${receipt.type}`,
   });
-  job.lines.push({ kind: 'text', text: `Time : ${createdAt.toLocaleString()}` });
-  if (receipt.cashierName) job.lines.push({ kind: 'text', text: `By   : ${receipt.cashierName}` });
+  job.lines.push({ kind: 'text', text: createdAt.toLocaleString() });
+  if (receipt.cashierName) job.lines.push({ kind: 'text', text: `Cashier: ${receipt.cashierName}` });
 
   job.lines.push({ kind: 'divider' });
   for (const it of receipt.items) {
-    job.lines.push({
-      kind: 'text',
-      text: `${it.quantity}x ${it.menuItemName}`.slice(0, 30),
-    });
-    const priceLine = padRight(`  @ ${currency}${it.unitPrice.toFixed(2)}`, 20) +
-      `${currency}${it.lineTotal.toFixed(2)}`;
-    job.lines.push({ kind: 'text', text: priceLine });
-    if (it.notes) job.lines.push({ kind: 'text', text: `  (${it.notes})` });
+    const lineTotal = money(currency, it.lineTotal);
+    const name = `${it.quantity}x ${it.menuItemName}`;
+    job.lines.push({ kind: 'text', text: row(name, lineTotal) });
+    if (it.quantity > 1) {
+      // Secondary "@ Tk unit" line, indented so it reads as a sub-item.
+      job.lines.push({ kind: 'text', text: `   @ ${money(currency, it.unitPrice)}` });
+    }
+    if (it.notes) job.lines.push({ kind: 'text', text: `   (${it.notes})` });
   }
 
   job.lines.push({ kind: 'divider' });
-  job.lines.push({ kind: 'text', text: padLabel('Subtotal', `${currency}${receipt.subtotal.toFixed(2)}`) });
+  job.lines.push({ kind: 'text', text: row('Subtotal', money(currency, receipt.subtotal)) });
   if (receipt.discountAmount && receipt.discountAmount > 0) {
-    job.lines.push({
-      kind: 'text',
-      text: padLabel(`Discount${receipt.discountName ? ' (' + receipt.discountName + ')' : ''}`,
-        `-${currency}${receipt.discountAmount.toFixed(2)}`),
-    });
+    const label = receipt.discountName ? `Discount (${receipt.discountName})` : 'Discount';
+    job.lines.push({ kind: 'text', text: row(label, `-${money(currency, receipt.discountAmount)}`) });
   }
   if (receipt.taxAmount && receipt.taxAmount > 0) {
-    job.lines.push({ kind: 'text', text: padLabel('Tax', `${currency}${receipt.taxAmount.toFixed(2)}`) });
+    job.lines.push({ kind: 'text', text: row('Tax', money(currency, receipt.taxAmount)) });
   }
-  job.lines.push({ kind: 'text', text: padLabel('TOTAL', `${currency}${receipt.totalAmount.toFixed(2)}`), bold: true });
+  job.lines.push({ kind: 'text', text: row('TOTAL', money(currency, receipt.totalAmount)), bold: true });
   if (receipt.paymentMethod) {
     job.lines.push({ kind: 'text', text: `Paid via: ${receipt.paymentMethod}` });
   }
@@ -168,17 +183,6 @@ function buildReceiptJob(receipt: ReceiptInput, openCashDrawer: boolean): Therma
   job.lines.push({ kind: 'cut' });
 
   return job;
-}
-
-function padLabel(label: string, amount: string): string {
-  const totalWidth = 32;
-  const amountLen = amount.length;
-  const labelLen = label.length;
-  const spaces = Math.max(1, totalWidth - amountLen - labelLen);
-  return `${label}${' '.repeat(spaces)}${amount}`;
-}
-function padRight(s: string, width: number): string {
-  return s.length >= width ? s : s + ' '.repeat(width - s.length);
 }
 
 /** Minimal HTML receipt used only when the bill slot is in os-printer mode. */
