@@ -6,7 +6,7 @@ import {
   updateAccessToken,
 } from '../session/session';
 import { onlineDetector } from './online-detector';
-import { enqueue } from './outbox';
+import { enqueue, OutboxFullError } from './outbox';
 import { getCached, setCached } from './cache-store';
 import { rewritePath, isSynthetic } from './id-remap';
 import {
@@ -207,13 +207,27 @@ function handleOffline(
   // Queue the original request. Subsequent items/payments targeting a
   // synthetic order id ride on that same synthetic id in the path; the drain
   // will rewrite them after the create call returns the real id.
-  enqueue({
-    method,
-    path: input.path,
-    body: input.body,
-    authToken,
-    idempotencyKey,
-  });
+  try {
+    enqueue({
+      method,
+      path: input.path,
+      body: input.body,
+      authToken,
+      idempotencyKey,
+    });
+  } catch (err) {
+    // OutboxFullError is the only recoverable case: surface it to the
+    // renderer with a 503 so the cashier sees a real error instead of a
+    // fake "queued" response that will never actually drain.
+    if (err instanceof OutboxFullError) {
+      return {
+        status: 503,
+        ok: false,
+        body: { message: err.message, code: 'OUTBOX_FULL' },
+      };
+    }
+    throw err;
+  }
 
   if (synth) {
     return { status: 200, ok: true, body: synth, queued: true, idempotencyKey };

@@ -203,6 +203,7 @@ export interface DesktopApi {
     status: () => Promise<SyncStatus>;
     failedList: () => Promise<FailedOutboxRow[]>;
     retry: (id: string) => Promise<{ ok: true }>;
+    retryAllFailed: () => Promise<{ reset: number }>;
     dismiss: (id: string) => Promise<{ ok: true }>;
     drainNow: () => Promise<{ drained: number; failed: number; remaining: number }>;
     forceOffline: () => Promise<{ ok: true }>;
@@ -271,6 +272,7 @@ const api: DesktopApi = {
     status: () => ipcRenderer.invoke('sync:status'),
     failedList: () => ipcRenderer.invoke('sync:failed-list'),
     retry: (id) => ipcRenderer.invoke('sync:retry', id),
+    retryAllFailed: () => ipcRenderer.invoke('sync:retry-all-failed'),
     dismiss: (id) => ipcRenderer.invoke('sync:dismiss', id),
     drainNow: () => ipcRenderer.invoke('sync:drain-now'),
     forceOffline: () => ipcRenderer.invoke('sync:force-offline'),

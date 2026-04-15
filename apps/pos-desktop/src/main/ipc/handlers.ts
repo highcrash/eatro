@@ -17,7 +17,7 @@ import { printA4Report } from '../printing/a4-report';
 import type { KitchenTicketInput } from '@restora/utils';
 import { onlineDetector } from '../sync/online-detector';
 import { apiFetch, type ApiFetchInput } from '../sync/api-proxy';
-import { counts, listFailed, retry, dismiss, clearAll } from '../sync/outbox';
+import { counts, listFailed, retry, retryAllFailed, dismiss, clearAll } from '../sync/outbox';
 import { forceDrain } from '../sync/sync-worker';
 import { BrowserWindow } from 'electron';
 import { refreshUploadProxyServer } from '../upload-proxy';
@@ -233,6 +233,12 @@ export function registerIpcHandlers(): void {
     retry(id);
     void forceDrain();
     return { ok: true };
+  });
+
+  ipcMain.handle('sync:retry-all-failed', () => {
+    const reset = retryAllFailed();
+    void forceDrain();
+    return { reset };
   });
 
   ipcMain.handle('sync:dismiss', (_e, id: string) => {

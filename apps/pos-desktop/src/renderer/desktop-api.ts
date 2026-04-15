@@ -202,6 +202,7 @@ export interface DesktopApi {
     status: () => Promise<SyncStatus>;
     failedList: () => Promise<FailedOutboxRow[]>;
     retry: (id: string) => Promise<{ ok: true }>;
+    retryAllFailed: () => Promise<{ reset: number }>;
     dismiss: (id: string) => Promise<{ ok: true }>;
     drainNow: () => Promise<{ drained: number; failed: number; remaining: number }>;
     forceOffline: () => Promise<{ ok: true }>;

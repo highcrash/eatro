@@ -3,6 +3,8 @@ import { getAccessToken } from '../session/session';
 import { onlineDetector } from './online-detector';
 import {
   listPending,
+  listPendingDue,
+  nextDueAtMs,
   markSuccess,
   markFailed,
   markAttemptLoss,
@@ -11,6 +13,9 @@ import {
 import { isSynthetic, mapSyntheticToReal, rewritePath, pathHasSynthetic } from './id-remap';
 import { getLocalDb } from '../db/local-db';
 import { clearShadowOrders } from './shadow-orders';
+
+const FALLBACK_TICK_MS = 30_000;
+const MIN_TICK_MS = 250;
 
 /**
  * Drains pending outbox rows to the server in order. Runs:
@@ -50,7 +55,10 @@ export async function forceDrain(): Promise<{ drained: number; failed: number; r
     const cfg = await readConfig();
     if (!cfg) return { drained: 0, failed: 0, remaining: 0 };
 
-    const rows = listPending();
+    // Only fire rows whose backoff window has elapsed. A row that's still
+    // sleeping (e.g. transient 5xx 4 seconds ago, next-attempt-in 16s) is
+    // skipped this cycle — the scheduler will wake us up when it's due.
+    const rows = listPendingDue();
     for (const row of rows) {
       if (!onlineDetector.isOnline()) break;
       const outcome = await tryDeliver(cfg.serverUrl, row);
@@ -70,6 +78,7 @@ export async function forceDrain(): Promise<{ drained: number; failed: number; r
   } finally {
     draining = false;
     notify();
+    scheduleNextTick();
   }
 }
 
@@ -160,12 +169,34 @@ function truncate(s: string): string {
   return s.length <= 200 ? s : s.slice(0, 200) + '…';
 }
 
+/**
+ * Single self-rescheduling timer driven by the next due row in the outbox.
+ * Replaces the old "drain whenever the detector flips online" pattern,
+ * which never retried a transient failure until the cashier reopened the
+ * lid or the network bounced again.
+ */
+let tickHandle: NodeJS.Timeout | null = null;
+
+function scheduleNextTick(): void {
+  if (tickHandle) { clearTimeout(tickHandle); tickHandle = null; }
+  const next = nextDueAtMs();
+  if (next == null) {
+    // Nothing pending — re-check after FALLBACK_TICK_MS in case we missed
+    // an online-detector flip or a renderer enqueue raced our notify().
+    tickHandle = setTimeout(() => void forceDrain(), FALLBACK_TICK_MS);
+    return;
+  }
+  const wait = Math.max(MIN_TICK_MS, next - Date.now());
+  tickHandle = setTimeout(() => void forceDrain(), wait);
+}
+
 export function startSyncWorker(): void {
   onlineDetector.on('change', (next, prev) => {
     if (prev !== 'online' && next === 'online') {
       void forceDrain();
     }
   });
+  scheduleNextTick();
 }
 
 // Silence unused-var: isSynthetic re-exported for callers that want cheap check.

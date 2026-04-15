@@ -126,7 +126,26 @@ export function SyncPanel({ onClose }: Props): JSX.Element {
         </section>
 
         <section>
-          <h2 style={styles.sectionTitle}>Failed requests</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={styles.sectionTitle}>Failed requests</h2>
+            {failed && failed.length > 0 && (
+              <button
+                onClick={() =>
+                  void run(
+                    'retry-all',
+                    async () => {
+                      await window.desktop.sync.retryAllFailed();
+                    },
+                    'All failed requests reset to pending',
+                  )
+                }
+                disabled={busyAction !== null}
+                style={styles.btnSecondary}
+              >
+                Retry all ({failed.length})
+              </button>
+            )}
+          </div>
           {failed === null ? (
             <p style={styles.sub}>Loading…</p>
           ) : failed.length === 0 ? (

@@ -31,6 +31,13 @@ export function getLocalDb(): BetterSqlite {
   return _db;
 }
 
+function ensureColumn(db: BetterSqlite, table: string, column: string, ddl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
+}
+
 function migrate(db: BetterSqlite): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS cashier_pins (
@@ -59,9 +66,14 @@ function migrate(db: BetterSqlite): void {
       created_at_ms     INTEGER NOT NULL,
       attempts          INTEGER NOT NULL DEFAULT 0,
       last_error        TEXT,
-      status            TEXT NOT NULL DEFAULT 'pending'    -- pending | failed
+      status            TEXT NOT NULL DEFAULT 'pending',   -- pending | failed
+      -- Earliest absolute time (ms epoch) at which the next drain attempt may
+      -- fire. Set to created_at_ms on enqueue and pushed forward by the
+      -- exponential backoff after each transient failure.
+      next_attempt_at_ms INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS outbox_status_idx ON outbox(status, created_at_ms);
+    CREATE INDEX IF NOT EXISTS outbox_next_attempt_idx ON outbox(status, next_attempt_at_ms);
 
     -- Cached GET responses keyed by "METHOD PATH". Offline reads fall back here
     -- so the POS keeps rendering menu, tables, branding, etc. Written on every
@@ -103,6 +115,12 @@ function migrate(db: BetterSqlite): void {
     CREATE INDEX IF NOT EXISTS shadow_orders_table_idx ON shadow_orders(table_id);
     CREATE INDEX IF NOT EXISTS shadow_orders_status_idx ON shadow_orders(status);
   `);
+
+  // Backfill the next_attempt_at_ms column on existing terminals upgrading
+  // from a release that didn't have it. CREATE TABLE IF NOT EXISTS skips
+  // schema changes on an existing table, so an explicit ALTER is needed.
+  ensureColumn(db, 'outbox', 'next_attempt_at_ms', 'next_attempt_at_ms INTEGER NOT NULL DEFAULT 0');
+  db.exec(`CREATE INDEX IF NOT EXISTS outbox_next_attempt_idx ON outbox(status, next_attempt_at_ms)`);
 }
 
 /** For tests / recovery. */
