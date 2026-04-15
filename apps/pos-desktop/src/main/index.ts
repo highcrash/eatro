@@ -16,6 +16,9 @@ function createWindow(): void {
     height: 800,
     show: false,
     autoHideMenuBar: true,
+    // Cashier terminals run full-screen by default — kiosk-like. F11 toggles
+    // back to a windowed view if the owner needs to reach the taskbar.
+    fullscreen: true,
     // electron-builder packs build/icon.ico into the exe itself for the
     // taskbar/alt-tab icon; this option is mainly for dev-mode window decoration.
     icon: join(__dirname, '../../build/icon.png'),
@@ -28,6 +31,15 @@ function createWindow(): void {
   });
 
   setMainWindowForPrinting(win);
+
+  // F11 toggles fullscreen ↔ windowed. Intercepted at the main process so a
+  // renderer keydown handler can't accidentally swallow it.
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'F11') {
+      win.setFullScreen(!win.isFullScreen());
+      event.preventDefault();
+    }
+  });
 
   win.once('ready-to-show', () => {
     win.show();

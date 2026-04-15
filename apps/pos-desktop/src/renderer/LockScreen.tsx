@@ -97,6 +97,8 @@ function PinPad({
   const [busy, setBusy] = useState(false);
   const [lockedUntilMs, setLockedUntilMs] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const pinRef = React.useRef(pin);
+  pinRef.current = pin;
 
   useEffect(() => {
     if (!lockedUntilMs) return;
@@ -106,8 +108,8 @@ function PinPad({
 
   const isLocked = lockedUntilMs != null && lockedUntilMs > now;
 
-  async function submit(final: string) {
-    if (isLocked || busy) return;
+  const submit = React.useCallback(async (final: string) => {
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -131,7 +133,47 @@ function PinPad({
     } finally {
       setBusy(false);
     }
-  }
+  }, [busy, cashier.id, onSignedIn]);
+
+  // Auto-submit when typing stops. 4 digits is the minimum so we debounce
+  // a bit longer than a rapid typist's inter-key interval; if the cashier
+  // has a 5- or 6-digit PIN the debounce resets with each digit and only
+  // fires after the final one.
+  useEffect(() => {
+    if (isLocked || busy) return;
+    if (pin.length < 4) return;
+    const t = setTimeout(() => {
+      void submit(pinRef.current);
+    }, pin.length >= 6 ? 80 : 450);
+    return () => clearTimeout(t);
+  }, [pin, isLocked, busy, submit]);
+
+  // Hardware keyboard: digits, Backspace, Enter, Escape. Runs at window
+  // scope so no input focus is required — the cashier just starts typing.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (isLocked || busy) return;
+      if (e.key >= '0' && e.key <= '9') {
+        e.preventDefault();
+        setPin((p) => (p.length >= 6 ? p : p + e.key));
+        setError(null);
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        setPin((p) => p.slice(0, -1));
+        setError(null);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (pinRef.current.length >= 4) void submit(pinRef.current);
+        else setError('PIN must be at least 4 digits');
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setPin('');
+        setError(null);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isLocked, busy, submit]);
 
   function tap(d: string) {
     if (isLocked || busy) return;
@@ -146,12 +188,8 @@ function PinPad({
       return;
     }
     if (pin.length >= 6) return;
-    const next = pin + d;
-    setPin(next);
-    if (next.length >= 4) {
-      // auto-submit when the PIN reaches a plausible length; cashier taps the
-      // enter button below if they want a 5- or 6-digit PIN.
-    }
+    setPin((p) => p + d);
+    setError(null);
   }
 
   function onEnter() {
