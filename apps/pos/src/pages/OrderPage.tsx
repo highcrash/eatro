@@ -283,29 +283,47 @@ function AddItemsOverlay({
   };
 
   // ── Keyboard navigation ──────────────────────────────────────────────────
-  // Typing a plain character outside the search box re-routes focus to it
-  // (and the character flows in via the normal key event). Arrows move a
-  // highlight through filteredItems; Enter adds the highlighted item.
   const GRID_COLS = 5;
   const clampIdx = (i: number) => Math.max(0, Math.min(filteredItems.length - 1, i));
 
+  // Reset the highlight whenever the result set changes.
   useEffect(() => {
     setHoverIdx(0);
   }, [addSearch, addCatId, filteredItems.length]);
+
+  // Auto-focus the search box the moment the overlay opens so the cashier
+  // can just start typing.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
 
+      // Escape — if search has text, clear it; else let the outer onClose take over.
       if (e.key === 'Escape') {
-        if (addSearch) { setAddSearch(''); e.preventDefault(); return; }
-        // let the outer onClose handle if the search is already empty
+        if (addSearch) { setAddSearch(''); e.preventDefault(); }
         return;
       }
 
+      // Typing a plain character while focus is on a button / the grid: refocus
+      // the search input AND append the character manually (focus alone wouldn't
+      // deliver the keystroke because the event fires against the old target).
       if (!typing && isPlainCharKey(e)) {
-        // Bounce focus into the search and drop the char there naturally.
+        e.preventDefault();
+        setAddSearch((prev) => prev + e.key);
+        if (addCatId) setAddCatId(null);
+        searchRef.current?.focus();
+        return;
+      }
+
+      // Backspace while focused outside the search still edits the search (UX nicety).
+      if (!typing && e.key === 'Backspace' && addSearch) {
+        e.preventDefault();
+        setAddSearch((prev) => prev.slice(0, -1));
         searchRef.current?.focus();
         return;
       }
@@ -325,7 +343,7 @@ function AddItemsOverlay({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredItems, hoverIdx, addSearch]);
+  }, [filteredItems, hoverIdx, addSearch, addCatId]);
 
   // Scroll the highlighted tile into view as the user arrows around.
   useEffect(() => {
