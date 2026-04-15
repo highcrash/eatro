@@ -73,7 +73,10 @@ function migrate(db: BetterSqlite): void {
       next_attempt_at_ms INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS outbox_status_idx ON outbox(status, created_at_ms);
-    CREATE INDEX IF NOT EXISTS outbox_next_attempt_idx ON outbox(status, next_attempt_at_ms);
+    -- outbox_next_attempt_idx is created below, after ensureColumn guarantees
+    -- the next_attempt_at_ms column exists on terminals upgrading from an
+    -- older schema. If we declared it here the index DDL would reference an
+    -- unknown column and the whole migration batch would fail on upgrade.
 
     -- Cached GET responses keyed by "METHOD PATH". Offline reads fall back here
     -- so the POS keeps rendering menu, tables, branding, etc. Written on every
