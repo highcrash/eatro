@@ -662,7 +662,31 @@ function ActiveOrderView({
     },
   });
 
-  const printNewItemsKT = (ord: Order, newItems: CartItem[]) => {
+  const printNewItemsKT = async (ord: Order, newItems: CartItem[]) => {
+    // Desktop path — hit the kitchen printer slot directly. Previously this
+    // went through window.open + print-shim which mis-routed everything to
+    // the reports printer.
+    const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
+    if (desktopPrint) {
+      try {
+        const res = await desktopPrint({
+          orderNumber: `${ord.orderNumber} (+ADD)`,
+          tableNumber: ord.tableNumber,
+          type: ord.type,
+          createdAt: new Date().toISOString(),
+          items: newItems.map((c) => ({
+            quantity: c.quantity,
+            menuItemName: c.menuItem.name,
+            notes: c.notes ?? null,
+          })),
+        });
+        if (!res?.ok) alert(`Kitchen add-items print failed: ${res?.message ?? 'unknown error'}`);
+      } catch (err) {
+        alert(`Kitchen add-items print failed: ${(err as Error).message}`);
+      }
+      return;
+    }
+    // Browser fallback — popup window + auto-print.
     const items = newItems
       .map((c) => `<tr><td style="padding:4px 0;font-size:16px;font-weight:bold">${c.quantity}\u00d7</td><td style="padding:4px 8px;font-size:16px">${c.menuItem.name}</td></tr>`)
       .join('');
@@ -1649,9 +1673,24 @@ function NewOrderView({
 
   const { data: branchSettings } = useBranchSettings();
 
-  const maybePrintKitchenTicket = (order: Order) => {
+  const maybePrintKitchenTicket = async (order: Order) => {
     // Only auto-print when KDS is disabled — otherwise the KDS screen handles it.
     if (branchSettings && branchSettings.useKds) return;
+    // Desktop path — await the IPC so a printer failure actually surfaces
+    // instead of being swallowed into a fire-and-forget promise.
+    const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
+    if (desktopPrint) {
+      try {
+        const res = await desktopPrint(order);
+        if (!res?.ok) {
+          alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
+        }
+      } catch (err) {
+        alert(`Kitchen print failed: ${(err as Error).message}`);
+      }
+      return;
+    }
+    // Browser fallback — popup window + auto-print.
     const ok = printKitchenTicketUtil(order as any);
     if (!ok) {
       alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
