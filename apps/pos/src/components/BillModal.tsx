@@ -106,7 +106,7 @@ export default function BillModal({ order, onClose }: BillModalProps) {
               </div>
             )}
             <div className="flex justify-between text-[#666]">
-              <span>Tax</span>
+              <span>VAT</span>
               <span>{formatCurrency(tax)}</span>
             </div>
             <div className="flex justify-between font-display text-xl tracking-wide text-[#111] pt-1 border-t border-[#DDD9D3]">

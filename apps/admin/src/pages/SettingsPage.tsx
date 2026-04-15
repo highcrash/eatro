@@ -43,6 +43,9 @@ export default function SettingsPage() {
         currency: branch.currency,
         timezone: branch.timezone,
         taxRate: branch.taxRate,
+        vatEnabled: (branch as unknown as { vatEnabled?: boolean }).vatEnabled ?? true,
+        serviceChargeEnabled: (branch as unknown as { serviceChargeEnabled?: boolean }).serviceChargeEnabled ?? false,
+        serviceChargeRate: Number((branch as unknown as { serviceChargeRate?: number }).serviceChargeRate ?? 0),
         stockPricingMethod: (branch as any).stockPricingMethod ?? 'LAST_PURCHASE',
       });
     }
@@ -166,19 +169,53 @@ export default function SettingsPage() {
                   maxLength={3}
                 />
               </Field>
-              <Field label="Tax Rate (%)">
+              <Field label="VAT Rate (%)">
                 <input
                   type="number"
                   value={form.taxRate ?? 0}
                   onChange={(e) => handleChange('taxRate', parseFloat(e.target.value) || 0)}
-                  disabled={!isOwner}
+                  disabled={!isOwner || form.vatEnabled === false}
                   className="input-base"
                   placeholder="0"
                   min={0}
                   max={100}
                   step={0.01}
                 />
+                <label className="flex items-center gap-2 mt-2 text-[11px] text-[#999]">
+                  <input
+                    type="checkbox"
+                    checked={form.vatEnabled ?? true}
+                    onChange={(e) => handleChange('vatEnabled', e.target.checked as unknown as number)}
+                    disabled={!isOwner}
+                  />
+                  <span>VAT enabled — when off, no tax is added to new orders regardless of the rate above.</span>
+                </label>
               </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Service Charge (%)">
+                <input
+                  type="number"
+                  value={form.serviceChargeRate ?? 0}
+                  onChange={(e) => handleChange('serviceChargeRate', parseFloat(e.target.value) || 0)}
+                  disabled={!isOwner || form.serviceChargeEnabled === false}
+                  className="input-base"
+                  placeholder="0"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                />
+                <label className="flex items-center gap-2 mt-2 text-[11px] text-[#999]">
+                  <input
+                    type="checkbox"
+                    checked={form.serviceChargeEnabled ?? false}
+                    onChange={(e) => handleChange('serviceChargeEnabled', e.target.checked as unknown as number)}
+                    disabled={!isOwner}
+                  />
+                  <span>Service charge enabled — when on, the % above is added to every new order before VAT.</span>
+                </label>
+              </Field>
+              <div />
             </div>
             <Field label="Timezone">
               <input

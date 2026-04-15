@@ -30,7 +30,7 @@ export default function ReceiptModal({ order, cashReceived, onDone }: ReceiptMod
     if (!isDesktop()) return;
     if (autoPrintedRef.current) return;
     autoPrintedRef.current = true;
-    void printReceiptSmart(order, branding ?? undefined).then((res) => {
+    void printReceiptSmart(order, branding ?? undefined, { cashReceived }).then((res) => {
       if (!res.ok) setPrintError(res.message);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -38,7 +38,7 @@ export default function ReceiptModal({ order, cashReceived, onDone }: ReceiptMod
 
   async function handlePrint() {
     setPrintError(null);
-    const res = await printReceiptSmart(order, branding ?? undefined);
+    const res = await printReceiptSmart(order, branding ?? undefined, { cashReceived });
     if (!res.ok) setPrintError(res.message);
   }
 
@@ -110,7 +110,7 @@ export default function ReceiptModal({ order, cashReceived, onDone }: ReceiptMod
               </div>
             )}
             <div className="flex justify-between text-[#666]">
-              <span>Tax</span>
+              <span>VAT</span>
               <span>{formatCurrency(tax)}</span>
             </div>
             <div className="flex justify-between font-display text-xl tracking-wide text-[#111] pt-1">

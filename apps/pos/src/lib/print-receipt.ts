@@ -19,6 +19,9 @@ interface Branding {
   mushakVersion?: string | null;
   wifiPass?: string | null;
   taxRate?: number | string | null;
+  serviceChargeRate?: number | string | null;
+  serviceChargeEnabled?: boolean | null;
+  vatEnabled?: boolean | null;
 }
 
 interface DesktopReceiptInput {
@@ -47,6 +50,8 @@ interface DesktopReceiptInput {
   subtotal: number;
   discountAmount?: number;
   discountName?: string | null;
+  serviceChargeAmount?: number;
+  serviceChargeRatePct?: number;
   taxAmount?: number;
   taxRatePct?: number;
   roundAdjustment?: number;
@@ -75,22 +80,40 @@ export function isDesktop(): boolean {
   return desktopPrint()?.receipt != null;
 }
 
-export function orderToReceiptInput(order: Order, branding: Branding | undefined): DesktopReceiptInput {
+export function orderToReceiptInput(
+  order: Order,
+  branding: Branding | undefined,
+  opts: { cashReceived?: number } = {},
+): DesktopReceiptInput {
   // Split payments from the Order's payments array — this is what lets the
   // thermal receipt show the proper "Payments: -Cash: ... -Card: ..." block.
   const rawPayments = (order.payments ?? []) as Array<{ method: string; amount: number; reference?: string | null }>;
+  const total = Number(order.totalAmount);
+
+  // Cash handling: if the cashier captured a "received" amount (i.e. the
+  // customer handed over more than the bill), swap the cash payment's
+  // stored `amount` for the tendered total — that's what the printed
+  // receipt needs to reflect, with the difference going to the RETURNED
+  // AMOUNT line. Non-cash payments stay at their applied amounts.
+  const cashReceived = opts.cashReceived != null && opts.cashReceived > 0 ? opts.cashReceived : null;
   const payments = rawPayments.length
-    ? rawPayments.map((p) => ({
-        method: p.method,
-        amount: Number(p.amount),
-        reference: p.reference ?? null,
-      }))
+    ? rawPayments.map((p) => {
+        const isCash = String(p.method ?? '').toUpperCase() === 'CASH';
+        const applied = Number(p.amount);
+        return {
+          method: p.method,
+          amount: isCash && cashReceived != null ? Math.max(cashReceived, applied) : applied,
+          reference: p.reference ?? null,
+        };
+      })
     : undefined;
 
   const totalPaid = payments ? payments.reduce((s, p) => s + p.amount, 0) : 0;
-  const change = payments && totalPaid > Number(order.totalAmount) ? totalPaid - Number(order.totalAmount) : 0;
+  const change = payments && totalPaid > total ? totalPaid - total : 0;
 
   const taxRatePct = branding?.taxRate != null ? Number(branding.taxRate) : undefined;
+  const serviceChargeRatePct = branding?.serviceChargeRate != null ? Number(branding.serviceChargeRate) : undefined;
+  const serviceChargeAmount = Number((order as unknown as { serviceChargeAmount?: number }).serviceChargeAmount ?? 0);
   const isPaid = order.status === 'PAID' || (payments?.length ?? 0) > 0;
 
   return {
@@ -120,6 +143,8 @@ export function orderToReceiptInput(order: Order, branding: Branding | undefined
     subtotal: Number(order.subtotal),
     discountAmount: order.discountAmount ? Number(order.discountAmount) : undefined,
     discountName: (order as unknown as { discountName?: string | null }).discountName ?? null,
+    serviceChargeAmount: serviceChargeAmount > 0 ? serviceChargeAmount : undefined,
+    serviceChargeRatePct: serviceChargeRatePct != null && Number.isFinite(serviceChargeRatePct) && serviceChargeRatePct > 0 ? serviceChargeRatePct : undefined,
     taxAmount: order.taxAmount ? Number(order.taxAmount) : undefined,
     taxRatePct: Number.isFinite(taxRatePct) ? taxRatePct : undefined,
     totalAmount: Number(order.totalAmount),
@@ -139,12 +164,12 @@ export function orderToReceiptInput(order: Order, branding: Branding | undefined
 export async function printReceiptSmart(
   order: Order,
   branding: Branding | undefined,
-  opts: { openCashDrawer?: boolean } = {},
+  opts: { openCashDrawer?: boolean; cashReceived?: number } = {},
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const dp = desktopPrint();
   if (dp?.receipt) {
     return dp.receipt({
-      receipt: orderToReceiptInput(order, branding),
+      receipt: orderToReceiptInput(order, branding, { cashReceived: opts.cashReceived }),
       openCashDrawer: opts.openCashDrawer ?? order.paymentMethod === 'CASH',
     });
   }

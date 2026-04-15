@@ -35,6 +35,8 @@ export interface ReceiptInput {
   subtotal: number;
   discountAmount?: number;
   discountName?: string | null;
+  serviceChargeAmount?: number;          // paisa — rendered on its own line above VAT when > 0
+  serviceChargeRatePct?: number;         // e.g. 10 for 10% (prints in the label: "Service Charge-10.00%:")
   taxAmount?: number;
   taxRatePct?: number;                   // e.g. 5 for 5%
   roundAdjustment?: number;              // +/- rounding applied to the total (paisa)
@@ -269,8 +271,15 @@ function buildReceiptJob(receipt: ReceiptInput, openCashDrawer: boolean): Therma
   job.lines.push({ kind: 'text', text: doubleDivider() });
   job.lines.push({ kind: 'text', text: row('Net Total:', money(currency, netTotal)) });
 
+  if (receipt.serviceChargeAmount && receipt.serviceChargeAmount > 0) {
+    const scLabel = receipt.serviceChargeRatePct != null
+      ? `Service Charge-${receipt.serviceChargeRatePct.toFixed(2)}%:`
+      : 'Service Charge:';
+    job.lines.push({ kind: 'text', text: row(scLabel, money(currency, receipt.serviceChargeAmount)) });
+  }
+
   if (receipt.taxAmount && receipt.taxAmount > 0) {
-    const taxLabel = receipt.taxRatePct != null ? `Vat-${receipt.taxRatePct.toFixed(2)}%:` : 'Tax:';
+    const taxLabel = receipt.taxRatePct != null ? `Vat-${receipt.taxRatePct.toFixed(2)}%:` : 'VAT:';
     job.lines.push({ kind: 'text', text: row(taxLabel, money(currency, receipt.taxAmount)) });
   }
   if (receipt.roundAdjustment && Math.abs(receipt.roundAdjustment) > 0) {

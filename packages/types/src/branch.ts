@@ -13,6 +13,9 @@ export interface Branch extends AuditFields {
   currency: string;
   timezone: string;
   taxRate: number;
+  vatEnabled: boolean;
+  serviceChargeEnabled: boolean;
+  serviceChargeRate: number;
   stockPricingMethod: StockPricingMethod;
   // Branding
   logoUrl: string | null;
@@ -40,6 +43,9 @@ export interface CreateBranchDto {
 
 export interface UpdateBranchDto extends Partial<CreateBranchDto> {
   isActive?: boolean;
+  vatEnabled?: boolean;
+  serviceChargeEnabled?: boolean;
+  serviceChargeRate?: number;
   stockPricingMethod?: StockPricingMethod;
   logoUrl?: string | null;
   posLogoUrl?: string | null;
@@ -105,6 +111,10 @@ export interface Branding {
   bin: string | null;
   mushakVersion: string | null;
   wifiPass: string | null;
+  taxRate: number | null;
+  vatEnabled: boolean;
+  serviceChargeEnabled: boolean;
+  serviceChargeRate: number;
   facebookUrl: string | null;
   instagramUrl: string | null;
   posTheme: string;

@@ -1214,7 +1214,7 @@ function ActiveOrderView({
           </div>
         )}
         <div className="flex justify-between text-sm font-theme-body text-theme-text-muted">
-          <span>Tax</span><span>{formatCurrency(tax)}</span>
+          <span>VAT</span><span>{formatCurrency(tax)}</span>
         </div>
         <div className="flex justify-between font-theme-display text-2xl tracking-wide pt-1">
           <span>TOTAL</span>
