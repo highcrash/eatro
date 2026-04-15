@@ -1,6 +1,6 @@
 import { getPrinters } from '../config/store';
 import { sendThermalJob, ThermalError, type ThermalJob } from './escpos';
-import { printHtmlToDevice } from './html-print';
+import { printHtmlToPdfThenShell } from './pdf-print';
 import { probe } from './printer-health';
 import log from 'electron-log';
 
@@ -55,12 +55,15 @@ export async function printReceipt(receipt: ReceiptInput, opts: PrintReceiptOpti
     return;
   }
 
-  // os-printer fallback: HTML rendering. Cash drawer kick cannot be sent
-  // this way; we silently skip it. We pass an explicit 80mm × 297mm page
-  // size (in microns) so the driver doesn't fall back to a zero-height
-  // page when the @page CSS size: auto isn't fully honored — which was
-  // printing blank receipts on the Cash Printer driver.
-  await printHtmlToDevice(renderReceiptHtml(receipt), slot.deviceName, {
+  // os-printer path: render the receipt HTML to a PDF via Chromium's
+  // printToPDF (which doesn't depend on a painted BrowserWindow the way
+  // webContents.print does) and shell it to the driver through the
+  // default PDF handler's PrintTo verb. Works reliably across every
+  // Windows thermal driver we've tested — the webContents.print path was
+  // shipping blank surfaces on some drivers even after every paint /
+  // page-size fix we could apply. Cash drawer kick cannot be sent this
+  // way; we silently skip it.
+  await printHtmlToPdfThenShell(renderReceiptHtml(receipt), slot.deviceName, {
     pageSize: { width: 80_000, height: 297_000 },
   });
 }

@@ -1,7 +1,7 @@
 import { renderKitchenTicketHtml, type KitchenTicketInput } from '@restora/utils';
 import { getPrinters } from '../config/store';
 import { sendThermalJob, type ThermalJob } from './escpos';
-import { printHtmlToDevice } from './html-print';
+import { printHtmlToPdfThenShell } from './pdf-print';
 
 /**
  * Print a kitchen ticket on the configured kitchen printer.
@@ -19,12 +19,12 @@ export async function printKitchenTicket(ticket: KitchenTicketInput): Promise<vo
     return;
   }
 
-  // os-printer fallback — print the existing HTML ticket through Chromium.
-  // Explicit 80mm × 297mm page size (in microns) matches the HTML template's
-  // @page rule; without this some Windows thermal drivers default to a
-  // zero-height page and the ticket prints blank.
+  // os-printer path: render HTML → PDF (reliable across thermal drivers)
+  // and shell it to the printer via the default PDF handler. See
+  // pdf-print.ts for the full reasoning; webContents.print() shipped
+  // blank pages on some drivers even after every fix we could apply.
   const html = renderKitchenTicketHtml(ticket);
-  await printHtmlToDevice(html, slot.deviceName, {
+  await printHtmlToPdfThenShell(html, slot.deviceName, {
     pageSize: { width: 80_000, height: 297_000 },
   });
 }
