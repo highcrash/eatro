@@ -4,6 +4,10 @@ import { printHtmlToPdfThenShell } from './pdf-print';
 import { probe } from './printer-health';
 import log from 'electron-log';
 
+// Keep the PDF fallback around for slots the user explicitly prefers that
+// path on, even though it's been replaced as the default.
+void printHtmlToPdfThenShell;
+
 export interface ReceiptInput {
   brandName: string;
   branchName: string;
@@ -50,22 +54,12 @@ export async function printReceipt(receipt: ReceiptInput, opts: PrintReceiptOpti
 
   const wantsDrawerKick = Boolean(opts.openCashDrawer && printers.openCashDrawerOnCashPayment);
 
-  if (slot.mode === 'network') {
-    await sendThermalJob(slot, buildReceiptJob(receipt, wantsDrawerKick));
-    return;
-  }
-
-  // os-printer path: render the receipt HTML to a PDF via Chromium's
-  // printToPDF (which doesn't depend on a painted BrowserWindow the way
-  // webContents.print does) and shell it to the driver through the
-  // default PDF handler's PrintTo verb. Works reliably across every
-  // Windows thermal driver we've tested — the webContents.print path was
-  // shipping blank surfaces on some drivers even after every paint /
-  // page-size fix we could apply. Cash drawer kick cannot be sent this
-  // way; we silently skip it.
-  await printHtmlToPdfThenShell(renderReceiptHtml(receipt), slot.deviceName, {
-    pageSize: { width: 80_000, height: 297_000 },
-  });
+  // Both network and os-printer modes go through sendThermalJob now —
+  // os-printer is handled by compiling ESC/POS bytes in memory and
+  // shipping them RAW through the Windows spooler (see escpos.ts).
+  // Cash drawer kick works in both modes because it's an ESC/POS
+  // command, not a driver feature.
+  await sendThermalJob(slot, buildReceiptJob(receipt, wantsDrawerKick));
 }
 
 /**

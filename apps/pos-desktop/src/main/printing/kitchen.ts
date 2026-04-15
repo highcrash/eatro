@@ -1,7 +1,6 @@
-import { renderKitchenTicketHtml, type KitchenTicketInput } from '@restora/utils';
+import type { KitchenTicketInput } from '@restora/utils';
 import { getPrinters } from '../config/store';
 import { sendThermalJob, type ThermalJob } from './escpos';
-import { printHtmlToPdfThenShell } from './pdf-print';
 
 /**
  * Print a kitchen ticket on the configured kitchen printer.
@@ -14,19 +13,11 @@ export async function printKitchenTicket(ticket: KitchenTicketInput): Promise<vo
     throw new Error('Kitchen printer is not configured. Set it in Printer Settings.');
   }
 
-  if (slot.mode === 'network') {
-    await sendThermalJob(slot, buildKitchenJob(ticket));
-    return;
-  }
-
-  // os-printer path: render HTML → PDF (reliable across thermal drivers)
-  // and shell it to the printer via the default PDF handler. See
-  // pdf-print.ts for the full reasoning; webContents.print() shipped
-  // blank pages on some drivers even after every fix we could apply.
-  const html = renderKitchenTicketHtml(ticket);
-  await printHtmlToPdfThenShell(html, slot.deviceName, {
-    pageSize: { width: 80_000, height: 297_000 },
-  });
+  // Both network and os-printer modes go through sendThermalJob — for
+  // os-printer we build ESC/POS bytes in memory and ship them RAW
+  // through the Windows spooler (see escpos.ts), which any ESC/POS
+  // capable thermal printer accepts natively.
+  await sendThermalJob(slot, buildKitchenJob(ticket));
 }
 
 function buildKitchenJob(ticket: KitchenTicketInput): ThermalJob {

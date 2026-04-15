@@ -1,6 +1,7 @@
 import { ThermalPrinter, PrinterTypes, CharacterSet } from 'node-thermal-printer';
 import type { PrinterSlot } from '../config/store';
 import { probe, recordOutcome } from './printer-health';
+import { sendRawToWindowsPrinter } from './windows-raw-print';
 
 export interface ThermalJobLine {
   kind: 'align-center' | 'align-left' | 'bold-on' | 'bold-off' | 'double-on' | 'double-off' | 'divider' | 'newline' | 'cut';
@@ -53,20 +54,41 @@ function classifyError(err: unknown, slot: PrinterSlot): ThermalError {
 }
 
 /**
- * Send an ESC/POS job to a networked thermal printer (TCP, port 9100).
- * One automatic retry on transient failure (timeout / dropped connection).
- * The final error is a typed ThermalError so callers can render a
- * cashier-friendly message. Updates the printer-health cache on every
- * outcome so the Diagnostics panel reflects reality within seconds.
+ * Send an ESC/POS job to a thermal printer. Two transports:
+ *
+ *   - network TCP (port 9100): one retry on timeout / dropped connection,
+ *     health-probe guard so an unreachable printer fails instantly
+ *     instead of waiting 4 s for the library timeout.
+ *   - os-printer: build the ESC/POS byte buffer with node-thermal-printer,
+ *     then spool it RAW through the Windows print spooler via the
+ *     WritePrinter Win32 API. Bypasses every GDI / PDF rasterizer — the
+ *     printer receives bytes it natively understands. This is the only
+ *     reliable path for USB thermal printers like the Rongta RP335A
+ *     where Windows GDI drivers produce blank pages from rasterized
+ *     bitmaps.
  */
 export async function sendThermalJob(slot: PrinterSlot, job: ThermalJob): Promise<void> {
-  if (slot.mode !== 'network') {
-    throw new ThermalError('config', 'sendThermalJob can only be called for network-mode slots', slot);
+  if (slot.mode === 'disabled') {
+    throw new ThermalError('config', 'Printer slot is disabled', slot);
   }
 
-  // Skip the attempt entirely if we already know the printer is down — the
-  // cashier gets an instant error instead of waiting 4s for the library's
-  // internal connect timeout. Force a fresh probe on first-run (cache empty).
+  if (slot.mode === 'os-printer') {
+    // Build the ESC/POS byte buffer in-memory (not executed), then
+    // hand it to the Windows spooler in RAW mode via PowerShell.
+    const startedAt = Date.now();
+    try {
+      const bytes = await buildEscposBytes(job);
+      await sendRawToWindowsPrinter(slot.deviceName, bytes);
+      recordOutcome(slot, { ok: true, latencyMs: Date.now() - startedAt });
+      return;
+    } catch (err) {
+      const typed = classifyError(err, slot);
+      recordOutcome(slot, { ok: false, error: `${typed.kind}: ${typed.message}` });
+      throw typed;
+    }
+  }
+
+  // network mode
   const health = await probe(slot);
   if (health.status === 'unreachable') {
     recordOutcome(slot, { ok: false, error: health.lastError ?? 'unreachable' });
@@ -83,9 +105,6 @@ export async function sendThermalJob(slot: PrinterSlot, job: ThermalJob): Promis
     } catch (err) {
       lastErr = err;
       const typed = classifyError(err, slot);
-      // Only retry timeouts / dropped connections. Protocol errors (the
-      // printer rejected the command, bad font, etc.) won't succeed on
-      // a second try and would double-print if they partially executed.
       if (typed.kind !== 'timeout' && typed.kind !== 'unreachable') break;
       if (attempt === 2) break;
     }
@@ -94,6 +113,48 @@ export async function sendThermalJob(slot: PrinterSlot, job: ThermalJob): Promis
   const typed = classifyError(lastErr, slot);
   recordOutcome(slot, { ok: false, error: `${typed.kind}: ${typed.message}` });
   throw typed;
+}
+
+/**
+ * Compile a ThermalJob into raw ESC/POS bytes. We instantiate a
+ * ThermalPrinter against a dummy interface — the library's command
+ * methods buffer bytes into an internal buffer without hitting the
+ * wire, so getBuffer() returns the full command stream we can then
+ * ship ourselves via whatever transport we choose.
+ */
+async function buildEscposBytes(job: ThermalJob): Promise<Buffer> {
+  const printer = new ThermalPrinter({
+    type: PrinterTypes.EPSON,
+    // Dummy interface — we never call execute(), we call getBuffer().
+    interface: 'tcp://127.0.0.1:1',
+    characterSet: CharacterSet.PC437_USA,
+    removeSpecialCharacters: false,
+  });
+
+  for (const line of job.lines) {
+    switch (line.kind) {
+      case 'align-center': printer.alignCenter(); break;
+      case 'align-left': printer.alignLeft(); break;
+      case 'bold-on': printer.bold(true); break;
+      case 'bold-off': printer.bold(false); break;
+      case 'double-on': printer.setTextDoubleHeight(); printer.setTextDoubleWidth(); break;
+      case 'double-off': printer.setTextNormal(); break;
+      case 'divider': printer.drawLine(); break;
+      case 'newline': printer.newLine(); break;
+      case 'cut': printer.cut(); break;
+      case 'text':
+        if (line.bold) printer.bold(true);
+        if (line.size === 'large') { printer.setTextDoubleHeight(); printer.setTextDoubleWidth(); }
+        printer.println(line.text);
+        if (line.size === 'large') printer.setTextNormal();
+        if (line.bold) printer.bold(false);
+        break;
+    }
+  }
+  if (job.openCashDrawer) printer.openCashDrawer();
+
+  const buf = printer.getBuffer();
+  return Buffer.isBuffer(buf) ? buf : Buffer.from(buf as unknown as Uint8Array);
 }
 
 async function runJob(slot: Extract<PrinterSlot, { mode: 'network' }>, job: ThermalJob): Promise<void> {
