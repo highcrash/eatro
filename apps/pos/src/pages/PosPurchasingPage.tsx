@@ -1199,7 +1199,9 @@ function PurchaseOrdersTab() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {filtered.map((po) => {
-            const total = po.items.reduce((s, it) => s + Number(it.quantityOrdered) * Number(it.unitCost), 0);
+            // unitCost is stored in paisa (smallest unit); totals stay in paisa
+            // and feed straight into formatCurrency().
+            const totalPaisa = po.items.reduce((s, it) => s + Number(it.quantityOrdered) * Number(it.unitCost), 0);
             return (
               <button
                 key={po.id}
@@ -1221,7 +1223,7 @@ function PurchaseOrdersTab() {
                 </p>
                 <div className="flex items-center justify-between pt-1 border-t border-theme-border mt-1">
                   <span className="text-[10px] text-theme-text-muted">Total</span>
-                  <span className="font-bold text-theme-text text-sm">{formatCurrency(Math.round(total * 100))}</span>
+                  <span className="font-bold text-theme-text text-sm">{formatCurrency(Math.round(totalPaisa))}</span>
                 </div>
               </button>
             );
@@ -1302,6 +1304,7 @@ function PoDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                       <span className="text-right font-semibold">
                         {formatCurrency(Math.round(ordered * Number(it.unitCost)))}
                       </span>
+                      {/* Both unitCost and the product are in paisa — formatCurrency divides by 100 internally. */}
                     </div>
                   );
                 })}
@@ -1319,7 +1322,7 @@ function PoDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                   <span>Total Ordered</span>
                   <span>
                     {formatCurrency(
-                      Math.round(po.items.reduce((s, it) => s + Number(it.quantityOrdered) * Number(it.unitCost), 0) * 100),
+                      Math.round(po.items.reduce((s, it) => s + Number(it.quantityOrdered) * Number(it.unitCost), 0)),
                     )}
                   </span>
                 </div>
@@ -1328,7 +1331,7 @@ function PoDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                     <span>Received</span>
                     <span>
                       {formatCurrency(
-                        Math.round(po.items.reduce((s, it) => s + Number(it.quantityReceived) * Number(it.unitCost), 0) * 100),
+                        Math.round(po.items.reduce((s, it) => s + Number(it.quantityReceived) * Number(it.unitCost), 0)),
                       )}
                     </span>
                   </div>
