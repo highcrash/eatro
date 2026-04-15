@@ -333,7 +333,7 @@ export class OrderService {
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { discountAmount, discountId, discountName: discount.name, couponId: null, couponCode: null, totalAmount, taxAmount },
+      data: { discountAmount, discountId, discountName: discount.name, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount },
       include: { items: true, payments: true },
     });
 
@@ -403,7 +403,7 @@ export class OrderService {
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { discountAmount, couponId: coupon.id, couponCode: coupon.code, discountName: coupon.name, discountId: null, totalAmount, taxAmount },
+      data: { discountAmount, couponId: coupon.id, couponCode: coupon.code, discountName: coupon.name, discountId: null, totalAmount, taxAmount, serviceChargeAmount },
       include: { items: true, payments: true },
     });
 
