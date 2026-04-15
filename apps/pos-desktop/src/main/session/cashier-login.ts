@@ -1,6 +1,7 @@
 import { readConfig } from '../config/store';
 import { setSession, type AuthenticatedUser } from './session';
 import { replaceCashiers, type CashierEntry } from './cashier-cache';
+import { prefetchStartupData } from '../sync/prefetch';
 
 /**
  * Fetch + cache the current cashier list from the server. Best-effort:
@@ -53,6 +54,9 @@ export async function pinLoginWithServer(staffId: string): Promise<Authenticated
   if (!res.ok) throw new Error(await extractErrorMessage(res, 'PIN login failed'));
   const data = (await res.json()) as LoginResponse;
   setSession({ user: data.user, accessToken: data.accessToken, refreshToken: data.refreshToken });
+  // Warm the offline cache in the background so the POS has data to render
+  // if the network drops right after sign-in. Don't block login on this.
+  void prefetchStartupData();
   return data.user;
 }
 
@@ -74,6 +78,7 @@ export async function passwordLoginOnDevice(
   if (!res.ok) throw new Error(await extractErrorMessage(res, 'Login failed'));
   const data = (await res.json()) as LoginResponse;
   setSession({ user: data.user, accessToken: data.accessToken, refreshToken: data.refreshToken });
+  void prefetchStartupData();
   return data.user;
 }
 

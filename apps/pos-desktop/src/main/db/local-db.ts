@@ -62,6 +62,26 @@ function migrate(db: BetterSqlite): void {
       status            TEXT NOT NULL DEFAULT 'pending'    -- pending | failed
     );
     CREATE INDEX IF NOT EXISTS outbox_status_idx ON outbox(status, created_at_ms);
+
+    -- Cached GET responses keyed by "METHOD PATH". Offline reads fall back here
+    -- so the POS keeps rendering menu, tables, branding, etc. Written on every
+    -- successful online GET; read when offline or on network failure.
+    CREATE TABLE IF NOT EXISTS response_cache (
+      path_key      TEXT PRIMARY KEY,
+      status        INTEGER NOT NULL,
+      body          TEXT NOT NULL,
+      updated_at_ms INTEGER NOT NULL
+    );
+
+    -- Maps synthetic IDs generated while offline (for orders + their items/payments)
+    -- to the real IDs the server assigned on drain. Drain rewrites subsequent
+    -- requests targeting synthetic IDs before replaying them.
+    CREATE TABLE IF NOT EXISTS id_remap (
+      synthetic_id  TEXT PRIMARY KEY,
+      real_id       TEXT,
+      kind          TEXT NOT NULL,                  -- 'order' | 'item' | 'payment'
+      created_at_ms INTEGER NOT NULL
+    );
   `);
 }
 

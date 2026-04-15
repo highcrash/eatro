@@ -7,59 +7,63 @@ import {
 } from '../session/session';
 import { onlineDetector } from './online-detector';
 import { enqueue } from './outbox';
+import { getCached, setCached } from './cache-store';
+import { rewritePath, isSynthetic } from './id-remap';
+import {
+  buildCreateOrderResponse,
+  buildAddItemsResponse,
+  buildPaymentResponse,
+  buildApplyDiscountResponse,
+} from './synthetic';
 
 /**
  * Central HTTP proxy that every renderer API call flows through. Handles:
  *   - attaching session tokens and Idempotency-Key headers
- *   - queueing mutations when offline (synthetic 202 response)
- *   - serving GETs from an in-memory cache when offline so the POS can
- *     keep rendering instead of throwing into a white screen
+ *   - serving GETs from a SQLite cache when offline (cache survives restart)
+ *   - synthesizing plausible responses for offline mutations so the POS
+ *     keeps flowing as if the network succeeded (orders, items, payments,
+ *     apply-discount — voids go through the basic queue path)
  *   - transparent 401 refresh
  */
-
-// In-memory response cache for GETs. Key = "GET <path>". Survives until
-// process exit; that's fine — a desktop terminal stays open all day, and a
-// fresh restart re-fetches everything once online again.
-const responseCache = new Map<string, { status: number; body: unknown; ts: number }>();
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-function cacheKey(method: string, path: string): string { return `${method} ${path}`; }
-
-function getCached(method: string, path: string) {
-  const entry = responseCache.get(cacheKey(method, path));
-  if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL_MS) {
-    responseCache.delete(cacheKey(method, path));
-    return null;
-  }
-  return entry;
-}
-
-function setCached(method: string, path: string, status: number, body: unknown): void {
-  if (status < 200 || status >= 300) return;
-  responseCache.set(cacheKey(method, path), { status, body, ts: Date.now() });
-}
 
 export interface ApiFetchInput {
   method: string;
   path: string;                 // relative, e.g. "/orders"
   body?: unknown;
   headers?: Record<string, string>;
-  idempotencyKey?: string;      // caller may pre-compute one so they can
-                                // correlate with local records
+  idempotencyKey?: string;
 }
 
 export interface ApiFetchResult {
   status: number;
   ok: boolean;
   body: unknown;
-  queued?: boolean;             // true when offline → outbox
+  queued?: boolean;
   idempotencyKey?: string;
 }
 
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function cuid32(): string { return randomBytes(16).toString('hex'); }
+
+/**
+ * Does this path target an offline-synthesizable mutation? We only synthesize
+ * what the cashier's hot path needs; voids and approvals fall through to the
+ * plain queue and will replay when online.
+ */
+function offlineSynthesizable(method: string, path: string): 'create-order' | 'add-items' | 'pay' | 'apply-discount' | null {
+  if (method !== 'POST') return null;
+  if (path === '/orders') return 'create-order';
+  if (/^\/orders\/[^/]+\/items$/.test(path)) return 'add-items';
+  if (/^\/orders\/[^/]+\/payment$/.test(path)) return 'pay';
+  if (/^\/orders\/[^/]+\/apply-discount$/.test(path)) return 'apply-discount';
+  return null;
+}
+
+function extractOrderId(path: string): string | null {
+  const m = /^\/orders\/([^/]+)/.exec(path);
+  return m ? m[1] : null;
+}
 
 export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
   const cfg = await readConfig();
@@ -72,7 +76,12 @@ export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
   const idempotencyKey = input.idempotencyKey ?? (isMutation ? cuid32() : undefined);
   const authToken = getAccessToken();
 
-  const url = `${cfg.serverUrl}/api/v1${input.path}`;
+  // Rewrite synthetic IDs to real ones if the drain has already learned the
+  // mapping — this covers the edge case where the user goes back online and
+  // immediately edits an offline order before drain completes.
+  const effectivePath = isMutation ? rewritePath(input.path) : input.path;
+
+  const url = `${cfg.serverUrl}/api/v1${effectivePath}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(input.headers ?? {}),
@@ -81,37 +90,9 @@ export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
   };
 
   if (!onlineDetector.isOnline()) {
-    if (!isMutation) {
-      // Serve from the offline cache when we have it; that keeps
-      // menu / tables / branding / staff queries rendering instead of
-      // throwing the POS into a white screen on connection drop.
-      const cached = getCached(method, input.path);
-      if (cached) {
-        return { status: cached.status, ok: true, body: cached.body };
-      }
-      // No cached snapshot — return an empty payload that React Query treats
-      // as a successful empty list/object. Better than throwing for the
-      // common "first load while offline" case.
-      return { status: 200, ok: true, body: emptyShapeFor(input.path) };
-    }
-    enqueue({
-      method,
-      path: input.path,
-      body: input.body,
-      authToken,
-      idempotencyKey,
-    });
-    return {
-      status: 202,
-      ok: true,
-      body: { queued: true, idempotencyKey },
-      queued: true,
-      idempotencyKey,
-    };
+    return handleOffline(input, method, isMutation, authToken, idempotencyKey, cfg.branch.id);
   }
 
-  // Online path — forward the real request. On transient failure, if it's
-  // a mutation we queue it for sync instead of surfacing the error.
   try {
     let res = await fetch(url, {
       method,
@@ -119,10 +100,7 @@ export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
       body: input.body == null ? undefined : JSON.stringify(input.body),
     });
 
-    // Transparent 401 refresh: if the access token expired and we still have
-    // a refresh token, swap tokens ourselves and retry once. This keeps the
-    // POS renderer from ever seeing a 401 — so its fake 'desktop-managed'
-    // refresh path never kicks in and the cashier isn't randomly logged out.
+    // Transparent 401 refresh so the POS never sees an expired-token bounce.
     const isAuthPath = input.path.startsWith('/auth/');
     if (res.status === 401 && !isAuthPath) {
       const refreshed = await tryRefreshSession(cfg.serverUrl);
@@ -137,34 +115,69 @@ export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
 
     const text = await res.text();
     const parsed = text ? safeParse(text) : null;
-    if (!isMutation) setCached(method, input.path, res.status, parsed);
+    if (!isMutation && res.ok) setCached(method, input.path, res.status, parsed);
     return { status: res.status, ok: res.ok, body: parsed, idempotencyKey };
   } catch (err) {
-    // Network blew up mid-request. For mutations, outbox and report queued.
-    if (isMutation) {
-      enqueue({
-        method,
-        path: input.path,
-        body: input.body,
-        authToken,
-        idempotencyKey,
-      });
-      return {
-        status: 202,
-        ok: true,
-        body: { queued: true, idempotencyKey, reason: (err as Error).message },
-        queued: true,
-        idempotencyKey,
-      };
-    }
-    // Network blew up on a GET — fall back to cache or an empty payload
-    // so render code doesn't crash on undefined.
+    // Network blew up mid-request. Fall through to the offline path so the
+    // cashier gets the same UX whether the detector already flipped or not.
+    console.warn('[api-proxy] fetch failed, serving offline path:', (err as Error).message);
+    return handleOffline(input, method, isMutation, authToken, idempotencyKey, cfg.branch.id);
+  }
+}
+
+function handleOffline(
+  input: ApiFetchInput,
+  method: string,
+  isMutation: boolean,
+  authToken: string | null,
+  idempotencyKey: string | undefined,
+  branchId: string,
+): ApiFetchResult {
+  if (!isMutation) {
     const cached = getCached(method, input.path);
-    if (cached) {
-      return { status: cached.status, ok: true, body: cached.body };
-    }
+    if (cached) return { status: cached.status, ok: true, body: cached.body };
     return { status: 200, ok: true, body: emptyShapeFor(input.path) };
   }
+
+  // Mutations: try to synthesize a believable response for the ones the POS
+  // actually needs offline. For everything else queue and hand the POS a
+  // minimal 202 — same as before (notes-edit, void, etc. replay on reconnect).
+  const kind = offlineSynthesizable(method, input.path);
+  let synth: unknown = null;
+  if (kind === 'create-order') {
+    synth = buildCreateOrderResponse(input.body as Parameters<typeof buildCreateOrderResponse>[0], branchId);
+  } else if (kind === 'add-items') {
+    const orderId = extractOrderId(input.path)!;
+    synth = buildAddItemsResponse(orderId, (input.body as Parameters<typeof buildAddItemsResponse>[1]) ?? []);
+  } else if (kind === 'pay') {
+    const orderId = extractOrderId(input.path)!;
+    synth = buildPaymentResponse(orderId, input.body as Parameters<typeof buildPaymentResponse>[1]);
+  } else if (kind === 'apply-discount') {
+    const orderId = extractOrderId(input.path)!;
+    synth = buildApplyDiscountResponse(orderId, input.body as Parameters<typeof buildApplyDiscountResponse>[1]);
+  }
+
+  // Queue the original request. Subsequent items/payments targeting a
+  // synthetic order id ride on that same synthetic id in the path; the drain
+  // will rewrite them after the create call returns the real id.
+  enqueue({
+    method,
+    path: input.path,
+    body: input.body,
+    authToken,
+    idempotencyKey,
+  });
+
+  if (synth) {
+    return { status: 200, ok: true, body: synth, queued: true, idempotencyKey };
+  }
+  return {
+    status: 202,
+    ok: true,
+    body: { queued: true, idempotencyKey },
+    queued: true,
+    idempotencyKey,
+  };
 }
 
 function safeParse(text: string): unknown {
@@ -172,24 +185,22 @@ function safeParse(text: string): unknown {
 }
 
 /**
- * Best-guess empty payload for offline first-load. The POS treats arrays
- * and objects very differently when rendering; returning the wrong shape
- * is what crashes pages. These heuristics handle the common endpoints.
+ * Best-guess empty payload for offline first-load when we have no cache at
+ * all. Single-record endpoints need `{}`, lists need `[]`; returning the
+ * wrong shape crashes the POS.
  */
 function emptyShapeFor(path: string): unknown {
-  // Branding / website content / single-record endpoints expect an object.
   if (
     path === '/branding' ||
     path === '/branch-settings' ||
     path === '/auth/me' ||
-    /^\/menu\/(item|category)\//.test(path)
+    path.startsWith('/work-periods/current') ||
+    /^\/menu\/(item|category)\//.test(path) ||
+    /^\/orders\/[^/?]+$/.test(path)
   ) return {};
-  // Everything else assumed to be a list.
   return [];
 }
 
-// Cache a single in-flight refresh promise so a burst of 401s doesn't trigger
-// N parallel refresh calls.
 let refreshing: Promise<string | null> | null = null;
 
 async function tryRefreshSession(serverUrl: string): Promise<string | null> {
@@ -212,10 +223,12 @@ async function tryRefreshSession(serverUrl: string): Promise<string | null> {
     } catch {
       return null;
     } finally {
-      // Clear the cache so the next future refresh starts fresh.
       setTimeout(() => { refreshing = null; }, 0);
     }
   })();
 
   return refreshing;
 }
+
+// Silence unused-var warnings when isSynthetic is re-exported for future use.
+void isSynthetic;
