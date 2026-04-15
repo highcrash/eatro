@@ -52,7 +52,7 @@ function StationDialog({
       <div className="bg-[#161616] w-[400px] p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-display text-xl tracking-wide">
-            {initial ? 'EDIT' : 'ADD'} COOKING STATION
+            {initial ? 'EDIT' : 'ADD'} KITCHEN SECTION
           </h3>
           <button onClick={onClose} className="text-[#999] hover:text-white">
             <X size={16} />
@@ -179,7 +179,8 @@ export default function CookingStationsPage() {
           <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">
             Settings
           </p>
-          <h1 className="font-display text-4xl text-white tracking-wide">COOKING STATIONS</h1>
+          <h1 className="font-display text-4xl text-white tracking-wide">KITCHEN SECTIONS</h1>
+          <p className="text-[#666] font-body text-xs mt-2">Define where each menu item is prepared and which printer gets its KOT. Items with no section fall back to the terminal's default kitchen printer.</p>
         </div>
         <button
           onClick={() => setDialog({ open: true })}

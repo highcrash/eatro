@@ -323,12 +323,19 @@ function ItemDialog({
               </select>
             </div>
             <div className="flex-1">
-              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Type</label>
-              <select value={form.type} onChange={(e) => set('type', e.target.value)}
+              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Kitchen Section</label>
+              <select value={form.cookingStationId} onChange={(e) => set('cookingStationId', e.target.value)}
                 className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white">
-                <option value="FOOD">Food</option>
-                <option value="BEVERAGE">Beverage</option>
+                <option value="">None (default kitchen)</option>
+                {cookingStations.filter((s) => s.isActive).map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
               </select>
+              {cookingStations.filter((s) => s.isActive).length === 0 && (
+                <p className="text-[10px] text-[#666] mt-1">
+                  No sections yet. Add them in <a href="/cooking-stations" className="text-[#D62B2B] hover:underline">Kitchen Sections</a>.
+                </p>
+              )}
             </div>
           </div>
 
@@ -344,18 +351,6 @@ function ItemDialog({
               className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
           </div>
 
-          {cookingStations.length > 0 && (
-            <div>
-              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Cooking Station</label>
-              <select value={form.cookingStationId} onChange={(e) => set('cookingStationId', e.target.value)}
-                className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white">
-                <option value="">None</option>
-                {cookingStations.filter((s) => s.isActive).map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Image Upload */}
           <div>

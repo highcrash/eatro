@@ -90,7 +90,7 @@ const NAV_GROUPS = [
   {
     label: null,
     items: [
-      { to: '/cooking-stations', icon: Printer, label: 'Printers' },
+      { to: '/cooking-stations', icon: Printer, label: 'Kitchen Sections' },
       { to: '/branches', icon: Building2, label: 'Branches' },
       { to: '/cashier-permissions', icon: ShieldCheck, label: 'Cashier Perms' },
       { to: '/website', icon: Globe, label: 'Website' },
