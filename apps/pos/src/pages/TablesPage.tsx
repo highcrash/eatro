@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { User, Tag, Eye, X, Check } from 'lucide-react';
+import { User, Tag, Eye, X, Check, Settings2 } from 'lucide-react';
 
 import type { DiningTable, Order, TableStatus } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
@@ -603,6 +603,22 @@ export default function TablesPage() {
                     {badgeType === 'qr' ? 'QR ORDER' : badgeType === 'items' ? 'NEW ITEMS' : '💰 BILL'}
                   </div>
                 )}
+                {/* Floating options button — easier touch target than the
+                    old inline cog glyph. 40×40 px tap area, pinned to the
+                    top-LEFT so the right-side QR/NEW-ITEMS/BILL badges don't
+                    collide with it. */}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Options for table ${table.tableNumber}`}
+                  onClick={(e) => { e.stopPropagation(); setContextTable(table); setShowTableMenu(true); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setContextTable(table); setShowTableMenu(true); } }}
+                  title="Table options"
+                  className="absolute top-2 left-2 z-10 w-10 h-10 flex items-center justify-center rounded-theme bg-theme-bg/80 backdrop-blur text-theme-text-muted hover:bg-theme-accent hover:text-white active:scale-95 transition-all border border-theme-border shadow-sm cursor-pointer"
+                >
+                  <Settings2 size={18} />
+                </span>
+
                 {/* Body */}
                 <div className="p-5 flex flex-col items-center gap-2">
                   <div className="text-theme-accent">
@@ -614,16 +630,6 @@ export default function TablesPage() {
                   <div className="text-[10px] font-theme-body text-theme-text-muted uppercase tracking-widest">
                     {table.capacity} seats
                   </div>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => { e.stopPropagation(); setContextTable(table); setShowTableMenu(true); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setContextTable(table); setShowTableMenu(true); } }}
-                    className="text-theme-text-muted hover:text-theme-accent text-xs font-theme-body transition-colors mt-1"
-                    title="Table options"
-                  >
-                    &#9881;
-                  </span>
                 </div>
                 {/* Status bar */}
                 <div className={`h-2 w-full ${STATUS_BAR[table.status] ?? 'bg-theme-border'}`} />
