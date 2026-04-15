@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Truck, Package, Undo2, Wallet } from 'lucide-react';
+import { Plus, X, Truck, Package, Undo2, Wallet, ClipboardList } from 'lucide-react';
 
 import type { CashierAction, ApprovalMode, PurchaseOrder } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
@@ -31,7 +31,7 @@ interface Ingredient {
   supplier?: { name: string } | null;
 }
 
-type Tab = 'create-po' | 'receive' | 'returns' | 'pay';
+type Tab = 'create-po' | 'receive' | 'returns' | 'pay' | 'history';
 
 interface POLine { ingredientId: string; quantity: string; unit: string; unitCost: string }
 
@@ -82,6 +82,7 @@ const TAB_LABELS: Record<Tab, { label: string; Icon: typeof Truck }> = {
   'receive':   { label: 'Receive Goods',  Icon: Package },
   'returns':   { label: 'Returns',        Icon: Undo2 },
   'pay':       { label: 'Pay Supplier',   Icon: Wallet },
+  'history':   { label: 'History',        Icon: ClipboardList },
 };
 
 export default function PosPurchasingPage() {
@@ -95,6 +96,9 @@ export default function PosPurchasingPage() {
     if (perms.receivePurchaseOrder.enabled && perms.receivePurchaseOrder.approval !== 'NONE') out.push('receive');
     if (perms.returnPurchaseOrder.enabled  && perms.returnPurchaseOrder.approval !== 'NONE')  out.push('returns');
     if (perms.paySupplier.enabled          && perms.paySupplier.approval !== 'NONE')          out.push('pay');
+    // History tab visible whenever ANY purchasing action is enabled — reading
+    // POs is a pure view and doesn't need its own permission gate.
+    if (out.length > 0) out.push('history');
     return out;
   }, [perms]);
 
@@ -209,6 +213,7 @@ export default function PosPurchasingPage() {
             qc={qc}
           />
         )}
+        {activeTab === 'history' && <PurchaseOrdersTab />}
       </div>
 
       {pendingAction && (
@@ -1101,6 +1106,244 @@ function PayTab({ suppliers, guardAndRun, qc }: {
       >
         {mut.isPending ? 'Paying…' : 'Record Payment'}
       </button>
+    </div>
+  );
+}
+
+// ─── Tab: PO History ─────────────────────────────────────────────────────────
+// Read-only list of every purchase order this branch has created. Cashiers
+// use this to look up past orders, verify received / pending status, and see
+// what the supplier charged.
+
+interface PoListItem {
+  id: string;
+  status: 'DRAFT' | 'SENT' | 'PARTIAL' | 'RECEIVED' | 'CANCELLED';
+  createdAt: string;
+  receivedAt: string | null;
+  notes: string | null;
+  supplier: { id: string; name: string } | null;
+  createdBy?: { id: string; name: string } | null;
+  items: PoListItemLine[];
+}
+interface PoListItemLine {
+  id: string;
+  ingredientId: string;
+  quantityOrdered: number | string;
+  quantityReceived: number | string;
+  unitCost: number | string;
+  unit?: string | null;
+  ingredient?: { id: string; name: string; unit: string; purchaseUnit?: string | null } | null;
+}
+
+const PO_STATUS_TONE: Record<PoListItem['status'], string> = {
+  DRAFT:     'bg-theme-border text-theme-text-muted',
+  SENT:      'bg-theme-info/20 text-theme-info',
+  PARTIAL:   'bg-theme-warn/20 text-theme-warn',
+  RECEIVED:  'bg-theme-pop/20 text-theme-pop',
+  CANCELLED: 'bg-theme-danger/20 text-theme-danger',
+};
+
+const PO_STATUSES = ['ALL', 'DRAFT', 'SENT', 'PARTIAL', 'RECEIVED', 'CANCELLED'] as const;
+
+function PurchaseOrdersTab() {
+  const [statusFilter, setStatusFilter] = useState<(typeof PO_STATUSES)[number]>('ALL');
+  const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const { data: pos = [], isLoading } = useQuery<PoListItem[]>({
+    queryKey: ['purchasing', 'history', statusFilter],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (statusFilter !== 'ALL') params.set('status', statusFilter);
+      const qs = params.toString();
+      return api.get(`/cashier-ops/purchase-orders${qs ? '?' + qs : ''}`);
+    },
+  });
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return pos;
+    const q = search.toLowerCase().trim();
+    return pos.filter((po) =>
+      po.id.toLowerCase().includes(q) ||
+      (po.supplier?.name ?? '').toLowerCase().includes(q) ||
+      po.items.some((it) => (it.ingredient?.name ?? '').toLowerCase().includes(q)),
+    );
+  }, [pos, search]);
+
+  return (
+    <div className="bg-theme-surface rounded-theme border border-theme-border p-6 w-full max-w-5xl">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <p className="text-xs font-bold uppercase tracking-wider text-theme-text-muted">Purchase Orders</p>
+        <div className="flex gap-2 flex-wrap">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="bg-theme-bg rounded-theme px-3 py-2 text-xs font-semibold text-theme-text outline-none border border-transparent focus:border-theme-accent"
+          >
+            {PO_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Supplier, item, PO #…"
+            className="bg-theme-bg rounded-theme px-3 py-2 text-xs text-theme-text outline-none border border-transparent focus:border-theme-accent min-w-[200px]"
+          />
+        </div>
+      </div>
+
+      {isLoading ? (
+        <p className="text-theme-text-muted text-sm py-10 text-center">Loading…</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-theme-text-muted text-sm py-10 text-center">No purchase orders yet.</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {filtered.map((po) => {
+            const total = po.items.reduce((s, it) => s + Number(it.quantityOrdered) * Number(it.unitCost), 0);
+            return (
+              <button
+                key={po.id}
+                onClick={() => setSelectedId(po.id)}
+                className="text-left bg-theme-bg rounded-theme border border-theme-border hover:border-theme-accent transition-colors p-4 flex flex-col gap-2"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] font-bold tracking-widest uppercase text-theme-text-muted">PO</p>
+                    <p className="font-display text-xl text-theme-text">#{po.id.slice(-6).toUpperCase()}</p>
+                  </div>
+                  <span className={`text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 ${PO_STATUS_TONE[po.status]}`}>
+                    {po.status}
+                  </span>
+                </div>
+                <p className="text-xs text-theme-text">{po.supplier?.name ?? '—'}</p>
+                <p className="text-[11px] text-theme-text-muted">
+                  {new Date(po.createdAt).toLocaleDateString()} · {po.items.length} item{po.items.length !== 1 ? 's' : ''}
+                </p>
+                <div className="flex items-center justify-between pt-1 border-t border-theme-border mt-1">
+                  <span className="text-[10px] text-theme-text-muted">Total</span>
+                  <span className="font-bold text-theme-text text-sm">{formatCurrency(Math.round(total * 100))}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {selectedId && <PoDetailModal id={selectedId} onClose={() => setSelectedId(null)} />}
+    </div>
+  );
+}
+
+function PoDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
+  const { data: po, isLoading } = useQuery<PoListItem>({
+    queryKey: ['purchasing', 'po', id],
+    queryFn: () => api.get(`/cashier-ops/purchase-orders/${id}`),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="bg-theme-surface rounded-theme border border-theme-border w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="px-6 py-4 border-b border-theme-border flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-theme-accent">Purchase Order</p>
+            <h2 className="font-display text-2xl tracking-wide text-theme-text">
+              #{id.slice(-6).toUpperCase()}
+            </h2>
+          </div>
+          <button onClick={onClose} className="text-theme-text-muted hover:text-theme-text">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-auto px-6 py-4 space-y-4 text-sm">
+          {isLoading || !po ? (
+            <p className="text-theme-text-muted text-sm py-6 text-center">Loading…</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-theme-text-muted items-center">
+                <span>{new Date(po.createdAt).toLocaleString()}</span>
+                <span>•</span>
+                <span className="text-theme-text">{po.supplier?.name ?? '—'}</span>
+                {po.createdBy && (<><span>•</span><span>By {po.createdBy.name}</span></>)}
+                <span className={`ml-auto text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 ${PO_STATUS_TONE[po.status]}`}>
+                  {po.status}
+                </span>
+              </div>
+
+              <div>
+                <div className="grid grid-cols-[auto_1fr_90px_90px_110px_110px] gap-3 text-[10px] font-bold uppercase tracking-wider text-theme-text-muted pb-2 border-b border-theme-border">
+                  <span>#</span>
+                  <span>Item</span>
+                  <span className="text-right">Ordered</span>
+                  <span className="text-right">Received</span>
+                  <span className="text-right">Unit ৳</span>
+                  <span className="text-right">Line</span>
+                </div>
+                {po.items.map((it, idx) => {
+                  const ordered = Number(it.quantityOrdered);
+                  const received = Number(it.quantityReceived);
+                  const unit = it.unit || it.ingredient?.purchaseUnit || it.ingredient?.unit || '';
+                  const rcvShort = ordered > received;
+                  return (
+                    <div key={it.id} className="grid grid-cols-[auto_1fr_90px_90px_110px_110px] gap-3 py-2 border-b border-theme-border text-theme-text items-center">
+                      <span className="text-theme-text-muted">{idx + 1}</span>
+                      <div>
+                        <p>{it.ingredient?.name ?? '—'}</p>
+                        {unit && <p className="text-[11px] text-theme-text-muted">{unit}</p>}
+                      </div>
+                      <span className="text-right">{ordered.toFixed(3)}</span>
+                      <span className={`text-right ${rcvShort ? 'text-theme-warn' : 'text-theme-pop'}`}>
+                        {received.toFixed(3)}
+                      </span>
+                      <span className="text-right">{formatCurrency(Number(it.unitCost))}</span>
+                      <span className="text-right font-semibold">
+                        {formatCurrency(Math.round(ordered * Number(it.unitCost)))}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {po.notes && (
+                <div className="bg-theme-bg rounded-theme p-3 border border-theme-border">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-1">Notes</p>
+                  <p className="text-sm text-theme-text whitespace-pre-wrap">{po.notes}</p>
+                </div>
+              )}
+
+              <div className="border-t border-theme-border pt-3 space-y-1 text-theme-text-muted">
+                <div className="flex justify-between text-theme-text font-bold text-lg">
+                  <span>Total Ordered</span>
+                  <span>
+                    {formatCurrency(
+                      Math.round(po.items.reduce((s, it) => s + Number(it.quantityOrdered) * Number(it.unitCost), 0) * 100),
+                    )}
+                  </span>
+                </div>
+                {(po.status === 'PARTIAL' || po.status === 'RECEIVED') && (
+                  <div className="flex justify-between">
+                    <span>Received</span>
+                    <span>
+                      {formatCurrency(
+                        Math.round(po.items.reduce((s, it) => s + Number(it.quantityReceived) * Number(it.unitCost), 0) * 100),
+                      )}
+                    </span>
+                  </div>
+                )}
+                {po.receivedAt && (
+                  <div className="flex justify-between">
+                    <span>Closed at</span>
+                    <span className="text-theme-text">{new Date(po.receivedAt).toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

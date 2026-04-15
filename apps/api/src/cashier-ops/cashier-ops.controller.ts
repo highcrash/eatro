@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards, BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards, BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import type { JwtPayload, CreatePurchaseOrderDto, ReceiveGoodsDto, CreateReturnDto, CreateExpenseDto } from '@restora/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -42,6 +42,22 @@ export class CashierOpsController {
   async listOpenPOs(@CurrentUser() user: JwtPayload) {
     const all = await this.purchasing.findAll(user.branchId);
     return all.filter((po) => po.status === 'SENT' || po.status === 'PARTIAL' || po.status === 'DRAFT');
+  }
+
+  /**
+   * List every PO on the cashier's branch. Used by the Purchase History tab
+   * so cashiers can look up what they created, received, paid, etc. Optional
+   * `status` filter matches the admin findAll signature.
+   */
+  @Get('purchase-orders')
+  async listAllPOs(@CurrentUser() user: JwtPayload, @Query('status') status?: string) {
+    return this.purchasing.findAll(user.branchId, status);
+  }
+
+  /** Fetch a single PO for the details modal. */
+  @Get('purchase-orders/:id')
+  async getPO(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.purchasing.findOne(id, user.branchId);
   }
 
   /**

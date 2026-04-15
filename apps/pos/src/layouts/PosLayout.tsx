@@ -10,7 +10,6 @@ import {
   Wallet,
   Flame,
   Calendar,
-  ClipboardList,
 } from 'lucide-react';
 
 import { useAuthStore } from '../store/auth.store';
@@ -27,7 +26,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/tables',        label: 'Home',      Icon: Home },
   { to: '/order',         label: 'Cashier',   Icon: ShoppingCart },
-  { to: '/orders',        label: 'Orders',    Icon: ClipboardList },
   { to: '/customers',     label: 'Customers', Icon: Users },
   { to: '/kitchen',       label: 'Kitchen',   Icon: Flame },
   { to: '/reports/sales', label: 'Reports',   Icon: BarChart3 },
