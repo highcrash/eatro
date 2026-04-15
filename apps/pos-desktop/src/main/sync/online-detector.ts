@@ -16,9 +16,21 @@ class OnlineDetector extends EventEmitter {
   private fastIntervalMs = 3_000;
   private consecutiveFails = 0;
   private probing = false;
+  private lastProbeAtMs: number | null = null;
+  private lastProbeLatencyMs: number | null = null;
+  private lastError: string | null = null;
 
   isOnline(): boolean { return this.status === 'online'; }
   currentStatus(): Status { return this.status; }
+
+  telemetry(): { lastProbeAtMs: number | null; lastProbeLatencyMs: number | null; lastError: string | null; consecutiveFails: number } {
+    return {
+      lastProbeAtMs: this.lastProbeAtMs,
+      lastProbeLatencyMs: this.lastProbeLatencyMs,
+      lastError: this.lastError,
+      consecutiveFails: this.consecutiveFails,
+    };
+  }
 
   start(): void {
     if (this.timer) return;
@@ -45,6 +57,7 @@ class OnlineDetector extends EventEmitter {
   private async probe(): Promise<void> {
     if (this.probing) return;
     this.probing = true;
+    const startedAt = Date.now();
     try {
       const cfg = await readConfig();
       if (!cfg) return; // not paired yet — treat as unknown
@@ -55,14 +68,19 @@ class OnlineDetector extends EventEmitter {
           signal: controller.signal,
           method: 'GET',
         });
+        this.lastProbeAtMs = Date.now();
+        this.lastProbeLatencyMs = this.lastProbeAtMs - startedAt;
         if (res.ok) {
           this.consecutiveFails = 0;
+          this.lastError = null;
           this.setStatus('online');
         } else {
-          this.onFail();
+          this.onFail(`HTTP ${res.status}`);
         }
-      } catch {
-        this.onFail();
+      } catch (err) {
+        this.lastProbeAtMs = Date.now();
+        this.lastProbeLatencyMs = this.lastProbeAtMs - startedAt;
+        this.onFail((err as Error).message || 'fetch failed');
       } finally {
         clearTimeout(t);
       }
@@ -71,8 +89,9 @@ class OnlineDetector extends EventEmitter {
     }
   }
 
-  private onFail(): void {
+  private onFail(message?: string): void {
     this.consecutiveFails++;
+    if (message) this.lastError = message;
     // Single failure doesn't flip status immediately; require two in a row.
     if (this.consecutiveFails >= 2) this.setStatus('offline');
     // Tighten polling while offline so reconnect is detected quickly.

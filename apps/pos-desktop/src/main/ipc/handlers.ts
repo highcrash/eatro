@@ -22,6 +22,7 @@ import { forceDrain } from '../sync/sync-worker';
 import { BrowserWindow } from 'electron';
 import { refreshUploadProxyServer } from '../upload-proxy';
 import { getLastUpdateStatus, triggerCheck, installAndRestart } from '../updater';
+import { captureDiagnosticsSnapshot } from '../diagnostics';
 
 export function registerIpcHandlers(): void {
   // Config ----------------------------------------------------------------
@@ -255,6 +256,10 @@ export function registerIpcHandlers(): void {
     version: app.getVersion(),
     isPackaged: app.isPackaged,
   }));
+
+  // Diagnostics -----------------------------------------------------------
+
+  ipcMain.handle('diagnostics:snapshot', () => captureDiagnosticsSnapshot());
 
   ipcMain.handle('update:status', () => getLastUpdateStatus());
   ipcMain.handle('update:check', async () => triggerCheck());

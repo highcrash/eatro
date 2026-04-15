@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LogOut, KeyRound, Printer, Activity, Unlink, RefreshCw, User } from 'lucide-react';
+import { LogOut, KeyRound, Printer, Activity, Unlink, RefreshCw, User, Stethoscope } from 'lucide-react';
 
 /**
  * Shape of the desktop bridge that the Electron wrapper publishes on
@@ -16,6 +16,7 @@ export interface DesktopBridge {
   openChangePin: () => void;
   openPrinterSettings: () => void;
   openSyncPanel: () => void;
+  openDiagnostics?: () => void;
   requestUnpair: () => void;
 }
 
@@ -115,6 +116,9 @@ export function DesktopSidebarMenu({ bridge, userName }: { bridge: DesktopBridge
               <SectionLabel>Owner controls</SectionLabel>
               <MenuItem icon={Activity} label="Sync status" onClick={() => { setOpen(false); bridge.openSyncPanel(); }} />
               <MenuItem icon={Printer} label="Printer settings" onClick={() => { setOpen(false); bridge.openPrinterSettings(); }} />
+              {bridge.openDiagnostics && (
+                <MenuItem icon={Stethoscope} label="Diagnostics" onClick={() => { setOpen(false); bridge.openDiagnostics!(); }} />
+              )}
               <MenuItem icon={RefreshCw} label="Check for updates" onClick={() => {
                 setOpen(false);
                 const w = window as unknown as { desktop?: { update?: { check: () => Promise<unknown> } } };

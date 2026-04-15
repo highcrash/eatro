@@ -26,6 +26,7 @@ interface Props {
   onOpenChangePin: () => void;
   onOpenPrinterSettings: () => void;
   onOpenSyncPanel: () => void;
+  onOpenDiagnostics: () => void;
   onRequestUnpair: () => void;
 }
 
@@ -76,6 +77,7 @@ export function PosEmbed(props: Props): JSX.Element {
       openChangePin: () => refs.current.onOpenChangePin(),
       openPrinterSettings: () => refs.current.onOpenPrinterSettings(),
       openSyncPanel: () => refs.current.onOpenSyncPanel(),
+      openDiagnostics: () => refs.current.onOpenDiagnostics(),
       requestUnpair: () => refs.current.onRequestUnpair(),
     };
     (window as unknown as { __desktop?: typeof bridge }).__desktop = bridge;

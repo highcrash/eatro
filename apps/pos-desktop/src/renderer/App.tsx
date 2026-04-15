@@ -4,13 +4,14 @@ import { LockScreen } from './LockScreen';
 import { PrinterSettings } from './PrinterSettings';
 import { SyncBanner } from './SyncBanner';
 import { SyncPanel } from './SyncPanel';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { PosEmbed } from './PosEmbed';
 import { UpdateToast } from './UpdateToast';
 import { ChangePinDialog } from './ChangePinDialog';
 import { OwnerPasswordDialog } from './OwnerPasswordDialog';
 import type { PairedConfig, SessionUser } from './desktop-api';
 
-type View = 'loading' | 'pairing' | 'locked' | 'signed-in' | 'printer-settings' | 'sync-panel';
+type View = 'loading' | 'pairing' | 'locked' | 'signed-in' | 'printer-settings' | 'sync-panel' | 'diagnostics';
 
 export function App(): JSX.Element {
   const [view, setView] = useState<View>('loading');
@@ -115,6 +116,17 @@ export function App(): JSX.Element {
     );
   }
 
+  if (view === 'diagnostics') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        <SyncBanner />
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <DiagnosticsPanel onClose={() => setView('signed-in')} />
+        </div>
+      </div>
+    );
+  }
+
   if (view === 'signed-in' && user && config) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -127,6 +139,7 @@ export function App(): JSX.Element {
             onOpenChangePin={() => setChangePinOpen(true)}
             onOpenPrinterSettings={() => setView('printer-settings')}
             onOpenSyncPanel={() => setView('sync-panel')}
+            onOpenDiagnostics={() => setView('diagnostics')}
             onRequestUnpair={() => setUnpairPromptOpen(true)}
           />
         </div>

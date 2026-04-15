@@ -1,6 +1,22 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { execSync } from 'child_process';
+
+// Inject the git commit SHA at build time so the Diagnostics panel can
+// show it. Falls back to the CI-provided value or 'dev' when no git is
+// available (e.g. building from a tarball).
+function gitSha(): string {
+  if (process.env.GIT_SHA) return process.env.GIT_SHA;
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim() || 'dev';
+  } catch {
+    return 'dev';
+  }
+}
+const GIT_SHA = gitSha();
 
 // electron-vite wires three independent bundles (main, preload, renderer).
 // `externalizeDepsPlugin()` keeps native + node-only modules (better-sqlite3,
@@ -19,6 +35,9 @@ const WORKSPACE_DEPS = ['@restora/types', '@restora/utils'];
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: WORKSPACE_DEPS })],
+    define: {
+      'process.env.GIT_SHA': JSON.stringify(GIT_SHA),
+    },
     build: {
       outDir: 'dist/main',
       rollupOptions: {

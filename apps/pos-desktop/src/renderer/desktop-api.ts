@@ -100,6 +100,18 @@ export interface AppVersionInfo {
   version: string;
   isPackaged: boolean;
 }
+
+export interface DiagnosticsSnapshot {
+  capturedAt: string;
+  app: { version: string; isPackaged: boolean; electron: string; node: string; platform: string; commitSha: string | null };
+  session: { user: { id: string; name: string; email: string; role: string; branchId: string; branchName: string } | null };
+  pairing: { paired: boolean; serverUrl: string | null; deviceId: string | null; deviceName: string | null; branchId: string | null; branchName: string | null; pairedAt: string | null };
+  online: { status: 'unknown' | 'online' | 'offline'; isOnline: boolean; lastProbeAtMs: number | null; lastProbeLatencyMs: number | null; lastError: string | null; consecutiveFails: number };
+  outbox: { pending: number; failed: number; oldestPendingAtMs: number | null; failedSamples: Array<{ id: string; method: string; path: string; attempts: number; lastError: string | null; createdAtMs: number }> };
+  localDb: { pathHint: string; tables: Array<{ name: string; rows: number }> };
+  printers: { kitchen: string; bill: string; reports: string; openCashDrawerOnCashPayment: boolean };
+  update: UpdateStatus;
+}
 export interface PairedConfig {
   serverUrl: string;
   deviceId: string;
@@ -205,6 +217,9 @@ export interface DesktopApi {
     check: () => Promise<UpdateStatus>;
     install: () => Promise<{ ok: true }>;
     onStatusChanged: (cb: (status: UpdateStatus) => void) => () => void;
+  };
+  diagnostics: {
+    snapshot: () => Promise<DiagnosticsSnapshot>;
   };
 }
 
