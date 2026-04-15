@@ -8,7 +8,7 @@ import {
   markAttemptLoss,
   type OutboxRow,
 } from './outbox';
-import { isSynthetic, mapSyntheticToReal, rewritePath } from './id-remap';
+import { isSynthetic, mapSyntheticToReal, rewritePath, pathHasSynthetic } from './id-remap';
 import { getLocalDb } from '../db/local-db';
 import { clearShadowOrders } from './shadow-orders';
 
@@ -82,7 +82,7 @@ async function tryDeliver(serverUrl: string, row: OutboxRow): Promise<'success' 
   // create-order row must be drained first. It'll be earlier in the FIFO
   // because mutations are appended in cashier order, so this usually doesn't
   // trigger — but if we ever get here, skip this cycle and retry next tick.
-  if (/\boff_[A-Za-z0-9]+\b/.test(path)) {
+  if (pathHasSynthetic(path)) {
     markAttemptLoss(row.id, 'waiting for parent order id');
     return 'transient';
   }

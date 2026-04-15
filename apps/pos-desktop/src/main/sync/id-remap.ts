@@ -42,15 +42,26 @@ export function isSynthetic(id: string): boolean {
   return id.startsWith('off_');
 }
 
+// Matches the exact synthetic ID format minted by `syntheticId()` in
+// synthetic.ts: "off_" + kind ("order" | "item" | "pay") + "_" + 20 hex
+// chars. Using `\b` here would fail because `_` is a word char, so we
+// anchor explicitly on the prefix + known hex length.
+export const SYNTHETIC_ID_REGEX = /off_(?:order|item|pay)_[a-f0-9]{20}/g;
+
 /**
  * Rewrite a path segment that might contain a synthetic order / item id with
  * the real id once the drain learns it. Returns the original path if no
  * substitution applies yet.
  */
 export function rewritePath(path: string): string {
-  // Capture every "/off_XXX" segment and try to swap.
-  return path.replace(/\b(off_[A-Za-z0-9]+)\b/g, (match) => {
+  return path.replace(SYNTHETIC_ID_REGEX, (match) => {
     const real = resolveRealId(match);
     return real ?? match;
   });
+}
+
+/** True if any synthetic id is still present in the path after rewrite. */
+export function pathHasSynthetic(path: string): boolean {
+  SYNTHETIC_ID_REGEX.lastIndex = 0;
+  return SYNTHETIC_ID_REGEX.test(path);
 }
