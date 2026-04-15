@@ -20,10 +20,11 @@ export async function printKitchenTicket(ticket: KitchenTicketInput): Promise<vo
   }
 
   // os-printer fallback — print the existing HTML ticket through Chromium.
+  // No custom pageSize: most Windows thermal drivers silently reject
+  // arbitrary micron dimensions; the HTML template carries an @page CSS
+  // rule so the driver's default paper is used with the correct layout.
   const html = renderKitchenTicketHtml(ticket);
-  await printHtmlToDevice(html, slot.deviceName, {
-    pageSize: { width: 80_000, height: 200_000 }, // 80mm wide, tall enough to fit
-  });
+  await printHtmlToDevice(html, slot.deviceName);
 }
 
 function buildKitchenJob(ticket: KitchenTicketInput): ThermalJob {

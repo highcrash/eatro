@@ -56,10 +56,13 @@ export async function printReceipt(receipt: ReceiptInput, opts: PrintReceiptOpti
   }
 
   // os-printer fallback: HTML rendering. Cash drawer kick cannot be sent
-  // this way; we silently skip it.
-  await printHtmlToDevice(renderReceiptHtml(receipt), slot.deviceName, {
-    pageSize: { width: 80_000, height: 250_000 },
-  });
+  // this way; we silently skip it. We deliberately DON'T pass a custom
+  // pageSize here — most Windows thermal drivers reject arbitrary micron
+  // dimensions from webContents.print() and silently drop the job. Instead
+  // we let the driver use its configured default paper (typically already
+  // 80 mm roll) and constrain the rendered width via @page CSS inside
+  // renderReceiptHtml.
+  await printHtmlToDevice(renderReceiptHtml(receipt), slot.deviceName);
 }
 
 /**
@@ -190,14 +193,16 @@ function renderReceiptHtml(r: ReceiptInput): string {
   `).join('');
 
   return `<html><head><style>
-    body { font-family: monospace; width: 80mm; margin: 0; padding: 6px; font-size: 12px; }
-    h1 { font-size: 16px; margin: 0; text-align: center; }
-    table { width: 100%; border-collapse: collapse; margin-top: 6px; }
-    td { padding: 2px 0; vertical-align: top; }
+    @page { size: 80mm auto; margin: 2mm; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: monospace; width: 76mm; padding: 0; font-size: 11px; line-height: 1.3; }
+    h1 { font-size: 15px; margin: 0; text-align: center; }
+    table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    td { padding: 1px 0; vertical-align: top; }
     .center { text-align: center; }
     .right  { text-align: right; }
-    .divider { border-top: 1px dashed #000; margin: 6px 0; }
-    .total { font-weight: bold; font-size: 14px; }
+    .divider { border-top: 1px dashed #000; margin: 4px 0; }
+    .total { font-weight: bold; font-size: 13px; }
   </style></head><body>
     <h1>${esc(r.brandName)}</h1>
     <p class="center">${esc(r.branchName)}</p>
