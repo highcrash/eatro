@@ -222,6 +222,11 @@ export interface DesktopApi {
   diagnostics: {
     snapshot: () => Promise<DiagnosticsSnapshot>;
   };
+  deviceStatus: {
+    isRevoked: () => Promise<boolean>;
+    clearRevoked: () => Promise<{ ok: true }>;
+    onRevoked: (cb: () => void) => () => void;
+  };
 }
 
 const api: DesktopApi = {
@@ -292,6 +297,15 @@ const api: DesktopApi = {
   },
   diagnostics: {
     snapshot: () => ipcRenderer.invoke('diagnostics:snapshot'),
+  },
+  deviceStatus: {
+    isRevoked: () => ipcRenderer.invoke('device:is-revoked'),
+    clearRevoked: () => ipcRenderer.invoke('device:clear-revoked'),
+    onRevoked: (cb) => {
+      const listener = () => cb();
+      ipcRenderer.on('device:revoked', listener);
+      return () => ipcRenderer.off('device:revoked', listener);
+    },
   },
 };
 

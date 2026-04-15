@@ -5,6 +5,7 @@ import { PrinterSettings } from './PrinterSettings';
 import { SyncBanner } from './SyncBanner';
 import { SyncPanel } from './SyncPanel';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
+import { RevokedScreen } from './RevokedScreen';
 import { PosEmbed } from './PosEmbed';
 import { UpdateToast } from './UpdateToast';
 import { ChangePinDialog } from './ChangePinDialog';
@@ -20,14 +21,17 @@ export function App(): JSX.Element {
   const [appVersion, setAppVersion] = useState<string>('0.0.0');
   const [changePinOpen, setChangePinOpen] = useState(false);
   const [unpairPromptOpen, setUnpairPromptOpen] = useState(false);
+  const [revoked, setRevoked] = useState(false);
 
   useEffect(() => {
     void (async () => {
-      const [cfg, ver] = await Promise.all([
+      const [cfg, ver, alreadyRevoked] = await Promise.all([
         window.desktop.config.get(),
         window.desktop.app.version(),
+        window.desktop.deviceStatus.isRevoked(),
       ]);
       setAppVersion(ver.version);
+      if (alreadyRevoked) setRevoked(true);
       if (!cfg) {
         setView('pairing');
         return;
@@ -35,6 +39,12 @@ export function App(): JSX.Element {
       setConfig(cfg);
       setView('locked');
     })();
+  }, []);
+
+  // Listen for the server telling us this terminal has been revoked — drops
+  // the cashier straight into the hard lock, regardless of current view.
+  useEffect(() => {
+    return window.desktop.deviceStatus.onRevoked(() => setRevoked(true));
   }, []);
 
   async function unpair() {
@@ -53,6 +63,24 @@ export function App(): JSX.Element {
   }
 
   if (view === 'loading') return <CenterText>Loading…</CenterText>;
+
+  // Revoked takes priority over every other state — the terminal's token is
+  // no longer valid so the cashier cannot do anything until the owner
+  // unpairs + re-pairs.
+  if (revoked && config) {
+    return (
+      <RevokedScreen
+        branchName={config.branch.name}
+        deviceName={config.deviceName}
+        onUnpaired={() => {
+          setRevoked(false);
+          setConfig(null);
+          setUser(null);
+          setView('pairing');
+        }}
+      />
+    );
+  }
 
   if (view === 'pairing') {
     return (

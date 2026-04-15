@@ -30,6 +30,17 @@ export class DevicePublicController {
     if (!dto?.deviceToken) throw new BadRequestException('deviceToken required');
     return this.svc.listCashiersForToken(dto.deviceToken);
   }
+
+  /**
+   * Lightweight periodic probe from the desktop shell. Returns 200 while the
+   * device is still active, 401 the moment an admin revokes it — which the
+   * desktop then uses to flip into a "terminal revoked" lock screen.
+   */
+  @Post('heartbeat')
+  async heartbeat(@Body() dto: { deviceToken: string }) {
+    if (!dto?.deviceToken) throw new BadRequestException('deviceToken required');
+    return this.svc.heartbeat(dto.deviceToken);
+  }
 }
 
 /**

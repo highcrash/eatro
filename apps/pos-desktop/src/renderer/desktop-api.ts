@@ -221,6 +221,11 @@ export interface DesktopApi {
   diagnostics: {
     snapshot: () => Promise<DiagnosticsSnapshot>;
   };
+  deviceStatus: {
+    isRevoked: () => Promise<boolean>;
+    clearRevoked: () => Promise<{ ok: true }>;
+    onRevoked: (cb: () => void) => () => void;
+  };
 }
 
 declare global {

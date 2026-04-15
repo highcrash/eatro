@@ -23,6 +23,7 @@ import { BrowserWindow } from 'electron';
 import { refreshUploadProxyServer } from '../upload-proxy';
 import { getLastUpdateStatus, triggerCheck, installAndRestart } from '../updater';
 import { captureDiagnosticsSnapshot } from '../diagnostics';
+import { isRevoked, clearRevoked } from '../session/device-heartbeat';
 
 export function registerIpcHandlers(): void {
   // Config ----------------------------------------------------------------
@@ -61,6 +62,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('device:unpair', async () => {
     clearSession();
     await unpair();
+    // Clear the revoked flag too — the owner is unpairing on purpose, and
+    // after re-pair the new token is fresh and should start clean.
+    clearRevoked();
     await refreshUploadProxyServer();
     return { ok: true };
   });
@@ -260,6 +264,14 @@ export function registerIpcHandlers(): void {
   // Diagnostics -----------------------------------------------------------
 
   ipcMain.handle('diagnostics:snapshot', () => captureDiagnosticsSnapshot());
+
+  // Device revoke -----------------------------------------------------------
+
+  ipcMain.handle('device:is-revoked', () => isRevoked());
+  ipcMain.handle('device:clear-revoked', () => {
+    clearRevoked();
+    return { ok: true };
+  });
 
   ipcMain.handle('update:status', () => getLastUpdateStatus());
   ipcMain.handle('update:check', async () => triggerCheck());

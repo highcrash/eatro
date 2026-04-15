@@ -6,6 +6,7 @@ import { onlineDetector } from './sync/online-detector';
 import { startSyncWorker } from './sync/sync-worker';
 import { installUploadProxy } from './upload-proxy';
 import { setupAutoUpdater } from './updater';
+import { startHeartbeat } from './session/device-heartbeat';
 
 // Phase 1 — Electron main process with device pairing + encrypted config.
 // Later phases add printer, SQLite outbox, etc.
@@ -65,6 +66,7 @@ void app.whenReady().then(async () => {
   await installUploadProxy();
   createWindow();
   setupAutoUpdater();
+  startHeartbeat();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -133,6 +133,13 @@ export class DeviceService {
     });
   }
 
+  /** Cheap liveness probe used by the desktop shell every minute. */
+  async heartbeat(deviceToken: string): Promise<{ active: true; deviceId: string; branchId: string }> {
+    const device = await this.verifyToken(deviceToken);
+    if (!device) throw new UnauthorizedException('Terminal is not paired or has been revoked');
+    return { active: true, deviceId: device.id, branchId: device.branchId };
+  }
+
   async rename(deviceId: string, branchId: string, name: string) {
     const device = await this.prisma.device.findUnique({ where: { id: deviceId } });
     if (!device || device.branchId !== branchId) throw new NotFoundException('Device not found');
