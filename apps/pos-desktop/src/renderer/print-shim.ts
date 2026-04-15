@@ -96,19 +96,28 @@ export function installPrintShim(): void {
     const widthHint = parseWidth(features);
     let buffer = '';
     let printed = false;
+    let printRouter = (reason: string) => {
+      if (printed) return;
+      printed = true;
+      const slot = sniffSlot(buffer, widthHint);
+      console.log(`[print-shim] popup → ${slot} (${reason}, ${buffer.length} bytes)`);
+      routeHtmlToDesktop(buffer, slot);
+    };
 
     const fake: FakeWindow = {
       document: {
         body: null,
         write(html: string) { buffer += html; },
-        close() { /* no-op */ },
+        // The popup pattern ends with `document.close()`; treat that as the
+        // "ready to print" signal. The popup's own inline
+        // <script>window.print()</script> never executes inside our fake
+        // window context, so we'd never get a real `print()` call.
+        close() {
+          if (buffer) setTimeout(() => printRouter('document.close'), 0);
+        },
       },
-      print() {
-        if (printed) return;
-        printed = true;
-        const slot = sniffSlot(buffer, widthHint);
-        routeHtmlToDesktop(buffer, slot);
-      },
+      // If anything DOES call .print() directly (some flows do), honour it.
+      print() { printRouter('window.print'); },
       close() { fake.closed = true; },
       closed: false,
       onload: null,
