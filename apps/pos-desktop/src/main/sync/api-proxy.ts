@@ -1,6 +1,10 @@
 import { randomBytes } from 'crypto';
 import { readConfig } from '../config/store';
-import { getAccessToken } from '../session/session';
+import {
+  getAccessToken,
+  getRefreshToken,
+  updateAccessToken,
+} from '../session/session';
 import { onlineDetector } from './online-detector';
 import { enqueue } from './outbox';
 
@@ -75,11 +79,28 @@ export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
   // Online path — forward the real request. On transient failure, if it's
   // a mutation we queue it for sync instead of surfacing the error.
   try {
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method,
       headers,
       body: input.body == null ? undefined : JSON.stringify(input.body),
     });
+
+    // Transparent 401 refresh: if the access token expired and we still have
+    // a refresh token, swap tokens ourselves and retry once. This keeps the
+    // POS renderer from ever seeing a 401 — so its fake 'desktop-managed'
+    // refresh path never kicks in and the cashier isn't randomly logged out.
+    const isAuthPath = input.path.startsWith('/auth/');
+    if (res.status === 401 && !isAuthPath) {
+      const refreshed = await tryRefreshSession(cfg.serverUrl);
+      if (refreshed) {
+        res = await fetch(url, {
+          method,
+          headers: { ...headers, Authorization: `Bearer ${refreshed}` },
+          body: input.body == null ? undefined : JSON.stringify(input.body),
+        });
+      }
+    }
+
     const text = await res.text();
     const parsed = text ? safeParse(text) : null;
     return { status: res.status, ok: res.ok, body: parsed, idempotencyKey };
@@ -107,4 +128,36 @@ export async function apiFetch(input: ApiFetchInput): Promise<ApiFetchResult> {
 
 function safeParse(text: string): unknown {
   try { return JSON.parse(text); } catch { return text; }
+}
+
+// Cache a single in-flight refresh promise so a burst of 401s doesn't trigger
+// N parallel refresh calls.
+let refreshing: Promise<string | null> | null = null;
+
+async function tryRefreshSession(serverUrl: string): Promise<string | null> {
+  if (refreshing) return refreshing;
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  refreshing = (async () => {
+    try {
+      const res = await fetch(`${serverUrl}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { accessToken?: string };
+      if (!data?.accessToken) return null;
+      updateAccessToken(data.accessToken);
+      return data.accessToken;
+    } catch {
+      return null;
+    } finally {
+      // Clear the cache so the next future refresh starts fresh.
+      setTimeout(() => { refreshing = null; }, 0);
+    }
+  })();
+
+  return refreshing;
 }

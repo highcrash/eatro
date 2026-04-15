@@ -5,3 +5,7 @@
    should be identical to the browser POS. */
 html, body, #root { height: 100%; }
 body { overflow: hidden; }
+
+/* Suppress the default white background during view transitions so the
+   cashier never sees a flash of white when the React tree swaps. */
+html { background: #0D0D0D; }

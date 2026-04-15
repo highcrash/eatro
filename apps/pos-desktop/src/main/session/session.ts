@@ -43,6 +43,14 @@ export function getAccessToken(): string | null {
   return current?.accessToken ?? null;
 }
 
+export function getRefreshToken(): string | null {
+  return current?.refreshToken ?? null;
+}
+
+export function updateAccessToken(accessToken: string): void {
+  if (current) current = { ...current, accessToken };
+}
+
 export function clearSession(): void {
   current = null;
 }

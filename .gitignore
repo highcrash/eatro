@@ -5,6 +5,10 @@ node_modules/
 # Build outputs
 dist/
 build/
+# Keep the desktop app's build resources (icons, installer assets) under vcs —
+# those are source files, not generated artifacts.
+!apps/pos-desktop/build/
+!apps/pos-desktop/build/**
 .next/
 out/
 

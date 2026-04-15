@@ -15,6 +15,12 @@ import type { SessionUser } from './desktop-api';
  * Before rendering, we seed apps/pos's auth store with the Desktop session.
  * The desktop fetch-shim is already installed at this point, so access
  * tokens passed here are dummy — main attaches real Authorization headers.
+ *
+ * Auth-store re-seeding: the web POS's api.ts clears auth on certain 401s.
+ * The desktop's api-proxy refreshes tokens transparently so POS shouldn't
+ * see a 401, but if something slips through we re-seed the store instead of
+ * bouncing to the lock screen — the desktop session is the source of truth
+ * here.
  */
 interface Props {
   user: SessionUser;
@@ -25,9 +31,7 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
 });
 
-export function PosEmbed({ user, onSignOutRequested }: Props): JSX.Element {
-  // Seed POS auth state once per user. Using setState synchronously before
-  // the children render avoids a flash of LoginPage.
+function seedPosAuth(user: SessionUser): void {
   useAuthStore.setState({
     user: {
       id: user.id,
@@ -37,21 +41,52 @@ export function PosEmbed({ user, onSignOutRequested }: Props): JSX.Element {
       branchId: user.branchId,
       branchName: user.branchName,
     },
-    // Dummy tokens — real ones live in Electron main. Present so any
-    // code path that guards on their presence is happy.
     accessToken: 'desktop-managed',
     refreshToken: 'desktop-managed',
     isAuthenticated: true,
   });
+}
 
-  // If POS signs itself out (e.g. 401 cascade), bounce back to the
-  // desktop lock screen instead of POS's own LoginPage.
+export function PosEmbed({ user, onSignOutRequested }: Props): JSX.Element {
+  // Track the caller's latest callback without re-running the subscription.
+  const signOutRef = React.useRef(onSignOutRequested);
+  signOutRef.current = onSignOutRequested;
+
+  // Track whether the desktop user has explicitly signed out. Only then is
+  // a clearAuth a real sign-out; everything else is an unwanted side effect
+  // we should repair by re-seeding.
+  const userIntentsSignOutRef = React.useRef(false);
+
+  // Seed synchronously on mount + whenever user changes. We don't rely on a
+  // useEffect for the initial seed because PosApp renders immediately and
+  // would flash its own LoginPage if we were a tick late.
+  seedPosAuth(user);
+
   React.useEffect(() => {
     const unsub = useAuthStore.subscribe((state, prev) => {
-      if (prev.isAuthenticated && !state.isAuthenticated) onSignOutRequested();
+      if (prev.isAuthenticated && !state.isAuthenticated) {
+        if (userIntentsSignOutRef.current) {
+          signOutRef.current();
+        } else {
+          // POS cleared its own auth mid-session. Re-seed silently.
+          console.warn('[PosEmbed] POS clearAuth intercepted — re-seeding from desktop session');
+          seedPosAuth(user);
+        }
+      }
     });
     return unsub;
-  }, [onSignOutRequested]);
+  }, [user]);
+
+  // Expose a tiny global flag so the DesktopMenu's Sign Out flow can mark the
+  // next clearAuth as "intended" right before calling window.desktop.session.signout().
+  React.useEffect(() => {
+    (window as unknown as { __desktopMarkSignOut?: () => void }).__desktopMarkSignOut = () => {
+      userIntentsSignOutRef.current = true;
+    };
+    return () => {
+      delete (window as unknown as { __desktopMarkSignOut?: () => void }).__desktopMarkSignOut;
+    };
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

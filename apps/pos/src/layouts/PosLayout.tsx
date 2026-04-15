@@ -1,4 +1,5 @@
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import {
   ShoppingCart,
   ChefHat,
@@ -16,6 +17,8 @@ import { useAuthStore } from '../store/auth.store';
 import { useBranding, useApplyPosTheme, resolveLogoUrl } from '../lib/branding';
 import { useCashierPermissions } from '../lib/permissions';
 import NotificationBell from '../components/NotificationBell';
+import { useShortcuts } from '../lib/keyboard';
+import { KeyboardHelp } from '../components/KeyboardHelp';
 
 interface NavItem {
   to: string;
@@ -40,6 +43,29 @@ export default function PosLayout() {
   const { user, clearAuth } = useAuthStore();
   const { data: branding } = useBranding();
   useApplyPosTheme(branding);
+  const navigate = useNavigate();
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  // Global keyboard shortcuts. Alt chords fire even while typing (so the
+  // cashier can jump from search-to-Purchasing without un-focusing); the
+  // plain "?" opens help only when not typing.
+  useShortcuts(
+    {
+      'alt+t': () => navigate('/tables'),
+      'alt+n': () => navigate('/order'),
+      'alt+c': () => navigate('/customers'),
+      'alt+k': () => navigate('/kitchen'),
+      'alt+r': () => navigate('/reports/sales'),
+      'alt+b': () => navigate('/reservations'),
+      'alt+p': () => navigate('/purchasing'),
+      'alt+f': () => navigate('/finance'),
+      'alt+y': () => navigate('/pre-ready'),
+      '?':   () => setHelpOpen(true),
+      'F1':  () => setHelpOpen(true),
+      'Escape': () => setHelpOpen(false),
+    },
+    { allowInTyping: false },
+  );
 
   const brandLogo = resolveLogoUrl(branding?.posLogoUrl ?? branding?.logoUrl);
   const brandName = branding?.name ?? 'Restro POS';
@@ -123,6 +149,9 @@ export default function PosLayout() {
 
       {/* Global notification bell — fixed top-right, mounted once */}
       <NotificationBell />
+
+      {/* Keyboard shortcut cheat-sheet (? / F1) */}
+      {helpOpen && <KeyboardHelp onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }

@@ -162,6 +162,8 @@ export interface DesktopApi {
     pinStatus: (staffId: string) => Promise<PinStatus>;
     verifyPin: (args: { staffId: string; pin: string }) => Promise<VerifyPinResult>;
     setPin: (args: { email: string; password: string; pin: string }) => Promise<SetPinResult>;
+    changePin: (args: { staffId: string; currentPin: string; newPin: string }) => Promise<{ ok: true } | { ok: false; message: string }>;
+    forgetPin: (staffId: string) => Promise<{ ok: true }>;
   };
   session: {
     current: () => Promise<SessionUser | null>;
@@ -220,6 +222,8 @@ const api: DesktopApi = {
     pinStatus: (staffId) => ipcRenderer.invoke('cashier:pin-status', staffId),
     verifyPin: (args) => ipcRenderer.invoke('cashier:verify-pin', args),
     setPin: (args) => ipcRenderer.invoke('cashier:set-pin', args),
+    changePin: (args) => ipcRenderer.invoke('cashier:change-pin', args),
+    forgetPin: (staffId) => ipcRenderer.invoke('cashier:forget-pin', staffId),
   },
   session: {
     current: () => ipcRenderer.invoke('session:current'),

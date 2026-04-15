@@ -16,6 +16,9 @@ function createWindow(): void {
     height: 800,
     show: false,
     autoHideMenuBar: true,
+    // electron-builder packs build/icon.ico into the exe itself for the
+    // taskbar/alt-tab icon; this option is mainly for dev-mode window decoration.
+    icon: join(__dirname, '../../build/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,

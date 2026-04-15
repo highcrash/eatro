@@ -7,7 +7,7 @@ import {
   pinLoginWithServer,
   passwordLoginOnDevice,
 } from '../session/cashier-login';
-import { getPinStatus, setPin, verifyPin } from '../session/pin-store';
+import { getPinStatus, setPin, verifyPin, clearPin } from '../session/pin-store';
 import { clearSession, getSessionUser } from '../session/session';
 import { listOsPrinters } from '../printing/html-print';
 import { testPrint } from '../printing/test-print';
@@ -109,6 +109,30 @@ export function registerIpcHandlers(): void {
       }
     },
   );
+
+  ipcMain.handle(
+    'cashier:change-pin',
+    async (_e, { staffId, currentPin, newPin }: { staffId: string; currentPin: string; newPin: string }) => {
+      try {
+        const verify = await verifyPin(staffId, currentPin);
+        if (!verify.ok) {
+          if (verify.reason === 'wrong') return { ok: false, message: 'Current PIN is wrong' };
+          if (verify.reason === 'locked') return { ok: false, message: 'PIN is temporarily locked. Try again later.' };
+          if (verify.reason === 'no-pin') return { ok: false, message: 'No PIN set for this user yet' };
+          return { ok: false, message: 'Could not verify current PIN' };
+        }
+        await setPin(staffId, newPin);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: (err as Error).message };
+      }
+    },
+  );
+
+  ipcMain.handle('cashier:forget-pin', (_e, staffId: string) => {
+    clearPin(staffId);
+    return { ok: true };
+  });
 
   // Session ---------------------------------------------------------------
 

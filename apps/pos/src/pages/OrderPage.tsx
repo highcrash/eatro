@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Plus, Minus, ArrowLeft, ShoppingBag, X, Printer, Search } from 'lucide-react';
@@ -6,6 +6,7 @@ import { Plus, Minus, ArrowLeft, ShoppingBag, X, Printer, Search } from 'lucide-
 import type { MenuItem, Order, OrderItem, CreateOrderDto, VoidOrderItemDto, WasteReason } from '@restora/types';
 import { formatCurrency, printKitchenTicket as printKitchenTicketUtil } from '@restora/utils';
 import { useBranchSettings } from '../hooks/useBranchSettings';
+import { isPlainCharKey } from '../lib/keyboard';
 import { useAuthStore } from '../store/auth.store';
 import { api } from '../lib/api';
 import PaymentModal from '../components/PaymentModal';
@@ -244,6 +245,9 @@ function AddItemsOverlay({
 }) {
   const [addSearch, setAddSearch] = useState('');
   const [addCatId, setAddCatId] = useState<string | null>(null);
+  const [hoverIdx, setHoverIdx] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   // Fetch categories from API for proper hierarchy (includes parents with 0 direct items)
   const { data: apiCategories = [] } = useQuery<{ id: string; name: string; parentId: string | null; children?: { id: string; name: string }[] }[]>({
@@ -277,6 +281,59 @@ function AddItemsOverlay({
       return [...prev, { menuItem: item, quantity: 1 }];
     });
   };
+
+  // ── Keyboard navigation ──────────────────────────────────────────────────
+  // Typing a plain character outside the search box re-routes focus to it
+  // (and the character flows in via the normal key event). Arrows move a
+  // highlight through filteredItems; Enter adds the highlighted item.
+  const GRID_COLS = 5;
+  const clampIdx = (i: number) => Math.max(0, Math.min(filteredItems.length - 1, i));
+
+  useEffect(() => {
+    setHoverIdx(0);
+  }, [addSearch, addCatId, filteredItems.length]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
+
+      if (e.key === 'Escape') {
+        if (addSearch) { setAddSearch(''); e.preventDefault(); return; }
+        // let the outer onClose handle if the search is already empty
+        return;
+      }
+
+      if (!typing && isPlainCharKey(e)) {
+        // Bounce focus into the search and drop the char there naturally.
+        searchRef.current?.focus();
+        return;
+      }
+
+      if (filteredItems.length === 0) return;
+
+      if (e.key === 'ArrowRight') { setHoverIdx((i) => clampIdx(i + 1)); e.preventDefault(); return; }
+      if (e.key === 'ArrowLeft')  { setHoverIdx((i) => clampIdx(i - 1)); e.preventDefault(); return; }
+      if (e.key === 'ArrowDown')  { setHoverIdx((i) => clampIdx(i + GRID_COLS)); e.preventDefault(); return; }
+      if (e.key === 'ArrowUp')    { setHoverIdx((i) => clampIdx(i - GRID_COLS)); e.preventDefault(); return; }
+      if (e.key === 'Enter')      {
+        const item = filteredItems[hoverIdx];
+        if (item) { addToNewCart(item); e.preventDefault(); }
+        return;
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredItems, hoverIdx, addSearch]);
+
+  // Scroll the highlighted tile into view as the user arrows around.
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const child = grid.children[hoverIdx] as HTMLElement | undefined;
+    if (child) child.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [hoverIdx]);
 
   const removeFromNewCart = (menuItemId: string) => {
     setNewItemCart((prev) => {
@@ -317,10 +374,11 @@ function AddItemsOverlay({
             <div className="relative max-w-md">
               <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
               <input
+                ref={searchRef}
                 type="text"
                 value={addSearch}
                 onChange={(e) => { setAddSearch(e.target.value); if (e.target.value) setAddCatId(null); }}
-                placeholder="Search products…"
+                placeholder="Search products… (start typing anywhere)"
                 className="w-full bg-theme-surface rounded-full pl-11 pr-10 py-2.5 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent"
               />
               {addSearch && (
@@ -366,16 +424,20 @@ function AddItemsOverlay({
           )}
 
           {/* Menu grid (matches NewOrderView) */}
-          <div className="flex-1 overflow-auto px-6 pb-6 grid grid-cols-5 gap-3 content-start">
-            {filteredItems.map((item) => {
+          <div
+            ref={gridRef}
+            className="flex-1 overflow-auto px-6 pb-6 grid grid-cols-5 gap-3 content-start"
+          >
+            {filteredItems.map((item, idx) => {
               const inCart = newItemCart.find((c) => c.menuItem.id === item.id);
+              const isHover = idx === hoverIdx;
               return (
                 <button
                   key={item.id}
-                  onClick={() => addToNewCart(item)}
+                  onClick={() => { setHoverIdx(idx); addToNewCart(item); }}
                   className={`relative bg-theme-surface rounded-theme p-1.5 text-center border transition-all hover:border-theme-accent ${
                     inCart ? 'border-theme-pop border-2' : 'border-theme-border'
-                  }`}
+                  } ${isHover ? 'ring-2 ring-theme-accent ring-offset-1 ring-offset-theme-bg' : ''}`}
                 >
                   {inCart && (
                     <div className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-theme-pop text-white flex items-center justify-center text-[9px] font-bold z-10">

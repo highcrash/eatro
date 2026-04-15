@@ -7,6 +7,8 @@ import { SyncPanel } from './SyncPanel';
 import { PosEmbed } from './PosEmbed';
 import { DesktopMenu } from './DesktopMenu';
 import { UpdateToast } from './UpdateToast';
+import { ChangePinDialog } from './ChangePinDialog';
+import { OwnerPasswordDialog } from './OwnerPasswordDialog';
 import type { PairedConfig, SessionUser } from './desktop-api';
 
 type View = 'loading' | 'pairing' | 'locked' | 'signed-in' | 'printer-settings' | 'sync-panel';
@@ -15,6 +17,8 @@ export function App(): JSX.Element {
   const [view, setView] = useState<View>('loading');
   const [config, setConfig] = useState<PairedConfig | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [changePinOpen, setChangePinOpen] = useState(false);
+  const [unpairPromptOpen, setUnpairPromptOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -36,6 +40,8 @@ export function App(): JSX.Element {
   }
 
   async function signOut() {
+    // Let PosEmbed know the next clearAuth is intentional and shouldn't be re-seeded.
+    (window as unknown as { __desktopMarkSignOut?: () => void }).__desktopMarkSignOut?.();
     await window.desktop.session.signout();
     setUser(null);
     setView('locked');
@@ -56,15 +62,30 @@ export function App(): JSX.Element {
 
   if (view === 'locked' && config) {
     return (
-      <LockScreen
-        deviceName={config.deviceName}
-        branchName={config.branch.name}
-        onUnpair={() => void unpair()}
-        onSignedIn={(u) => {
-          setUser(u);
-          setView('signed-in');
-        }}
-      />
+      <>
+        <LockScreen
+          deviceName={config.deviceName}
+          branchName={config.branch.name}
+          onUnpair={() => setUnpairPromptOpen(true)}
+          onSignedIn={(u) => {
+            setUser(u);
+            setView('signed-in');
+          }}
+        />
+        {unpairPromptOpen && (
+          <OwnerPasswordDialog
+            title="UNPAIR TERMINAL"
+            description="This terminal will forget its paired branch. After this, first-run setup runs again on next launch. Confirm with the Owner password."
+            confirmLabel="Unpair"
+            danger
+            onClose={() => setUnpairPromptOpen(false)}
+            onConfirm={async () => {
+              setUnpairPromptOpen(false);
+              await unpair();
+            }}
+          />
+        )}
+      </>
     );
   }
 
@@ -100,11 +121,35 @@ export function App(): JSX.Element {
         <DesktopMenu
           terminalName={config.deviceName}
           cashierName={user.name}
+          cashierRole={user.role}
           onPrinters={() => setView('printer-settings')}
           onSync={() => setView('sync-panel')}
+          onChangePin={() => setChangePinOpen(true)}
+          onRequestUnpair={() => setUnpairPromptOpen(true)}
           onSignOut={() => void signOut()}
         />
         <UpdateToast />
+        {changePinOpen && (
+          <ChangePinDialog
+            staffId={user.id}
+            cashierName={user.name}
+            onClose={() => setChangePinOpen(false)}
+            onDone={() => setChangePinOpen(false)}
+          />
+        )}
+        {unpairPromptOpen && (
+          <OwnerPasswordDialog
+            title="UNPAIR TERMINAL"
+            description="This terminal will forget its paired branch. After this, first-run setup runs again on next launch. Confirm with the Owner password."
+            confirmLabel="Unpair"
+            danger
+            onClose={() => setUnpairPromptOpen(false)}
+            onConfirm={async () => {
+              setUnpairPromptOpen(false);
+              await unpair();
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -129,4 +174,3 @@ function CenterText({ children }: { children: React.ReactNode }): JSX.Element {
     </div>
   );
 }
-

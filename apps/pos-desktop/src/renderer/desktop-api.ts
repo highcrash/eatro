@@ -164,6 +164,8 @@ export interface DesktopApi {
     pinStatus: (staffId: string) => Promise<PinStatus>;
     verifyPin: (args: { staffId: string; pin: string }) => Promise<VerifyPinResult>;
     setPin: (args: { email: string; password: string; pin: string }) => Promise<SetPinResult>;
+    changePin: (args: { staffId: string; currentPin: string; newPin: string }) => Promise<{ ok: true } | { ok: false; message: string }>;
+    forgetPin: (staffId: string) => Promise<{ ok: true }>;
   };
   session: {
     current: () => Promise<SessionUser | null>;
