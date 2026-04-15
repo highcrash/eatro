@@ -44,7 +44,13 @@ export async function printHtmlToDevice(
   const tmpDir = join(app.getPath('userData'), 'print-tmp');
   mkdirSync(tmpDir, { recursive: true });
   const tmpPath = join(tmpDir, `${randomBytes(6).toString('hex')}.html`);
-  writeFileSync(tmpPath, html, 'utf8');
+  // Strip any auto-print / auto-close scripts that the web-POS popup flow
+  // embeds in shared templates (e.g. kitchen-ticket.ts). In the desktop
+  // shell we drive printing from the main process and a self-closing page
+  // destroys the BrowserWindow before our webContents.print() fires,
+  // producing the confusing "Object has been destroyed" error.
+  const sanitized = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+  writeFileSync(tmpPath, sanitized, 'utf8');
 
   const win = new BrowserWindow({
     show: false,

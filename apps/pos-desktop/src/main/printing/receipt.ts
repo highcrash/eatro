@@ -224,6 +224,5 @@ function renderReceiptHtml(r: ReceiptInput): string {
     ${r.paymentMethod ? `<p>Paid via: ${esc(r.paymentMethod)}</p>` : ''}
     <div class="divider"></div>
     <p class="center">${esc(r.footerText ?? 'Thank you!')}</p>
-    <script>window.onload=function(){setTimeout(function(){window.close();},10);}<\/script>
   </body></html>`;
 }
