@@ -16,6 +16,7 @@ import {
   buildApplyDiscountResponse,
 } from './synthetic';
 import { listShadowOrders, getShadowOrder, parseOrderListPath } from './shadow-orders';
+import { updateCachedBody } from './cache-store';
 
 /**
  * Central HTTP proxy that every renderer API call flows through. Handles:
@@ -52,12 +53,14 @@ function cuid32(): string { return randomBytes(16).toString('hex'); }
  * what the cashier's hot path needs; voids and approvals fall through to the
  * plain queue and will replay when online.
  */
-function offlineSynthesizable(method: string, path: string): 'create-order' | 'add-items' | 'pay' | 'apply-discount' | null {
-  if (method !== 'POST') return null;
-  if (path === '/orders') return 'create-order';
-  if (/^\/orders\/[^/]+\/items$/.test(path)) return 'add-items';
-  if (/^\/orders\/[^/]+\/payment$/.test(path)) return 'pay';
-  if (/^\/orders\/[^/]+\/apply-discount$/.test(path)) return 'apply-discount';
+function offlineSynthesizable(method: string, path: string): 'create-order' | 'add-items' | 'pay' | 'apply-discount' | 'table-status' | null {
+  if (method === 'POST') {
+    if (path === '/orders') return 'create-order';
+    if (/^\/orders\/[^/]+\/items$/.test(path)) return 'add-items';
+    if (/^\/orders\/[^/]+\/payment$/.test(path)) return 'pay';
+    if (/^\/orders\/[^/]+\/apply-discount$/.test(path)) return 'apply-discount';
+  }
+  if (method === 'PATCH' && /^\/tables\/[^/]+\/status$/.test(path)) return 'table-status';
   return null;
 }
 
@@ -183,6 +186,22 @@ function handleOffline(
   } else if (kind === 'apply-discount') {
     const orderId = extractOrderId(input.path)!;
     synth = buildApplyDiscountResponse(orderId, input.body as Parameters<typeof buildApplyDiscountResponse>[1]);
+  } else if (kind === 'table-status') {
+    // Optimistically patch the cached /tables entry so the Tables view
+    // reflects the new status immediately; the real PATCH will replay
+    // from the outbox when online.
+    const m = /^\/tables\/([^/]+)\/status$/.exec(input.path);
+    const tableId = m?.[1];
+    const nextStatus = (input.body as { status?: string } | null)?.status;
+    if (tableId && nextStatus) {
+      updateCachedBody('GET', '/tables', (body) => {
+        if (!Array.isArray(body)) return body;
+        return (body as Array<{ id: string; status?: string }>).map((t) =>
+          t?.id === tableId ? { ...t, status: nextStatus } : t,
+        );
+      });
+      synth = { id: tableId, status: nextStatus };
+    }
   }
 
   // Queue the original request. Subsequent items/payments targeting a

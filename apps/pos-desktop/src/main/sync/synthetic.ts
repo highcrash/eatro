@@ -101,6 +101,21 @@ function findTableNumber(tableId: string | null | undefined): string | null {
 }
 
 /**
+ * Mirror the server's side-effect: on POST /orders for a dine-in table the
+ * table transitions to OCCUPIED. Patch the cached /tables list so the
+ * Tables view reflects the new state while offline.
+ */
+function markTableOccupied(tableId: string | null | undefined): void {
+  if (!tableId) return;
+  updateCachedBody('GET', '/tables', (body) => {
+    if (!Array.isArray(body)) return body;
+    return (body as Array<{ id: string; status?: string }>).map((t) =>
+      t?.id === tableId ? { ...t, status: 'OCCUPIED' } : t,
+    );
+  });
+}
+
+/**
  * Best-effort tax rate derived from the most recent cached real order. The
  * branch's tax rate isn't exposed on any endpoint the POS currently fetches
  * on login, so we infer it from `taxAmount / subtotal` on whatever real
@@ -202,6 +217,7 @@ export function buildCreateOrderResponse(
     updatedAt: now(),
   };
   indexOrder(order);
+  markTableOccupied(order.tableId);
   return order;
 }
 
