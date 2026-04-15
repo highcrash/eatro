@@ -558,13 +558,12 @@ export class PurchasingService {
     }
     if (!supplierId) throw new BadRequestException('Supplier ID is required for independent returns');
 
-    // Convert each line's quantity to the ingredient's STOCK unit. The POS
-    // form lets a cashier enter "1 PACK" or "1 KG" (purchase unit), but
-    // currentStock is tracked in the smaller stock unit (10 pcs, 1000 g).
-    // Without this conversion, returning 1 PACK only deducts 1 pcs and the
-    // printed return doc shows "1 PACK" while the actual stock movement
-    // was 1 unit. Receive flow already does this — applied the same logic
-    // here for symmetry.
+    // Convert each line's quantity to the ingredient's STOCK unit and
+    // its unitPrice from per-purchase-unit to per-stock-unit. The POS
+    // form lets a cashier enter "1 BOX @ ৳300" (purchase unit + price
+    // per box); we need to record 30 pcs @ ৳10/pcs so the supplier
+    // ledger and return list show the correct ৳300 total instead of
+    // 30 × ৳300 = ৳9000.
     const itemsInStockUnit: Array<{ ingredientId: string; quantity: number; unitPrice: number }> = [];
     for (const line of dto.items) {
       const ingredient = await this.prisma.ingredient.findFirst({
@@ -573,25 +572,34 @@ export class PurchasingService {
       if (!ingredient) throw new BadRequestException(`Ingredient ${line.ingredientId} not found`);
       const hasPurchaseUnit = !!ingredient.purchaseUnit && ingredient.purchaseUnitQty.toNumber() > 0;
       const inputUnit = (line.unit ?? '').trim() || null;
+
       let stockQty = line.quantity;
-      // Case 1: caller said the qty is in the purchase unit, convert by purchaseUnitQty.
+      let stockUnitPrice = line.unitPrice;
+      // Conversion factor = stockQty / inputQty. unitPrice is divided by
+      // the same factor so quantity × unitPrice stays equal to the
+      // amount the customer agreed.
+      let factor = 1;
+
       if (hasPurchaseUnit && inputUnit && inputUnit === ingredient.purchaseUnit) {
-        stockQty = line.quantity * ingredient.purchaseUnitQty.toNumber();
+        factor = ingredient.purchaseUnitQty.toNumber();
+        stockQty = line.quantity * factor;
       } else if (inputUnit && inputUnit !== ingredient.unit) {
-        // Case 2: a different unit (e.g. KG vs G with no purchaseUnitQty set);
-        // run it through the branch's UnitConversion table.
         try {
           stockQty = await this.unitConversion.convert(branchId, line.quantity, inputUnit, ingredient.unit);
+          factor = line.quantity > 0 ? stockQty / line.quantity : 1;
         } catch {
-          // No conversion defined — fall back to the raw qty so the cashier
-          // can still record the return; admin can audit later.
-          stockQty = line.quantity;
+          stockQty = line.quantity; // no conversion → leave raw + price
         }
       }
+
+      if (factor > 0 && factor !== 1) {
+        stockUnitPrice = Math.round(line.unitPrice / factor);
+      }
+
       itemsInStockUnit.push({
         ingredientId: line.ingredientId,
         quantity: stockQty,
-        unitPrice: line.unitPrice,
+        unitPrice: stockUnitPrice,
       });
     }
 

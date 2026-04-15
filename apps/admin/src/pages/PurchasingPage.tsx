@@ -115,7 +115,7 @@ export default function PurchasingPage() {
   const qc = useQueryClient();
   const [view, setView] = useState<'list' | 'create' | 'detail' | 'returns' | 'return-create'>('list');
   const [indReturnSupplierId, setIndReturnSupplierId] = useState('');
-  const [indReturnLines, setIndReturnLines] = useState<{ ingredientId: string; quantity: string; unitPrice: string }[]>([]);
+  const [indReturnLines, setIndReturnLines] = useState<{ ingredientId: string; quantity: string; unitPrice: string; unit: string }[]>([]);
   const [indReturnNotes, setIndReturnNotes] = useState('');
   const [indReturnSearch, setIndReturnSearch] = useState<Record<number, string>>({});
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
@@ -240,7 +240,12 @@ export default function PurchasingPage() {
     mutationFn: () => {
       const items = indReturnLines
         .filter((l) => l.ingredientId && parseFloat(l.quantity) > 0)
-        .map((l) => ({ ingredientId: l.ingredientId, quantity: parseFloat(l.quantity), unitPrice: Math.round((parseFloat(l.unitPrice) || 0) * 100) }));
+        .map((l) => ({
+          ingredientId: l.ingredientId,
+          quantity: parseFloat(l.quantity),
+          unitPrice: Math.round((parseFloat(l.unitPrice) || 0) * 100),
+          unit: l.unit || undefined,
+        }));
       return api.post('/purchasing/returns/create', { supplierId: indReturnSupplierId, items, notes: indReturnNotes || undefined });
     },
     onSuccess: () => {
@@ -397,7 +402,7 @@ export default function PurchasingPage() {
               <button onClick={() => setView('returns')} className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-[#999] font-body text-sm px-4 py-2 transition-colors">
                 RETURNS
               </button>
-              <button onClick={() => { setView('return-create'); setIndReturnSupplierId(''); setIndReturnLines([{ ingredientId: '', quantity: '0', unitPrice: '0' }]); setIndReturnNotes(''); setIndReturnSearch({}); }} className="bg-[#FFA726] hover:bg-[#FFB74D] text-[#0D0D0D] font-body text-sm px-4 py-2 transition-colors">
+              <button onClick={() => { setView('return-create'); setIndReturnSupplierId(''); setIndReturnLines([{ ingredientId: '', quantity: '0', unitPrice: '0', unit: '' }]); setIndReturnNotes(''); setIndReturnSearch({}); }} className="bg-[#FFA726] hover:bg-[#FFB74D] text-[#0D0D0D] font-body text-sm px-4 py-2 transition-colors">
                 RETURN TO SUPPLIER
               </button>
               <button onClick={resetCreate} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">
@@ -1211,9 +1216,10 @@ export default function PurchasingPage() {
           <div className="bg-[#161616] border border-[#2A2A2A] p-6">
             <h3 className="font-display text-lg text-white tracking-widest mb-4">RETURN ITEMS</h3>
             <div className="grid grid-cols-12 gap-2 mb-2">
-              <div className="col-span-5 text-[#666] text-xs font-body tracking-widest uppercase">Ingredient (search)</div>
-              <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Qty</div>
-              <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Price (৳)</div>
+              <div className="col-span-4 text-[#666] text-xs font-body tracking-widest uppercase">Ingredient (search)</div>
+              <div className="col-span-1 text-[#666] text-xs font-body tracking-widest uppercase">Qty</div>
+              <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Unit</div>
+              <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Price (৳ / unit)</div>
               <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase text-right">Total</div>
               <div className="col-span-1"></div>
             </div>
@@ -1221,9 +1227,18 @@ export default function PurchasingPage() {
               const selIng = findIngredient(line.ingredientId);
               const qty = parseFloat(line.quantity) || 0;
               const price = parseFloat(line.unitPrice) || 0;
+              // Possible unit choices: purchase unit (if set + non-stock) and stock unit.
+              // Defaulting to purchase unit lets the admin enter "1 BOX @ ৳300"
+              // exactly the way the supplier invoices.
+              const unitChoices = (() => {
+                if (!selIng) return [] as string[];
+                const stock = selIng.unit;
+                const purchase = selIng.purchaseUnit && Number(selIng.purchaseUnitQty) > 0 ? selIng.purchaseUnit : null;
+                return purchase && purchase !== stock ? [purchase, stock] : [stock];
+              })();
               return (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-center mb-2">
-                  <div className="col-span-5">
+                  <div className="col-span-4">
                     <input
                       list={`ret-ing-${idx}`}
                       value={indReturnSearch[idx] !== undefined ? indReturnSearch[idx] : (selIng ? (variantLabels[selIng.id] ?? `${selIng.name} (${selIng.unit})`) : '')}
@@ -1237,7 +1252,15 @@ export default function PurchasingPage() {
                           return;
                         }
                         if (match) {
-                          setIndReturnLines((l) => l.map((item, i) => i === idx ? { ...item, ingredientId: match.id, unitPrice: String((Number(match.costPerUnit) / 100).toFixed(2)) } : item));
+                          // Default to the purchase unit + per-pack price
+                          // when the ingredient has both — that's what
+                          // appears on the supplier's invoice.
+                          const hasPU = !!match.purchaseUnit && Number(match.purchaseUnitQty) > 0;
+                          const defaultUnit = hasPU ? (match.purchaseUnit ?? match.unit) : match.unit;
+                          const defaultPrice = hasPU && Number(match.costPerPurchaseUnit) > 0
+                            ? (Number(match.costPerPurchaseUnit) / 100).toFixed(2)
+                            : (Number(match.costPerUnit) / 100).toFixed(2);
+                          setIndReturnLines((l) => l.map((item, i) => i === idx ? { ...item, ingredientId: match.id, unit: defaultUnit, unitPrice: String(defaultPrice) } : item));
                           setIndReturnSearch((s) => { const next = { ...s }; delete next[idx]; return next; });
                         }
                       }}
@@ -1254,8 +1277,35 @@ export default function PurchasingPage() {
                       ))}
                     </datalist>
                   </div>
-                  <div className="col-span-2">
+                  <div className="col-span-1">
                     <input type="number" step="0.001" min="0" value={line.quantity} onChange={(e) => setIndReturnLines((l) => l.map((item, i) => i === idx ? { ...item, quantity: e.target.value } : item))} className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+                  </div>
+                  <div className="col-span-2">
+                    <select
+                      value={line.unit || (selIng?.unit ?? '')}
+                      onChange={(e) => {
+                        const nextUnit = e.target.value;
+                        // Auto-swap the price suggestion when the user
+                        // toggles between purchase + stock unit so the per-
+                        // unit price always reflects the chosen unit.
+                        setIndReturnLines((l) => l.map((item, i) => {
+                          if (i !== idx) return item;
+                          let nextPrice = item.unitPrice;
+                          if (selIng) {
+                            if (nextUnit === selIng.purchaseUnit && Number(selIng.costPerPurchaseUnit) > 0) {
+                              nextPrice = (Number(selIng.costPerPurchaseUnit) / 100).toFixed(2);
+                            } else if (nextUnit === selIng.unit && Number(selIng.costPerUnit) > 0) {
+                              nextPrice = (Number(selIng.costPerUnit) / 100).toFixed(2);
+                            }
+                          }
+                          return { ...item, unit: nextUnit, unitPrice: nextPrice };
+                        }));
+                      }}
+                      disabled={!selIng}
+                      className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                    >
+                      {unitChoices.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
                   </div>
                   <div className="col-span-2">
                     <input type="number" step="0.01" min="0" value={line.unitPrice} onChange={(e) => setIndReturnLines((l) => l.map((item, i) => i === idx ? { ...item, unitPrice: e.target.value } : item))} placeholder="৳" className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
@@ -1270,7 +1320,7 @@ export default function PurchasingPage() {
               );
             })}
             <button
-              onClick={() => setIndReturnLines((l) => [...l, { ingredientId: '', quantity: '0', unitPrice: '0' }])}
+              onClick={() => setIndReturnLines((l) => [...l, { ingredientId: '', quantity: '0', unitPrice: '0', unit: '' }])}
               className="mt-2 text-[#666] hover:text-white font-body text-xs tracking-widest uppercase transition-colors border border-dashed border-[#2A2A2A] hover:border-[#D62B2B] w-full py-2"
             >
               + Add Item
