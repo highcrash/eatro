@@ -5,7 +5,6 @@ import { PrinterSettings } from './PrinterSettings';
 import { SyncBanner } from './SyncBanner';
 import { SyncPanel } from './SyncPanel';
 import { PosEmbed } from './PosEmbed';
-import { DesktopMenu } from './DesktopMenu';
 import { UpdateToast } from './UpdateToast';
 import { ChangePinDialog } from './ChangePinDialog';
 import { OwnerPasswordDialog } from './OwnerPasswordDialog';
@@ -17,12 +16,17 @@ export function App(): JSX.Element {
   const [view, setView] = useState<View>('loading');
   const [config, setConfig] = useState<PairedConfig | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [appVersion, setAppVersion] = useState<string>('0.0.0');
   const [changePinOpen, setChangePinOpen] = useState(false);
   const [unpairPromptOpen, setUnpairPromptOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
-      const cfg = await window.desktop.config.get();
+      const [cfg, ver] = await Promise.all([
+        window.desktop.config.get(),
+        window.desktop.app.version(),
+      ]);
+      setAppVersion(ver.version);
       if (!cfg) {
         setView('pairing');
         return;
@@ -40,7 +44,7 @@ export function App(): JSX.Element {
   }
 
   async function signOut() {
-    // Let PosEmbed know the next clearAuth is intentional and shouldn't be re-seeded.
+    // Mark the upcoming clearAuth as intentional so PosEmbed doesn't re-seed.
     (window as unknown as { __desktopMarkSignOut?: () => void }).__desktopMarkSignOut?.();
     await window.desktop.session.signout();
     setUser(null);
@@ -116,18 +120,16 @@ export function App(): JSX.Element {
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
         <SyncBanner />
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-          <PosEmbed user={user} onSignOutRequested={() => void signOut()} />
+          <PosEmbed
+            user={user}
+            appVersion={appVersion}
+            onSignOutRequested={() => void signOut()}
+            onOpenChangePin={() => setChangePinOpen(true)}
+            onOpenPrinterSettings={() => setView('printer-settings')}
+            onOpenSyncPanel={() => setView('sync-panel')}
+            onRequestUnpair={() => setUnpairPromptOpen(true)}
+          />
         </div>
-        <DesktopMenu
-          terminalName={config.deviceName}
-          cashierName={user.name}
-          cashierRole={user.role}
-          onPrinters={() => setView('printer-settings')}
-          onSync={() => setView('sync-panel')}
-          onChangePin={() => setChangePinOpen(true)}
-          onRequestUnpair={() => setUnpairPromptOpen(true)}
-          onSignOut={() => void signOut()}
-        />
         <UpdateToast />
         {changePinOpen && (
           <ChangePinDialog

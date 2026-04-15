@@ -1525,6 +1525,9 @@ function NewOrderView({
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [waiterId, setWaiterId] = useState<string>('');
+  const [hoverIdx, setHoverIdx] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const { data: menuItems = [] } = useQuery<MenuItem[]>({
     queryKey: ['menu'],
@@ -1563,6 +1566,64 @@ function NewOrderView({
       return [...prev, { menuItem: item, quantity: 1 }];
     });
   };
+
+  // ── Keyboard navigation (mirrors AddItemsOverlay) ──────────────────────
+  const availableItems = filtered.filter((m) => m.isAvailable);
+  const GRID_COLS = 5;
+  const clampIdx = (i: number) => Math.max(0, Math.min(availableItems.length - 1, i));
+
+  useEffect(() => { setHoverIdx(0); }, [search, activeCategory, availableItems.length]);
+
+  // Autofocus the search input on mount so typing starts filtering immediately.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
+
+      if (e.key === 'Escape') {
+        if (search) { setSearch(''); e.preventDefault(); }
+        return;
+      }
+      if (!typing && isPlainCharKey(e)) {
+        e.preventDefault();
+        setSearch((prev) => prev + e.key);
+        setActiveCategory(null);
+        searchRef.current?.focus();
+        return;
+      }
+      if (!typing && e.key === 'Backspace' && search) {
+        e.preventDefault();
+        setSearch((prev) => prev.slice(0, -1));
+        searchRef.current?.focus();
+        return;
+      }
+      if (availableItems.length === 0) return;
+      if (e.key === 'ArrowRight') { setHoverIdx((i) => clampIdx(i + 1)); e.preventDefault(); return; }
+      if (e.key === 'ArrowLeft')  { setHoverIdx((i) => clampIdx(i - 1)); e.preventDefault(); return; }
+      if (e.key === 'ArrowDown')  { setHoverIdx((i) => clampIdx(i + GRID_COLS)); e.preventDefault(); return; }
+      if (e.key === 'ArrowUp')    { setHoverIdx((i) => clampIdx(i - GRID_COLS)); e.preventDefault(); return; }
+      if (e.key === 'Enter')      {
+        const item = availableItems[hoverIdx];
+        if (item) { addToCart(item); e.preventDefault(); }
+        return;
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableItems, hoverIdx, search]);
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const child = grid.children[hoverIdx] as HTMLElement | undefined;
+    if (child) child.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [hoverIdx]);
 
   const removeFromCart = (itemId: string) => {
     setCart((prev) => {
@@ -1631,10 +1692,11 @@ function NewOrderView({
           <div className="relative flex-1 max-w-md">
             <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
             <input
+              ref={searchRef}
               type="text"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setActiveCategory(null); }}
-              placeholder="Search products…"
+              placeholder="Search products… (start typing anywhere)"
               className="w-full bg-theme-surface rounded-full pl-11 pr-10 py-2.5 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent"
             />
             {search && (
@@ -1697,16 +1759,20 @@ function NewOrderView({
           </div>
         )}
 
-        <div className="flex-1 overflow-auto px-6 pb-6 grid grid-cols-5 gap-3 content-start">
-          {filtered.filter((m) => m.isAvailable).map((item) => {
+        <div
+          ref={gridRef}
+          className="flex-1 overflow-auto px-6 pb-6 grid grid-cols-5 gap-3 content-start"
+        >
+          {availableItems.map((item, idx) => {
             const inCart = cart.find((c) => c.menuItem.id === item.id);
+            const isHover = idx === hoverIdx;
             return (
               <button
                 key={item.id}
-                onClick={() => addToCart(item)}
+                onClick={() => { setHoverIdx(idx); addToCart(item); }}
                 className={`relative bg-theme-surface rounded-theme p-2 text-center border transition-all hover:border-theme-accent ${
                   inCart ? 'border-theme-pop border-2' : 'border-theme-border'
-                }`}
+                } ${isHover ? 'ring-2 ring-theme-accent ring-offset-1 ring-offset-theme-bg' : ''}`}
               >
                 {inCart && (
                   <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-theme-pop text-white flex items-center justify-center text-[10px] font-bold z-10">

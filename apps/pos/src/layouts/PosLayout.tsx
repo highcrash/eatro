@@ -19,6 +19,7 @@ import { useCashierPermissions } from '../lib/permissions';
 import NotificationBell from '../components/NotificationBell';
 import { useShortcuts } from '../lib/keyboard';
 import { KeyboardHelp } from '../components/KeyboardHelp';
+import { DesktopSidebarMenu, useDesktopBridge } from '../components/DesktopSidebarMenu';
 
 interface NavItem {
   to: string;
@@ -45,6 +46,18 @@ export default function PosLayout() {
   useApplyPosTheme(branding);
   const navigate = useNavigate();
   const [helpOpen, setHelpOpen] = useState(false);
+  const desktopBridge = useDesktopBridge();
+
+  // Logout: in desktop, route through the paired-session flow so the terminal
+  // returns to the cashier lock screen. In a browser, clearAuth is enough —
+  // POS will show its LoginPage on the next render.
+  const handleLogout = () => {
+    if (desktopBridge) {
+      desktopBridge.signOut();
+    } else {
+      clearAuth();
+    }
+  };
 
   // Global keyboard shortcuts. Alt chords fire even while typing (so the
   // cashier can jump from search-to-Purchasing without un-focusing); the
@@ -126,19 +139,28 @@ export default function PosLayout() {
         </nav>
 
         <div className="flex flex-col items-center gap-3 pt-4 border-t border-theme-border w-full px-3">
-          <div className="w-10 h-10 rounded-full bg-theme-bg flex items-center justify-center">
-            <span className="text-theme-text-muted text-sm font-bold">
-              {user?.name?.charAt(0).toUpperCase()}
-            </span>
-          </div>
-          <button
-            onClick={clearAuth}
-            title="Logout"
-            className="flex flex-col items-center justify-center gap-1 py-3 w-full rounded-theme text-theme-sidebar-text hover:bg-theme-bg hover:text-theme-danger transition-colors"
-          >
-            <LogOut size={18} />
-            <span className="text-[10px] font-semibold">Logout</span>
-          </button>
+          {desktopBridge ? (
+            // Desktop shell: the sidebar avatar opens a popover with desktop
+            // actions (change pin, printers, sync, unpair, sign out, version).
+            <DesktopSidebarMenu bridge={desktopBridge} userName={user?.name ?? ''} />
+          ) : (
+            // Web: the classic avatar + logout split.
+            <>
+              <div className="w-10 h-10 rounded-full bg-theme-bg flex items-center justify-center">
+                <span className="text-theme-text-muted text-sm font-bold">
+                  {user?.name?.charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <button
+                onClick={handleLogout}
+                title="Logout"
+                className="flex flex-col items-center justify-center gap-1 py-3 w-full rounded-theme text-theme-sidebar-text hover:bg-theme-bg hover:text-theme-danger transition-colors"
+              >
+                <LogOut size={18} />
+                <span className="text-[10px] font-semibold">Logout</span>
+              </button>
+            </>
+          )}
         </div>
       </aside>
 
