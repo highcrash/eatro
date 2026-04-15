@@ -9,6 +9,8 @@ interface CookingStation {
   name: string;
   printerName: string | null;
   printerIp: string | null;
+  printerPort: number | null;
+  sortOrder: number;
   isActive: boolean;
 }
 
@@ -23,13 +25,17 @@ function StationDialog({
   const [name, setName] = useState(initial?.name ?? '');
   const [printerName, setPrinterName] = useState(initial?.printerName ?? '');
   const [printerIp, setPrinterIp] = useState(initial?.printerIp ?? '');
+  const [printerPort, setPrinterPort] = useState<string>(String(initial?.printerPort ?? ''));
+  const [sortOrder, setSortOrder] = useState<string>(String(initial?.sortOrder ?? 0));
 
   const mutation = useMutation({
     mutationFn: () => {
       const body = {
         name,
-        printerName: printerName || undefined,
-        printerIp: printerIp || undefined,
+        printerName: printerName.trim() || null,
+        printerIp: printerIp.trim() || null,
+        printerPort: printerPort.trim() ? Number(printerPort) : null,
+        sortOrder: sortOrder.trim() ? Number(sortOrder) : 0,
       };
       return initial
         ? api.patch(`/cooking-stations/${initial.id}`, body)
@@ -80,15 +86,42 @@ function StationDialog({
           />
         </div>
 
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">
+              Printer IP
+            </label>
+            <input
+              type="text"
+              value={printerIp}
+              onChange={(e) => setPrinterIp(e.target.value)}
+              placeholder="e.g. 192.168.1.100"
+              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">
+              Printer Port
+            </label>
+            <input
+              type="number"
+              value={printerPort}
+              onChange={(e) => setPrinterPort(e.target.value)}
+              placeholder="9100"
+              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white"
+            />
+          </div>
+        </div>
+
         <div>
           <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">
-            Printer IP
+            Sort Order
           </label>
           <input
-            type="text"
-            value={printerIp}
-            onChange={(e) => setPrinterIp(e.target.value)}
-            placeholder="e.g. 192.168.1.100"
+            type="number"
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value)}
+            placeholder="0"
             className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white"
           />
         </div>

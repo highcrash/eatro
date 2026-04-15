@@ -1431,11 +1431,15 @@ model CookingStation {
   id          String   @id @default(cuid())
   branchId    String
   name        String
-  printerName String?
-  printerIp   String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  // Printer target for this section's KOT. Leaving all three NULL means
+  // the section falls back to the desktop's default kitchen slot.
+  printerName String?   // Windows printer name (USB thermal driver) — os-printer mode
+  printerIp   String?   // Network thermal printer host
+  printerPort Int?      // Network thermal printer TCP port (default 9100 at runtime)
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   // Relations
   branch    Branch     @relation(fields: [branchId], references: [id])

@@ -20,7 +20,7 @@ export class CookingStationController {
   @Post()
   create(
     @CurrentUser() user: JwtPayload,
-    @Body() body: { name: string; printerName?: string; printerIp?: string },
+    @Body() body: { name: string; printerName?: string | null; printerIp?: string | null; printerPort?: number | null; sortOrder?: number },
   ) {
     return this.service.create(user.branchId, body);
   }
@@ -29,7 +29,7 @@ export class CookingStationController {
   update(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-    @Body() body: { name?: string; printerName?: string; printerIp?: string; isActive?: boolean },
+    @Body() body: { name?: string; printerName?: string | null; printerIp?: string | null; printerPort?: number | null; sortOrder?: number; isActive?: boolean },
   ) {
     return this.service.update(id, user.branchId, body);
   }

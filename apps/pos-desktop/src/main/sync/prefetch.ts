@@ -19,6 +19,11 @@ const STARTUP_PATHS: string[] = [
   '/work-periods/current',
   '/payment-methods',
   '/discounts/active',
+  // Cooking stations / kitchen sections — the desktop needs these cached
+  // so it can group kitchen tickets per section and route to each
+  // section's configured printer, even when the network blips during
+  // a busy service.
+  '/cooking-stations',
 ];
 
 export async function prefetchStartupData(): Promise<void> {

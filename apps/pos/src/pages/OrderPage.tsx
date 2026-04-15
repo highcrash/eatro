@@ -677,6 +677,7 @@ function ActiveOrderView({
           items: newItems.map((c) => ({
             quantity: c.quantity,
             menuItemName: c.menuItem.name,
+            menuItemId: c.menuItem.id,
             notes: c.notes ?? null,
           })),
         });

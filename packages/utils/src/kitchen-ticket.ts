@@ -31,9 +31,16 @@ export interface KitchenTicketInput {
   items: Array<{
     quantity: number;
     menuItemName: string;
+    /** Menu item id — optional, used by the desktop to group items by
+     *  their cooking station when fanning KOTs to multiple printers. */
+    menuItemId?: string | null;
     notes?: string | null;
     voidedAt?: string | Date | null;
   }>;
+  /** Kitchen section label printed as a sub-header on sectioned KOTs
+   *  (e.g. "-- FOOD --", "-- BEVERAGE --"). Desktop-only; web POS
+   *  popup flow ignores it. */
+  sectionName?: string | null;
 }
 
 export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {

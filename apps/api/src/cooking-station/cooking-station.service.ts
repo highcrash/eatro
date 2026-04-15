@@ -8,7 +8,7 @@ export class CookingStationService {
   findAll(branchId: string) {
     return this.prisma.cookingStation.findMany({
       where: { branchId },
-      orderBy: { name: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
   }
 
@@ -20,18 +20,20 @@ export class CookingStationService {
     return station;
   }
 
-  create(branchId: string, dto: { name: string; printerName?: string; printerIp?: string }) {
+  create(branchId: string, dto: { name: string; printerName?: string | null; printerIp?: string | null; printerPort?: number | null; sortOrder?: number }) {
     return this.prisma.cookingStation.create({
       data: {
         branchId,
         name: dto.name,
         printerName: dto.printerName ?? null,
         printerIp: dto.printerIp ?? null,
+        printerPort: dto.printerPort ?? null,
+        sortOrder: dto.sortOrder ?? 0,
       },
     });
   }
 
-  async update(id: string, branchId: string, dto: { name?: string; printerName?: string; printerIp?: string; isActive?: boolean }) {
+  async update(id: string, branchId: string, dto: { name?: string; printerName?: string | null; printerIp?: string | null; printerPort?: number | null; sortOrder?: number; isActive?: boolean }) {
     await this.findOne(id, branchId);
     return this.prisma.cookingStation.update({
       where: { id },
