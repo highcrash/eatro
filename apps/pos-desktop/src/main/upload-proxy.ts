@@ -23,18 +23,26 @@ export async function refreshUploadProxyServer(): Promise<void> {
   cachedServerUrl = cfg?.serverUrl ?? null;
 }
 
+/**
+ * Only these hosts count as "the renderer's own origin" — i.e. relative URL
+ * resolutions for dev-server / file:// pages. Requests to any other host
+ * (DO Spaces CDN, any real service) pass through unchanged.
+ */
+function isRendererOriginHost(host: string): boolean {
+  if (!host) return false;          // file:// URLs
+  if (host === 'localhost' || host.startsWith('localhost:')) return true;
+  if (host === '127.0.0.1' || host.startsWith('127.0.0.1:')) return true;
+  return false;
+}
+
 export async function installUploadProxy(): Promise<void> {
   await refreshUploadProxyServer();
   console.log(`[upload-proxy] installed; server = ${cachedServerUrl ?? '(unpaired)'}`);
 
-  // Broad filter — filter precisely in the handler. Some requests
-  // (ws://, file://, etc.) are emitted by the renderer and we want to
-  // inspect them all during debugging.
   session.defaultSession.webRequest.onBeforeRequest(
     { urls: ['<all_urls>'] },
     (details, callback) => {
       try {
-        // Only image/video/audio subresources — leave XHR, fetch, navigation alone.
         const resourceType = details.resourceType;
         if (resourceType !== 'image' && resourceType !== 'media' && resourceType !== 'font') {
           return callback({});
@@ -47,10 +55,13 @@ export async function installUploadProxy(): Promise<void> {
         try { parsed = new URL(details.url); } catch { return callback({}); }
         if (!parsed.pathname.startsWith('/uploads/')) return callback({});
 
-        const targetParsed = new URL(target);
-        if (parsed.host === targetParsed.host && parsed.protocol === targetParsed.protocol) {
+        // CRITICAL: only redirect requests aimed at the renderer's own
+        // origin (dev server or file://). Absolute URLs to DO Spaces /
+        // any other CDN are already valid — don't touch them.
+        if (parsed.protocol !== 'file:' && !isRendererOriginHost(parsed.host)) {
           return callback({});
         }
+
         const redirectURL = `${target.replace(/\/$/, '')}${parsed.pathname}${parsed.search}`;
         console.log(`[upload-proxy] ${details.url}  →  ${redirectURL}`);
         callback({ redirectURL });

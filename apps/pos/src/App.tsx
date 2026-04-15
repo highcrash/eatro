@@ -4,6 +4,7 @@ import { useAuthStore } from './store/auth.store';
 import LoginPage from './pages/LoginPage';
 import PosLayout from './layouts/PosLayout';
 import OrderPage from './pages/OrderPage';
+import PosOrdersPage from './pages/PosOrdersPage';
 import TablesPage from './pages/TablesPage';
 import KitchenPage from './pages/KitchenPage';
 import SalesReportPage from './pages/SalesReportPage';
@@ -26,6 +27,7 @@ export default function App() {
         <Route index element={<Navigate to="/tables" replace />} />
         <Route path="/tables" element={<TablesPage />} />
         <Route path="/order/:tableId?" element={<OrderPage />} />
+        <Route path="/orders" element={<PosOrdersPage />} />
         <Route path="/customers" element={<PosCustomersPage />} />
         <Route path="/purchasing" element={<PosPurchasingPage />} />
         <Route path="/finance" element={<PosFinancePage />} />

@@ -458,9 +458,10 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
   const [error, setError] = useState('');
   const [rcvVariantOverrides, setRcvVariantOverrides] = useState<Record<string, { id: string; brandName: string; packSize?: string }>>({});
   const [rcvVariantPicker, setRcvVariantPicker] = useState<{ poItemId: string; parent: Ingredient } | null>(null);
-  const [rcvExtras, setRcvExtras] = useState<{ ingredientId: string; quantity: string; unitPrice: string }[]>([]);
+  const [rcvExtras, setRcvExtras] = useState<{ ingredientId: string; quantity: string; unitPrice: string; unit: string }[]>([]);
   const [rcvExtraSearch, setRcvExtraSearch] = useState<Record<number, string>>({});
   const [rcvExtraVariantPicker, setRcvExtraVariantPicker] = useState<{ parent: Ingredient; idx: number } | null>(null);
+  const [closePartialCheck, setClosePartialCheck] = useState(false);
 
   const grandTotal = (po
     ? po.items.reduce((sum, item) => {
@@ -475,10 +476,15 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['purchasing', 'open'] });
       void qc.invalidateQueries({ queryKey: ['ingredients'] });
+      // Refresh supplier lists so totalDue reflects the new receipt cost
+      // without the cashier having to reload the page.
+      void qc.invalidateQueries({ queryKey: ['suppliers'] });
       setPoId('');
       setReceiveQtys({});
       setReceivePrices({});
       setReceiveNotes('');
+      setRcvExtras([]);
+      setClosePartialCheck(false);
       setError('Goods received ✓');
     },
     onError: (e: Error) => setError(e.message),
@@ -501,7 +507,12 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
       });
     const additionalItems = rcvExtras
       .filter((e) => e.ingredientId && parseFloat(e.quantity) > 0)
-      .map((e) => ({ ingredientId: e.ingredientId, quantityReceived: parseFloat(e.quantity), unitPrice: e.unitPrice ? Math.round(parseFloat(e.unitPrice) * 100) : undefined }));
+      .map((e) => ({
+        ingredientId: e.ingredientId,
+        quantityReceived: parseFloat(e.quantity),
+        unitPrice: e.unitPrice ? Math.round(parseFloat(e.unitPrice) * 100) : undefined,
+        unit: e.unit || undefined,
+      }));
     if (!items.length && !additionalItems.length) return setError('Enter at least one received quantity');
     guardAndRun('receivePurchaseOrder', `Receive PO #${po.id.slice(-6).toUpperCase()} · ${po.supplier?.name ?? ''}`, (otp) => {
       mut.mutate({
@@ -509,6 +520,7 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
         items,
         additionalItems: additionalItems.length > 0 ? additionalItems : undefined,
         notes: receiveNotes || undefined,
+        closePartial: closePartialCheck || undefined,
         actionOtp: otp ?? undefined,
       });
     });
@@ -593,13 +605,19 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
           <div className="border-t border-theme-border mt-3 pt-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-theme-accent">Extra Items (not in PO)</span>
-              <button onClick={() => setRcvExtras((e) => [...e, { ingredientId: '', quantity: '', unitPrice: '' }])}
+              <button onClick={() => setRcvExtras((e) => [...e, { ingredientId: '', quantity: '', unitPrice: '', unit: '' }])}
                 className="text-theme-accent text-[10px] font-bold uppercase tracking-wider hover:opacity-80">+ Add</button>
             </div>
             {rcvExtras.map((extra, idx) => {
               const sel = extra.ingredientId ? findIngredient(ingredients, extra.ingredientId) : null;
+              // Unit picker only shows when the ingredient has NO purchase-unit pack
+              // configured — in that case qty is in the base unit and cashier may
+              // want to receive in a convertible alternative (e.g. G vs KG).
+              const hasPU = !!sel?.purchaseUnit && Number(sel.purchaseUnitQty) > 0;
+              const unitOptions = sel ? (hasPU ? [sel.purchaseUnit as string] : convertibleUnits(sel.unit)) : [];
+              const showUnitPicker = !!sel && !hasPU && unitOptions.length > 1;
               return (
-                <div key={idx} className="grid grid-cols-[3fr_100px_100px_40px] gap-2 items-center mb-2">
+                <div key={idx} className="grid grid-cols-[3fr_90px_80px_100px_40px] gap-2 items-center mb-2">
                   <div>
                     <input
                       list={`rcv-ext-${idx}`}
@@ -616,7 +634,8 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
                           }
                           const pu = match.purchaseUnit && Number(match.purchaseUnitQty) > 0;
                           const cost = pu ? (Number(match.costPerPurchaseUnit) / 100).toFixed(2) : (Number(match.costPerUnit) / 100).toFixed(2);
-                          setRcvExtras((l) => l.map((item, i) => i === idx ? { ...item, ingredientId: match.id, unitPrice: cost } : item));
+                          const defaultUnit = match.purchaseUnit || match.unit;
+                          setRcvExtras((l) => l.map((item, i) => i === idx ? { ...item, ingredientId: match.id, unitPrice: cost, unit: defaultUnit } : item));
                           setRcvExtraSearch((s) => { const n = { ...s }; delete n[idx]; return n; });
                         }
                       }}
@@ -632,6 +651,19 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
                   <input type="number" step="0.001" min="0" placeholder="Qty" value={extra.quantity}
                     onChange={(e) => setRcvExtras((l) => l.map((item, i) => i === idx ? { ...item, quantity: e.target.value } : item))}
                     className="bg-theme-bg rounded-theme px-2 py-2 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent text-right" />
+                  {showUnitPicker ? (
+                    <select
+                      value={extra.unit || unitOptions[0]}
+                      onChange={(e) => setRcvExtras((l) => l.map((item, i) => i === idx ? { ...item, unit: e.target.value } : item))}
+                      className="bg-theme-bg rounded-theme px-2 py-2 text-xs font-semibold text-theme-text outline-none border border-theme-border focus:border-theme-accent text-center"
+                    >
+                      {unitOptions.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  ) : (
+                    <div className="bg-theme-bg rounded-theme px-2 py-2 text-xs font-semibold text-theme-text-muted text-center">
+                      {sel ? (extra.unit || unitOptions[0] || '—') : '—'}
+                    </div>
+                  )}
                   <input type="number" step="0.01" min="0" placeholder="৳ Price" value={extra.unitPrice}
                     onChange={(e) => setRcvExtras((l) => l.map((item, i) => i === idx ? { ...item, unitPrice: e.target.value } : item))}
                     className="bg-theme-bg rounded-theme px-2 py-2 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent text-right" />
@@ -655,6 +687,26 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
             <span className="text-sm text-theme-text-muted">Total Receiving</span>
             <span className="text-2xl font-extrabold text-theme-text">{formatCurrency(Math.round(grandTotal * 100))}</span>
           </div>
+
+          {/* Close partial — only relevant when at least one PO item is under-received */}
+          {po.items.some((i) => {
+            const remaining = Number(i.quantityOrdered) - Number(i.quantityReceived);
+            const receivingNow = parseFloat(receiveQtys[i.id] || '0') || 0;
+            return remaining - receivingNow > 0;
+          }) && (
+            <label className="mt-3 flex items-start gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={closePartialCheck}
+                onChange={(e) => setClosePartialCheck(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-theme-accent"
+              />
+              <span className="text-xs text-theme-text">
+                <span className="font-semibold">Close this order after receiving.</span>
+                <span className="text-theme-text-muted"> Any un-received items stay on the PO for audit, but the status goes to Received (no more deliveries expected).</span>
+              </span>
+            </label>
+          )}
         </div>
       )}
 
@@ -689,7 +741,8 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
           onSelect={(variant) => {
             const pu = rcvExtraVariantPicker.parent.purchaseUnit || variant.purchaseUnit;
             const cost = pu && Number(variant.costPerPurchaseUnit) > 0 ? (Number(variant.costPerPurchaseUnit) / 100).toFixed(2) : (Number(variant.costPerUnit) / 100).toFixed(2);
-            setRcvExtras((l) => l.map((item, i) => i === rcvExtraVariantPicker.idx ? { ...item, ingredientId: variant.id, unitPrice: cost } : item));
+            const defaultUnit = variant.purchaseUnit || rcvExtraVariantPicker.parent.purchaseUnit || variant.unit || rcvExtraVariantPicker.parent.unit;
+            setRcvExtras((l) => l.map((item, i) => i === rcvExtraVariantPicker.idx ? { ...item, ingredientId: variant.id, unitPrice: cost, unit: defaultUnit } : item));
             setRcvExtraVariantPicker(null);
           }}
           onClose={() => setRcvExtraVariantPicker(null)}

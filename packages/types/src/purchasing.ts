@@ -64,8 +64,15 @@ export interface ReceiveGoodsDto {
     ingredientId: string;
     quantityReceived: number;
     unitPrice?: number; // in paisa
+    /** Override the receive-side unit. Used when the ingredient has no
+     *  purchaseUnit set and the cashier wants to receive in an alternative
+     *  stock-compatible unit (e.g. 500 G for a KG-stocked ingredient). */
+    unit?: string;
   }[];
   notes?: string;
+  /** Close the PO to RECEIVED even when some items are only partially
+   *  received. Useful when the supplier won't deliver the rest. */
+  closePartial?: boolean;
 }
 
 // ─── Purchase Returns ────────────────────────────────────────────────────────

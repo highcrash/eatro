@@ -255,7 +255,26 @@ export class PurchasingService {
           if (!ingredient) continue;
           const hasPurchaseUnit = ingredient.purchaseUnit && ingredient.purchaseUnitQty.toNumber() > 0;
           const purchaseUnitQty = hasPurchaseUnit ? ingredient.purchaseUnitQty.toNumber() : 1;
-          const stockQtyReceived = hasPurchaseUnit ? extra.quantityReceived * purchaseUnitQty : extra.quantityReceived;
+
+          // Convert received qty to stock units, same priority as PO items:
+          //   1) hasPurchaseUnit → qty is in purchase-units, scale by purchaseUnitQty
+          //   2) explicit `unit` override that differs from stock unit → unit-conversion table
+          //   3) as-is (qty is already in stock units)
+          const incomingUnit = extra.unit || ingredient.purchaseUnit || ingredient.unit;
+          const stockUnit = ingredient.unit;
+          let stockQtyReceived: number;
+          if (hasPurchaseUnit) {
+            stockQtyReceived = extra.quantityReceived * purchaseUnitQty;
+          } else if (incomingUnit !== stockUnit) {
+            stockQtyReceived = await this.unitConversion.convert(
+              branchId,
+              extra.quantityReceived,
+              incomingUnit,
+              stockUnit,
+            );
+          } else {
+            stockQtyReceived = extra.quantityReceived;
+          }
 
           const ingredientUpdate: Record<string, unknown> = { currentStock: { increment: stockQtyReceived } };
           if (extra.unitPrice && extra.unitPrice > 0) {
@@ -317,12 +336,18 @@ export class PurchasingService {
         });
       }
 
-      const newStatus = allReceived ? 'RECEIVED' : 'PARTIAL';
+      // `closePartial` lets the cashier mark the PO complete even when some
+      // items weren't fully received (supplier finalised the delivery at a
+      // short count, no more coming). Remaining un-received qty stays on the
+      // PO items for auditability; status flips to RECEIVED.
+      const forceClose = dto.closePartial === true;
+      const finalReceived = allReceived || forceClose;
+      const newStatus = finalReceived ? 'RECEIVED' : 'PARTIAL';
       return tx.purchaseOrder.update({
         where: { id },
         data: {
           status: newStatus,
-          receivedAt: allReceived ? new Date() : undefined,
+          receivedAt: finalReceived ? new Date() : undefined,
         },
         include: {
           supplier: { select: { id: true, name: true } },
