@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from 'react';
 import { X, Printer } from 'lucide-react';
 
 import type { Order } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { useBranding } from '../lib/branding';
+import { isDesktop, printReceiptSmart } from '../lib/print-receipt';
 
 interface ReceiptModalProps {
   order: Order;
@@ -17,6 +19,28 @@ export default function ReceiptModal({ order, cashReceived, onDone }: ReceiptMod
   const subtotal = Number(order.subtotal);
   const tax = Number(order.taxAmount);
   const change = order.paymentMethod === 'CASH' ? cashReceived - total : 0;
+  const [printError, setPrintError] = useState<string | null>(null);
+  const autoPrintedRef = useRef(false);
+
+  // Auto-fire the print + cash-drawer kick exactly once per mount when
+  // running inside the Electron desktop shell. The manual Print button stays
+  // as a reprint option. In the browser (no desktop wrapper) the cashier
+  // still clicks Print themselves — we don't force a dialog on them.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    if (autoPrintedRef.current) return;
+    autoPrintedRef.current = true;
+    void printReceiptSmart(order, branding ?? undefined).then((res) => {
+      if (!res.ok) setPrintError(res.message);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handlePrint() {
+    setPrintError(null);
+    const res = await printReceiptSmart(order, branding ?? undefined);
+    if (!res.ok) setPrintError(res.message);
+  }
 
   const paidAt = order.paidAt
     ? new Date(order.paidAt).toLocaleTimeString('en-BD', { hour: '2-digit', minute: '2-digit' })
@@ -136,20 +160,27 @@ export default function ReceiptModal({ order, cashReceived, onDone }: ReceiptMod
         </div>
 
         {/* Actions */}
-        <div className="px-6 pb-6 pt-2 flex gap-3">
-          <button
-            onClick={() => window.print()}
-            className="flex-1 border border-[#DDD9D3] py-2.5 text-sm font-body text-[#666] hover:border-[#111] hover:text-[#111] transition-colors flex items-center justify-center gap-2"
-          >
-            <Printer size={14} />
-            Print
-          </button>
-          <button
-            onClick={onDone}
-            className="flex-1 bg-[#111] text-white py-2.5 text-sm font-body font-medium hover:bg-[#333] transition-colors"
-          >
-            Done
-          </button>
+        <div className="px-6 pb-6 pt-2 flex flex-col gap-2">
+          {printError && (
+            <p className="text-[11px] font-body text-[#D62B2B] text-center px-2 py-1 border border-[#D62B2B]/30 bg-[#D62B2B]/5">
+              Print failed: {printError}
+            </p>
+          )}
+          <div className="flex gap-3">
+            <button
+              onClick={() => void handlePrint()}
+              className="flex-1 border border-[#DDD9D3] py-2.5 text-sm font-body text-[#666] hover:border-[#111] hover:text-[#111] transition-colors flex items-center justify-center gap-2"
+            >
+              <Printer size={14} />
+              {isDesktop() ? 'Reprint' : 'Print'}
+            </button>
+            <button
+              onClick={onDone}
+              className="flex-1 bg-[#111] text-white py-2.5 text-sm font-body font-medium hover:bg-[#333] transition-colors"
+            >
+              Done
+            </button>
+          </div>
         </div>
       </div>
     </div>

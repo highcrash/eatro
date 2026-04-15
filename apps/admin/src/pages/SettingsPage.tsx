@@ -245,6 +245,8 @@ export default function SettingsPage() {
 
       <SmsSettingsSection isOwner={isOwner} />
 
+      <KitchenSettingsSection isOwner={isOwner} />
+
       <UnitConversionSection isOwner={isOwner} />
 
       <style>{`
@@ -405,6 +407,54 @@ function SmsSettingsSection({ isOwner }: { isOwner: boolean }) {
             <input type="checkbox" checked={settings.notifyVoidOtp} disabled={!isOwner}
               onChange={(e) => updateMut.mutate({ notifyVoidOtp: e.target.checked })}
               className="accent-[#D62B2B] w-4 h-4" />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Kitchen Settings ────────────────────────────────────────────────────────
+
+function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
+  const qc = useQueryClient();
+
+  const { data: settings, isLoading } = useQuery<{ useKds: boolean }>({
+    queryKey: ['branch-settings'],
+    queryFn: () => api.get('/branch-settings'),
+  });
+
+  const updateMut = useMutation({
+    mutationFn: (data: { useKds: boolean }) => api.patch('/branch-settings', data),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['branch-settings'] }),
+  });
+
+  if (isLoading || !settings) return null;
+
+  return (
+    <div className="mt-8">
+      <div className="mb-4">
+        <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Operations</p>
+        <h2 className="font-display text-2xl text-white tracking-wide">KITCHEN</h2>
+      </div>
+
+      <div className="bg-[#161616] border border-[#2A2A2A]">
+        <div className="px-5 py-4 flex items-center justify-between">
+          <div className="pr-6">
+            <p className="text-sm font-body text-white font-medium mb-1">Use Kitchen Display System (KDS)</p>
+            <p className="text-xs font-body text-[#999] leading-relaxed">
+              When off, kitchen tickets auto-print on the cashier PC's default printer the moment an order is fired. Use this when your kitchen has a thermal printer but no screen.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+            <span className="text-xs font-body text-[#999]">{settings.useKds ? 'On' : 'Off'}</span>
+            <input
+              type="checkbox"
+              checked={settings.useKds}
+              disabled={!isOwner || updateMut.isPending}
+              onChange={(e) => updateMut.mutate({ useKds: e.target.checked })}
+              className="accent-[#D62B2B] w-4 h-4"
+            />
           </label>
         </div>
       </div>

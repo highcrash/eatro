@@ -7,10 +7,12 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
+import { DeviceModule } from '../device-registration/device.module';
 
 @Module({
   imports: [
     PassportModule,
+    DeviceModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

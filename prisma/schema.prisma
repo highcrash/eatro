@@ -191,6 +191,7 @@ model Branch {
   reservations          Reservation[]
   settings              BranchSetting?
   websiteContent        WebsiteContent?
+  devices               Device[]
 
   @@index([isActive])
   @@map("branches")
@@ -211,6 +212,8 @@ model BranchSetting {
   customThemes     String? // JSON array of custom theme objects (slug, name, scope, tokens)
   // Cashier permissions (Phase 6)
   cashierPermissions String? // JSON: per-action enabled+approval mode
+  // Kitchen
+  useKds             Boolean @default(true)  // When false, kitchen tickets auto-print from POS (no KDS screen)
   // ── Reservation Settings ──
   openingTime                     String  @default("09:00")
   closingTime                     String  @default("23:00")
@@ -1533,4 +1536,48 @@ model BackupSchedule {
   updatedAt DateTime  @updatedAt
 
   @@map("backup_schedule")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESKTOP DEVICES — Paired Windows cashier terminals
+// ─────────────────────────────────────────────────────────────────────────────
+// Each installation of apps/pos-desktop registers itself once via POST
+// /devices/register using owner credentials. Server returns a long-lived
+// opaque device token; only its bcrypt hash is stored here. Desktop
+// authenticates subsequent cashier logins by presenting the token.
+
+model Device {
+  id         String    @id @default(cuid())
+  branchId   String
+  name       String    // "Front Counter", "Register 2"
+  tokenHash  String    // bcrypt hash of the device token
+  lastSeenAt DateTime?
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+  createdById String?  // Staff.id of the owner/manager who paired the device
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@index([branchId, isActive])
+  @@map("devices")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IDEMPOTENCY — safe retries for mutation endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+// Desktop terminals attach an Idempotency-Key header to every mutating
+// request. If the network hiccups mid-drain and the same request replays,
+// the server returns the cached response instead of executing twice.
+
+model IdempotencyRecord {
+  key          String   @id
+  method       String
+  path         String
+  responseCode Int
+  responseBody String   // JSON-serialized body
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("idempotency_records")
 }

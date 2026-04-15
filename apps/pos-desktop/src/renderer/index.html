@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      CSP tuned for the desktop shell:
+      - img-src allows http/https (branch logos, uploaded menu photos on DO Spaces or the paired API server)
+      - connect-src allows http(s) + ws(s) so React Query and socket.io reach the paired server
+      - style-src permits inline styles used by imported POS components
+      - script-src 'unsafe-eval' is required by React Query devtools and Tailwind's JIT inline compiler in dev
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; media-src 'self' blob: http: https:; script-src 'self' 'unsafe-eval'; connect-src 'self' http: https: ws: wss:; font-src 'self' data: https:"
+    />
+    <title>Restora POS</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

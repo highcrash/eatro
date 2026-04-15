@@ -1,0 +1,54 @@
+appId: app.restora.pos.desktop
+productName: Restora POS
+copyright: Copyright © 2026 Restora
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+  # pnpm workspace symlinks leak turbo caches and sibling packages into the
+  # pack. We only need our compiled dist/ + node_modules — exclude the rest.
+  - '!**/.turbo/**'
+  - '!**/*.map'
+  - '!**/{tsconfig,tsconfig.*}.json'
+  - '!packages/*/src/**'
+
+# Native modules must be rebuilt against Electron's Node ABI at package time.
+npmRebuild: true
+
+# better-sqlite3 + any other .node binaries can't live inside asar.
+asar: true
+asarUnpack:
+  - '**/*.node'
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  executableName: Restora POS
+  artifactName: RestoraPOS-Setup-${version}.${ext}
+  # icon auto-resolves from build/icon.ico (Windows) or build/icon.png.
+  # Drop a 256x256+ .ico in build/ before cutting a real release — the
+  # default Electron icon ships until then.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Restora POS
+  uninstallDisplayName: Restora POS ${version}
+  deleteAppDataOnUninstall: false   # preserve paired config + PIN hashes
+
+# Auto-update feed. electron-updater fetches https://github.com/<owner>/<repo>/releases/latest
+# and looks for latest.yml + the matching .exe + .blockmap.
+publish:
+  - provider: github
+    owner: highcrash
+    repo: eatro
+    releaseType: release

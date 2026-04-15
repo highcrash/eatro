@@ -4,6 +4,7 @@ import { X, Printer } from 'lucide-react';
 import type { Order } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { useBranding } from '../lib/branding';
+import { printReceiptSmart } from '../lib/print-receipt';
 
 interface BillModalProps {
   order: Order;
@@ -30,7 +31,7 @@ export default function BillModal({ order, onClose }: BillModalProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const handlePrint = () => window.print();
+  const handlePrint = () => void printReceiptSmart(order, branding ?? undefined, { openCashDrawer: false });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">

@@ -1,0 +1,19 @@
+{
+  "extends": "@restora/config/tsconfig/base",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "types": ["node", "electron"],
+    "composite": true,
+    "noEmit": false,
+    "outDir": "dist/main-types",
+    "baseUrl": ".",
+    "paths": {
+      "@restora/types": ["../../packages/types/src"],
+      "@restora/utils": ["../../packages/utils/src"]
+    }
+  },
+  "include": ["src/main/**/*", "src/preload/**/*", "electron.vite.config.ts"]
+}

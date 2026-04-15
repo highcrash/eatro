@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   Globe,
   Database,
+  Monitor,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -96,6 +97,7 @@ const NAV_GROUPS = [
       { to: '/settings', icon: Settings, label: 'Settings' },
       { to: '/data-cleanup', icon: Trash2, label: 'Data Cleanup' },
       { to: '/backups', icon: Database, label: 'Backups' },
+      { to: '/devices', icon: Monitor, label: 'Terminals' },
     ],
   },
 ];

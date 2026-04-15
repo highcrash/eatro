@@ -7,13 +7,15 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --filter=!@restora/pos-desktop",
+    "dev:all": "turbo run dev --concurrency=12",
     "dev:api": "turbo run dev --filter=@restora/api",
     "dev:pos": "turbo run dev --filter=@restora/pos",
     "dev:admin": "turbo run dev --filter=@restora/admin",
     "dev:kds": "turbo run dev --filter=@restora/kds",
     "dev:qr": "turbo run dev --filter=@restora/qr",
     "dev:web": "turbo run dev --filter=@restora/web",
+    "dev:desktop": "turbo run dev --filter=@restora/pos-desktop",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
@@ -62,6 +64,9 @@
       "@prisma/client",
       "@prisma/engines",
       "bcrypt",
+      "better-sqlite3",
+      "electron",
+      "electron-builder",
       "esbuild",
       "msgpackr-extract",
       "prisma"

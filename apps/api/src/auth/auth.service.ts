@@ -5,6 +5,7 @@ import * as bcrypt from 'bcryptjs';
 
 import type { JwtPayload, LoginResponse } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { DeviceService } from '../device-registration/device.service';
 
 @Injectable()
 export class AuthService {
@@ -12,7 +13,49 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly devices: DeviceService,
   ) {}
+
+  /**
+   * Desktop terminal: establish a cashier session using a paired device
+   * token + staff identity. The PIN itself is verified locally in the
+   * desktop app (bcrypt hash stored on the PC) — the server trusts that if
+   * the desktop presents both a valid deviceToken AND the correct staffId
+   * for that device's branch, the cashier has proven identity on-device.
+   */
+  async pinLogin(deviceToken: string, staffId: string): Promise<LoginResponse> {
+    const device = await this.devices.verifyToken(deviceToken);
+    if (!device) throw new UnauthorizedException('Terminal is not paired or has been revoked');
+
+    const staff = await this.prisma.staff.findFirst({
+      where: { id: staffId, branchId: device.branchId, deletedAt: null, isActive: true },
+      include: { branch: { select: { name: true } } },
+    });
+    if (!staff) throw new UnauthorizedException('Staff not found on this terminal\'s branch');
+
+    return this.login(staff);
+  }
+
+  /**
+   * First-time cashier setup on a new terminal: cashier proves identity
+   * with password + deviceToken. On success they can then set a local PIN.
+   * Same response shape as regular login.
+   */
+  async passwordLoginOnDevice(
+    deviceToken: string,
+    email: string,
+    password: string,
+  ): Promise<LoginResponse> {
+    const device = await this.devices.verifyToken(deviceToken);
+    if (!device) throw new UnauthorizedException('Terminal is not paired or has been revoked');
+
+    const staff = await this.validateUser(email, password);
+    if (!staff) throw new UnauthorizedException('Invalid credentials');
+    if (staff.branchId !== device.branchId) {
+      throw new UnauthorizedException('This staff member does not belong to this terminal\'s branch');
+    }
+    return this.login(staff);
+  }
 
   async validateUser(email: string, password: string): Promise<{ id: string; email: string; role: string; branchId: string; name: string; branch: { name: string } } | null> {
     const staff = await this.prisma.staff.findFirst({

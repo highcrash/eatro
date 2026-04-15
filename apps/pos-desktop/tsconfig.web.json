@@ -1,0 +1,13 @@
+{
+  "extends": "@restora/config/tsconfig/react",
+  "compilerOptions": {
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@restora/types": ["../../packages/types/src"],
+      "@restora/utils": ["../../packages/utils/src"],
+      "@pos/*": ["../pos/src/*"]
+    }
+  },
+  "include": ["src/renderer/**/*", "../pos/src/**/*"]
+}

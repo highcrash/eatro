@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 import type { Order, LoginResponse } from '@restora/types';
-import { formatElapsed, elapsedSeconds } from '@restora/utils';
+import { formatElapsed, elapsedSeconds, printKitchenTicket } from '@restora/utils';
 import { useAuthStore } from './store/auth.store';
 import { api } from './lib/api';
 
@@ -89,6 +89,15 @@ function KdsDisplay() {
   const [preparingIds, setPreparingIds] = useState<Set<string>>(new Set());
   const [, setTick] = useState(0);
   const [clock, setClock] = useState(new Date());
+  const [kdsEnabled, setKdsEnabled] = useState<boolean | null>(null);
+
+  // Check branch-level KDS toggle on mount
+  useEffect(() => {
+    api
+      .get<{ useKds: boolean }>('/branch-settings')
+      .then((s) => setKdsEnabled(s.useKds))
+      .catch(() => setKdsEnabled(true)); // fail open
+  }, []);
 
   // Fetch existing active orders on mount
   useEffect(() => {
@@ -150,38 +159,31 @@ function KdsDisplay() {
   }, []);
 
   const printTicket = useCallback((ticket: Order) => {
-    const activeItems = ticket.items.filter((i) => !i.voidedAt);
-    const items = activeItems
-      .map(
-        (i) =>
-          `<tr><td style="padding:4px 0;font-size:16px;font-weight:bold">${i.quantity}\u00d7</td><td style="padding:4px 8px;font-size:16px">${i.menuItemName}</td></tr>${i.notes ? `<tr><td></td><td style="font-size:12px;color:#666;padding-bottom:4px">&nbsp;&rarr; ${i.notes}</td></tr>` : ''}`,
-      )
-      .join('');
-
-    const html = `<html><head><style>
-      body { font-family: monospace; width: 80mm; margin: 0; padding: 8px; }
-      h1 { font-size: 24px; margin: 0; text-align: center; }
-      .meta { font-size: 12px; text-align: center; color: #666; margin: 4px 0 12px; }
-      table { width: 100%; border-collapse: collapse; }
-      .divider { border-top: 1px dashed #000; margin: 8px 0; }
-      .notes { font-size: 12px; font-style: italic; margin-top: 8px; }
-    </style></head><body>
-      <h1>KITCHEN ORDER</h1>
-      <div class="meta">#${ticket.orderNumber} &mdash; ${ticket.tableNumber ? 'Table ' + ticket.tableNumber : ticket.type}</div>
-      <div class="meta">${new Date(ticket.createdAt).toLocaleTimeString()}</div>
-      <div class="divider"></div>
-      <table>${items}</table>
-      <div class="divider"></div>
-      ${ticket.notes ? `<div class="notes">Note: ${ticket.notes}</div>` : ''}
-      <script>window.onload=function(){window.print();window.close();}<\/script>
-    </body></html>`;
-
-    const win = window.open('', '_blank', 'width=320,height=600');
-    if (win) {
-      win.document.write(html);
-      win.document.close();
-    }
+    printKitchenTicket(ticket as any);
   }, []);
+
+  if (kdsEnabled === false) {
+    return (
+      <div className="h-screen bg-[#0D0D0D] flex items-center justify-center p-8">
+        <div className="max-w-md text-center">
+          <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-3">Disabled</p>
+          <h1 className="font-display text-white text-4xl tracking-wide mb-4">KITCHEN DISPLAY IS OFF</h1>
+          <p className="text-[#CCC] text-sm font-body leading-relaxed mb-6">
+            This branch is configured to auto-print kitchen tickets directly from the POS instead of using a screen.
+          </p>
+          <p className="text-[#666] text-xs font-body">
+            To re-enable the KDS, open Admin &rarr; Settings &rarr; Kitchen.
+          </p>
+          <button
+            onClick={() => clearAuth()}
+            className="mt-8 bg-[#1A1A1A] border border-[#2A2A2A] text-white text-xs font-body tracking-widest uppercase px-4 py-2 hover:bg-[#222] transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-[#0D0D0D] p-4 overflow-hidden flex flex-col">

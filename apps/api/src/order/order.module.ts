@@ -4,9 +4,10 @@ import { OrderService } from './order.service';
 import { WsGatewayModule } from '../ws-gateway/ws-gateway.module';
 import { RecipeModule } from '../recipe/recipe.module';
 import { AccountModule } from '../account/account.module';
+import { BranchSettingsModule } from '../branch-settings/branch-settings.module';
 
 @Module({
-  imports: [WsGatewayModule, RecipeModule, AccountModule],
+  imports: [WsGatewayModule, RecipeModule, AccountModule, BranchSettingsModule],
   controllers: [OrderController, QrOrderController],
   providers: [OrderService],
   exports: [OrderService],

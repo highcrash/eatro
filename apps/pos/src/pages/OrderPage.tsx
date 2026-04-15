@@ -4,7 +4,8 @@ import { useParams, useNavigate, useLocation, useSearchParams } from 'react-rout
 import { Plus, Minus, ArrowLeft, ShoppingBag, X, Printer, Search } from 'lucide-react';
 
 import type { MenuItem, Order, OrderItem, CreateOrderDto, VoidOrderItemDto, WasteReason } from '@restora/types';
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, printKitchenTicket as printKitchenTicketUtil } from '@restora/utils';
+import { useBranchSettings } from '../hooks/useBranchSettings';
 import { useAuthStore } from '../store/auth.store';
 import { api } from '../lib/api';
 import PaymentModal from '../components/PaymentModal';
@@ -502,6 +503,7 @@ function ActiveOrderView({
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { data: branchSettings } = useBranchSettings();
   const isCashier = user?.role === 'CASHIER' || user?.role === 'KITCHEN' || user?.role === 'WAITER';
 
   const [order, setOrder] = useState<Order>(initialOrder);
@@ -569,7 +571,7 @@ function ActiveOrderView({
     mutationFn: (items: { menuItemId: string; quantity: number; notes?: string }[]) =>
       api.post<Order>(`/orders/${order.id}/items`, items),
     onSuccess: (updated) => {
-      printNewItemsKT(updated, newItemCart);
+      if (!branchSettings || !branchSettings.useKds) printNewItemsKT(updated, newItemCart);
       setOrder(updated);
       setShowAddItems(false);
       setNewItemCart([]);
@@ -1490,44 +1492,21 @@ function NewOrderView({
     });
   };
 
-  const printKitchenTicket = (order: Order) => {
-    const activeItems = order.items.filter((i) => !i.voidedAt);
-    const items = activeItems
-      .map(
-        (i) =>
-          `<tr><td style="padding:4px 0;font-size:16px;font-weight:bold">${i.quantity}\u00d7</td><td style="padding:4px 8px;font-size:16px">${i.menuItemName}</td></tr>${i.notes ? `<tr><td></td><td style="font-size:12px;color:#666;padding-bottom:4px">&nbsp;&rarr; ${i.notes}</td></tr>` : ''}`,
-      )
-      .join('');
+  const { data: branchSettings } = useBranchSettings();
 
-    const html = `<html><head><style>
-      body { font-family: monospace; width: 80mm; margin: 0; padding: 8px; }
-      h1 { font-size: 24px; margin: 0; text-align: center; }
-      .meta { font-size: 12px; text-align: center; color: #666; margin: 4px 0 12px; }
-      table { width: 100%; border-collapse: collapse; }
-      .divider { border-top: 1px dashed #000; margin: 8px 0; }
-      .notes { font-size: 12px; font-style: italic; margin-top: 8px; }
-    </style></head><body>
-      <h1>KITCHEN ORDER</h1>
-      <div class="meta">#${order.orderNumber} &mdash; ${order.tableNumber ? 'Table ' + order.tableNumber : order.type}</div>
-      <div class="meta">${new Date(order.createdAt).toLocaleTimeString()}</div>
-      <div class="divider"></div>
-      <table>${items}</table>
-      <div class="divider"></div>
-      ${order.notes ? `<div class="notes">Note: ${order.notes}</div>` : ''}
-      <script>window.onload=function(){window.print();window.close();}<\/script>
-    </body></html>`;
-
-    const win = window.open('', '_blank', 'width=320,height=600');
-    if (win) {
-      win.document.write(html);
-      win.document.close();
+  const maybePrintKitchenTicket = (order: Order) => {
+    // Only auto-print when KDS is disabled — otherwise the KDS screen handles it.
+    if (branchSettings && branchSettings.useKds) return;
+    const ok = printKitchenTicketUtil(order as any);
+    if (!ok) {
+      alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
     }
   };
 
   const createOrderMutation = useMutation({
     mutationFn: (dto: CreateOrderDto) => api.post<Order>('/orders', dto),
     onSuccess: (order) => {
-      printKitchenTicket(order);
+      maybePrintKitchenTicket(order);
       void queryClient.invalidateQueries({ queryKey: ['tables'] });
       void queryClient.invalidateQueries({ queryKey: ['orders', 'table', tableId] });
       void navigate('/tables');

@@ -1,0 +1,7 @@
+/* Re-use the web POS stylesheet verbatim so theming, fonts, and layout match. */
+@import '../../../../pos/src/styles/globals.css';
+
+/* Desktop-only overrides go below. Keep this file thin — the cashier UX
+   should be identical to the browser POS. */
+html, body, #root { height: 100%; }
+body { overflow: hidden; }

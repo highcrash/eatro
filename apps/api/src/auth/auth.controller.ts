@@ -55,4 +55,20 @@ export class AuthController {
   ) {
     return this.authService.switchBranch(user.sub, user.role, dto.branchId);
   }
+
+  @Post('pin-login')
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 900_000, limit: 30 } })
+  @ApiOperation({ summary: 'Desktop: exchange device token + staffId for a cashier session (PIN verified locally by the terminal)' })
+  pinLogin(@Body() dto: { deviceToken: string; staffId: string }) {
+    return this.authService.pinLogin(dto.deviceToken, dto.staffId);
+  }
+
+  @Post('password-login-on-device')
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 900_000, limit: 10 } })
+  @ApiOperation({ summary: 'Desktop: first-time cashier setup — prove identity with password before setting a local PIN' })
+  passwordLoginOnDevice(@Body() dto: { deviceToken: string; email: string; password: string }) {
+    return this.authService.passwordLoginOnDevice(dto.deviceToken, dto.email, dto.password);
+  }
 }

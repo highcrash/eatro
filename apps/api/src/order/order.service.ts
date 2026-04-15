@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
 import { RecipeService } from '../recipe/recipe.service';
 import { AccountService } from '../account/account.service';
+import { BranchSettingsService } from '../branch-settings/branch-settings.service';
 
 @Injectable()
 export class OrderService {
@@ -14,6 +15,7 @@ export class OrderService {
     private readonly ws: RestoraPosGateway,
     private readonly recipeService: RecipeService,
     private readonly accountService: AccountService,
+    private readonly branchSettings: BranchSettingsService,
   ) {}
 
   findAll(branchId: string, tableId?: string, status?: string, from?: string, to?: string) {
@@ -175,7 +177,9 @@ export class OrderService {
     });
 
     this.ws.emitToBranch(branchId, 'order:created', order);
-    this.ws.emitToKds(branchId, 'kds:ticket:new', order);
+    if (await this.branchSettings.isKdsEnabled(branchId)) {
+      this.ws.emitToKds(branchId, 'kds:ticket:new', order);
+    }
     if (dto.tableId) this.ws.emitToBranch(branchId, 'table:updated', { id: dto.tableId, status: 'OCCUPIED' });
 
     // Deduct stock via recipe engine (best-effort, non-blocking)
@@ -559,7 +563,9 @@ export class OrderService {
     });
 
     this.ws.emitToBranch(branchId, 'order:updated', updated);
-    this.ws.emitToKds(branchId, 'kds:ticket:new', updated);
+    if (await this.branchSettings.isKdsEnabled(branchId)) {
+      this.ws.emitToKds(branchId, 'kds:ticket:new', updated);
+    }
 
     return updated;
   }
@@ -657,7 +663,9 @@ export class OrderService {
     });
 
     this.ws.emitToBranch(branchId, 'order:updated', updated);
-    this.ws.emitToKds(branchId, 'kds:ticket:new', updated);
+    if (await this.branchSettings.isKdsEnabled(branchId)) {
+      this.ws.emitToKds(branchId, 'kds:ticket:new', updated);
+    }
 
     // Deduct stock for newly approved items
     void this.recipeService.deductStockForOrder(
@@ -712,7 +720,9 @@ export class OrderService {
     });
 
     this.ws.emitToBranch(branchId, 'order:updated', updated);
-    this.ws.emitToKds(branchId, 'kds:ticket:new', updated);
+    if (await this.branchSettings.isKdsEnabled(branchId)) {
+      this.ws.emitToKds(branchId, 'kds:ticket:new', updated);
+    }
 
     void this.recipeService.deductStockForOrder(
       branchId, orderId,

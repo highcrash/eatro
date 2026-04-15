@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Edit, Trash2, X, Building2 } from 'lucide-react';
+import { Plus, Edit, Trash2, X, Building2, Copy, Check } from 'lucide-react';
 
 import type { Branch, CreateBranchDto, UpdateBranchDto } from '@restora/types';
 import { api } from '../lib/api';
@@ -105,6 +105,18 @@ export default function BranchesPage() {
 
   const isOwner = currentUser?.role === 'OWNER';
   const showForm = showAdd || !!editing;
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyBranchId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
+    } catch {
+      // Clipboard API can fail in insecure contexts — fall back to prompt.
+      window.prompt('Copy Branch ID:', id);
+    }
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -148,6 +160,21 @@ export default function BranchesPage() {
                   </span>
                 )}
               </div>
+
+              <button
+                type="button"
+                onClick={() => void copyBranchId(b.id)}
+                title="Copy Branch ID — paste into the desktop POS First-Run Setup"
+                className="w-full mb-3 flex items-center gap-2 bg-[#0D0D0D] border border-[#2A2A2A] hover:border-[#D62B2B] px-2 py-1.5 text-left transition-colors group"
+              >
+                <span className="text-[9px] font-body font-medium tracking-widest uppercase text-[#666] group-hover:text-[#D62B2B]">ID</span>
+                <span className="text-[11px] font-mono text-[#CCC] truncate flex-1">{b.id}</span>
+                {copiedId === b.id ? (
+                  <Check size={12} className="text-[#4CAF50] flex-shrink-0" />
+                ) : (
+                  <Copy size={12} className="text-[#666] group-hover:text-[#D62B2B] flex-shrink-0" />
+                )}
+              </button>
 
               <div className="space-y-1 text-xs font-body text-[#DDD9D3]">
                 <p>{b.address}</p>

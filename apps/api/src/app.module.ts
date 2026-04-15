@@ -39,6 +39,9 @@ import { WebsiteModule } from './website/website.module';
 import { CleanupModule } from './cleanup/cleanup.module';
 import { ReservationModule } from './reservation/reservation.module';
 import { BackupModule } from './backup/backup.module';
+import { BranchSettingsModule } from './branch-settings/branch-settings.module';
+import { DeviceModule } from './device-registration/device.module';
+import { IdempotencyModule } from './idempotency/idempotency.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -137,6 +140,15 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // Database Backup/Restore (OWNER-only)
     BackupModule,
+
+    // Branch-level POS settings (KDS toggle, etc.)
+    BranchSettingsModule,
+
+    // Desktop cashier terminals (pairing, pin-login, admin revoke)
+    DeviceModule,
+
+    // Idempotent mutation responses — desktop outbox retries land here.
+    IdempotencyModule,
 
     // Reservation System
     ScheduleModule.forRoot(),
