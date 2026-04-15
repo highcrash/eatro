@@ -56,13 +56,13 @@ export async function printReceipt(receipt: ReceiptInput, opts: PrintReceiptOpti
   }
 
   // os-printer fallback: HTML rendering. Cash drawer kick cannot be sent
-  // this way; we silently skip it. We deliberately DON'T pass a custom
-  // pageSize here — most Windows thermal drivers reject arbitrary micron
-  // dimensions from webContents.print() and silently drop the job. Instead
-  // we let the driver use its configured default paper (typically already
-  // 80 mm roll) and constrain the rendered width via @page CSS inside
-  // renderReceiptHtml.
-  await printHtmlToDevice(renderReceiptHtml(receipt), slot.deviceName);
+  // this way; we silently skip it. We pass an explicit 80mm × 297mm page
+  // size (in microns) so the driver doesn't fall back to a zero-height
+  // page when the @page CSS size: auto isn't fully honored — which was
+  // printing blank receipts on the Cash Printer driver.
+  await printHtmlToDevice(renderReceiptHtml(receipt), slot.deviceName, {
+    pageSize: { width: 80_000, height: 297_000 },
+  });
 }
 
 /**
@@ -193,8 +193,12 @@ function renderReceiptHtml(r: ReceiptInput): string {
   `).join('');
 
   return `<html><head><style>
-    @page { size: 80mm auto; margin: 2mm; }
-    html, body { margin: 0; padding: 0; }
+    /* 80mm × 297mm fixed: "auto" height is unreliable across Windows thermal
+       drivers (some render a zero-height page and the receipt prints blank).
+       A tall fixed height works on every driver we've seen — the roll
+       printer cuts at end-of-content anyway. */
+    @page { size: 80mm 297mm; margin: 2mm; }
+    html, body { margin: 0; padding: 0; color: #000; }
     body { font-family: monospace; width: 76mm; padding: 0; font-size: 11px; line-height: 1.3; }
     h1 { font-size: 15px; margin: 0; text-align: center; }
     table { width: 100%; border-collapse: collapse; margin-top: 4px; }

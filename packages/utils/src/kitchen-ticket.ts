@@ -49,8 +49,8 @@ export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {
   const destination = ticket.tableNumber ? `Table ${escapeHtml(String(ticket.tableNumber))}` : escapeHtml(ticket.type);
 
   return `<html><head><style>
-    @page { size: 80mm auto; margin: 2mm; }
-    html, body { margin: 0; padding: 0; }
+    @page { size: 80mm 297mm; margin: 2mm; }
+    html, body { margin: 0; padding: 0; color: #000; }
     body { font-family: monospace; width: 76mm; padding: 0; }
     h1 { font-size: 22px; margin: 0; text-align: center; }
     .meta { font-size: 12px; text-align: center; color: #666; margin: 4px 0 12px; }
