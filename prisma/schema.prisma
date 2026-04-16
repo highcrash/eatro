@@ -1441,6 +1441,12 @@ model CookingStation {
   printerName String?   // Windows printer name (USB thermal driver) — os-printer mode
   printerIp   String?   // Network thermal printer host
   printerPort Int?      // Network thermal printer TCP port (default 9100 at runtime)
+  // Per-section VAT opt-out. When false, items routed to this station are
+  // excluded from the VAT base on new orders — useful for jurisdictions
+  // that zero-rate certain categories (e.g. Bangladesh zero-rates some
+  // beverages). The branch's master vatEnabled flag still wins: when VAT
+  // is off branch-wide, no items are taxed regardless of section flags.
+  vatEnabled  Boolean   @default(true)
   sortOrder   Int       @default(0)
   isActive    Boolean   @default(true)
   createdAt   DateTime  @default(now())

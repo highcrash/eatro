@@ -12,6 +12,7 @@ interface CookingStation {
   printerPort: number | null;
   sortOrder: number;
   isActive: boolean;
+  vatEnabled: boolean;
 }
 
 function StationDialog({
@@ -27,6 +28,7 @@ function StationDialog({
   const [printerIp, setPrinterIp] = useState(initial?.printerIp ?? '');
   const [printerPort, setPrinterPort] = useState<string>(String(initial?.printerPort ?? ''));
   const [sortOrder, setSortOrder] = useState<string>(String(initial?.sortOrder ?? 0));
+  const [vatEnabled, setVatEnabled] = useState<boolean>(initial?.vatEnabled ?? true);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -36,6 +38,7 @@ function StationDialog({
         printerIp: printerIp.trim() || null,
         printerPort: printerPort.trim() ? Number(printerPort) : null,
         sortOrder: sortOrder.trim() ? Number(sortOrder) : 0,
+        vatEnabled,
       };
       return initial
         ? api.patch(`/cooking-stations/${initial.id}`, body)
@@ -126,6 +129,16 @@ function StationDialog({
           />
         </div>
 
+        <label className="flex items-center gap-2 text-xs text-[#DDD9D3]">
+          <input
+            type="checkbox"
+            checked={vatEnabled}
+            onChange={(e) => setVatEnabled(e.target.checked)}
+            className="accent-[#D62B2B]"
+          />
+          <span>VAT applies to items in this section — uncheck to zero-rate (e.g. beverages in jurisdictions that exempt them).</span>
+        </label>
+
         {mutation.isError && (
           <p className="text-xs text-[#D62B2B]">{(mutation.error as Error).message}</p>
         )}
@@ -197,6 +210,7 @@ export default function CookingStationsPage() {
               <th className="px-5 py-3 font-medium">Name</th>
               <th className="px-5 py-3 font-medium">Printer Name</th>
               <th className="px-5 py-3 font-medium">Printer IP</th>
+              <th className="px-5 py-3 font-medium">VAT</th>
               <th className="px-5 py-3 font-medium">Status</th>
               <th className="px-5 py-3 font-medium w-28">Actions</th>
             </tr>
@@ -207,6 +221,7 @@ export default function CookingStationsPage() {
                 <td className="px-5 py-3 font-medium text-white">{station.name}</td>
                 <td className="px-5 py-3 text-[#999]">{station.printerName ?? '--'}</td>
                 <td className="px-5 py-3 text-[#999]">{station.printerIp ?? '--'}</td>
+                <td className="px-5 py-3 text-[#999]">{station.vatEnabled ? 'Applied' : 'Zero-rated'}</td>
                 <td className="px-5 py-3">
                   <button
                     onClick={() => toggleMutation.mutate(station)}
@@ -237,7 +252,7 @@ export default function CookingStationsPage() {
             ))}
             {stations.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-5 py-8 text-center text-[#999]">
+                <td colSpan={6} className="px-5 py-8 text-center text-[#999]">
                   No cooking stations configured
                 </td>
               </tr>

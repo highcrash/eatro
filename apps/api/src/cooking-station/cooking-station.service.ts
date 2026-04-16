@@ -20,7 +20,7 @@ export class CookingStationService {
     return station;
   }
 
-  create(branchId: string, dto: { name: string; printerName?: string | null; printerIp?: string | null; printerPort?: number | null; sortOrder?: number }) {
+  create(branchId: string, dto: { name: string; printerName?: string | null; printerIp?: string | null; printerPort?: number | null; sortOrder?: number; vatEnabled?: boolean }) {
     return this.prisma.cookingStation.create({
       data: {
         branchId,
@@ -29,11 +29,12 @@ export class CookingStationService {
         printerIp: dto.printerIp ?? null,
         printerPort: dto.printerPort ?? null,
         sortOrder: dto.sortOrder ?? 0,
+        vatEnabled: dto.vatEnabled ?? true,
       },
     });
   }
 
-  async update(id: string, branchId: string, dto: { name?: string; printerName?: string | null; printerIp?: string | null; printerPort?: number | null; sortOrder?: number; isActive?: boolean }) {
+  async update(id: string, branchId: string, dto: { name?: string; printerName?: string | null; printerIp?: string | null; printerPort?: number | null; sortOrder?: number; isActive?: boolean; vatEnabled?: boolean }) {
     await this.findOne(id, branchId);
     return this.prisma.cookingStation.update({
       where: { id },

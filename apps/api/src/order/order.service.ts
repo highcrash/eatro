@@ -11,9 +11,10 @@ import { BranchSettingsService } from '../branch-settings/branch-settings.servic
 /**
  * Service charge + VAT calculator used by every place that recomputes an
  * order's totals (create, add-items, apply-discount / coupon, void).
- * Respects the branch-level vatEnabled + serviceChargeEnabled toggles so
- * an admin can turn VAT off or switch on a service charge without
- * redeploying.
+ * Respects the branch-level vatEnabled + serviceChargeEnabled toggles and
+ * the optional per-section `taxableSubtotal` override (for sections that
+ * are individually VAT-exempt). When `taxableSubtotal` is omitted, the
+ * whole subtotal is considered taxable.
  */
 interface TaxableBranch {
   vatEnabled: boolean;
@@ -21,13 +22,21 @@ interface TaxableBranch {
   serviceChargeEnabled: boolean;
   serviceChargeRate: { toNumber(): number };
 }
-function computeTotals(branch: TaxableBranch, subtotal: number, discountAmount = 0) {
+function computeTotals(branch: TaxableBranch, subtotal: number, discountAmount = 0, taxableSubtotal?: number) {
   const net = Math.max(0, subtotal - discountAmount);
   const serviceChargeAmount = branch.serviceChargeEnabled && branch.serviceChargeRate.toNumber() > 0
     ? Math.round(net * (branch.serviceChargeRate.toNumber() / 100))
     : 0;
+  // VAT base = taxable portion of net (after proportional discount) + full
+  // service charge. Service charge stays taxable for simplicity; admins
+  // who need a VAT-free SC can turn VAT off branch-wide.
+  let taxableNet = net;
+  if (taxableSubtotal != null && subtotal > 0) {
+    const taxableShareOfSubtotal = Math.min(1, Math.max(0, taxableSubtotal / subtotal));
+    taxableNet = Math.max(0, Math.round(net * taxableShareOfSubtotal));
+  }
   const taxAmount = branch.vatEnabled && branch.taxRate.toNumber() > 0
-    ? Math.round((net + serviceChargeAmount) * (branch.taxRate.toNumber() / 100))
+    ? Math.round((taxableNet + serviceChargeAmount) * (branch.taxRate.toNumber() / 100))
     : 0;
   const totalAmount = net + serviceChargeAmount + taxAmount;
   return { serviceChargeAmount, taxAmount, totalAmount };
@@ -154,7 +163,19 @@ export class OrderService {
     });
 
     const subtotal = itemsData.reduce((s, i) => s + i.totalPrice, 0);
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, 0);
+    // Per-section VAT: items routed to a section with vatEnabled=false
+    // contribute to subtotal but not to the taxable base.
+    const sectionIds = Array.from(new Set(menuItems.map((m) => m.cookingStationId).filter((id): id is string => !!id)));
+    const stations = sectionIds.length
+      ? await this.prisma.cookingStation.findMany({ where: { id: { in: sectionIds } } })
+      : [];
+    const vatOptOut = new Set(stations.filter((s) => !s.vatEnabled).map((s) => s.id));
+    const taxableSubtotal = itemsData.reduce((s, i) => {
+      const m = menuItems.find((mm) => mm.id === i.menuItemId);
+      if (m?.cookingStationId && vatOptOut.has(m.cookingStationId)) return s;
+      return s + i.totalPrice;
+    }, 0);
+    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, 0, taxableSubtotal);
 
     // Update table status to OCCUPIED if dine-in
     let tableNumber: string | null = null;
