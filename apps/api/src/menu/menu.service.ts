@@ -67,9 +67,9 @@ export class MenuService {
 
   async bulkCreate(
     branchId: string,
-    rows: { categoryName: string; name: string; type: string; price: number; description?: string; tags?: string }[],
+    rows: { categoryName: string; name: string; price: number; description?: string; tags?: string; kitchenSection?: string; type?: string }[],
   ) {
-    // 1. Collect unique category names and resolve/create them
+    // 1. Resolve / create categories
     const catNames = [...new Set(rows.map((r) => r.categoryName.trim()).filter(Boolean))];
     const existingCats = await this.prisma.menuCategory.findMany({
       where: { branchId, deletedAt: null },
@@ -86,7 +86,11 @@ export class MenuService {
       }
     }
 
-    // 2. Create menu items
+    // 2. Load kitchen sections once — matched by case-insensitive name.
+    const stations = await this.prisma.cookingStation.findMany({ where: { branchId, isActive: true } });
+    const stationMap = new Map(stations.map((s) => [s.name.toLowerCase(), s.id] as const));
+
+    // 3. Create menu items
     let created = 0;
     let skipped = 0;
     const errors: string[] = [];
@@ -99,12 +103,18 @@ export class MenuService {
         skipped++;
         continue;
       }
-      const itemType = row.type?.toUpperCase() === 'BEVERAGE' ? 'BEVERAGE' : 'FOOD';
       const price = Math.round(Number(row.price) * 100); // convert to paisa
       if (isNaN(price) || price < 0) {
         errors.push(`Row ${i + 1}: invalid price "${row.price}"`);
         skipped++;
         continue;
+      }
+      // Kitchen section matched by name. Unknown sections are not an error —
+      // they silently fall back to the default kitchen slot on the desktop.
+      const sectionKey = row.kitchenSection?.trim().toLowerCase();
+      const cookingStationId = sectionKey ? stationMap.get(sectionKey) ?? null : null;
+      if (sectionKey && !cookingStationId) {
+        errors.push(`Row ${i + 1} ("${row.name}"): kitchen section "${row.kitchenSection}" not found — item created without one`);
       }
       try {
         await this.prisma.menuItem.create({
@@ -112,11 +122,15 @@ export class MenuService {
             branchId,
             categoryId,
             name: row.name.trim(),
-            type: itemType as any,
+            // MenuItem.type is legacy; admin no longer exposes it and
+            // downstream code reads cookingStationId. Default to FOOD so
+            // the enum stays happy.
+            type: 'FOOD',
             price,
             description: row.description?.trim() || null,
             tags: row.tags?.trim() || null,
-          },
+            cookingStationId,
+          } as unknown as Parameters<typeof this.prisma.menuItem.create>[0]['data'],
         });
         created++;
       } catch (e: any) {

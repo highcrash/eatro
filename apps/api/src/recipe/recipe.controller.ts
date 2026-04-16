@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { RecipeService } from './recipe.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -35,6 +35,14 @@ export class RecipeController {
   @Put('menu-item/:menuItemId')
   upsert(@Param('menuItemId') menuItemId: string, @CurrentUser() user: JwtPayload, @Body() dto: UpsertRecipeDto) {
     return this.recipeService.upsert(menuItemId, user.branchId, dto);
+  }
+
+  @Post('bulk')
+  bulkUpsert(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { rows: { menuItemName: string; ingredientName: string; quantity: number; unit?: string }[] },
+  ) {
+    return this.recipeService.bulkUpsert(user.branchId, dto.rows);
   }
 
   @Delete('menu-item/:menuItemId')

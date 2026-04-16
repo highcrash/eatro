@@ -683,7 +683,7 @@ export default function MenuPage() {
   const [bulkSectionId, setBulkSectionId] = useState<string>('');
   const [bulkStatus, setBulkStatus] = useState<string | null>(null);
   const [csvOpen, setCsvOpen] = useState(false);
-  const [csvRows, setCsvRows] = useState<{ categoryName: string; name: string; type: string; price: number; description: string; tags: string }[]>([]);
+  const [csvRows, setCsvRows] = useState<{ categoryName: string; name: string; price: number; description: string; tags: string; kitchenSection: string }[]>([]);
   const [csvResult, setCsvResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
 
@@ -776,13 +776,13 @@ export default function MenuPage() {
       const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
       const catIdx = headers.indexOf('category');
       const nameIdx = headers.indexOf('name');
-      const typeIdx = headers.indexOf('type');
       const priceIdx = headers.indexOf('price');
       const descIdx = headers.indexOf('description');
       const tagsIdx = headers.indexOf('tags');
+      const sectionIdx = headers.findIndex((h) => h === 'kitchen_section' || h === 'section');
 
       if (nameIdx === -1 || priceIdx === -1 || catIdx === -1) {
-        alert('CSV must have columns: category, name, price. Optional: type, description, tags');
+        alert('CSV must have columns: category, name, price. Optional: kitchen_section, description, tags');
         return;
       }
 
@@ -791,10 +791,10 @@ export default function MenuPage() {
         return {
           categoryName: cols[catIdx] || '',
           name: cols[nameIdx] || '',
-          type: typeIdx >= 0 ? cols[typeIdx] || 'FOOD' : 'FOOD',
           price: Number(cols[priceIdx]) || 0,
           description: descIdx >= 0 ? cols[descIdx] || '' : '',
           tags: tagsIdx >= 0 ? cols[tagsIdx] || '' : '',
+          kitchenSection: sectionIdx >= 0 ? cols[sectionIdx] || '' : '',
         };
       }).filter((r) => r.name && r.categoryName);
 
@@ -806,7 +806,7 @@ export default function MenuPage() {
   };
 
   const downloadTemplate = () => {
-    const csv = 'category,name,type,price,description,tags\nAppetizer,Spring Roll,FOOD,150,Crispy vegetable spring roll,Popular\nBeverage,Mango Lassi,BEVERAGE,120,Fresh mango yogurt drink,New';
+    const csv = 'category,name,price,kitchen_section,description,tags\nAppetizer,Spring Roll,150,Food,Crispy vegetable spring roll,Popular\nBeverage,Mango Lassi,120,Beverage,Fresh mango yogurt drink,New';
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1106,7 +1106,7 @@ export default function MenuPage() {
                           <th className="px-3 py-2 text-left">#</th>
                           <th className="px-3 py-2 text-left">Category</th>
                           <th className="px-3 py-2 text-left">Name</th>
-                          <th className="px-3 py-2 text-left">Type</th>
+                          <th className="px-3 py-2 text-left">Kitchen Section</th>
                           <th className="px-3 py-2 text-right">Price</th>
                           <th className="px-3 py-2 text-left">Description</th>
                           <th className="px-3 py-2 text-left">Tags</th>
@@ -1118,7 +1118,7 @@ export default function MenuPage() {
                             <td className="px-3 py-1.5 text-[#666]">{i + 1}</td>
                             <td className="px-3 py-1.5">{r.categoryName}</td>
                             <td className="px-3 py-1.5">{r.name}</td>
-                            <td className="px-3 py-1.5 text-[#999]">{r.type}</td>
+                            <td className="px-3 py-1.5 text-[#999]">{r.kitchenSection || '—'}</td>
                             <td className="px-3 py-1.5 text-right">{r.price}</td>
                             <td className="px-3 py-1.5 text-[#999] max-w-[150px] truncate">{r.description}</td>
                             <td className="px-3 py-1.5 text-[#999]">{r.tags}</td>

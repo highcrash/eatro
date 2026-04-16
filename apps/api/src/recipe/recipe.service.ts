@@ -60,6 +60,128 @@ export class RecipeService {
     });
   }
 
+  /**
+   * Bulk upsert recipes from a flat CSV-style list. Groups rows by menu
+   * item (matched by name case-insensitively), resolves ingredients by
+   * name, and rewrites each menu item's recipe.
+   *
+   * Rows whose menu item isn't found, or whose ingredient isn't found,
+   * are skipped with a reason recorded. Each menu item's recipe is
+   * upserted in one go — so if the CSV supplies 3 rows for "Chicken
+   * Curry", the final recipe has exactly those 3 items (not appended).
+   *
+   * Variant ingredients can be targeted by their full display name
+   * ("Parent — Brand") or by just the parent's name (in which case the
+   * recipe line uses the parent and stock deducts FIFO across variants
+   * at order time).
+   */
+  async bulkUpsert(
+    branchId: string,
+    rows: {
+      menuItemName: string;
+      ingredientName: string;
+      quantity: number;
+      unit?: string;
+    }[],
+  ) {
+    // Resolve menu items + ingredients once
+    const menuItems = await this.prisma.menuItem.findMany({
+      where: { branchId, deletedAt: null },
+      select: { id: true, name: true },
+    });
+    const menuItemByName = new Map(menuItems.map((m) => [m.name.toLowerCase(), m.id] as const));
+
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { branchId, deletedAt: null },
+      select: { id: true, name: true, unit: true, parentId: true },
+    });
+    const ingredientByName = new Map(ingredients.map((i) => [i.name.toLowerCase(), i] as const));
+
+    // Group rows by menu item
+    interface Grouped { menuItemId: string; items: { ingredientId: string; quantity: number; unit: string }[]; }
+    const grouped = new Map<string, Grouped>();
+    const errors: string[] = [];
+    let skipped = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const miName = row.menuItemName?.trim().toLowerCase();
+      const ingName = row.ingredientName?.trim().toLowerCase();
+      if (!miName || !ingName) {
+        errors.push(`Row ${i + 1}: missing menu_item_name or ingredient_name`);
+        skipped++;
+        continue;
+      }
+
+      const menuItemId = menuItemByName.get(miName);
+      if (!menuItemId) {
+        errors.push(`Row ${i + 1}: menu item "${row.menuItemName}" not found`);
+        skipped++;
+        continue;
+      }
+
+      const ing = ingredientByName.get(ingName);
+      if (!ing) {
+        errors.push(`Row ${i + 1}: ingredient "${row.ingredientName}" not found`);
+        skipped++;
+        continue;
+      }
+
+      const qty = Number(row.quantity);
+      if (!qty || qty <= 0 || isNaN(qty)) {
+        errors.push(`Row ${i + 1}: invalid quantity "${row.quantity}"`);
+        skipped++;
+        continue;
+      }
+
+      const existing = grouped.get(menuItemId) ?? { menuItemId, items: [] };
+      existing.items.push({
+        ingredientId: ing.id,
+        quantity: qty,
+        unit: (row.unit?.trim().toUpperCase() || ing.unit),
+      });
+      grouped.set(menuItemId, existing);
+    }
+
+    // Upsert each menu item's recipe in its own txn so one bad menu
+    // item doesn't block the others.
+    let updated = 0;
+    for (const [menuItemId, group] of grouped) {
+      try {
+        await this.prisma.recipe.upsert({
+          where: { menuItemId },
+          create: {
+            menuItemId,
+            items: {
+              create: group.items.map((i) => ({
+                ingredientId: i.ingredientId,
+                quantity: i.quantity,
+                unit: i.unit as any,
+              })),
+            },
+          },
+          update: {
+            items: {
+              deleteMany: {},
+              create: group.items.map((i) => ({
+                ingredientId: i.ingredientId,
+                quantity: i.quantity,
+                unit: i.unit as any,
+              })),
+            },
+          },
+        });
+        updated++;
+      } catch (e: any) {
+        const miName = menuItems.find((m) => m.id === menuItemId)?.name ?? menuItemId;
+        errors.push(`Menu item "${miName}": ${e.message?.slice(0, 80)}`);
+        skipped++;
+      }
+    }
+
+    return { updated, skipped, errors, totalRows: rows.length };
+  }
+
   async remove(menuItemId: string, branchId: string) {
     const menuItem = await this.prisma.menuItem.findFirst({
       where: { id: menuItemId, branchId, deletedAt: null },

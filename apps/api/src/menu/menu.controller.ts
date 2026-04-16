@@ -35,7 +35,7 @@ export class MenuController {
   @Roles('OWNER', 'MANAGER')
   bulkCreate(
     @CurrentUser() user: JwtPayload,
-    @Body() dto: { rows: { categoryName: string; name: string; type: string; price: number; description?: string; tags?: string }[] },
+    @Body() dto: { rows: { categoryName: string; name: string; price: number; description?: string; tags?: string; kitchenSection?: string }[] },
   ) {
     return this.menuService.bulkCreate(user.branchId, dto.rows);
   }

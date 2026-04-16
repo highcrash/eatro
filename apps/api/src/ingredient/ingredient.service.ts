@@ -206,10 +206,54 @@ export class IngredientService {
     });
   }
 
-  async bulkCreate(branchId: string, items: { name: string; unit?: string; category?: string; itemCode?: string; minimumStock?: number; costPerUnit?: number; purchaseUnit?: string; purchaseUnitQty?: number; costPerPurchaseUnit?: number }[]) {
+  async bulkCreate(
+    branchId: string,
+    items: {
+      name: string;
+      unit?: string;
+      category?: string;
+      itemCode?: string;
+      minimumStock?: number;
+      costPerUnit?: number;
+      purchaseUnit?: string;
+      purchaseUnitQty?: number;
+      costPerPurchaseUnit?: number;
+      parentCode?: string;
+      brandName?: string;
+      packSize?: string;
+      piecesPerPack?: number;
+      sku?: string;
+    }[],
+  ) {
     const results: { name: string; status: 'created' | 'skipped'; reason?: string }[] = [];
 
-    for (const item of items) {
+    // Two-pass import so variants can reference parents by item code even when
+    // the parent row appears after the variant in the CSV:
+    //   Pass 1 — create/touch parents (any row without parent_code, plus any
+    //            row whose item_code is referenced as parent_code by another).
+    //   Pass 2 — create variants, linking by parent_code → parent.itemCode.
+    const referencedParentCodes = new Set(
+      items.map((r) => r.parentCode?.trim()).filter((c): c is string => !!c),
+    );
+
+    const parentRows = items.filter((r) => !r.parentCode?.trim());
+    const variantRows = items.filter((r) => !!r.parentCode?.trim());
+
+    // Map of itemCode -> ingredientId for variant linking
+    const parentByCode = new Map<string, string>();
+
+    // Prime map with existing ingredients in this branch (so variants can
+    // attach to ingredients that were imported in a previous run).
+    const existingWithCodes = await this.prisma.ingredient.findMany({
+      where: { branchId, deletedAt: null, itemCode: { not: null } },
+      select: { id: true, itemCode: true },
+    });
+    for (const e of existingWithCodes) {
+      if (e.itemCode) parentByCode.set(e.itemCode, e.id);
+    }
+
+    // ─── Pass 1: parents ────────────────────────────────────────────────
+    for (const item of parentRows) {
       if (!item.name?.trim()) {
         results.push({ name: item.name ?? '', status: 'skipped', reason: 'Empty name' });
         continue;
@@ -219,12 +263,23 @@ export class IngredientService {
         where: { branchId, name: item.name.trim(), deletedAt: null },
       });
 
+      // A parent that other rows reference must be marked hasVariants.
+      const shouldBeParent = !!item.itemCode && referencedParentCodes.has(item.itemCode.trim());
+
       if (existing) {
+        // Update hasVariants if this row is a parent for later variant rows
+        if (shouldBeParent && !existing.hasVariants) {
+          await this.prisma.ingredient.update({
+            where: { id: existing.id },
+            data: { hasVariants: true },
+          });
+        }
+        if (item.itemCode) parentByCode.set(item.itemCode.trim(), existing.id);
         results.push({ name: item.name, status: 'skipped', reason: 'Already exists' });
         continue;
       }
 
-      await this.prisma.ingredient.create({
+      const created = await this.prisma.ingredient.create({
         data: {
           branchId,
           name: item.name.trim(),
@@ -236,12 +291,82 @@ export class IngredientService {
           purchaseUnit: item.purchaseUnit ?? null,
           purchaseUnitQty: item.purchaseUnitQty ?? 1,
           costPerPurchaseUnit: item.costPerPurchaseUnit ?? 0,
+          hasVariants: shouldBeParent,
+        },
+      });
+      if (item.itemCode) parentByCode.set(item.itemCode.trim(), created.id);
+      results.push({ name: item.name, status: 'created' });
+    }
+
+    // ─── Pass 2: variants ───────────────────────────────────────────────
+    for (const item of variantRows) {
+      if (!item.name?.trim()) {
+        results.push({ name: item.name ?? '', status: 'skipped', reason: 'Empty name' });
+        continue;
+      }
+      const parentCode = item.parentCode!.trim();
+      const parentId = parentByCode.get(parentCode);
+      if (!parentId) {
+        results.push({ name: item.name, status: 'skipped', reason: `Parent code "${parentCode}" not found` });
+        continue;
+      }
+
+      // Parent inherits unit + purchaseUnit semantics — load it.
+      const parent = await this.prisma.ingredient.findFirst({
+        where: { id: parentId, branchId, deletedAt: null },
+      });
+      if (!parent) {
+        results.push({ name: item.name, status: 'skipped', reason: 'Parent not found (deleted?)' });
+        continue;
+      }
+
+      // Ensure parent is marked as a parent (if imported in a previous run
+      // without variants, promote it now).
+      if (!parent.hasVariants) {
+        await this.prisma.ingredient.update({
+          where: { id: parent.id },
+          data: { hasVariants: true },
+        });
+      }
+
+      const brandName = item.brandName?.trim() || item.name.trim();
+      const displayName = `${parent.name} — ${brandName}`;
+
+      // Skip if an ingredient with that exact name already exists
+      const dup = await this.prisma.ingredient.findFirst({
+        where: { branchId, name: displayName, deletedAt: null },
+      });
+      if (dup) {
+        results.push({ name: item.name, status: 'skipped', reason: 'Variant already exists' });
+        continue;
+      }
+
+      await this.prisma.ingredient.create({
+        data: {
+          branchId,
+          parentId: parent.id,
+          name: displayName,
+          brandName,
+          packSize: item.packSize ?? null,
+          piecesPerPack: item.piecesPerPack ?? null,
+          sku: item.sku ?? null,
+          unit: parent.unit,
+          category: parent.category,
+          purchaseUnit: parent.purchaseUnit,
+          purchaseUnitQty: item.piecesPerPack ?? (parent.purchaseUnitQty?.toNumber() ?? 1),
+          costPerPurchaseUnit: item.costPerPurchaseUnit ?? 0,
+          costPerUnit: item.costPerUnit ?? 0,
         },
       });
       results.push({ name: item.name, status: 'created' });
     }
 
-    return { total: items.length, created: results.filter((r) => r.status === 'created').length, skipped: results.filter((r) => r.status === 'skipped').length, results };
+    return {
+      total: items.length,
+      created: results.filter((r) => r.status === 'created').length,
+      skipped: results.filter((r) => r.status === 'skipped').length,
+      results,
+    };
   }
 
   async setSuppliers(id: string, branchId: string, supplierIds: string[]) {

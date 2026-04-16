@@ -5,12 +5,17 @@ import { formatCurrency } from '@restora/utils';
 import type { Ingredient, Supplier, StockMovement, StockUnit, IngredientCategory } from '@restora/types';
 import VariantDialog from '../components/VariantDialog';
 
-const INV_CSV_EXAMPLE = `name,code,category,unit,minimum_stock,cost_per_unit,purchase_unit,purchase_unit_qty,cost_per_purchase_unit
-Chicken Breast,MEA0030,RAW,KG,5,450,,,
-Olive Oil,OIL0010,RAW,L,2,800,,,
-Salt,SPI0026,SPICE,G,500,5,,,
-Oreo Biscuit,CHC0002,BEVERAGE,G,200,0.10,PACK,200,20
-Monin Syrup,CHC0003,BEVERAGE,ML,500,1.07,BOTTLE,750,800`;
+// Variant rows reference their parent via parent_code (matches an earlier
+// row's code OR an already-imported ingredient's item code). Variants
+// inherit unit + purchase_unit from the parent — those columns are ignored
+// on variant rows.
+const INV_CSV_EXAMPLE = `name,code,category,unit,minimum_stock,cost_per_unit,purchase_unit,purchase_unit_qty,cost_per_purchase_unit,parent_code,brand_name,pack_size,pieces_per_pack,sku
+Chicken Breast,MEA0030,RAW,KG,5,450,,,,,,,,
+Olive Oil,OIL0010,RAW,L,2,800,,,,,,,,
+Salt,SPI0026,SPICE,G,500,5,,,,,,,,
+Cola,BEV0010,BEVERAGE,ML,500,0.15,BOTTLE,500,75,,,,,
+Cola Coca-Cola 500ml,,,,,0.15,,,75,BEV0010,Coca-Cola 500ml,500ml,500,CC500
+Cola Pepsi 500ml,,,,,0.14,,,70,BEV0010,Pepsi 500ml,500ml,500,PP500`;
 
 function downloadInventoryCSV() {
   const blob = new Blob([INV_CSV_EXAMPLE], { type: 'text/csv' });
@@ -302,7 +307,12 @@ export default function InventoryPage() {
   });
 
   const bulkMutation = useMutation({
-    mutationFn: (items: { name: string; unit?: string; category?: string; itemCode?: string; minimumStock?: number; costPerUnit?: number }[]) =>
+    mutationFn: (items: {
+      name: string; unit?: string; category?: string; itemCode?: string;
+      minimumStock?: number; costPerUnit?: number;
+      purchaseUnit?: string; purchaseUnitQty?: number; costPerPurchaseUnit?: number;
+      parentCode?: string; brandName?: string; packSize?: string; piecesPerPack?: number; sku?: string;
+    }[]) =>
       api.post<{ total: number; created: number; skipped: number; results: { name: string; status: string; reason?: string }[] }>('/ingredients/bulk', { items }),
     onSuccess: (data) => {
       setCsvResult(data);
@@ -320,15 +330,22 @@ export default function InventoryPage() {
       if (rows.length < 2) return;
 
       const header = rows[0].map((h) => h.toLowerCase().replace(/[^a-z_]/g, ''));
-      const nameIdx = header.findIndex((h) => h.includes('name') && !h.includes('purchase'));
-      const codeIdx = header.findIndex((h) => h.includes('code'));
-      const catIdx = header.findIndex((h) => h.includes('category') || h.includes('cat'));
-      const unitIdx = header.findIndex((h) => h === 'unit' || (h.includes('unit') && !h.includes('purchase') && !h.includes('cost') && !h.includes('qty')));
+      const nameIdx = header.findIndex((h) => h === 'name');
+      const codeIdx = header.findIndex((h) => h === 'code' || h === 'item_code');
+      const catIdx = header.findIndex((h) => h.includes('category') || h === 'cat');
+      const unitIdx = header.findIndex((h) => h === 'unit');
       const minIdx = header.findIndex((h) => h.includes('min'));
-      const costIdx = header.findIndex((h) => h === 'cost_per_unit' || (h.includes('cost') && h.includes('unit') && !h.includes('purchase')));
-      const puIdx = header.findIndex((h) => h === 'purchase_unit' || (h.includes('purchase') && h.includes('unit') && !h.includes('qty') && !h.includes('cost')));
-      const puQtyIdx = header.findIndex((h) => h.includes('purchase') && h.includes('qty'));
-      const puCostIdx = header.findIndex((h) => h.includes('cost') && h.includes('purchase'));
+      const costIdx = header.findIndex((h) => h === 'cost_per_unit');
+      const puIdx = header.findIndex((h) => h === 'purchase_unit');
+      const puQtyIdx = header.findIndex((h) => h === 'purchase_unit_qty');
+      const puCostIdx = header.findIndex((h) => h === 'cost_per_purchase_unit');
+      // Variant columns — all optional; presence of parent_code turns the
+      // row into a variant of the parent with that code.
+      const parentCodeIdx = header.findIndex((h) => h === 'parent_code');
+      const brandIdx = header.findIndex((h) => h === 'brand_name' || h === 'brand');
+      const packSizeIdx = header.findIndex((h) => h === 'pack_size');
+      const ppIdx = header.findIndex((h) => h === 'pieces_per_pack');
+      const skuIdx = header.findIndex((h) => h === 'sku');
 
       if (nameIdx === -1) { alert('CSV must have a "name" column'); return; }
 
@@ -337,18 +354,24 @@ export default function InventoryPage() {
         const row = rows[i];
         if (!row[nameIdx]?.trim()) continue;
         const pu = puIdx >= 0 ? row[puIdx]?.trim().toUpperCase() || undefined : undefined;
-        const puQty = puQtyIdx >= 0 ? parseFloat(row[puQtyIdx]) || undefined : undefined;
+        const puQty = puQtyIdx >= 0 && row[puQtyIdx]?.trim() ? parseFloat(row[puQtyIdx]) || undefined : undefined;
         const puCost = puCostIdx >= 0 && row[puCostIdx]?.trim() ? Math.round(parseFloat(row[puCostIdx]) * 100) : undefined;
+        const parentCode = parentCodeIdx >= 0 ? row[parentCodeIdx]?.trim() || undefined : undefined;
         items.push({
           name: row[nameIdx].trim(),
           itemCode: codeIdx >= 0 ? row[codeIdx]?.trim() || undefined : undefined,
           category: catIdx >= 0 ? row[catIdx]?.trim().toUpperCase() || undefined : undefined,
           unit: unitIdx >= 0 ? row[unitIdx]?.trim().toUpperCase() || undefined : undefined,
-          minimumStock: minIdx >= 0 ? parseFloat(row[minIdx]) || 0 : 0,
-          costPerUnit: costIdx >= 0 ? Math.round((parseFloat(row[costIdx]) || 0) * 100) : 0,
+          minimumStock: minIdx >= 0 && row[minIdx]?.trim() ? parseFloat(row[minIdx]) || 0 : 0,
+          costPerUnit: costIdx >= 0 && row[costIdx]?.trim() ? Math.round((parseFloat(row[costIdx]) || 0) * 100) : 0,
           purchaseUnit: pu,
           purchaseUnitQty: puQty,
           costPerPurchaseUnit: puCost,
+          parentCode,
+          brandName: brandIdx >= 0 ? row[brandIdx]?.trim() || undefined : undefined,
+          packSize: packSizeIdx >= 0 ? row[packSizeIdx]?.trim() || undefined : undefined,
+          piecesPerPack: ppIdx >= 0 && row[ppIdx]?.trim() ? parseFloat(row[ppIdx]) || undefined : undefined,
+          sku: skuIdx >= 0 ? row[skuIdx]?.trim() || undefined : undefined,
         });
       }
 
