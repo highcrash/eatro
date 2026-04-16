@@ -480,6 +480,20 @@ export class WorkPeriodService {
       orderBy: { createdAt: 'asc' },
     });
 
+    // Tax block for the Z-report: gross subtotal (pre-tax), discounts,
+    // service charge, VAT, and net. Only PAID orders contribute — VOIDs
+    // and still-open tickets are excluded from tax liability.
+    const paidOrders = orders.filter((o) => o.status === 'PAID');
+    const taxBreakdown = {
+      subtotal: paidOrders.reduce((s, o) => s + o.subtotal.toNumber(), 0),
+      discountTotal: paidOrders.reduce((s, o) => s + o.discountAmount.toNumber(), 0),
+      // Both fields exist on newer rows; older rows return 0 from @default.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      serviceChargeTotal: paidOrders.reduce((s, o) => s + Number((o as any).serviceChargeAmount ?? 0), 0),
+      vatTotal: paidOrders.reduce((s, o) => s + o.taxAmount.toNumber(), 0),
+      netSales: paidOrders.reduce((s, o) => s + o.totalAmount.toNumber(), 0),
+    };
+
     return {
       workPeriod: wp,
       totalSales: orders.reduce((s, o) => s + o.totalAmount.toNumber(), 0),
@@ -490,6 +504,7 @@ export class WorkPeriodService {
       totalExpenses: expenses.reduce((s, e) => s + e.amount.toNumber(), 0),
       expenseCount: expenses.length,
       expenseByCategory,
+      taxBreakdown,
       balances,
       posAccounts,
       consumedItems,

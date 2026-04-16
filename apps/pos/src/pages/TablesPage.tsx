@@ -50,6 +50,13 @@ interface WorkPeriodSummary {
   totalExpenses: number;
   expenseCount: number;
   expenseByCategory: Record<string, number>;
+  taxBreakdown?: {
+    subtotal: number;
+    discountTotal: number;
+    serviceChargeTotal: number;
+    vatTotal: number;
+    netSales: number;
+  };
   balances: {
     opening: Record<string, number>;
     salesByMethod: Record<string, number>;
@@ -84,7 +91,7 @@ interface LastClosing {
 }
 
 function printEndOfDayReport(summary: WorkPeriodSummary) {
-  const { workPeriod: wp, totalSales, orderCount, voidedOrders, byPaymentMethod, byOrderType, totalExpenses, expenseCount, expenseByCategory, balances, posAccounts, consumedItems, consumedTotalValue, wasteItems, wasteTotalValue } = summary;
+  const { workPeriod: wp, totalSales, orderCount, voidedOrders, byPaymentMethod, byOrderType, totalExpenses, expenseCount, expenseByCategory, taxBreakdown, balances, posAccounts, consumedItems, consumedTotalValue, wasteItems, wasteTotalValue } = summary;
 
   const startTime = new Date(wp.startedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   const endTime = wp.endedAt ? new Date(wp.endedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Now';
@@ -164,6 +171,18 @@ function printEndOfDayReport(summary: WorkPeriodSummary) {
       <tr style="font-size:10px;color:#666"><td>Type</td><td style="text-align:center">Qty</td><td style="text-align:right">Amount</td></tr>
       ${orderTypeRows || '<tr><td colspan="3" style="text-align:center;color:#999">No sales</td></tr>'}
     </table>
+
+    ${taxBreakdown ? `
+    <div class="divider"></div>
+    <h2>TAX BREAKDOWN (PAID ORDERS)</h2>
+    <table>
+      <tr><td>Gross Subtotal</td><td style="text-align:right">${formatCurrency(taxBreakdown.subtotal)}</td></tr>
+      ${taxBreakdown.discountTotal > 0 ? `<tr><td>− Discounts</td><td style="text-align:right">-${formatCurrency(taxBreakdown.discountTotal)}</td></tr>` : ''}
+      ${taxBreakdown.serviceChargeTotal > 0 ? `<tr><td>+ Service Charge</td><td style="text-align:right">${formatCurrency(taxBreakdown.serviceChargeTotal)}</td></tr>` : ''}
+      ${taxBreakdown.vatTotal > 0 ? `<tr><td>+ VAT</td><td style="text-align:right">${formatCurrency(taxBreakdown.vatTotal)}</td></tr>` : ''}
+      <tr class="total-row"><td>Net Sales</td><td style="text-align:right">${formatCurrency(taxBreakdown.netSales)}</td></tr>
+    </table>
+    ` : ''}
 
     <div class="divider"></div>
     <h2>EXPENSES (${expenseCount})</h2>
