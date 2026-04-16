@@ -169,6 +169,45 @@ export class QrOrderController {
     return this.orderService.createQrOrder(branchId, dto);
   }
 
+  /**
+   * Public feed for the customer-facing display pole. Takes a table id
+   * and returns the current active order's items + totals (no
+   * customer names, no staff ids). No auth — the display device
+   * shouldn't need to know a password.
+   */
+  @Get('display/:tableId')
+  async getCustomerDisplay(@Param('tableId') tableId: string) {
+    const order = await this.prisma.order.findFirst({
+      where: {
+        tableId,
+        deletedAt: null,
+        status: { notIn: ['PAID', 'VOID'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { items: { where: { voidedAt: null } } },
+    });
+    if (!order) return null;
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      tableNumber: order.tableNumber,
+      subtotal: Number(order.subtotal),
+      discountAmount: Number(order.discountAmount),
+      discountName: order.discountName,
+      taxAmount: Number(order.taxAmount),
+      serviceChargeAmount: Number((order as unknown as { serviceChargeAmount?: number }).serviceChargeAmount ?? 0),
+      totalAmount: Number(order.totalAmount),
+      items: order.items.map((i) => ({
+        id: i.id,
+        menuItemName: i.menuItemName,
+        quantity: Number(i.quantity),
+        unitPrice: Number(i.unitPrice),
+        totalPrice: Number(i.totalPrice),
+      })),
+    };
+  }
+
   @Get('qr/:id/status')
   async getOrderStatus(@Param('id') id: string) {
     const order = await this.prisma.order.findFirst({

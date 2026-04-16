@@ -12,9 +12,22 @@ import PosPurchasingPage from './pages/PosPurchasingPage';
 import PosFinancePage from './pages/PosFinancePage';
 import PosPreReadyPage from './pages/PosPreReadyPage';
 import PosReservationsPage from './pages/PosReservationsPage';
+import CustomerDisplayPage from './pages/CustomerDisplayPage';
 
 export default function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  // Customer-display runs on a separate device (second monitor / tablet)
+  // and hits a public /orders/display/:tableId endpoint, so it has to
+  // be reachable without a cashier login. Route it outside the auth
+  // wall. Everything else still requires auth.
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/customer-display')) {
+    return (
+      <Routes>
+        <Route path="/customer-display/:tableId?" element={<CustomerDisplayPage />} />
+      </Routes>
+    );
+  }
 
   if (!isAuthenticated) {
     return <LoginPage />;
