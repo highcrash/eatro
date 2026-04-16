@@ -17,6 +17,27 @@ interface UnitConversion {
   factor: number;
 }
 
+type TabKey =
+  | 'restaurant'
+  | 'branding'
+  | 'theme'
+  | 'kitchen'
+  | 'payments'
+  | 'reservations'
+  | 'notifications'
+  | 'units';
+
+const TABS: Array<{ key: TabKey; label: string }> = [
+  { key: 'restaurant', label: 'Restaurant' },
+  { key: 'branding', label: 'Branding' },
+  { key: 'theme', label: 'Theme' },
+  { key: 'kitchen', label: 'Kitchen' },
+  { key: 'payments', label: 'Payments' },
+  { key: 'reservations', label: 'Reservations' },
+  { key: 'notifications', label: 'Notifications' },
+  { key: 'units', label: 'Units' },
+];
+
 export default function SettingsPage() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
@@ -32,6 +53,14 @@ export default function SettingsPage() {
 
   const [form, setForm] = useState<UpdateBranchDto>({});
   const [saved, setSaved] = useState(false);
+  const [tab, setTab] = useState<TabKey>(() => {
+    if (typeof window === 'undefined') return 'restaurant';
+    const stored = window.localStorage.getItem('settings:tab') as TabKey | null;
+    return stored && TABS.some((t) => t.key === stored) ? stored : 'restaurant';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.localStorage.setItem('settings:tab', tab);
+  }, [tab]);
 
   useEffect(() => {
     if (branch) {
@@ -87,18 +116,42 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <div className="mb-8">
+    <div className="max-w-4xl space-y-6">
+      <div className="mb-4">
         <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Configuration</p>
         <h1 className="font-display text-4xl text-white tracking-wide">SETTINGS</h1>
       </div>
 
       {!isOwner && (
-        <div className="mb-6 border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-body text-amber-700">
+        <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-body text-amber-700">
           You have read-only access. Only the Owner can update branch settings.
         </div>
       )}
 
+      {/* Tab bar — sticky so it stays reachable on long pages */}
+      <div className="sticky top-0 z-10 bg-[#0D0D0D] border-b border-[#2A2A2A] -mx-6 px-6 pb-0 overflow-x-auto">
+        <nav className="flex gap-1">
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`px-4 py-3 text-xs font-body font-medium tracking-widest uppercase border-b-2 transition-colors whitespace-nowrap ${
+                  active
+                    ? 'border-[#D62B2B] text-white'
+                    : 'border-transparent text-[#666] hover:text-white hover:border-[#2A2A2A]'
+                }`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* ─── Restaurant tab ──────────────────────────────────────────── */}
+      {tab === 'restaurant' && (
       <form onSubmit={handleSubmit}>
         {/* Branch details */}
         <div className="bg-[#161616] border border-[#2A2A2A] mb-6">
@@ -275,16 +328,21 @@ export default function SettingsPage() {
           </div>
         )}
       </form>
+      )}
 
-      <BrandingSection isOwner={isOwner} />
+      {tab === 'branding' && <BrandingSection isOwner={isOwner} />}
 
-      <ThemingSection isOwner={isOwner} />
+      {tab === 'theme' && <ThemingSection isOwner={isOwner} />}
 
-      <SmsSettingsSection isOwner={isOwner} />
+      {tab === 'kitchen' && <KitchenSettingsSection isOwner={isOwner} />}
 
-      <KitchenSettingsSection isOwner={isOwner} />
+      {tab === 'payments' && <PaymentMethodsSection />}
 
-      <UnitConversionSection isOwner={isOwner} />
+      {tab === 'reservations' && <ReservationSettingsSection />}
+
+      {tab === 'notifications' && <SmsSettingsSection isOwner={isOwner} />}
+
+      {tab === 'units' && <UnitConversionSection isOwner={isOwner} />}
 
       <style>{`
         .input-base {
@@ -636,12 +694,6 @@ function UnitConversionSection({ isOwner }: { isOwner: boolean }) {
           )}
         </form>
       )}
-
-      {/* Payment Methods */}
-      <PaymentMethodsSection />
-
-      {/* Reservation Settings */}
-      <ReservationSettingsSection />
     </div>
   );
 }
