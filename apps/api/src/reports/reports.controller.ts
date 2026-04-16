@@ -85,6 +85,16 @@ export class ReportsController {
     return this.reportsService.getWaiterReport(user.branchId, from ?? defaultFrom, to ?? now.toISOString().split('T')[0]);
   }
 
+  @Get('voids')
+  @Roles('OWNER', 'MANAGER')
+  getVoidReport(
+    @CurrentUser() user: JwtPayload,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.reportsService.getVoidReport(user.branchId, from, to);
+  }
+
   @Get('sales-vs-food-cost')
   getSalesVsFoodCost(
     @CurrentUser() user: JwtPayload,

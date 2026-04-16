@@ -72,6 +72,7 @@ const NAV_GROUPS = [
       { to: '/reports', icon: BarChart2, label: 'Reports' },
       { to: '/reports/sales', icon: BarChart2, label: 'Sales Report' },
       { to: '/reports/daily', icon: BarChart2, label: 'Daily Reports' },
+      { to: '/reports/voids', icon: BarChart2, label: 'Void Audit' },
       { to: '/discounts', icon: BarChart2, label: 'Discounts & Coupons' },
       { to: '/expenses', icon: Receipt, label: 'Expenses' },
       { to: '/accounts', icon: Landmark, label: 'Accounts' },

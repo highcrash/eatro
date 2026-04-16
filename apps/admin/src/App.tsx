@@ -26,6 +26,7 @@ import SettingsPage from './pages/SettingsPage';
 import CookingStationsPage from './pages/CookingStationsPage';
 import SalesReportPage from './pages/SalesReportPage';
 import DailyReportsPage from './pages/DailyReportsPage';
+import VoidReportPage from './pages/VoidReportPage';
 import BranchesPage from './pages/BranchesPage';
 import CashierPermissionsPage from './pages/CashierPermissionsPage';
 import WebsitePage from './pages/WebsitePage';
@@ -62,6 +63,7 @@ export default function AdminApp() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/reports/sales" element={<SalesReportPage />} />
         <Route path="/reports/daily" element={<DailyReportsPage />} />
+        <Route path="/reports/voids" element={<VoidReportPage />} />
         <Route path="/discounts" element={<DiscountsPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/attendance" element={<AttendancePage />} />

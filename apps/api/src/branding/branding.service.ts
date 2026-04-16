@@ -44,7 +44,7 @@ export class BrandingService {
       bin: branch.bin,
       mushakVersion: branch.mushakVersion,
       wifiPass: branch.wifiPass,
-      billLogoWidthPct: branch.billLogoWidthPct,
+      billLogoWidthPct: (branch as unknown as { billLogoWidthPct?: number }).billLogoWidthPct ?? 80,
       taxRate: Number(branch.taxRate),
       vatEnabled: branch.vatEnabled,
       serviceChargeEnabled: branch.serviceChargeEnabled,

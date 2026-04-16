@@ -444,4 +444,130 @@ export class ReportsService {
       totalSpent,
     };
   }
+
+  /**
+   * Voided items + fully-voided orders between from/to (defaults: today).
+   * Useful for owners to audit what staff struck off and why. Returns two
+   * lists — "items" (partial voids) and "orders" (fully cancelled orders)
+   * — plus a summary of total value voided and counts by approver.
+   */
+  async getVoidReport(branchId: string, from?: string, to?: string) {
+    const now = new Date();
+    const start = from
+      ? (() => { const d = new Date(from); d.setHours(0, 0, 0, 0); return d; })()
+      : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = to
+      ? (() => { const d = new Date(to); d.setHours(23, 59, 59, 999); return d; })()
+      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    // OrderItem.voidedById has no Prisma relation (yet) so we hydrate
+    // Staff names in a second query + map here. Same for the order join
+    // — just fetch parent orders separately and hash them.
+    const voidedItems = await this.prisma.orderItem.findMany({
+      where: {
+        voidedAt: { gte: start, lte: end, not: null },
+        order: { branchId, deletedAt: null },
+      },
+      orderBy: { voidedAt: 'desc' },
+    });
+
+    const voidedOrders = await this.prisma.order.findMany({
+      where: {
+        branchId,
+        status: 'VOID',
+        voidedAt: { gte: start, lte: end, not: null },
+        deletedAt: null,
+      },
+      orderBy: { voidedAt: 'desc' },
+    });
+
+    const parentOrderIds = Array.from(new Set(voidedItems.map((i) => i.orderId)));
+    const parentOrders = parentOrderIds.length
+      ? await this.prisma.order.findMany({
+          where: { id: { in: parentOrderIds } },
+          select: { id: true, orderNumber: true, tableNumber: true, type: true, status: true },
+        })
+      : [];
+    const parentById = new Map(parentOrders.map((o) => [o.id, o] as const));
+
+    const approverIds = Array.from(new Set([
+      ...voidedItems.map((i) => i.voidedById).filter((x): x is string => !!x),
+      ...voidedOrders.map((o) => o.voidedById).filter((x): x is string => !!x),
+    ]));
+    const approvers = approverIds.length
+      ? await this.prisma.staff.findMany({
+          where: { id: { in: approverIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const approverById = new Map(approvers.map((s) => [s.id, s] as const));
+
+    const items = voidedItems.map((i) => {
+      const parent = parentById.get(i.orderId);
+      const approver = i.voidedById ? approverById.get(i.voidedById) ?? null : null;
+      return {
+        id: i.id,
+        orderId: i.orderId,
+        orderNumber: parent?.orderNumber ?? '',
+        tableNumber: parent?.tableNumber ?? null,
+        type: parent?.type ?? '',
+        orderStatus: parent?.status ?? '',
+        menuItemName: i.menuItemName,
+        quantity: Number(i.quantity),
+        unitPrice: Number(i.unitPrice),
+        lineTotal: Number(i.totalPrice),
+        voidReason: i.voidReason,
+        voidedAt: i.voidedAt,
+        voidedBy: approver,
+      };
+    });
+
+    const orders = voidedOrders.map((o) => {
+      const approver = o.voidedById ? approverById.get(o.voidedById) ?? null : null;
+      return {
+        id: o.id,
+        orderNumber: o.orderNumber,
+        tableNumber: o.tableNumber,
+        type: o.type,
+        subtotal: Number(o.subtotal),
+        voidReason: o.voidReason,
+        voidedAt: o.voidedAt,
+        voidedBy: approver,
+      };
+    });
+
+    const itemsValue = items.reduce((s, i) => s + i.lineTotal, 0);
+    const ordersValue = orders.reduce((s, o) => s + o.subtotal, 0);
+
+    const byApprover: Record<string, { name: string; itemCount: number; orderCount: number; valuePaisa: number }> = {};
+    for (const i of items) {
+      if (!i.voidedBy) continue;
+      const key = i.voidedBy.id;
+      if (!byApprover[key]) byApprover[key] = { name: i.voidedBy.name, itemCount: 0, orderCount: 0, valuePaisa: 0 };
+      byApprover[key].itemCount += 1;
+      byApprover[key].valuePaisa += i.lineTotal;
+    }
+    for (const o of orders) {
+      if (!o.voidedBy) continue;
+      const key = o.voidedBy.id;
+      if (!byApprover[key]) byApprover[key] = { name: o.voidedBy.name, itemCount: 0, orderCount: 0, valuePaisa: 0 };
+      byApprover[key].orderCount += 1;
+      byApprover[key].valuePaisa += o.subtotal;
+    }
+
+    return {
+      from: start.toISOString(),
+      to: end.toISOString(),
+      items,
+      orders,
+      summary: {
+        itemCount: items.length,
+        orderCount: orders.length,
+        itemsValuePaisa: itemsValue,
+        ordersValuePaisa: ordersValue,
+        totalValuePaisa: itemsValue + ordersValue,
+        byApprover: Object.values(byApprover).sort((a, b) => b.valuePaisa - a.valuePaisa),
+      },
+    };
+  }
 }

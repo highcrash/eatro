@@ -169,7 +169,11 @@ export class OrderService {
     const stations = sectionIds.length
       ? await this.prisma.cookingStation.findMany({ where: { id: { in: sectionIds } } })
       : [];
-    const vatOptOut = new Set(stations.filter((s) => !s.vatEnabled).map((s) => s.id));
+    const vatOptOut = new Set(
+      stations
+        .filter((s) => (s as unknown as { vatEnabled?: boolean }).vatEnabled === false)
+        .map((s) => s.id),
+    );
     const taxableSubtotal = itemsData.reduce((s, i) => {
       const m = menuItems.find((mm) => mm.id === i.menuItemId);
       if (m?.cookingStationId && vatOptOut.has(m.cookingStationId)) return s;
