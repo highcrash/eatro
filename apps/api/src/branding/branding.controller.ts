@@ -48,6 +48,7 @@ export class BrandingController {
       bin?: string | null;
       mushakVersion?: string | null;
       wifiPass?: string | null;
+      billLogoWidthPct?: number;
       facebookUrl?: string | null;
       instagramUrl?: string | null;
     },

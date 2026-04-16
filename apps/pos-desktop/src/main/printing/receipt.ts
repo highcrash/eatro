@@ -17,6 +17,7 @@ export interface ReceiptInput {
   bin?: string;                          // Business Identification Number (Bangladesh); prints below phone
   mushakVersion?: string;                // e.g. "Mushak-6.3"; optional audit line under BIN
   logoUrl?: string;                      // branch logo URL — cached + rasterized at the top of the receipt
+  logoWidthPct?: number;                 // 10–100; % of 80mm paper width the logo should fill
   orderNumber: string;
   tableNumber?: string | null;
   type: string;
@@ -70,7 +71,7 @@ export async function printReceipt(receipt: ReceiptInput, opts: PrintReceiptOpti
   // Resolve the (optional) branch logo to a local file path once, before
   // the ESC/POS buffer is assembled. Failure is silent — receipt prints
   // without the logo if the PNG is missing or unreachable.
-  const logoPath = await getCachedLogoPath(receipt.logoUrl);
+  const logoPath = await getCachedLogoPath(receipt.logoUrl, receipt.logoWidthPct ?? 80);
   if (slot.mode === 'disabled') {
     throw new Error('Bill printer is not configured. Set it in Printer Settings.');
   }

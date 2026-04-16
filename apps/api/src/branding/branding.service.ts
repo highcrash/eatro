@@ -44,6 +44,7 @@ export class BrandingService {
       bin: branch.bin,
       mushakVersion: branch.mushakVersion,
       wifiPass: branch.wifiPass,
+      billLogoWidthPct: branch.billLogoWidthPct,
       taxRate: Number(branch.taxRate),
       vatEnabled: branch.vatEnabled,
       serviceChargeEnabled: branch.serviceChargeEnabled,
@@ -76,6 +77,7 @@ export class BrandingService {
       bin?: string | null;
       mushakVersion?: string | null;
       wifiPass?: string | null;
+      billLogoWidthPct?: number;
       facebookUrl?: string | null;
       instagramUrl?: string | null;
     },

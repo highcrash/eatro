@@ -1,6 +1,6 @@
 {
   "name": "@restora/pos-desktop",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "private": true,
   "description": "Windows cashier terminal — Electron shell that wraps the web POS and adds native printing, cash drawer, and offline sync.",
   "main": "dist/main/index.js",
@@ -22,6 +22,7 @@
     "electron-updater": "^6.3.0",
     "lucide-react": "^0.468.0",
     "node-thermal-printer": "^4.5.0",
+    "pngjs": "^7.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.54.0",
@@ -36,6 +37,7 @@
     "@restora/types": "workspace:*",
     "@restora/utils": "workspace:*",
     "@types/better-sqlite3": "^7.6.11",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",

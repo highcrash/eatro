@@ -156,6 +156,7 @@ model Branch {
   bin             String?    // Bangladesh Business Identification Number, shown under phone
   mushakVersion   String?    // e.g. "Mushak-6.3" — printed below BIN on paper bills
   wifiPass        String?    // guest Wi-Fi password, optionally printed on the bill
+  billLogoWidthPct Int       @default(80) // how wide the logo prints on the receipt (% of 80mm paper)
   facebookUrl     String?
   instagramUrl    String?
   isActive  Boolean  @default(true)

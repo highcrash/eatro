@@ -17,6 +17,7 @@ interface Form {
   bin: string;
   mushakVersion: string;
   wifiPass: string;
+  billLogoWidthPct: number;
   facebookUrl: string;
   instagramUrl: string;
 }
@@ -25,6 +26,7 @@ const empty: Form = {
   name: '', address: '', phone: '', email: '',
   websiteTagline: '', billHeaderText: '', billFooterText: '',
   bin: '', mushakVersion: '', wifiPass: '',
+  billLogoWidthPct: 80,
   facebookUrl: '', instagramUrl: '',
 };
 
@@ -51,6 +53,7 @@ export default function BrandingSection({ isOwner }: Props) {
       bin: branding.bin ?? '',
       mushakVersion: branding.mushakVersion ?? '',
       wifiPass: branding.wifiPass ?? '',
+      billLogoWidthPct: Number(branding.billLogoWidthPct ?? 80),
       facebookUrl: branding.facebookUrl ?? '',
       instagramUrl: branding.instagramUrl ?? '',
     });
@@ -70,6 +73,7 @@ export default function BrandingSection({ isOwner }: Props) {
       bin: form.bin || null,
       mushakVersion: form.mushakVersion || null,
       wifiPass: form.wifiPass || null,
+      billLogoWidthPct: form.billLogoWidthPct,
       facebookUrl: form.facebookUrl || null,
       instagramUrl: form.instagramUrl || null,
       logoUrl,
@@ -229,6 +233,30 @@ export default function BrandingSection({ isOwner }: Props) {
           </div>
           <Field label="Wi-Fi Password (optional, printed on bill)">
             <input value={form.wifiPass} onChange={(e) => setForm((f) => ({ ...f, wifiPass: e.target.value }))} disabled={!isOwner} className="input-base" placeholder="e.g. eatrobadda" />
+          </Field>
+          <Field label={`Bill Logo Width (${form.billLogoWidthPct}% of 80 mm paper)`}>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={10}
+                max={100}
+                step={5}
+                value={form.billLogoWidthPct}
+                onChange={(e) => setForm((f) => ({ ...f, billLogoWidthPct: Number(e.target.value) }))}
+                disabled={!isOwner}
+                className="flex-1 accent-[#D62B2B]"
+              />
+              <input
+                type="number"
+                min={10}
+                max={100}
+                value={form.billLogoWidthPct}
+                onChange={(e) => setForm((f) => ({ ...f, billLogoWidthPct: Math.max(10, Math.min(100, Number(e.target.value) || 80)) }))}
+                disabled={!isOwner}
+                className="input-base w-20 text-center"
+              />
+            </div>
+            <p className="text-[10px] text-[#666] mt-1">Only affects the thermal bill logo — web & admin use the original image.</p>
           </Field>
         </div>
       </div>

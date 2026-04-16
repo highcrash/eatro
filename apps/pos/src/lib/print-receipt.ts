@@ -19,6 +19,7 @@ interface Branding {
   mushakVersion?: string | null;
   wifiPass?: string | null;
   logoUrl?: string | null;
+  billLogoWidthPct?: number | null;
   taxRate?: number | string | null;
   serviceChargeRate?: number | string | null;
   serviceChargeEnabled?: boolean | null;
@@ -33,6 +34,7 @@ interface DesktopReceiptInput {
   bin?: string;
   mushakVersion?: string;
   logoUrl?: string;
+  logoWidthPct?: number;
   orderNumber: string;
   tableNumber?: string | null;
   type: string;
@@ -127,6 +129,7 @@ export function orderToReceiptInput(
     mushakVersion: branding?.mushakVersion ?? undefined,
     wifiPass: branding?.wifiPass ?? undefined,
     logoUrl: branding?.logoUrl ?? undefined,
+    logoWidthPct: branding?.billLogoWidthPct != null ? Number(branding.billLogoWidthPct) : undefined,
     orderNumber: order.orderNumber,
     tableNumber: order.tableNumber ?? null,
     type: order.type,
