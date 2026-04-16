@@ -232,24 +232,35 @@ export class IngredientService {
     //   Pass 1 — create/touch parents (any row without parent_code, plus any
     //            row whose item_code is referenced as parent_code by another).
     //   Pass 2 — create variants, linking by parent_code → parent.itemCode.
-    const referencedParentCodes = new Set(
-      items.map((r) => r.parentCode?.trim()).filter((c): c is string => !!c),
-    );
+    // Codes referenced by variant rows — used below to decide which parent
+    // rows should be flagged hasVariants. Stored in two forms so the
+    // check covers both itemCode (case-preserving) and name (lowercased).
+    const referencedParentCodes = new Set<string>();
+    const referencedParentNames = new Set<string>();
+    for (const r of items) {
+      const pc = r.parentCode?.trim();
+      if (!pc) continue;
+      referencedParentCodes.add(pc);
+      referencedParentNames.add(pc.toLowerCase());
+    }
 
     const parentRows = items.filter((r) => !r.parentCode?.trim());
     const variantRows = items.filter((r) => !!r.parentCode?.trim());
 
-    // Map of itemCode -> ingredientId for variant linking
+    // parent_code resolves against both itemCode and name (lowercased).
+    // That way exported CSVs round-trip even when the owner never bothered
+    // to assign item codes — the parent's name acts as the fallback.
     const parentByCode = new Map<string, string>();
 
-    // Prime map with existing ingredients in this branch (so variants can
-    // attach to ingredients that were imported in a previous run).
-    const existingWithCodes = await this.prisma.ingredient.findMany({
-      where: { branchId, deletedAt: null, itemCode: { not: null } },
-      select: { id: true, itemCode: true },
+    const existingParents = await this.prisma.ingredient.findMany({
+      where: { branchId, deletedAt: null, parentId: null },
+      select: { id: true, itemCode: true, name: true },
     });
-    for (const e of existingWithCodes) {
-      if (e.itemCode) parentByCode.set(e.itemCode, e.id);
+    for (const e of existingParents) {
+      if (e.itemCode) parentByCode.set(e.itemCode.trim(), e.id);
+      // Lowercased name fallback — ignore collisions (first wins).
+      const nameKey = e.name.trim().toLowerCase();
+      if (!parentByCode.has(nameKey)) parentByCode.set(nameKey, e.id);
     }
 
     // ─── Pass 1: parents ────────────────────────────────────────────────
@@ -264,7 +275,11 @@ export class IngredientService {
       });
 
       // A parent that other rows reference must be marked hasVariants.
-      const shouldBeParent = !!item.itemCode && referencedParentCodes.has(item.itemCode.trim());
+      // Referenced by itemCode OR by name.
+      const nameLc = item.name.trim().toLowerCase();
+      const shouldBeParent =
+        (!!item.itemCode && referencedParentCodes.has(item.itemCode.trim())) ||
+        referencedParentNames.has(nameLc);
 
       if (existing) {
         // Round-trip friendly: CSV re-upload updates the existing row's
@@ -287,8 +302,8 @@ export class IngredientService {
           },
         });
         if (item.itemCode) parentByCode.set(item.itemCode.trim(), existing.id);
-        // Expose itemCode already on the row so variants can still attach
         if (existing.itemCode) parentByCode.set(existing.itemCode, existing.id);
+        parentByCode.set(item.name.trim().toLowerCase(), existing.id);
         results.push({ name: item.name, status: 'updated' });
         continue;
       }
@@ -309,6 +324,7 @@ export class IngredientService {
         },
       });
       if (item.itemCode) parentByCode.set(item.itemCode.trim(), created.id);
+      parentByCode.set(item.name.trim().toLowerCase(), created.id);
       results.push({ name: item.name, status: 'created' });
     }
 
@@ -319,7 +335,10 @@ export class IngredientService {
         continue;
       }
       const parentCode = item.parentCode!.trim();
-      const parentId = parentByCode.get(parentCode);
+      // Try itemCode match first (exact, case-preserving), then fall back
+      // to name match (case-insensitive) so CSVs exported from parents
+      // without item codes still round-trip.
+      const parentId = parentByCode.get(parentCode) ?? parentByCode.get(parentCode.toLowerCase());
       if (!parentId) {
         results.push({ name: item.name, status: 'skipped', reason: `Parent code "${parentCode}" not found` });
         continue;

@@ -415,12 +415,13 @@ export default function InventoryPage() {
         '', // sku
       ].join(','));
 
-      if (ing.hasVariants && ing.variants) {
-        if (!ing.itemCode) {
-          // Can't round-trip variants without a parent code; caller will
-          // see that parent has hasVariants=true but no code.
-          continue;
-        }
+      if (ing.hasVariants && ing.variants?.length) {
+        // parent_code is what links variant rows to their parent on
+        // re-import. Prefer itemCode (stable identifier). Fall back to
+        // the parent's name so round-tripping works even when the
+        // owner never assigned item codes — the import side resolves
+        // parent_code against BOTH itemCode and name (case-insensitive).
+        const parentRef = ing.itemCode || ing.name;
         for (const v of ing.variants) {
           rows.push([
             esc((v as any).name ?? ''),
@@ -432,7 +433,7 @@ export default function InventoryPage() {
             '', // purchase_unit inherited
             '', // purchase_unit_qty
             esc((Number((v as any).costPerPurchaseUnit ?? 0) / 100).toFixed(2)),
-            esc(ing.itemCode), // parent_code
+            esc(parentRef),
             esc((v as any).brandName ?? ''),
             esc((v as any).packSize ?? ''),
             esc(Number((v as any).piecesPerPack ?? 0) || ''),
