@@ -679,6 +679,9 @@ export default function MenuPage() {
   const [activeParent, setActiveParent] = useState<string | null>(null);
   const [activeSub, setActiveSub] = useState<string | null>(null);
   const [menuSearch, setMenuSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkSectionId, setBulkSectionId] = useState<string>('');
+  const [bulkStatus, setBulkStatus] = useState<string | null>(null);
   const [csvOpen, setCsvOpen] = useState(false);
   const [csvRows, setCsvRows] = useState<{ categoryName: string; name: string; type: string; price: number; description: string; tags: string }[]>([]);
   const [csvResult, setCsvResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
@@ -692,6 +695,31 @@ export default function MenuPage() {
   const { data: menuItems = [] } = useQuery<MenuItem[]>({
     queryKey: ['menu'],
     queryFn: () => api.get<MenuItem[]>('/menu'),
+  });
+
+  const { data: kitchenSections = [] } = useQuery<{ id: string; name: string; isActive: boolean }[]>({
+    queryKey: ['cooking-stations'],
+    queryFn: () => api.get('/cooking-stations'),
+  });
+  const sectionById = new Map(kitchenSections.map((s) => [s.id, s] as const));
+
+  const bulkAssignSection = useMutation({
+    mutationFn: async (sectionId: string | null) => {
+      const ids = Array.from(selectedIds);
+      // Fan out PATCHes in parallel. /menu/:id already accepts
+      // cookingStationId per item; a dedicated bulk endpoint would be
+      // nicer but this is fine for realistic menu sizes (<500 items).
+      await Promise.all(ids.map((id) => api.patch(`/menu/${id}`, { cookingStationId: sectionId })));
+      return ids.length;
+    },
+    onSuccess: (count) => {
+      void qc.invalidateQueries({ queryKey: ['menu'] });
+      setBulkStatus(`Assigned ${count} item${count === 1 ? '' : 's'}`);
+      setTimeout(() => setBulkStatus(null), 2500);
+      setSelectedIds(new Set());
+      setBulkSectionId('');
+    },
+    onError: (err: Error) => setBulkStatus(err.message || 'Failed to assign'),
   });
 
   const topCategories = categories.filter((c) => !c.parentId);
@@ -897,15 +925,67 @@ export default function MenuPage() {
         )}
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="bg-[#1A1A1A] border border-[#D62B2B] px-5 py-3 flex items-center gap-4 mb-2">
+          <span className="text-white font-body text-sm font-medium">
+            {selectedIds.size} selected
+          </span>
+          <div className="flex items-center gap-2 ml-auto">
+            <label className="text-[10px] font-body tracking-widest uppercase text-[#999]">Kitchen Section</label>
+            <select
+              value={bulkSectionId}
+              onChange={(e) => setBulkSectionId(e.target.value)}
+              className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+            >
+              <option value="">— Pick —</option>
+              <option value="__NONE__">None (default kitchen)</option>
+              {kitchenSections.filter((s) => s.isActive).map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => bulkAssignSection.mutate(bulkSectionId === '__NONE__' ? null : bulkSectionId)}
+              disabled={!bulkSectionId || bulkAssignSection.isPending}
+              className="bg-[#D62B2B] hover:bg-[#F03535] text-white px-4 py-2 font-body font-medium text-sm transition-colors disabled:opacity-40"
+            >
+              {bulkAssignSection.isPending ? 'Assigning…' : 'Apply'}
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase px-3"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+      {bulkStatus && (
+        <p className="text-[#4CAF50] font-body text-xs mb-2 px-1">{bulkStatus}</p>
+      )}
+
       {/* Items table */}
       <div className="bg-[#161616] border border-[#2A2A2A]">
         <table className="w-full text-sm font-body">
           <thead>
             <tr className="text-left text-xs text-[#999] tracking-widest uppercase border-b border-[#2A2A2A]">
+              <th className="px-3 py-3 font-medium w-8">
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && filtered.every((m) => selectedIds.has(m.id))}
+                  onChange={(e) => {
+                    const next = new Set(selectedIds);
+                    if (e.target.checked) filtered.forEach((m) => next.add(m.id));
+                    else filtered.forEach((m) => next.delete(m.id));
+                    setSelectedIds(next);
+                  }}
+                  className="accent-[#D62B2B]"
+                />
+              </th>
               <th className="px-5 py-3 font-medium w-12"></th>
               <th className="px-5 py-3 font-medium">Name</th>
               <th className="px-5 py-3 font-medium">Category</th>
-              <th className="px-5 py-3 font-medium">Type</th>
+              <th className="px-5 py-3 font-medium">Section</th>
               <th className="px-5 py-3 font-medium">Price</th>
               <th className="px-5 py-3 font-medium">Tags</th>
               <th className="px-5 py-3 font-medium">Status</th>
@@ -915,8 +995,23 @@ export default function MenuPage() {
           <tbody>
             {filtered.map((item) => {
               const tags = item.tags ? item.tags.split(',').map((t) => t.trim()).filter(Boolean) : [];
+              const sectionId = (item as unknown as { cookingStationId?: string | null }).cookingStationId ?? null;
+              const sectionName = sectionId ? sectionById.get(sectionId)?.name ?? '(deleted)' : '—';
               return (
                 <tr key={item.id} className="border-b border-[#2A2A2A] last:border-0">
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={(e) => {
+                        const next = new Set(selectedIds);
+                        if (e.target.checked) next.add(item.id);
+                        else next.delete(item.id);
+                        setSelectedIds(next);
+                      }}
+                      className="accent-[#D62B2B]"
+                    />
+                  </td>
                   <td className="px-5 py-2">
                     {item.imageUrl ? (
                       <div className="w-10 h-10 border border-[#2A2A2A] overflow-hidden bg-[#0D0D0D]">
@@ -934,7 +1029,7 @@ export default function MenuPage() {
                     {(item.linkedItems?.length ?? 0) > 0 && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#999] border border-[#2A2A2A] px-1.5 py-0.5">LINKED</span>}
                   </td>
                   <td className="px-5 py-3 text-[#999]">{item.category?.name ?? '--'}</td>
-                  <td className="px-5 py-3 text-[#999]">{item.type}</td>
+                  <td className={`px-5 py-3 ${sectionId ? 'text-white' : 'text-[#666]'}`}>{sectionName}</td>
                   <td className="px-5 py-3 text-white">{formatCurrency(Number(item.price))}</td>
                   <td className="px-5 py-3">
                     <div className="flex flex-wrap gap-1">
@@ -961,7 +1056,7 @@ export default function MenuPage() {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={8} className="px-5 py-8 text-center text-[#999]">No menu items</td></tr>
+              <tr><td colSpan={9} className="px-5 py-8 text-center text-[#999]">No menu items</td></tr>
             )}
           </tbody>
         </table>

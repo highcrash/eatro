@@ -14,7 +14,15 @@ export interface ThermalJobText {
   size?: 'normal' | 'large';
 }
 
-export type ThermalJobItem = ThermalJobLine | ThermalJobText;
+/** Logo / raster image item. `path` must be a local PNG file; network URLs
+ *  should be fetched via logo-cache first. Rendered via node-thermal-printer
+ *  which emits ESC/POS GS v 0 raster commands. */
+export interface ThermalJobImage {
+  kind: 'image';
+  path: string;
+}
+
+export type ThermalJobItem = ThermalJobLine | ThermalJobText | ThermalJobImage;
 
 export interface ThermalJob {
   lines: ThermalJobItem[];
@@ -142,6 +150,17 @@ async function buildEscposBytes(job: ThermalJob): Promise<Buffer> {
       case 'divider': printer.drawLine(); break;
       case 'newline': printer.newLine(); break;
       case 'cut': printer.cut(); break;
+      case 'image':
+        try {
+          // node-thermal-printer's printImage appends ESC/POS raster
+          // commands to the buffer. It can throw on non-PNG, too-wide
+          // images, or unreadable files — swallow and skip so one bad
+          // logo doesn't kill the whole receipt.
+          await printer.printImage(line.path);
+        } catch {
+          // logo skipped — receipt continues without it
+        }
+        break;
       case 'text':
         if (line.bold) printer.bold(true);
         if (line.size === 'large') { printer.setTextDoubleHeight(); printer.setTextDoubleWidth(); }

@@ -2,6 +2,7 @@ import { getPrinters } from '../config/store';
 import { sendThermalJob, ThermalError, type ThermalJob } from './escpos';
 import { printHtmlToPdfThenShell } from './pdf-print';
 import { probe } from './printer-health';
+import { getCachedLogoPath } from './logo-cache';
 import log from 'electron-log';
 
 // Keep the PDF fallback around for slots the user explicitly prefers that
@@ -15,6 +16,7 @@ export interface ReceiptInput {
   branchPhone?: string;
   bin?: string;                          // Business Identification Number (Bangladesh); prints below phone
   mushakVersion?: string;                // e.g. "Mushak-6.3"; optional audit line under BIN
+  logoUrl?: string;                      // branch logo URL — cached + rasterized at the top of the receipt
   orderNumber: string;
   tableNumber?: string | null;
   type: string;
@@ -65,6 +67,10 @@ export interface PrintReceiptOptions {
 export async function printReceipt(receipt: ReceiptInput, opts: PrintReceiptOptions = {}): Promise<void> {
   const printers = await getPrinters();
   const slot = printers.bill;
+  // Resolve the (optional) branch logo to a local file path once, before
+  // the ESC/POS buffer is assembled. Failure is silent — receipt prints
+  // without the logo if the PNG is missing or unreachable.
+  const logoPath = await getCachedLogoPath(receipt.logoUrl);
   if (slot.mode === 'disabled') {
     throw new Error('Bill printer is not configured. Set it in Printer Settings.');
   }
@@ -76,7 +82,7 @@ export async function printReceipt(receipt: ReceiptInput, opts: PrintReceiptOpti
   // shipping them RAW through the Windows spooler (see escpos.ts).
   // Cash drawer kick works in both modes because it's an ESC/POS
   // command, not a driver feature.
-  await sendThermalJob(slot, buildReceiptJob(receipt, wantsDrawerKick));
+  await sendThermalJob(slot, buildReceiptJob(receipt, wantsDrawerKick, logoPath));
 }
 
 /**
@@ -183,13 +189,14 @@ function formatTime(d: Date): string {
   return `${String(h).padStart(2, '0')}:${m} ${ampm}`;
 }
 
-function buildReceiptJob(receipt: ReceiptInput, openCashDrawer: boolean): ThermalJob {
+function buildReceiptJob(receipt: ReceiptInput, openCashDrawer: boolean, logoPath?: string | null): ThermalJob {
   const job: ThermalJob = { lines: [], openCashDrawer };
   const currency = receipt.currencySymbol ?? 'Tk';
   const createdAt = new Date(receipt.createdAt);
 
-  // ── Header (centered): brand, address, phone, BIN, Mushak ────────────
+  // ── Header (centered): optional logo, brand, address, phone, BIN, Mushak ─
   job.lines.push({ kind: 'align-center' });
+  if (logoPath) job.lines.push({ kind: 'image', path: logoPath });
   job.lines.push({ kind: 'text', text: receipt.brandName, bold: true, size: 'large' });
   if (receipt.branchAddress) job.lines.push({ kind: 'text', text: receipt.branchAddress });
   if (receipt.branchPhone) job.lines.push({ kind: 'text', text: `Phone:${receipt.branchPhone}` });
