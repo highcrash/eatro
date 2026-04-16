@@ -319,6 +319,50 @@ Mango Lassi,Sugar,15,G`;
     URL.revokeObjectURL(url);
   };
 
+  // Export all current recipes in the same flat shape the bulk import
+  // accepts. Round-trip: edit in Excel → re-upload → recipes are fully
+  // replaced per menu item (the API upserts with deleteMany+createMany).
+  const downloadCurrentRecipes = async () => {
+    const esc = (v: string | number | null | undefined) => {
+      const s = (v ?? '').toString();
+      if (/[,"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    // Grab the full recipe set for this branch. /recipes returns all
+    // recipes' items already joined via the ingredient-map endpoint
+    // pattern, but there's no list endpoint yet — fetch per menu item
+    // in parallel, capped to items that have a non-zero cost (fast
+    // signal that a recipe exists).
+    const candidates = menuItems.filter((m) => !m.deletedAt && (allCosts[m.id] ?? 0) > 0);
+    const results = await Promise.all(
+      candidates.map((m) =>
+        api.get<{ items: { ingredient: { name: string }; quantity: number; unit: string }[] } | null>(
+          `/recipes/menu-item/${m.id}`,
+        ).then((r) => ({ menuItem: m, recipe: r })).catch(() => ({ menuItem: m, recipe: null })),
+      ),
+    );
+    const lines: string[] = [];
+    for (const { menuItem, recipe } of results) {
+      if (!recipe?.items?.length) continue;
+      for (const it of recipe.items) {
+        lines.push([
+          esc(menuItem.name),
+          esc(it.ingredient?.name ?? ''),
+          esc(Number(it.quantity)),
+          esc(it.unit ?? ''),
+        ].join(','));
+      }
+    }
+    const csv = ['menu_item_name,ingredient_name,quantity,unit', ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `recipes_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const addLine = () => setLines((l) => [...l, { ingredientId: '', quantity: '0', unit: 'G' }]);
   const removeLine = (idx: number) => {
     setLines((l) => l.filter((_, i) => i !== idx));
@@ -722,6 +766,12 @@ Mango Lassi,Sugar,15,G`;
                     className="w-full border border-[#2A2A2A] hover:border-[#D62B2B] text-[#999] hover:text-white font-body text-sm px-4 py-3 transition-colors tracking-widest uppercase"
                   >
                     ↓ Download CSV Template
+                  </button>
+                  <button
+                    onClick={downloadCurrentRecipes}
+                    className="w-full border border-[#2A2A2A] hover:border-[#C8FF00] text-[#999] hover:text-white font-body text-sm px-4 py-3 transition-colors tracking-widest uppercase"
+                  >
+                    ↓ Export Current Recipes
                   </button>
                   <button
                     onClick={() => bulkInputRef.current?.click()}

@@ -211,7 +211,7 @@ export default function InventoryPage() {
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterStock, setFilterStock] = useState('');
   const [showCSVUpload, setShowCSVUpload] = useState(false);
-  const [csvResult, setCsvResult] = useState<{ total: number; created: number; skipped: number; results: { name: string; status: string; reason?: string }[] } | null>(null);
+  const [csvResult, setCsvResult] = useState<{ total: number; created: number; updated?: number; skipped: number; results: { name: string; status: string; reason?: string }[] } | null>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
   const [expandedParent, setExpandedParent] = useState<string | null>(null);
   const [variantDialog, setVariantDialog] = useState<{ parent: Ingredient; variant?: Ingredient } | null>(null);
@@ -313,7 +313,7 @@ export default function InventoryPage() {
       purchaseUnit?: string; purchaseUnitQty?: number; costPerPurchaseUnit?: number;
       parentCode?: string; brandName?: string; packSize?: string; piecesPerPack?: number; sku?: string;
     }[]) =>
-      api.post<{ total: number; created: number; skipped: number; results: { name: string; status: string; reason?: string }[] }>('/ingredients/bulk', { items }),
+      api.post<{ total: number; created: number; updated?: number; skipped: number; results: { name: string; status: string; reason?: string }[] }>('/ingredients/bulk', { items }),
     onSuccess: (data) => {
       setCsvResult(data);
       void qc.invalidateQueries({ queryKey: ['ingredients'] });
@@ -382,6 +382,76 @@ export default function InventoryPage() {
     e.target.value = '';
   };
 
+  // Export current inventory in the same shape the upload template uses.
+  // Parents and variants both emit their row; variants reference the parent
+  // via parent_code. Parents without an itemCode still round-trip (we simply
+  // omit their variants — users who want variants round-tripped should
+  // assign the parent an item code first).
+  const downloadCurrentInventory = () => {
+    const esc = (v: string | number | null | undefined) => {
+      const s = (v ?? '').toString();
+      if (/[,"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const header = 'name,code,category,unit,minimum_stock,cost_per_unit,purchase_unit,purchase_unit_qty,cost_per_purchase_unit,parent_code,brand_name,pack_size,pieces_per_pack,sku';
+
+    // ingredients list contains only roots; variants live under each root.
+    const rows: string[] = [];
+    for (const ing of ingredients) {
+      rows.push([
+        esc(ing.name),
+        esc(ing.itemCode),
+        esc(ing.category),
+        esc(ing.unit),
+        esc(Number(ing.minimumStock ?? 0)),
+        esc((Number(ing.costPerUnit ?? 0) / 100).toFixed(4)),
+        esc(ing.purchaseUnit),
+        esc(Number(ing.purchaseUnitQty ?? 1)),
+        esc((Number(ing.costPerPurchaseUnit ?? 0) / 100).toFixed(2)),
+        '', // parent_code
+        '', // brand_name
+        '', // pack_size
+        '', // pieces_per_pack
+        '', // sku
+      ].join(','));
+
+      if (ing.hasVariants && ing.variants) {
+        if (!ing.itemCode) {
+          // Can't round-trip variants without a parent code; caller will
+          // see that parent has hasVariants=true but no code.
+          continue;
+        }
+        for (const v of ing.variants) {
+          rows.push([
+            esc((v as any).name ?? ''),
+            '', // code — variants don't carry itemCode in the template
+            '', // category inherited
+            '', // unit inherited
+            '', // minimum_stock (parent-level)
+            esc((Number((v as any).costPerUnit ?? 0) / 100).toFixed(4)),
+            '', // purchase_unit inherited
+            '', // purchase_unit_qty
+            esc((Number((v as any).costPerPurchaseUnit ?? 0) / 100).toFixed(2)),
+            esc(ing.itemCode), // parent_code
+            esc((v as any).brandName ?? ''),
+            esc((v as any).packSize ?? ''),
+            esc(Number((v as any).piecesPerPack ?? 0) || ''),
+            esc((v as any).sku ?? ''),
+          ].join(','));
+        }
+      }
+    }
+
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `inventory_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const openAddIng = () => { setEditingIng(null); setIngForm(emptyIngForm); setShowIngDialog(true); };
   const openEditIng = (ing: Ingredient) => {
     setEditingIng(ing);
@@ -435,7 +505,13 @@ export default function InventoryPage() {
                     className="w-full text-left px-3 py-2.5 text-sm font-body text-[#999] hover:bg-[#1F1F1F] hover:text-white transition-colors border-b border-[#2A2A2A]"
                   >
                     Upload CSV
-                    <span className="block text-[10px] text-[#666] mt-0.5">Bulk add ingredients</span>
+                    <span className="block text-[10px] text-[#666] mt-0.5">Re-uploading updates existing items</span>
+                  </button>
+                  <button
+                    onClick={() => { setShowCSVUpload(false); downloadCurrentInventory(); }}
+                    className="w-full text-left px-3 py-2 text-xs font-body text-[#666] hover:bg-[#1F1F1F] hover:text-[#999] transition-colors border-b border-[#2A2A2A]"
+                  >
+                    ↓ Export current inventory
                   </button>
                   <button
                     onClick={() => { setShowCSVUpload(false); downloadInventoryCSV(); }}
@@ -479,6 +555,9 @@ export default function InventoryPage() {
               <div className="flex items-center justify-between mb-2">
                 <div className="flex gap-4">
                   <span className="text-[#4CAF50] font-body text-sm font-medium">{csvResult.created} created</span>
+                  {csvResult.updated != null && csvResult.updated > 0 && (
+                    <span className="text-[#C8FF00] font-body text-sm font-medium">{csvResult.updated} updated</span>
+                  )}
                   <span className="text-[#FFA726] font-body text-sm">{csvResult.skipped} skipped</span>
                   <span className="text-[#666] font-body text-sm">of {csvResult.total} total</span>
                 </div>

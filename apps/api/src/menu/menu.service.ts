@@ -90,8 +90,19 @@ export class MenuService {
     const stations = await this.prisma.cookingStation.findMany({ where: { branchId, isActive: true } });
     const stationMap = new Map(stations.map((s) => [s.name.toLowerCase(), s.id] as const));
 
-    // 3. Create menu items
+    // 3. Load existing menu items once, keyed by lowercase name, so we can
+    //    decide per-row whether to create a new item or update the existing
+    //    one. This makes CSV re-uploads safe: export → edit → re-upload
+    //    adjusts prices/etc. instead of complaining about duplicates.
+    const existingItems = await this.prisma.menuItem.findMany({
+      where: { branchId, deletedAt: null },
+      select: { id: true, name: true },
+    });
+    const existingByName = new Map(existingItems.map((m) => [m.name.toLowerCase(), m.id] as const));
+
+    // 4. Create / update menu items
     let created = 0;
+    let updated = 0;
     let skipped = 0;
     const errors: string[] = [];
 
@@ -114,32 +125,50 @@ export class MenuService {
       const sectionKey = row.kitchenSection?.trim().toLowerCase();
       const cookingStationId = sectionKey ? stationMap.get(sectionKey) ?? null : null;
       if (sectionKey && !cookingStationId) {
-        errors.push(`Row ${i + 1} ("${row.name}"): kitchen section "${row.kitchenSection}" not found — item created without one`);
+        errors.push(`Row ${i + 1} ("${row.name}"): kitchen section "${row.kitchenSection}" not found — item saved without one`);
       }
+
+      const nameKey = row.name.trim().toLowerCase();
+      const existingId = existingByName.get(nameKey);
       try {
-        await this.prisma.menuItem.create({
-          data: {
-            branchId,
-            categoryId,
-            name: row.name.trim(),
-            // MenuItem.type is legacy; admin no longer exposes it and
-            // downstream code reads cookingStationId. Default to FOOD so
-            // the enum stays happy.
-            type: 'FOOD',
-            price,
-            description: row.description?.trim() || null,
-            tags: row.tags?.trim() || null,
-            cookingStationId,
-          } as unknown as Parameters<typeof this.prisma.menuItem.create>[0]['data'],
-        });
-        created++;
+        if (existingId) {
+          await this.prisma.menuItem.update({
+            where: { id: existingId },
+            data: {
+              categoryId,
+              price,
+              description: row.description?.trim() || null,
+              tags: row.tags?.trim() || null,
+              cookingStationId,
+            } as unknown as Parameters<typeof this.prisma.menuItem.update>[0]['data'],
+          });
+          updated++;
+        } else {
+          const createdRow = await this.prisma.menuItem.create({
+            data: {
+              branchId,
+              categoryId,
+              name: row.name.trim(),
+              // MenuItem.type is legacy; admin no longer exposes it and
+              // downstream code reads cookingStationId. Default to FOOD so
+              // the enum stays happy.
+              type: 'FOOD',
+              price,
+              description: row.description?.trim() || null,
+              tags: row.tags?.trim() || null,
+              cookingStationId,
+            } as unknown as Parameters<typeof this.prisma.menuItem.create>[0]['data'],
+          });
+          existingByName.set(nameKey, createdRow.id);
+          created++;
+        }
       } catch (e: any) {
         errors.push(`Row ${i + 1} ("${row.name}"): ${e.message?.slice(0, 80)}`);
         skipped++;
       }
     }
 
-    return { created, skipped, errors };
+    return { created, updated, skipped, errors };
   }
 
   // ─── Combo Items ───────────────────────────────────────────────────────────

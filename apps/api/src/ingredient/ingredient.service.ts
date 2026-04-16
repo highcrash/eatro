@@ -225,7 +225,7 @@ export class IngredientService {
       sku?: string;
     }[],
   ) {
-    const results: { name: string; status: 'created' | 'skipped'; reason?: string }[] = [];
+    const results: { name: string; status: 'created' | 'updated' | 'skipped'; reason?: string }[] = [];
 
     // Two-pass import so variants can reference parents by item code even when
     // the parent row appears after the variant in the CSV:
@@ -267,15 +267,29 @@ export class IngredientService {
       const shouldBeParent = !!item.itemCode && referencedParentCodes.has(item.itemCode.trim());
 
       if (existing) {
-        // Update hasVariants if this row is a parent for later variant rows
-        if (shouldBeParent && !existing.hasVariants) {
-          await this.prisma.ingredient.update({
-            where: { id: existing.id },
-            data: { hasVariants: true },
-          });
-        }
+        // Round-trip friendly: CSV re-upload updates the existing row's
+        // editable fields rather than skipping. Stock + IDs are never
+        // touched here — only the catalog-level descriptors the CSV
+        // template actually carries.
+        await this.prisma.ingredient.update({
+          where: { id: existing.id },
+          data: {
+            // Keep hasVariants if already true; only promote, never demote.
+            ...(shouldBeParent && !existing.hasVariants ? { hasVariants: true } : {}),
+            ...(item.unit ? { unit: item.unit as any } : {}),
+            ...(item.category ? { category: item.category as any } : {}),
+            ...(item.itemCode !== undefined ? { itemCode: item.itemCode || null } : {}),
+            ...(item.minimumStock !== undefined ? { minimumStock: item.minimumStock } : {}),
+            ...(item.costPerUnit !== undefined ? { costPerUnit: item.costPerUnit } : {}),
+            ...(item.purchaseUnit !== undefined ? { purchaseUnit: item.purchaseUnit || null } : {}),
+            ...(item.purchaseUnitQty !== undefined ? { purchaseUnitQty: item.purchaseUnitQty } : {}),
+            ...(item.costPerPurchaseUnit !== undefined ? { costPerPurchaseUnit: item.costPerPurchaseUnit } : {}),
+          },
+        });
         if (item.itemCode) parentByCode.set(item.itemCode.trim(), existing.id);
-        results.push({ name: item.name, status: 'skipped', reason: 'Already exists' });
+        // Expose itemCode already on the row so variants can still attach
+        if (existing.itemCode) parentByCode.set(existing.itemCode, existing.id);
+        results.push({ name: item.name, status: 'updated' });
         continue;
       }
 
@@ -332,12 +346,27 @@ export class IngredientService {
       const brandName = item.brandName?.trim() || item.name.trim();
       const displayName = `${parent.name} — ${brandName}`;
 
-      // Skip if an ingredient with that exact name already exists
+      // Round-trip friendly: if the variant already exists under this parent
+      // with the same display name, update its catalog fields (pack size,
+      // pricing, sku) rather than erroring. Stock + linked movements stay
+      // untouched.
       const dup = await this.prisma.ingredient.findFirst({
-        where: { branchId, name: displayName, deletedAt: null },
+        where: { branchId, name: displayName, parentId: parent.id, deletedAt: null },
       });
       if (dup) {
-        results.push({ name: item.name, status: 'skipped', reason: 'Variant already exists' });
+        await this.prisma.ingredient.update({
+          where: { id: dup.id },
+          data: {
+            brandName,
+            ...(item.packSize !== undefined ? { packSize: item.packSize || null } : {}),
+            ...(item.piecesPerPack !== undefined ? { piecesPerPack: item.piecesPerPack } : {}),
+            ...(item.sku !== undefined ? { sku: item.sku || null } : {}),
+            ...(item.piecesPerPack !== undefined ? { purchaseUnitQty: item.piecesPerPack } : {}),
+            ...(item.costPerPurchaseUnit !== undefined ? { costPerPurchaseUnit: item.costPerPurchaseUnit } : {}),
+            ...(item.costPerUnit !== undefined ? { costPerUnit: item.costPerUnit } : {}),
+          },
+        });
+        results.push({ name: item.name, status: 'updated' });
         continue;
       }
 
@@ -364,6 +393,7 @@ export class IngredientService {
     return {
       total: items.length,
       created: results.filter((r) => r.status === 'created').length,
+      updated: results.filter((r) => r.status === 'updated').length,
       skipped: results.filter((r) => r.status === 'skipped').length,
       results,
     };

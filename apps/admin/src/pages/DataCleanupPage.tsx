@@ -144,6 +144,13 @@ export default function DataCleanupPage() {
   const [password, setPassword] = useState('');
   const [result, setResult] = useState<string | null>(null);
 
+  // Hooks must be called unconditionally in the same order every render —
+  // keep all hook calls above any early return.
+  const { data: branding } = useQuery<{ name: string }>({
+    queryKey: ['branding'],
+    queryFn: () => api.get('/branding'),
+  });
+
   const mutation = useMutation({
     mutationFn: (dto: { scope: Scope; password: string; confirmName: string }) =>
       api.post<{ scope: string; deleted: Record<string, number> }>('/cleanup', dto),
@@ -170,10 +177,6 @@ export default function DataCleanupPage() {
     );
   }
 
-  const { data: branding } = useQuery<{ name: string }>({
-    queryKey: ['branding'],
-    queryFn: () => api.get('/branding'),
-  });
   const branchName = branding?.name ?? user?.branchName ?? '';
 
   return (

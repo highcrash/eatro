@@ -684,7 +684,7 @@ export default function MenuPage() {
   const [bulkStatus, setBulkStatus] = useState<string | null>(null);
   const [csvOpen, setCsvOpen] = useState(false);
   const [csvRows, setCsvRows] = useState<{ categoryName: string; name: string; price: number; description: string; tags: string; kitchenSection: string }[]>([]);
-  const [csvResult, setCsvResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
+  const [csvResult, setCsvResult] = useState<{ created: number; updated?: number; skipped: number; errors: string[] } | null>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
 
   const { data: categories = [] } = useQuery<MenuCategory[]>({
@@ -756,7 +756,7 @@ export default function MenuPage() {
   });
 
   const bulkMut = useMutation({
-    mutationFn: (rows: typeof csvRows) => api.post<{ created: number; skipped: number; errors: string[] }>('/menu/bulk', { rows }),
+    mutationFn: (rows: typeof csvRows) => api.post<{ created: number; updated?: number; skipped: number; errors: string[] }>('/menu/bulk', { rows }),
     onSuccess: (data) => {
       setCsvResult(data);
       void qc.invalidateQueries({ queryKey: ['menu'] });
@@ -812,6 +812,45 @@ export default function MenuPage() {
     const a = document.createElement('a');
     a.href = url;
     a.download = 'menu_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Round-trip the current menu as a CSV matching the import template.
+  // Fields with commas or quotes are escaped per RFC 4180 so Excel can
+  // re-open them cleanly and the import side (which splits on comma) still
+  // works on unescaped fields — which is why we prefer to *not* put commas
+  // in menu item names in the first place.
+  const downloadCurrentMenu = () => {
+    const esc = (v: string | null | undefined) => {
+      const s = (v ?? '').toString();
+      if (/[,"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const catById = new Map(categories.map((c) => [c.id, c.name] as const));
+    const rows = menuItems
+      .filter((m) => !m.deletedAt)
+      .map((m) => {
+        const catName = catById.get(m.categoryId) ?? '';
+        const sectionName = (m as any).cookingStationId
+          ? sectionById.get((m as any).cookingStationId)?.name ?? ''
+          : '';
+        const price = (Number(m.price) / 100).toFixed(2);
+        return [
+          esc(catName),
+          esc(m.name),
+          price,
+          esc(sectionName),
+          esc((m as any).description ?? ''),
+          esc((m as any).tags ?? ''),
+        ].join(',');
+      });
+    const csv = ['category,name,price,kitchen_section,description,tags', ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `menu_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1080,10 +1119,14 @@ export default function MenuPage() {
             </div>
 
             <div className="p-5 space-y-4 overflow-auto flex-1">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <button onClick={downloadTemplate}
                   className="border border-[#2A2A2A] px-4 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors">
                   Download Template
+                </button>
+                <button onClick={downloadCurrentMenu}
+                  className="border border-[#2A2A2A] px-4 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors">
+                  Export Current Menu
                 </button>
                 <button onClick={() => csvFileRef.current?.click()}
                   className="flex items-center gap-1.5 bg-[#D62B2B] text-white px-4 py-2 text-sm font-body font-medium hover:bg-[#F03535] transition-colors">
@@ -1093,8 +1136,8 @@ export default function MenuPage() {
               </div>
 
               <div className="text-[#666] text-xs font-body space-y-1">
-                <p>CSV columns: <span className="text-white">category</span>, <span className="text-white">name</span>, <span className="text-white">price</span> (required) &mdash; <span className="text-[#999]">type</span>, <span className="text-[#999]">description</span>, <span className="text-[#999]">tags</span> (optional)</p>
-                <p>Price in Taka (e.g. 150 = ৳150). Type: FOOD or BEVERAGE (defaults to FOOD). New categories are auto-created.</p>
+                <p>CSV columns: <span className="text-white">category</span>, <span className="text-white">name</span>, <span className="text-white">price</span> (required) &mdash; <span className="text-[#999]">kitchen_section</span>, <span className="text-[#999]">description</span>, <span className="text-[#999]">tags</span> (optional)</p>
+                <p>Price in Taka (e.g. 150 = ৳150). Re-uploading items with the same name updates them in place. New categories are auto-created.</p>
               </div>
 
               {csvRows.length > 0 && (
@@ -1136,6 +1179,9 @@ export default function MenuPage() {
                 <div className="border border-[#2A2A2A] bg-[#0D0D0D] p-4 space-y-2">
                   <p className="text-sm font-body">
                     <span className="text-[#4CAF50]">{csvResult.created} created</span>
+                    {csvResult.updated && csvResult.updated > 0 && (
+                      <span className="text-[#C8FF00] ml-3">{csvResult.updated} updated</span>
+                    )}
                     {csvResult.skipped > 0 && <span className="text-[#FFA726] ml-3">{csvResult.skipped} skipped</span>}
                   </p>
                   {csvResult.errors.length > 0 && (
