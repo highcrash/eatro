@@ -167,20 +167,21 @@ static_sites:
     domains:
       - { domain: kds.eatrobd.com }
 
-  - name: qr
-    github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
-    source_dir: /
-    build_command: |
-      pnpm install --frozen-lockfile
-      pnpm exec turbo run build --filter=@restora/qr
-    output_dir: apps/qr/dist
-    catchall_document: index.html
-    envs:
-      - { key: VITE_API_BASE_URL, value: "https://api.eatrobd.com/api/v1", scope: BUILD_TIME }
-    routes:
-      - path: /
-    domains:
-      - { domain: qr.eatrobd.com }
+  # `apps/qr` is the legacy single-file QR app — superseded by `qr-order`.
+  # Kept here with no domain so it doesn't get built and doesn't receive
+  # traffic. Remove once confirmed nothing references it.
+  # - name: qr
+  #   github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
+  #   source_dir: /
+  #   build_command: |
+  #     pnpm install --frozen-lockfile
+  #     pnpm exec turbo run build --filter=@restora/qr
+  #   output_dir: apps/qr/dist
+  #   catchall_document: index.html
+  #   envs:
+  #     - { key: VITE_API_BASE_URL, value: "https://api.eatrobd.com/api/v1", scope: BUILD_TIME }
+  #   routes: [{ path: / }]
+  #   domains: [{ domain: qr.eatrobd.com }]
 
   - name: qr-order
     github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
@@ -195,6 +196,10 @@ static_sites:
     routes:
       - path: /
     domains:
+      # qr.eatrobd.com (the customer-facing URL everyone knows) points here.
+      # order.eatrobd.com kept as an alias for backwards compatibility with
+      # any printed QR codes that used it during early testing.
+      - { domain: qr.eatrobd.com, type: PRIMARY }
       - { domain: order.eatrobd.com }
 
 # Note on routing:
