@@ -24,48 +24,83 @@ const NETWORK_ERROR_GATE: GatePayload = {
   clientIp: null,
 };
 
+/**
+ * Resolves the branchId that the gate should evaluate against, BEFORE
+ * TableEntry runs. Three sources, in priority order:
+ *   1. tableId from the URL → fetch /public/table/:tableId to get its branchId
+ *   2. Persisted session (sessionStorage) — returning guest
+ *   3. null (no branch known yet) → don't render anything
+ *
+ * This is what lets us gate even /table/:tableId itself: we peek at the
+ * table's branch without waiting for TableEntry to populate the session.
+ */
+function useResolvedBranchId(): string | null | 'resolving' {
+  const sessionBranchId = useSessionStore((s) => s.branchId);
+  const location = useLocation();
+  const [resolved, setResolved] = useState<string | null | 'resolving'>(
+    sessionBranchId ?? 'resolving',
+  );
+
+  // Extract tableId from /table/:tableId without depending on react-router's
+  // route matching (which only fires AFTER render). We parse the path.
+  const tableMatch = location.pathname.match(/^\/table\/([^/]+)/);
+  const tableId = tableMatch?.[1] ?? null;
+
+  useEffect(() => {
+    if (sessionBranchId) { setResolved(sessionBranchId); return; }
+    if (!tableId) { setResolved(null); return; }
+
+    let cancelled = false;
+    setResolved('resolving');
+    fetch(apiUrl(`/public/table/${tableId}`))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { branchId?: string } | null) => {
+        if (cancelled) return;
+        setResolved(data?.branchId ?? null);
+      })
+      .catch(() => { if (!cancelled) setResolved(null); });
+    return () => { cancelled = true; };
+  }, [sessionBranchId, tableId]);
+
+  return resolved;
+}
+
 export default function QrOrderApp() {
-  const branchId = useSessionStore((s) => s.branchId);
+  const resolvedBranchId = useResolvedBranchId();
   const [gate, setGate] = useState<GatePayload | null | 'loading'>(null);
 
-  // When a session branch is known, check whether the client IP is on the
-  // branch's QR allowlist. If not, show the Wi-Fi gate instead of routes.
-  // This runs every time branchId changes (incl. first load after
-  // TableEntry populates the session).
+  // Fire the gate check as soon as we know the branchId — regardless of
+  // which route the user landed on. Previously the check waited for
+  // TableEntry to populate the session, which meant /table/:tableId
+  // itself was exempt and TableEntry navigated to /menu before the
+  // gate could block.
   useEffect(() => {
-    if (!branchId) return;
+    if (resolvedBranchId === null || resolvedBranchId === 'resolving') return;
     let cancelled = false;
     setGate('loading');
-    // cache: 'no-store' + a cache-busting query param defeat any
-    // intermediate (CloudFlare, browser disk cache) that would otherwise
-    // return a stale `allowed: true` from an earlier on-network request.
-    fetch(apiUrl(`/public/qr-gate/${branchId}?t=${Date.now()}`), { cache: 'no-store' })
+    fetch(apiUrl(`/public/qr-gate/${resolvedBranchId}?t=${Date.now()}`), { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: GatePayload | null) => {
         if (cancelled) return;
-        // Fail-closed on null (branch not found / empty response) too.
         setGate(data ?? NETWORK_ERROR_GATE);
       })
       .catch(() => {
         if (!cancelled) setGate(NETWORK_ERROR_GATE);
       });
     return () => { cancelled = true; };
-  }, [branchId]);
+  }, [resolvedBranchId]);
 
-  // /table/:tableId is the entry point — it has to render so it can
-  // populate the session. Every other route is gated. useLocation so
-  // client-side navigations re-evaluate (window.location alone isn't
-  // reactive to React Router).
-  const location = useLocation();
-  const isEntryRoute = location.pathname.startsWith('/table/');
-
-  if (!isEntryRoute) {
-    // No session yet → treat as gated until TableEntry completes.
-    if (!branchId) return <Checking />;
-    if (gate === null || gate === 'loading') return <Checking />;
-    if (!gate.allowed) {
-      return <WifiGate payload={gate} onAllowed={() => setGate({ ...gate, allowed: true })} />;
-    }
+  // Nothing is rendered until the gate verdict is in. This includes
+  // /table/:tableId so the menu can't flash even briefly.
+  if (resolvedBranchId === 'resolving') return <Checking />;
+  if (resolvedBranchId === null) {
+    // No branch context at all — user hit a random URL. Show a minimal
+    // placeholder; don't touch the menu.
+    return <Checking />;
+  }
+  if (gate === null || gate === 'loading') return <Checking />;
+  if (!gate.allowed) {
+    return <WifiGate payload={gate} onAllowed={() => setGate({ ...gate, allowed: true })} />;
   }
 
   return (
