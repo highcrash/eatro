@@ -70,3 +70,24 @@ apps/api/apps/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# codecanyon fork — main-only files
+#
+# These paths exist on `main` (internal development / deploy config) but must
+# NOT travel with the `codecanyon` branch. Two gates keep them out:
+#   1. This ignore list — git stops tracking them on codecanyon once removed.
+#   2. scripts/lib/secret-scan.mjs — packager fails the build if any internal
+#      token leaks into the release tree anyway.
+#
+# When you add a new internal-only file, list it here AND in
+# codecanyon/docs/BRANCH_HYGIENE.md.
+# ─────────────────────────────────────────────────────────────────────────────
+.do/
+scripts/screenshot.mjs
+scripts/screenshot-pos.mjs
+scripts/seed-attendance.mjs
+scripts/seed-sales.mjs
+mockups/
+temporary screenshots/
+
