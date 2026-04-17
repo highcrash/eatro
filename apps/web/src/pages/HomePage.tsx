@@ -12,7 +12,7 @@ import { useMemo, useState } from 'react';
 /* ------------------------------------------------------------------ */
 
 interface PublicMenu {
-  categories: Array<{ id: string; name: string }>;
+  categories: Array<{ id: string; name: string; parentId?: string | null }>;
   items: Array<{
     id: string;
     name: string;

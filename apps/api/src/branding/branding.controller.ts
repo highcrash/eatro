@@ -14,7 +14,9 @@ export class BrandingPublicController {
 
   @Get(':branchId')
   get(@Param('branchId') branchId: string) {
-    return this.svc.getBranding(branchId);
+    // Narrow public subset — never return wifiPass, qrAllowedIps,
+    // bill text, BIN/Mushak, or any other internal field here.
+    return this.svc.getPublicBranding(branchId);
   }
 }
 

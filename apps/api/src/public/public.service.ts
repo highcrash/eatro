@@ -1,6 +1,42 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+// Fields safe to expose on the public website. Keep this list tight —
+// everything NOT listed here stays internal. In particular:
+//   - `costPrice` is cost of goods; never leak it.
+//   - `cookingStationId` / `type` expose internal kitchen routing.
+//   - `branchId` is a useful pointer the client may already know, so
+//     include it (endpoints already take branchId in the URL).
+// Any new MenuItem column with sensitive defaults (COGS, profit, internal
+// flags) MUST be added as exclusions, not included by default.
+const PUBLIC_MENU_ITEM_SELECT = {
+  id: true,
+  branchId: true,
+  categoryId: true,
+  name: true,
+  slug: true,
+  seoTitle: true,
+  seoDescription: true,
+  description: true,
+  price: true,
+  imageUrl: true,
+  tags: true,
+  sortOrder: true,
+  pieces: true,
+  prepTime: true,
+  spiceLevel: true,
+} as const;
+
+// Categories for the public menu — just presentational fields.
+const PUBLIC_CATEGORY_SELECT = {
+  id: true,
+  name: true,
+  slug: true,
+  icon: true,
+  parentId: true,
+  sortOrder: true,
+} as const;
+
 @Injectable()
 export class PublicService {
   constructor(private readonly prisma: PrismaService) {}
@@ -111,8 +147,16 @@ export class PublicService {
     if (hiddenItemIds.length > 0) itemWhere.id = { notIn: hiddenItemIds };
 
     const [categories, items] = await Promise.all([
-      this.prisma.menuCategory.findMany({ where: catWhere, orderBy: { sortOrder: 'asc' } }),
-      this.prisma.menuItem.findMany({ where: itemWhere, orderBy: { sortOrder: 'asc' } }),
+      this.prisma.menuCategory.findMany({
+        where: catWhere,
+        orderBy: { sortOrder: 'asc' },
+        select: PUBLIC_CATEGORY_SELECT,
+      }),
+      this.prisma.menuItem.findMany({
+        where: itemWhere,
+        orderBy: { sortOrder: 'asc' },
+        select: PUBLIC_MENU_ITEM_SELECT,
+      }),
     ]);
 
     const itemsWithDiscount = await this.applyDiscounts(branchId, items);
@@ -130,20 +174,25 @@ export class PublicService {
   }
 
   async getMenuItem(branchId: string, itemIdOrSlug: string) {
-    // Support lookup by ID or slug
+    // Support lookup by ID or slug. Use an explicit select so costPrice
+    // and internal fields never leak, then pull recipe ingredients
+    // separately with their own narrow select.
     const item = await this.prisma.menuItem.findFirst({
       where: {
         branchId,
         deletedAt: null,
         OR: [{ id: itemIdOrSlug }, { slug: itemIdOrSlug }],
       },
-      include: {
-        category: true,
+      select: {
+        ...PUBLIC_MENU_ITEM_SELECT,
+        category: { select: PUBLIC_CATEGORY_SELECT },
         recipe: {
-          include: {
+          select: {
             items: {
-              include: {
-                ingredient: { select: { id: true, name: true, unit: true, imageUrl: true, showOnWebsite: true } },
+              select: {
+                // Omit quantity + unit so competitors can't reverse-engineer
+                // portioning. Customers see the ingredient list only.
+                ingredient: { select: { id: true, name: true, imageUrl: true, showOnWebsite: true } },
               },
             },
           },
@@ -155,18 +204,21 @@ export class PublicService {
     // Apply discount
     const [itemWithDiscount] = await this.applyDiscounts(branchId, [item]);
 
-    // Filter ingredients by showOnWebsite
-    const ingredients = item.recipe?.items
-      .filter((ri) => ri.ingredient.showOnWebsite)
-      .map((ri) => ({
+    // Filter ingredients by showOnWebsite. Quantity + unit are intentionally
+    // stripped — exposing them lets competitors copy recipes. Admin-set
+    // "pieces" on MenuItem is already the customer-facing portioning hint.
+    const ingredients = (item as any).recipe?.items
+      ?.filter((ri: any) => ri.ingredient.showOnWebsite)
+      .map((ri: any) => ({
         id: ri.ingredient.id,
         name: ri.ingredient.name,
         imageUrl: ri.ingredient.imageUrl,
-        quantity: ri.quantity,
-        unit: ri.unit,
       })) ?? [];
 
-    return { ...itemWithDiscount, ingredients };
+    // Strip the raw recipe object — only the filtered `ingredients` array
+    // should be visible on the public detail endpoint.
+    const { recipe: _recipe, ...rest } = itemWithDiscount as any;
+    return { ...rest, ingredients };
   }
 
   async getRecommended(branchId: string, categoryId?: string) {
@@ -187,7 +239,7 @@ export class PublicService {
       if (ids.length > 0) {
         const items = await this.prisma.menuItem.findMany({
           where: { id: { in: ids }, deletedAt: null },
-          include: { category: true },
+          select: { ...PUBLIC_MENU_ITEM_SELECT, category: { select: PUBLIC_CATEGORY_SELECT } },
         });
         return this.applyDiscounts(branchId, items);
       }
@@ -196,7 +248,7 @@ export class PublicService {
     // Items tagged with recommendedTag
     const tagged = await this.prisma.menuItem.findMany({
       where: { branchId, deletedAt: null, isAvailable: true, websiteVisible: true, tags: { contains: tag } },
-      include: { category: true },
+      select: { ...PUBLIC_MENU_ITEM_SELECT, category: { select: PUBLIC_CATEGORY_SELECT } },
       take: 10,
     });
     if (tagged.length > 0) return this.applyDiscounts(branchId, tagged);
@@ -212,7 +264,7 @@ export class PublicService {
     const fallbackIds = topAll.map((t) => t.menuItemId);
     const fallbackItems = await this.prisma.menuItem.findMany({
       where: { id: { in: fallbackIds }, deletedAt: null },
-      include: { category: true },
+      select: { ...PUBLIC_MENU_ITEM_SELECT, category: { select: PUBLIC_CATEGORY_SELECT } },
     });
     return this.applyDiscounts(branchId, fallbackItems);
   }
@@ -222,7 +274,15 @@ export class PublicService {
     const dayName = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
     const discounts = await this.prisma.menuItemDiscount.findMany({
       where: { isActive: true, startDate: { lte: now }, endDate: { gte: now }, menuItem: { branchId, deletedAt: null, isAvailable: true, websiteVisible: true } },
-      include: { menuItem: { include: { category: true } } },
+      select: {
+        type: true,
+        value: true,
+        endDate: true,
+        applicableDays: true,
+        menuItem: {
+          select: { ...PUBLIC_MENU_ITEM_SELECT, category: { select: PUBLIC_CATEGORY_SELECT } },
+        },
+      },
     });
     const active = discounts.filter((d) => {
       if (!d.applicableDays) return true;
@@ -245,9 +305,20 @@ export class PublicService {
   }
 
   async getReviews(branchId: string) {
+    // Explicit select so orderId/customerId internal pointers don't leak
+    // to the public website. Customer name is whitelisted.
     return this.prisma.review.findMany({
       where: { branchId },
-      include: { customer: { select: { name: true } } },
+      select: {
+        id: true,
+        foodScore: true,
+        serviceScore: true,
+        atmosphereScore: true,
+        priceScore: true,
+        notes: true,
+        createdAt: true,
+        customer: { select: { name: true } },
+      },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });

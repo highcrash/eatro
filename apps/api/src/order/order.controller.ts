@@ -9,7 +9,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { OrderService } from './order.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { QrGateService } from '../qr-gate/qr-gate.service';
+import { QrGateService, extractClientIp } from '../qr-gate/qr-gate.service';
 
 @ApiTags('Orders')
 @ApiBearerAuth()
@@ -173,7 +173,11 @@ export class QrOrderController {
    * endpoints directly — this is the defense-in-depth check.
    */
   private async ensureGateOpen(branchId: string, req: Request) {
-    const verdict = await this.qrGate.evaluate(branchId, req.ip ?? null);
+    // Use the same priority-aware extractor as /public/qr-gate so the
+    // mutation check uses identical logic. Otherwise a CF hop could
+    // cause the GET gate check to pass (using CF-Connecting-IP) while
+    // the POST would see the edge IP and fail — or vice versa.
+    const verdict = await this.qrGate.evaluate(branchId, extractClientIp(req));
     if (!verdict) throw new NotFoundException('Branch not found');
     if (!verdict.allowed) {
       throw new ForbiddenException('QR ordering is restricted to the restaurant Wi-Fi network.');

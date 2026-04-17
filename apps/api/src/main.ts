@@ -19,8 +19,12 @@ async function bootstrap(): Promise<void> {
     .map((o) => o.trim())
     .filter(Boolean);
 
-  // Behind App Platform / nginx — trust X-Forwarded-* so secure cookies + req.ip work.
-  app.set('trust proxy', 1);
+  // Behind CloudFlare → DO App Platform there are 2+ proxy hops, so trust
+  // the whole chain. `true` tells Express to honor X-Forwarded-For from
+  // every upstream and set req.ip to the original client. Individual
+  // middleware (like the QR gate) additionally prefers CF-Connecting-IP
+  // and X-Forwarded-For[0] to be fully explicit.
+  app.set('trust proxy', true);
 
   // Serve locally-uploaded files for dev. In production uploads go to DO Spaces.
   app.useStaticAssets(join(process.cwd(), 'apps', 'api', 'uploads'), { prefix: '/uploads/' });

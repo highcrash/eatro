@@ -1,5 +1,37 @@
 import { Injectable } from '@nestjs/common';
+import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
+
+/**
+ * Best-effort real client IP extractor. Priority order:
+ *   1. CF-Connecting-IP      — CloudFlare's authoritative visitor IP
+ *   2. X-Real-IP             — nginx-style
+ *   3. X-Forwarded-For[0]    — first (leftmost) entry = original client
+ *   4. req.ip                — Express, honors `trust proxy` setting
+ *
+ * Each candidate is trimmed and any v4-mapped-v6 prefix (`::ffff:`) is
+ * stripped. Returns null if nothing usable is present (unlikely).
+ *
+ * Why not rely on req.ip alone? Behind CloudFlare → DO App Platform there
+ * are 2+ proxy hops. `trust proxy: true` helps, but CF still sets
+ * CF-Connecting-IP explicitly and we prefer that source when present.
+ */
+export function extractClientIp(req: Request): string | null {
+  const pick = (v: unknown): string | null => {
+    if (typeof v !== 'string') return null;
+    const first = v.split(',')[0]?.trim();
+    if (!first) return null;
+    return first.replace(/^::ffff:/, '');
+  };
+
+  const h = req.headers;
+  return (
+    pick(h['cf-connecting-ip']) ??
+    pick(h['x-real-ip']) ??
+    pick(h['x-forwarded-for']) ??
+    (req.ip ? req.ip.replace(/^::ffff:/, '') : null)
+  );
+}
 
 // IPv4 dotted-quad parser. Returns the IP as a 32-bit unsigned number, or
 // null for malformed input. Kept as a pure function so the allowlist
@@ -86,10 +118,11 @@ export class QrGateService {
       wifiSsid: (b.wifiSsid as string | null) ?? null,
       wifiPass: branch.wifiPass ?? null,
       message: (b.qrGateMessage as string | null) ?? null,
-      // Only surface clientIp when the gate is actively blocking — helps
-      // owners debug their allowlist from the guest's perspective without
-      // leaking IPs on every happy-path call.
-      clientIp: !allowed ? clientIp : null,
+      // Always surface the detected client IP so the admin can configure
+      // the allowlist from the "what IP do I actually look like" view.
+      // This isn't sensitive (the caller already knows their own IP) and
+      // the debug visibility outweighs the minor leak.
+      clientIp,
     };
   }
 }

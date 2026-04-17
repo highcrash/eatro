@@ -696,6 +696,7 @@ function CustomUnitSection({ isOwner }: { isOwner: boolean }) {
 function QrGateSection({ isOwner }: { isOwner: boolean }) {
   const queryClient = useQueryClient();
   const { data: branding } = useQuery<{
+    branchId: string;
     wifiSsid: string | null;
     wifiPass: string | null;
     qrGateEnabled: boolean;
@@ -704,6 +705,21 @@ function QrGateSection({ isOwner }: { isOwner: boolean }) {
   }>({
     queryKey: ['branding'],
     queryFn: () => api.get('/branding'),
+  });
+
+  // Probe the public gate endpoint from the admin's network to show the
+  // IP the server will actually see for guests — without this, owners
+  // fill in the allowlist by guessing and wonder why the gate isn't
+  // blocking. Refreshes every 30s so it stays live as the network changes.
+  const { data: gateProbe, refetch: refetchProbe } = useQuery<{
+    allowed: boolean;
+    clientIp: string | null;
+  }>({
+    queryKey: ['qr-gate-probe', branding?.branchId],
+    queryFn: () => api.get(`/public/qr-gate/${branding!.branchId}`),
+    enabled: !!branding?.branchId,
+    refetchInterval: 30_000,
+    staleTime: 0,
   });
 
   const [form, setForm] = useState({
@@ -781,10 +797,33 @@ function QrGateSection({ isOwner }: { isOwner: boolean }) {
             placeholder="192.168.1.0/24, 203.0.113.42, 10.0.0.0/8"
             className="input-base font-mono text-xs"
           />
-          <p className="text-[10px] text-[#666] mt-1">
-            Typical: your restaurant LAN's public IP as seen from the internet (e.g. <span className="font-mono">203.0.113.42</span>)
-            or the CIDR block assigned by your ISP. Check your current IP at whatismyipaddress.com while on the restaurant Wi-Fi.
-          </p>
+          <div className="mt-2 text-[11px] font-body text-[#888] space-y-1">
+            <p>
+              Your IP right now (as seen by the server):{' '}
+              <span className="font-mono text-[#C8FF00]">
+                {gateProbe?.clientIp ?? '…detecting…'}
+              </span>
+              <button
+                type="button"
+                onClick={() => void refetchProbe()}
+                className="ml-2 text-[10px] text-[#666] hover:text-white underline"
+              >
+                refresh
+              </button>
+            </p>
+            <p className="text-[#666]">
+              Open this page from a phone <em>on the restaurant Wi-Fi</em> to see the public IP
+              your guests' requests will carry. Add that IP (or the CIDR block for your whole
+              network) to the allowlist above.
+            </p>
+            {form.qrGateEnabled && gateProbe?.clientIp && (
+              <p className={gateProbe.allowed ? 'text-[#4CAF50]' : 'text-[#D62B2B]'}>
+                {gateProbe.allowed
+                  ? '✓ This IP currently passes the gate.'
+                  : '✗ This IP is NOT on the allowlist — guests from here would see the Wi-Fi page.'}
+              </p>
+            )}
+          </div>
         </Field>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

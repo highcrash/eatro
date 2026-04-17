@@ -67,6 +67,43 @@ export class BrandingService {
     return this.getBranding(branchId);
   }
 
+  /**
+   * Public-safe subset of branding, for the unauthenticated /public/branding
+   * endpoint consumed by the customer website. Deliberately omits:
+   *   - wifiPass, wifiSsid   (internal Wi-Fi creds; Wi-Fi is surfaced only
+   *     via the QR gate endpoint to guests on-network)
+   *   - qrGateEnabled, qrAllowedIps, qrGateMessage  (reveals network setup)
+   *   - billHeaderText, billFooterText  (internal bill strings)
+   *   - bin, mushakVersion  (tax identifiers, not for public consumption)
+   *   - billLogoWidthPct  (printer-only setting)
+   *   - serviceChargeRate  (internal pricing policy)
+   *
+   * The website needs just enough to render: name/contact, logo, tagline,
+   * social URLs, and the theme catalogue.
+   */
+  async getPublicBranding(branchId: string): Promise<Partial<Branding>> {
+    const full = await this.getBranding(branchId);
+    return {
+      branchId: full.branchId,
+      name: full.name,
+      address: full.address,
+      phone: full.phone,
+      email: full.email,
+      logoUrl: full.logoUrl,
+      posLogoUrl: full.posLogoUrl,
+      websiteTagline: full.websiteTagline,
+      facebookUrl: full.facebookUrl,
+      instagramUrl: full.instagramUrl,
+      posTheme: full.posTheme,
+      websiteTheme: full.websiteTheme,
+      themes: full.themes,
+      // VAT inclusion flag is fine to expose — menu prices can be displayed
+      // with or without VAT, and the website needs to know which.
+      vatEnabled: full.vatEnabled,
+      taxRate: full.taxRate,
+    };
+  }
+
   async updateBranding(
     branchId: string,
     dto: {
