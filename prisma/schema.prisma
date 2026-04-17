@@ -156,6 +156,10 @@ model Branch {
   bin             String?    // Bangladesh Business Identification Number, shown under phone
   mushakVersion   String?    // e.g. "Mushak-6.3" — printed below BIN on paper bills
   wifiPass        String?    // guest Wi-Fi password, optionally printed on the bill
+  wifiSsid        String?    // guest Wi-Fi network name (SSID) — shown on QR gate page
+  qrGateEnabled   Boolean  @default(false)   // when true, QR ordering requires the client IP to match qrAllowedIps
+  qrAllowedIps    String?    // comma-separated IPs and CIDR blocks (e.g. "192.168.1.0/24,203.0.113.42")
+  qrGateMessage   String?    // optional instructions shown under Wi-Fi details on the gate page
   billLogoWidthPct Int       @default(80) // how wide the logo prints on the receipt (% of 80mm paper)
   facebookUrl     String?
   instagramUrl    String?

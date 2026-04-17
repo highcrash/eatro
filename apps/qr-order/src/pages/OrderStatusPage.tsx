@@ -25,6 +25,11 @@ interface QrOrder {
   subtotal: number;
   taxAmount: number;
   totalAmount: number;
+  discountAmount?: number;
+  discountName?: string | null;
+  couponCode?: string | null;
+  customerId?: string | null;
+  customerName?: string | null;
   items: OrderItem[];
 }
 
@@ -99,6 +104,69 @@ export default function OrderStatusPage() {
   const qc = useQueryClient();
   const branchId = useSessionStore((s) => s.branchId);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginName, setLoginName] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
+
+  const hasCustomer = !!order.customerId;
+  const hasCoupon = !!order.couponCode;
+
+  const applyCoupon = async () => {
+    if (!couponCode.trim()) return;
+    setCouponBusy(true);
+    setCouponError(null);
+    try {
+      const res = await fetch(apiUrl(`/orders/qr/${orderId}/apply-coupon`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
+        body: JSON.stringify({ code: couponCode.trim().toUpperCase() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Failed to apply coupon' })) as { message?: string };
+        // Server uses the CUSTOMER_REQUIRED prefix so we can switch from
+        // "bad coupon" message into the identify-customer flow.
+        if ((err.message ?? '').includes('CUSTOMER_REQUIRED')) {
+          setShowLogin(true);
+          return;
+        }
+        throw new Error(err.message || 'Failed to apply coupon');
+      }
+      setCouponCode('');
+      void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+    } catch (e) {
+      setCouponError((e as Error).message);
+    } finally {
+      setCouponBusy(false);
+    }
+  };
+
+  const submitLogin = async () => {
+    if (!loginPhone.trim()) return;
+    setLoginBusy(true);
+    try {
+      const res = await fetch(apiUrl(`/orders/qr/${orderId}/identify-customer`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
+        body: JSON.stringify({ phone: loginPhone.trim(), name: loginName.trim() || undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Login failed' })) as { message?: string };
+        throw new Error(err.message || 'Login failed');
+      }
+      setShowLogin(false);
+      void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+      // Retry the coupon apply now that the order has a customer.
+      if (couponCode.trim()) void applyCoupon();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setLoginBusy(false);
+    }
+  };
 
   const currentStep = ORDER_STEPS.indexOf(order.status);
   const activeItems = order.items.filter((i) => !i.voidedAt);
@@ -213,9 +281,15 @@ export default function OrderStatusPage() {
             <span>Subtotal</span>
             <span>{formatCurrency(order.subtotal)}</span>
           </div>
+          {Number(order.discountAmount ?? 0) > 0 && (
+            <div className="flex justify-between text-sm font-body text-[#C8FF00]">
+              <span>{order.discountName || order.couponCode || 'Discount'}</span>
+              <span>−{formatCurrency(Number(order.discountAmount ?? 0))}</span>
+            </div>
+          )}
           {order.taxAmount > 0 && (
             <div className="flex justify-between text-sm font-body text-[#666]">
-              <span>Tax</span>
+              <span>VAT</span>
               <span>{formatCurrency(order.taxAmount)}</span>
             </div>
           )}
@@ -225,6 +299,92 @@ export default function OrderStatusPage() {
           </div>
         </div>
       </div>
+
+      {/* Coupon panel — hidden once paid/served. */}
+      {!isFinished && !hasCoupon && (
+        <div className="px-5 mb-24">
+          <div className="border border-[#2A2A2A] bg-[#1A1A1A] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="font-body font-medium text-sm text-white">Have a coupon?</p>
+              {hasCustomer && (
+                <span className="text-[10px] text-[#C8FF00] font-body tracking-widest uppercase">
+                  Logged in as {order.customerName}
+                </span>
+              )}
+            </div>
+            {!hasCustomer ? (
+              <div className="space-y-2">
+                <p className="text-xs text-[#888] font-body">
+                  Coupons are tied to your customer account. Please log in with your phone number to apply.
+                </p>
+                <button
+                  onClick={() => setShowLogin(true)}
+                  className="w-full bg-[#C8FF00] text-[#0D0D0D] py-2.5 font-body font-medium text-sm"
+                >
+                  Log in to apply coupon
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  value={couponCode}
+                  onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                  placeholder="ENTER CODE"
+                  className="flex-1 bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2.5 text-sm font-mono font-semibold tracking-widest text-white outline-none focus:border-[#C8FF00]"
+                />
+                <button
+                  onClick={() => void applyCoupon()}
+                  disabled={!couponCode.trim() || couponBusy}
+                  className="bg-[#C8FF00] text-[#0D0D0D] px-4 py-2.5 font-body font-medium text-sm disabled:opacity-40"
+                >
+                  {couponBusy ? '…' : 'Apply'}
+                </button>
+              </div>
+            )}
+            {couponError && <p className="text-xs text-[#D62B2B] font-body">{couponError}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Phone-login modal (QR coupon flow) */}
+      {showLogin && (
+        <div className="fixed inset-0 bg-black/80 z-40 flex items-center justify-center p-4" onClick={() => setShowLogin(false)}>
+          <div className="bg-[#1A1A1A] border border-[#2A2A2A] w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <p className="font-display text-lg text-white tracking-wider">LOGIN</p>
+              <p className="text-xs text-[#888] font-body mt-1">Enter your phone to apply coupons and earn loyalty.</p>
+            </div>
+            <input
+              value={loginPhone}
+              onChange={(e) => setLoginPhone(e.target.value)}
+              placeholder="Phone number"
+              autoFocus
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2.5 text-sm font-body text-white outline-none focus:border-[#C8FF00]"
+            />
+            <input
+              value={loginName}
+              onChange={(e) => setLoginName(e.target.value)}
+              placeholder="Name (optional)"
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2.5 text-sm font-body text-white outline-none focus:border-[#C8FF00]"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowLogin(false)}
+                className="flex-1 border border-[#2A2A2A] text-[#999] py-2.5 font-body text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void submitLogin()}
+                disabled={!loginPhone.trim() || loginBusy}
+                className="flex-1 bg-[#C8FF00] text-[#0D0D0D] py-2.5 font-body font-medium text-sm disabled:opacity-40"
+              >
+                {loginBusy ? 'Logging in…' : 'Continue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom actions */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-[#0D0D0D] border-t border-[#2A2A2A] px-5 py-4 z-20 space-y-2">

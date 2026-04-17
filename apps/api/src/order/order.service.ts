@@ -333,6 +333,12 @@ export class OrderService {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') throw new BadRequestException('Cannot modify this order');
     if (order.couponId) throw new BadRequestException('Remove coupon before applying a discount');
+    // Discounts must be tied to a customer so loyalty + usage-audit makes
+    // sense. POS shows a "pick a customer first" popup and retries; QR
+    // shows a login link. Returning 400 lets the client show that.
+    if (!order.customerId) {
+      throw new BadRequestException('CUSTOMER_REQUIRED: select or add a customer before applying a discount');
+    }
 
     const discount = await this.prisma.discount.findFirst({ where: { id: discountId, branchId, isActive: true } });
     if (!discount) throw new BadRequestException('Discount not found');
@@ -394,6 +400,12 @@ export class OrderService {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') throw new BadRequestException('Cannot modify this order');
     if (order.discountId) throw new BadRequestException('Remove discount before applying a coupon');
+    // Coupons are tied to a customer account for usage tracking and to
+    // block coupon-sharing. Clients detect CUSTOMER_REQUIRED in the
+    // error message and show a customer picker (POS) or login link (QR).
+    if (!order.customerId) {
+      throw new BadRequestException('CUSTOMER_REQUIRED: log in or select a customer before applying a coupon');
+    }
 
     // If replacing an existing coupon, decrement old coupon usage
     if (order.couponId) {

@@ -24,7 +24,8 @@ type TabKey =
   | 'payments'
   | 'reservations'
   | 'notifications'
-  | 'units';
+  | 'units'
+  | 'qr';
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'restaurant', label: 'Restaurant' },
@@ -35,6 +36,7 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'reservations', label: 'Reservations' },
   { key: 'notifications', label: 'Notifications' },
   { key: 'units', label: 'Units' },
+  { key: 'qr', label: 'QR Ordering' },
 ];
 
 export default function SettingsPage() {
@@ -347,6 +349,8 @@ export default function SettingsPage() {
           <UnitConversionSection isOwner={isOwner} />
         </>
       )}
+
+      {tab === 'qr' && <QrGateSection isOwner={isOwner} />}
 
       <style>{`
         .input-base {
@@ -685,6 +689,153 @@ function CustomUnitSection({ isOwner }: { isOwner: boolean }) {
       <p className="text-[#666] font-body text-xs mt-3">
         Code must be uppercase letters/digits/underscore (e.g. <span className="font-mono text-[#999]">JAR</span>, <span className="font-mono text-[#999]">HALF_KG</span>). Removing a custom unit only hides it from dropdowns — items already using it keep the value.
       </p>
+    </div>
+  );
+}
+
+function QrGateSection({ isOwner }: { isOwner: boolean }) {
+  const queryClient = useQueryClient();
+  const { data: branding } = useQuery<{
+    wifiSsid: string | null;
+    wifiPass: string | null;
+    qrGateEnabled: boolean;
+    qrAllowedIps: string | null;
+    qrGateMessage: string | null;
+  }>({
+    queryKey: ['branding'],
+    queryFn: () => api.get('/branding'),
+  });
+
+  const [form, setForm] = useState({
+    qrGateEnabled: false,
+    qrAllowedIps: '',
+    wifiSsid: '',
+    wifiPass: '',
+    qrGateMessage: '',
+  });
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!branding) return;
+    setForm({
+      qrGateEnabled: branding.qrGateEnabled ?? false,
+      qrAllowedIps: branding.qrAllowedIps ?? '',
+      wifiSsid: branding.wifiSsid ?? '',
+      wifiPass: branding.wifiPass ?? '',
+      qrGateMessage: branding.qrGateMessage ?? '',
+    });
+  }, [branding]);
+
+  const saveMut = useMutation({
+    mutationFn: () =>
+      api.patch('/branding', {
+        qrGateEnabled: form.qrGateEnabled,
+        qrAllowedIps: form.qrAllowedIps.trim() || null,
+        wifiSsid: form.wifiSsid.trim() || null,
+        wifiPass: form.wifiPass.trim() || null,
+        qrGateMessage: form.qrGateMessage.trim() || null,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['branding'] });
+      setSavedAt(Date.now());
+      setTimeout(() => setSavedAt(null), 2500);
+    },
+  });
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div>
+        <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Security</p>
+        <h2 className="font-display text-2xl text-white tracking-wide">QR ORDERING</h2>
+        <p className="text-[#999] font-body text-sm mt-2">
+          When the gate is enabled, QR ordering only works for guests whose IP
+          address matches the allowlist. Others see a "connect to our Wi-Fi"
+          page with the SSID + password below. Leave disabled to allow QR
+          orders from any network.
+        </p>
+      </div>
+
+      <div className="bg-[#161616] border border-[#2A2A2A] p-6 space-y-5">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.qrGateEnabled}
+            onChange={(e) => setForm((f) => ({ ...f, qrGateEnabled: e.target.checked }))}
+            disabled={!isOwner}
+            className="mt-1 w-4 h-4 accent-[#D62B2B]"
+          />
+          <div>
+            <p className="text-sm font-body font-medium text-white">Enable network gate</p>
+            <p className="text-xs font-body text-[#888] mt-0.5">
+              When off, QR orders are accepted from any network — use only if your restaurant doesn't offer in-house Wi-Fi.
+            </p>
+          </div>
+        </label>
+
+        <Field label="Allowed IP addresses / CIDR blocks (comma-separated)">
+          <textarea
+            value={form.qrAllowedIps}
+            onChange={(e) => setForm((f) => ({ ...f, qrAllowedIps: e.target.value }))}
+            disabled={!isOwner || !form.qrGateEnabled}
+            rows={3}
+            placeholder="192.168.1.0/24, 203.0.113.42, 10.0.0.0/8"
+            className="input-base font-mono text-xs"
+          />
+          <p className="text-[10px] text-[#666] mt-1">
+            Typical: your restaurant LAN's public IP as seen from the internet (e.g. <span className="font-mono">203.0.113.42</span>)
+            or the CIDR block assigned by your ISP. Check your current IP at whatismyipaddress.com while on the restaurant Wi-Fi.
+          </p>
+        </Field>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Wi-Fi Network Name (SSID)">
+            <input
+              type="text"
+              value={form.wifiSsid}
+              onChange={(e) => setForm((f) => ({ ...f, wifiSsid: e.target.value }))}
+              disabled={!isOwner}
+              placeholder="e.g. EatroGuest"
+              className="input-base"
+            />
+          </Field>
+          <Field label="Wi-Fi Password">
+            <input
+              type="text"
+              value={form.wifiPass}
+              onChange={(e) => setForm((f) => ({ ...f, wifiPass: e.target.value }))}
+              disabled={!isOwner}
+              placeholder="e.g. eatrobadda"
+              className="input-base"
+            />
+          </Field>
+        </div>
+
+        <Field label="Message for gated guests (optional)">
+          <textarea
+            value={form.qrGateMessage}
+            onChange={(e) => setForm((f) => ({ ...f, qrGateMessage: e.target.value }))}
+            disabled={!isOwner}
+            rows={3}
+            placeholder="Shown under the Wi-Fi details on the gate page, e.g. 'Ask our staff if you can't connect.'"
+            className="input-base"
+          />
+        </Field>
+      </div>
+
+      {isOwner && (
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => saveMut.mutate()}
+            disabled={saveMut.isPending}
+            className="bg-[#D62B2B] hover:bg-[#F03535] text-white px-8 py-3 font-body font-medium text-sm transition-colors disabled:opacity-40"
+          >
+            {saveMut.isPending ? 'Saving…' : 'Save QR Settings'}
+          </button>
+          {savedAt && <span className="text-sm font-body text-green-600">Saved.</span>}
+          {saveMut.isError && <span className="text-sm font-body text-[#D62B2B]">{(saveMut.error as Error).message}</span>}
+        </div>
+      )}
     </div>
   );
 }

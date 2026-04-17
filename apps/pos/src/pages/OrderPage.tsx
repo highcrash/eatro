@@ -778,6 +778,10 @@ function ActiveOrderView({
   const [posCouponCode, setPosCouponCode] = useState('');
   const [custSearch, setCustSearch] = useState('');
   const [showCustForm, setShowCustForm] = useState(false);
+  // When cashier clicks +Discount / +Coupon without a customer on the order,
+  // we capture the intent here and open the customer-required modal. After
+  // a customer is assigned, we auto-open the original discount/coupon modal.
+  const [customerGateFor, setCustomerGateFor] = useState<'discount' | 'coupon' | null>(null);
   const [newCustPhone, setNewCustPhone] = useState('');
   const [newCustName, setNewCustName] = useState('');
   const [showMoveTable, setShowMoveTable] = useState(false);
@@ -827,6 +831,16 @@ function ActiveOrderView({
       setOrder(updated);
       setCustSearch('');
       void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+      // If the cashier was gated while trying to apply a discount/coupon,
+      // continue into that flow now that a customer is attached. Non-null
+      // customerId is the signal that a real customer (not walk-in) was
+      // picked — walk-in clears the gate without advancing.
+      if (customerGateFor && (updated as any).customerId) {
+        const next = customerGateFor;
+        setCustomerGateFor(null);
+        if (next === 'discount') setShowDiscountPicker(true);
+        else setShowCouponInput(true);
+      }
     },
   });
 
@@ -1225,13 +1239,20 @@ function ActiveOrderView({
           <div className="pt-2 space-y-1">
             <div className="flex items-center gap-2">
               <button
-                onClick={() => { setShowDiscountPicker(true); setShowCouponInput(false); }}
+                onClick={() => {
+                  if (!(order as any).customerId) { setCustomerGateFor('discount'); return; }
+                  setShowDiscountPicker(true); setShowCouponInput(false);
+                }}
                 className="flex-1 bg-theme-bg hover:bg-theme-surface-alt text-theme-text font-semibold py-2 rounded-theme text-xs transition-colors"
               >
                 + Discount
               </button>
               <button
-                onClick={() => { setShowCouponInput(true); setShowDiscountPicker(false); }}
+                onClick={() => {
+                  if (!online) return;
+                  if (!(order as any).customerId) { setCustomerGateFor('coupon'); return; }
+                  setShowCouponInput(true); setShowDiscountPicker(false);
+                }}
                 disabled={!online}
                 title={online ? undefined : 'Coupon codes need internet to validate'}
                 className="flex-1 bg-theme-bg hover:bg-theme-surface-alt disabled:opacity-40 disabled:cursor-not-allowed text-theme-text font-semibold py-2 rounded-theme text-xs transition-colors"
@@ -1356,6 +1377,80 @@ function ActiveOrderView({
             voidItemMutation.mutate({ ...dto, itemId: voidingItem.id })
           }
         />
+      )}
+
+      {/* Customer-required gate: cashier tried to apply a discount/coupon
+          without a customer on the order. Pick one here (or add a new one),
+          then the original discount/coupon modal opens automatically. */}
+      {customerGateFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setCustomerGateFor(null)}>
+          <div className="bg-theme-surface rounded-theme shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <header className="px-5 py-4 border-b border-theme-border flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-wider text-theme-text-muted">
+                Customer Required — {customerGateFor === 'discount' ? 'Discount' : 'Coupon'}
+              </p>
+              <button onClick={() => setCustomerGateFor(null)} className="w-7 h-7 rounded-theme hover:bg-theme-bg flex items-center justify-center text-theme-text-muted">
+                <X size={14} />
+              </button>
+            </header>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-theme-text-muted">
+                Select an existing customer or add a new one to apply {customerGateFor === 'discount' ? 'a discount' : 'a coupon'}.
+                Applying without a customer is not allowed — discounts and coupons are tracked per customer.
+              </p>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-1">Search</label>
+                <input
+                  value={custSearch}
+                  onChange={(e) => setCustSearch(e.target.value)}
+                  placeholder="Phone or name…"
+                  autoFocus
+                  className="w-full bg-theme-bg rounded-theme px-4 py-2.5 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
+                />
+                {custSearch.length >= 2 && custResults.length > 0 && (
+                  <div className="mt-2 border border-theme-border rounded-theme max-h-40 overflow-auto bg-theme-bg">
+                    {custResults.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => assignCustomerMut.mutate(c.id)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-theme-surface-alt flex justify-between border-b border-theme-surface-alt last:border-0"
+                      >
+                        <span className="text-theme-text">{c.name}</span>
+                        <span className="text-theme-text-muted text-xs">{c.phone} ({c.totalOrders} orders)</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-theme-border pt-4">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-2">Or add new</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    value={newCustPhone}
+                    onChange={(e) => setNewCustPhone(e.target.value)}
+                    placeholder="Phone"
+                    className="bg-theme-bg rounded-theme px-3 py-2 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
+                  />
+                  <input
+                    value={newCustName}
+                    onChange={(e) => setNewCustName(e.target.value)}
+                    placeholder="Name"
+                    className="bg-theme-bg rounded-theme px-3 py-2 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
+                  />
+                </div>
+                <button
+                  onClick={() => createCustomerMut.mutate()}
+                  disabled={!newCustPhone || createCustomerMut.isPending}
+                  className="mt-2 w-full bg-theme-accent text-white font-bold py-2 rounded-theme text-sm hover:opacity-90 disabled:opacity-40"
+                >
+                  {createCustomerMut.isPending ? 'Adding…' : 'Add & Continue'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Discount picker modal */}

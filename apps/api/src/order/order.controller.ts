@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Headers, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Headers, BadRequestException, ForbiddenException, NotFoundException, Req } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import type { Request } from 'express';
 
 import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, JwtPayload } from '@restora/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -8,6 +9,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { OrderService } from './order.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { QrGateService } from '../qr-gate/qr-gate.service';
 
 @ApiTags('Orders')
 @ApiBearerAuth()
@@ -161,11 +163,27 @@ export class QrOrderController {
   constructor(
     private readonly orderService: OrderService,
     private readonly prisma: PrismaService,
+    private readonly qrGate: QrGateService,
   ) {}
 
+  /**
+   * Reject QR mutations when the client IP doesn't pass the branch's gate.
+   * Frontend calls /public/qr-gate on boot and shows the Wi-Fi page, but
+   * an off-network client that skips the SPA could still hit these
+   * endpoints directly — this is the defense-in-depth check.
+   */
+  private async ensureGateOpen(branchId: string, req: Request) {
+    const verdict = await this.qrGate.evaluate(branchId, req.ip ?? null);
+    if (!verdict) throw new NotFoundException('Branch not found');
+    if (!verdict.allowed) {
+      throw new ForbiddenException('QR ordering is restricted to the restaurant Wi-Fi network.');
+    }
+  }
+
   @Post('qr')
-  createQr(@Headers('x-branch-id') branchId: string, @Body() dto: CreateOrderDto) {
+  async createQr(@Headers('x-branch-id') branchId: string, @Body() dto: CreateOrderDto, @Req() req: Request) {
     if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
     return this.orderService.createQrOrder(branchId, dto);
   }
 
@@ -229,6 +247,10 @@ export class QrOrderController {
       discountId: order.discountId,
       taxAmount: order.taxAmount,
       totalAmount: order.totalAmount,
+      // Expose customer presence so the QR app can decide whether to show
+      // "Apply Coupon" directly or a phone-identify modal first.
+      customerId: order.customerId,
+      customerName: order.customerName,
       items: order.items.map((i) => ({
         id: i.id,
         name: i.menuItemName,
@@ -242,13 +264,53 @@ export class QrOrderController {
     };
   }
 
+  /**
+   * Phone-based identification for the QR flow. Finds an existing customer
+   * with this phone in the branch (creating one if new), then attaches it
+   * to the order. Used as a prerequisite to applying coupons from the QR
+   * app — the backend rejects coupon-apply without a customerId.
+   */
+  @Post('qr/:id/identify-customer')
+  async identifyCustomer(
+    @Param('id') id: string,
+    @Headers('x-branch-id') branchId: string,
+    @Body() dto: { phone: string; name?: string },
+    @Req() req: Request,
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
+
+    const phone = (dto.phone ?? '').trim();
+    if (!phone) throw new BadRequestException('Phone number required');
+    const name = (dto.name ?? '').trim() || 'Guest';
+
+    const order = await this.prisma.order.findFirst({ where: { id, branchId, deletedAt: null } });
+    if (!order) throw new NotFoundException('Order not found');
+
+    let customer = await this.prisma.customer.findFirst({
+      where: { branchId, phone, isActive: true },
+    });
+    if (!customer) {
+      customer = await this.prisma.customer.create({ data: { branchId, phone, name } });
+    }
+
+    await this.prisma.order.update({
+      where: { id },
+      data: { customerId: customer.id, customerName: customer.name, customerPhone: customer.phone },
+    });
+
+    return { customerId: customer.id, customerName: customer.name, customerPhone: customer.phone };
+  }
+
   @Post('qr/:id/items')
   async addItems(
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
     @Body() body: { items: { menuItemId: string; quantity: number; notes?: string }[] },
+    @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
     // If order is already accepted (not PENDING), new items need cashier approval
     const order = await this.prisma.order.findFirst({ where: { id, deletedAt: null } });
     if (!order) throw new NotFoundException('Order not found');
@@ -257,39 +319,51 @@ export class QrOrderController {
   }
 
   @Post('qr/:id/items/:itemId/cancel')
-  cancelItem(
+  async cancelItem(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @Headers('x-branch-id') branchId: string,
+    @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
     return this.orderService.cancelItemByCustomer(id, itemId, branchId);
   }
 
   @Post('qr/:id/request-bill')
-  requestBill(@Param('id') id: string, @Headers('x-branch-id') branchId: string) {
+  async requestBill(@Param('id') id: string, @Headers('x-branch-id') branchId: string, @Req() req: Request) {
     if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
     return this.orderService.requestBill(id, branchId);
   }
 
   @Post('qr/:id/apply-coupon')
-  applyCoupon(@Param('id') id: string, @Headers('x-branch-id') branchId: string, @Body() dto: { code: string }) {
+  async applyCoupon(
+    @Param('id') id: string,
+    @Headers('x-branch-id') branchId: string,
+    @Body() dto: { code: string },
+    @Req() req: Request,
+  ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
     return this.orderService.applyCoupon(id, branchId, dto.code);
   }
 
   @Patch('qr/:id/items/:itemId/notes')
-  updateItemNotesQr(
+  async updateItemNotesQr(
     @Param('id') id: string, @Param('itemId') itemId: string,
     @Headers('x-branch-id') branchId: string, @Body() dto: { notes: string },
+    @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
     return this.orderService.updateItemNotes(id, itemId, branchId, dto.notes);
   }
 
   @Post('qr/:id/remove-coupon')
-  removeCoupon(@Param('id') id: string, @Headers('x-branch-id') branchId: string) {
+  async removeCoupon(@Param('id') id: string, @Headers('x-branch-id') branchId: string, @Req() req: Request) {
     if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
     return this.orderService.removeDiscount(id, branchId);
   }
 }

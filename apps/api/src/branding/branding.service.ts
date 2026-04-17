@@ -30,6 +30,7 @@ export class BrandingService {
     const customThemes = parseCustomThemes(settings.customThemes);
     const themes: Theme[] = [...BUILT_IN_THEMES, ...customThemes];
 
+    const b = branch as unknown as Record<string, unknown>;
     return {
       branchId: branch.id,
       name: branch.name,
@@ -44,7 +45,11 @@ export class BrandingService {
       bin: branch.bin,
       mushakVersion: branch.mushakVersion,
       wifiPass: branch.wifiPass,
-      billLogoWidthPct: (branch as unknown as { billLogoWidthPct?: number }).billLogoWidthPct ?? 80,
+      wifiSsid: (b.wifiSsid as string | null) ?? null,
+      qrGateEnabled: (b.qrGateEnabled as boolean | undefined) ?? false,
+      qrAllowedIps: (b.qrAllowedIps as string | null) ?? null,
+      qrGateMessage: (b.qrGateMessage as string | null) ?? null,
+      billLogoWidthPct: (b.billLogoWidthPct as number | undefined) ?? 80,
       taxRate: Number(branch.taxRate),
       vatEnabled: branch.vatEnabled,
       serviceChargeEnabled: branch.serviceChargeEnabled,
@@ -77,6 +82,10 @@ export class BrandingService {
       bin?: string | null;
       mushakVersion?: string | null;
       wifiPass?: string | null;
+      wifiSsid?: string | null;
+      qrGateEnabled?: boolean;
+      qrAllowedIps?: string | null;
+      qrGateMessage?: string | null;
       billLogoWidthPct?: number;
       facebookUrl?: string | null;
       instagramUrl?: string | null;
@@ -84,7 +93,7 @@ export class BrandingService {
   ): Promise<Branding> {
     await this.prisma.branch.update({
       where: { id: branchId },
-      data: dto,
+      data: dto as any,
     });
     return this.getBranding(branchId);
   }

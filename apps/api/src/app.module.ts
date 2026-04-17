@@ -28,6 +28,7 @@ import { WorkPeriodModule } from './work-period/work-period.module';
 import { CookingStationModule } from './cooking-station/cooking-station.module';
 import { UnitConversionModule } from './unit-conversion/unit-conversion.module';
 import { CustomUnitModule } from './custom-unit/custom-unit.module';
+import { QrGateModule } from './qr-gate/qr-gate.module';
 import { PaymentMethodModule } from './payment-method/payment-method.module';
 import { UploadModule } from './upload/upload.module';
 import { DiscountModule } from './discount/discount.module';
@@ -111,6 +112,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     // Unit Conversions
     UnitConversionModule,
     CustomUnitModule,
+    QrGateModule,
     PaymentMethodModule,
 
     // File Upload
