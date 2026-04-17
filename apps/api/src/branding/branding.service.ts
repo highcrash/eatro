@@ -128,10 +128,49 @@ export class BrandingService {
       instagramUrl?: string | null;
     },
   ): Promise<Branding> {
-    await this.prisma.branch.update({
-      where: { id: branchId },
-      data: dto as any,
-    });
+    // Split the write: Prisma for fields that exist in the generated
+    // client, raw SQL for fields that may not yet (qr gate + wifi SSID,
+    // added in migration 20260417100000). This means the endpoint keeps
+    // working even if `prisma generate` hasn't been run locally after
+    // pulling the migration — otherwise a stale client throws "Unknown
+    // argument qrGateEnabled" and the admin's toggle silently fails.
+    const { qrGateEnabled, qrAllowedIps, wifiSsid, qrGateMessage, ...rest } = dto;
+
+    if (Object.keys(rest).length > 0) {
+      await this.prisma.branch.update({
+        where: { id: branchId },
+        data: rest as any,
+      });
+    }
+
+    // Raw SQL for the newly added columns — Postgres validates the columns
+    // exist, so this surfaces missing-migration errors instead of silent
+    // field drops.
+    if (qrGateEnabled !== undefined) {
+      await this.prisma.$executeRaw`
+        UPDATE "branches" SET "qrGateEnabled" = ${qrGateEnabled}
+        WHERE "id" = ${branchId}
+      `;
+    }
+    if (qrAllowedIps !== undefined) {
+      await this.prisma.$executeRaw`
+        UPDATE "branches" SET "qrAllowedIps" = ${qrAllowedIps}
+        WHERE "id" = ${branchId}
+      `;
+    }
+    if (wifiSsid !== undefined) {
+      await this.prisma.$executeRaw`
+        UPDATE "branches" SET "wifiSsid" = ${wifiSsid}
+        WHERE "id" = ${branchId}
+      `;
+    }
+    if (qrGateMessage !== undefined) {
+      await this.prisma.$executeRaw`
+        UPDATE "branches" SET "qrGateMessage" = ${qrGateMessage}
+        WHERE "id" = ${branchId}
+      `;
+    }
+
     return this.getBranding(branchId);
   }
 
