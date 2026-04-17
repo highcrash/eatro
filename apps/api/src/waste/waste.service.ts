@@ -68,8 +68,11 @@ export class WasteService {
       await this.ingredientService.syncParentStock(result.ingredient.parentId);
     }
 
-    // Emit low-stock alert if needed
-    if (result.ingredient.currentStock.toNumber() <= result.ingredient.minimumStock.toNumber()) {
+    // Emit low-stock alert if needed. minimumStock of 0 means "don't track".
+    if (
+      result.ingredient.minimumStock.toNumber() > 0 &&
+      result.ingredient.currentStock.toNumber() <= result.ingredient.minimumStock.toNumber()
+    ) {
       this.ws.emitToBranch(branchId, 'stock:low', {
         ingredientId: dto.ingredientId,
         name: result.ingredient.name,

@@ -484,7 +484,9 @@ export default function PurchasingPage() {
                     if (sid) {
                       const lowStock = ingredients.filter((i) => {
                         const linked = i.supplierId === sid || i.suppliers?.some((s: { supplierId: string }) => s.supplierId === sid);
-                        const low = Number(i.currentStock) <= Number(i.minimumStock);
+                        // Skip items the owner hasn't set a reorder point for.
+                        const min = Number(i.minimumStock);
+                        const low = min > 0 && Number(i.currentStock) <= min;
                         return linked && low;
                       });
                       if (lowStock.length > 0) {
@@ -596,7 +598,7 @@ export default function PurchasingPage() {
                   </div>
                   <div className="col-span-1 text-right">
                     {selIng && (
-                      <span className={`text-xs font-body ${Number(selIng.currentStock) <= Number(selIng.minimumStock) ? 'text-[#D62B2B]' : 'text-[#666]'}`}>
+                      <span className={`text-xs font-body ${Number(selIng.minimumStock) > 0 && Number(selIng.currentStock) <= Number(selIng.minimumStock) ? 'text-[#D62B2B]' : 'text-[#666]'}`}>
                         {Number(selIng.currentStock).toFixed(1)} {selIng.unit}
                       </span>
                     )}

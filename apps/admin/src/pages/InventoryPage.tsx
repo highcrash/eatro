@@ -233,7 +233,11 @@ export default function InventoryPage() {
       const hasSupplier = ing.suppliers?.some((s) => s.supplierId === filterSupplier) || ing.supplierId === filterSupplier;
       if (!hasSupplier) return false;
     }
-    if (filterStock === 'low' && Number(ing.currentStock) > Number(ing.minimumStock)) return false;
+    if (filterStock === 'low') {
+      // minimumStock=0 → owner isn't tracking this one; never "low".
+      const min = Number(ing.minimumStock);
+      if (min <= 0 || Number(ing.currentStock) > min) return false;
+    }
     if (filterStock === 'out' && Number(ing.currentStock) > 0) return false;
     return true;
   });
@@ -638,7 +642,7 @@ export default function InventoryPage() {
               </thead>
               <tbody>
                 {filteredIngredients.map((ing) => {
-                  const isLow = Number(ing.currentStock) <= Number(ing.minimumStock);
+                  const isLow = Number(ing.minimumStock) > 0 && Number(ing.currentStock) <= Number(ing.minimumStock);
                   const hasVars = ing.hasVariants && (ing.variants?.length ?? 0) > 0;
                   const isExpanded = expandedParent === ing.id;
                   return (

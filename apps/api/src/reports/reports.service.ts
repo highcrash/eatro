@@ -265,7 +265,9 @@ export class ReportsService {
       costPerUnit: i.costPerUnit.toNumber(),
       stockValue: i.currentStock.toNumber() * i.costPerUnit.toNumber(),
       supplierName: i.supplier?.name ?? null,
-      isLow: i.currentStock.toNumber() <= i.minimumStock.toNumber(),
+      // minimumStock=0 means the owner hasn't set a reorder threshold;
+      // never flag those items as low even if currentStock is 0.
+      isLow: i.minimumStock.toNumber() > 0 && i.currentStock.toNumber() <= i.minimumStock.toNumber(),
     }));
 
     const totalValue = items.reduce((s, i) => s + i.stockValue, 0);

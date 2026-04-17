@@ -472,7 +472,7 @@ Fried Onion,500,G,Oil,100,ML`;
                 if (!matchIng) return true;
                 return item.recipe?.items?.some((ri) => ri.ingredientId === matchIng.id) ?? false;
               }).map((item) => {
-                const isLow = Number(item.currentStock) <= Number(item.minimumStock);
+                const isLow = Number(item.minimumStock) > 0 && Number(item.currentStock) <= Number(item.minimumStock);
                 const cost = calcPreReadyCost(item, ingredients);
                 return (
                   <tr key={item.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">

@@ -67,7 +67,7 @@ export default function VariantPickerModal({ parent, onSelect, onClose }: Props)
                   {v.packSize && <span className="text-[#666] font-body text-xs ml-2">{v.packSize}</span>}
                   {v.piecesPerPack && <span className="text-[#666] font-body text-xs ml-1">({v.piecesPerPack} {parent.unit}/{parent.purchaseUnit || 'PACK'})</span>}
                 </div>
-                <span className={`font-body text-sm font-medium ${Number(v.currentStock) <= Number(v.minimumStock) ? 'text-red-500' : 'text-white'}`}>
+                <span className={`font-body text-sm font-medium ${Number(v.minimumStock) > 0 && Number(v.currentStock) <= Number(v.minimumStock) ? 'text-red-500' : 'text-white'}`}>
                   {Number(v.currentStock).toFixed(2)} {v.unit}
                 </span>
               </div>

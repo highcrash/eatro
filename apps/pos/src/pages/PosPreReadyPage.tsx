@@ -108,7 +108,7 @@ export default function PosPreReadyPage() {
                 </thead>
                 <tbody>
                   {items.filter((i) => i.isActive).map((it) => {
-                    const low = Number(it.currentStock) <= Number(it.minimumStock);
+                    const low = Number(it.minimumStock) > 0 && Number(it.currentStock) <= Number(it.minimumStock);
                     return (
                       <tr key={it.id} className="border-t border-theme-border">
                         <td className="px-4 py-3 font-semibold text-theme-text">{it.name}</td>

@@ -58,7 +58,9 @@ export default function DashboardPage() {
   const voidedToday = todayOrders.filter((o) => o.status === 'VOID').length;
 
   const lowStock = ingredients.filter(
-    (i) => i.isActive && i.currentStock <= i.minimumStock,
+    // Skip items with minimumStock=0 — owner hasn't set a reorder point,
+    // so they're not meaningfully "low" no matter the current stock.
+    (i) => i.isActive && Number(i.minimumStock) > 0 && Number(i.currentStock) <= Number(i.minimumStock),
   );
 
   const stats = [

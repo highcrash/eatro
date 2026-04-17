@@ -138,8 +138,11 @@ export class IngredientService {
       data: { currentStock: totalStock, costPerUnit: avgCost },
     });
 
-    // Emit low-stock alert based on parent aggregate vs parent minimumStock
-    if (totalStock <= Number(parent.minimumStock)) {
+    // Emit low-stock alert based on parent aggregate vs parent minimumStock.
+    // A minimumStock of 0 means "don't track low stock on this item" — skip
+    // the emit so the admin isn't spammed about consumables they don't reorder.
+    const minStock = Number(parent.minimumStock);
+    if (minStock > 0 && totalStock <= minStock) {
       this.ws.emitToBranch(parent.branchId, 'stock:low', {
         ingredientId: parentId,
         name: parent.name,
@@ -499,7 +502,12 @@ export class IngredientService {
 
     // Emit low-stock alert — only for standalone ingredients (not variants).
     // For variants, the parent sync in syncParentStock handles the alert.
-    if (!ingredient.parentId && updated.currentStock.toNumber() <= updated.minimumStock.toNumber()) {
+    // minimumStock of 0 means "don't track" — no warning.
+    if (
+      !ingredient.parentId &&
+      updated.minimumStock.toNumber() > 0 &&
+      updated.currentStock.toNumber() <= updated.minimumStock.toNumber()
+    ) {
       this.ws.emitToBranch(branchId, 'stock:low', {
         ingredientId: id,
         name: updated.name,
