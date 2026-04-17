@@ -36,7 +36,10 @@ export default function QrOrderApp() {
     if (!branchId) return;
     let cancelled = false;
     setGate('loading');
-    fetch(apiUrl(`/public/qr-gate/${branchId}`))
+    // cache: 'no-store' + a cache-busting query param defeat any
+    // intermediate (CloudFlare, browser disk cache) that would otherwise
+    // return a stale `allowed: true` from an earlier on-network request.
+    fetch(apiUrl(`/public/qr-gate/${branchId}?t=${Date.now()}`), { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: GatePayload | null) => {
         if (cancelled) return;
