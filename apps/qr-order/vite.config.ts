@@ -8,6 +8,26 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Force the new service worker to take over immediately on deploy.
+      // Without this, returning guests stay stuck on whatever bundle
+      // their PWA installed on their first visit — which is how the QR
+      // gate fix was unable to reach users with a previously cached
+      // service worker.
+      workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
+        // API responses (especially /public/qr-gate) must never be cached
+        // by the SW — the gate verdict depends on the caller's IP and a
+        // stale "allowed: true" trivially opens the gate for everyone.
+        navigateFallbackDenylist: [/^\/api\//],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+            handler: 'NetworkOnly',
+          },
+        ],
+      },
       manifest: {
         name: 'Restora Order',
         short_name: 'Restora',
