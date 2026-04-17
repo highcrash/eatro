@@ -85,6 +85,10 @@ export default function PreReadyPage() {
   const [editingItem, setEditingItem] = useState<PreReadyItem | null>(null);
   const [editForm, setEditForm] = useState({ name: '', minimumStock: '0' });
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkRows, setBulkRows] = useState<{ preReadyItemName: string; yieldQuantity?: number; yieldUnit?: string; ingredientName: string; quantity: number; unit?: string }[]>([]);
+  const [bulkResult, setBulkResult] = useState<{ updated: number; skipped: number; errors: string[]; totalRows: number } | null>(null);
+  const bulkInputRef = useRef<HTMLInputElement>(null);
 
   const { data: items = [] } = useQuery<PreReadyItem[]>({
     queryKey: ['pre-ready-items'],
@@ -260,6 +264,116 @@ export default function PreReadyPage() {
     onError: (err: Error) => { setDeleteError(err.message); },
   });
 
+  // ─── Bulk Pre-Ready Recipe CSV ───────────────────────────────────────────
+  const bulkMutation = useMutation({
+    mutationFn: (rows: typeof bulkRows) =>
+      api.post<{ updated: number; skipped: number; errors: string[]; totalRows: number }>('/pre-ready/recipes/bulk', { rows }),
+    onSuccess: (data) => {
+      setBulkResult(data);
+      void qc.invalidateQueries({ queryKey: ['pre-ready-items'] });
+    },
+  });
+
+  const handleBulkCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) { alert('CSV must have a header row and at least one data row'); return; }
+
+      const header = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/[^a-z_]/g, ''));
+      const prIdx = header.findIndex((h) => h === 'pre_ready_item_name' || h === 'pre_ready_name' || h === 'preready_name' || h === 'item_name' || h === 'item');
+      const yqIdx = header.findIndex((h) => h === 'yield_quantity' || h === 'yield_qty' || h === 'yield');
+      const yuIdx = header.findIndex((h) => h === 'yield_unit');
+      const ingIdx = header.findIndex((h) => h === 'ingredient_name' || h === 'ingredient');
+      const qtyIdx = header.findIndex((h) => h === 'quantity' || h === 'qty');
+      const unitIdx = header.findIndex((h) => h === 'unit');
+
+      if (prIdx === -1 || ingIdx === -1 || qtyIdx === -1) {
+        alert('CSV must have columns: pre_ready_item_name, ingredient_name, quantity (yield_quantity, yield_unit, unit are optional)');
+        return;
+      }
+
+      const parsed: typeof bulkRows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map((c) => c.trim());
+        const pr = cols[prIdx];
+        const ing = cols[ingIdx];
+        const qty = parseFloat(cols[qtyIdx]);
+        if (!pr || !ing || !qty || isNaN(qty)) continue;
+        parsed.push({
+          preReadyItemName: pr,
+          yieldQuantity: yqIdx >= 0 && cols[yqIdx]?.trim() ? parseFloat(cols[yqIdx]) || undefined : undefined,
+          yieldUnit: yuIdx >= 0 ? cols[yuIdx]?.toUpperCase() || undefined : undefined,
+          ingredientName: ing,
+          quantity: qty,
+          unit: unitIdx >= 0 ? cols[unitIdx]?.toUpperCase() || undefined : undefined,
+        });
+      }
+      setBulkRows(parsed);
+      setBulkResult(null);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const downloadBulkTemplate = () => {
+    const csv = `pre_ready_item_name,yield_quantity,yield_unit,ingredient_name,quantity,unit
+Chicken Stock,5,L,Chicken Bones,1,KG
+Chicken Stock,5,L,Onion,200,G
+Chicken Stock,5,L,Salt,10,G
+Fried Onion,500,G,Onion,1,KG
+Fried Onion,500,G,Oil,100,ML`;
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'pre-ready-recipes-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Round-trip current pre-ready recipes to the same template. Each pre-ready
+  // item emits one row per ingredient; yield_quantity + yield_unit repeat on
+  // every row of a group (Excel users edit them together).
+  const downloadCurrentPreReadyRecipes = () => {
+    const esc = (v: string | number | null | undefined) => {
+      const s = (v ?? '').toString();
+      if (/[,"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const ingById = new Map(ingredients.map((i) => [i.id, i] as const));
+    const lines: string[] = [];
+    for (const it of items) {
+      const r = it.recipe;
+      if (!r?.items?.length) continue;
+      const yq = Number(r.yieldQuantity ?? 1);
+      const yu = r.yieldUnit ?? it.unit;
+      for (const ri of r.items) {
+        const ing = ingById.get(ri.ingredientId);
+        if (!ing) continue;
+        lines.push([
+          esc(it.name),
+          esc(yq),
+          esc(yu),
+          esc(ing.name),
+          esc(Number(ri.quantity)),
+          esc(ri.unit ?? ing.unit),
+        ].join(','));
+      }
+    }
+    const csv = ['pre_ready_item_name,yield_quantity,yield_unit,ingredient_name,quantity,unit', ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pre-ready-recipes_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const openRecipe = (item: PreReadyItem) => {
     setShowRecipe(item);
     setIngSearch({});
@@ -292,7 +406,17 @@ export default function PreReadyPage() {
       <div className="flex items-center justify-between">
         <h1 className="font-display text-3xl text-white tracking-widest">PRE-READY FOODS</h1>
         <div className="flex gap-2">
-          {tab === 'items' && <button onClick={() => setShowAddItem(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">+ ADD ITEM</button>}
+          {tab === 'items' && (
+            <>
+              <button
+                onClick={() => { setBulkOpen(true); setBulkRows([]); setBulkResult(null); }}
+                className="bg-[#2A2A2A] hover:bg-[#D62B2B] text-[#999] hover:text-white font-body text-xs px-4 py-2 tracking-widest uppercase transition-colors"
+              >
+                Bulk Import CSV
+              </button>
+              <button onClick={() => setShowAddItem(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">+ ADD ITEM</button>
+            </>
+          )}
           {tab === 'production' && <button onClick={() => setShowCreateProd(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">+ NEW PRODUCTION</button>}
         </div>
       </div>
@@ -784,6 +908,126 @@ export default function PreReadyPage() {
             </div>
             <div className="px-5 py-3 border-t border-[#2A2A2A]">
               <button onClick={() => setShowCopyFromPR(false)} className="w-full bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2 transition-colors">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Pre-Ready Recipe CSV Modal */}
+      {bulkOpen && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setBulkOpen(false)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-[#2A2A2A] flex items-center justify-between">
+              <div>
+                <h2 className="font-display text-xl text-white tracking-widest">BULK PRE-READY RECIPE IMPORT</h2>
+                <p className="font-body text-[#666] text-xs mt-1">
+                  One row per ingredient. Group by pre-ready item. Existing recipes are overwritten.
+                </p>
+              </div>
+              <button onClick={() => setBulkOpen(false)} className="text-[#666] hover:text-white text-xl">✕</button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-5 space-y-4">
+              {!bulkResult && bulkRows.length === 0 && (
+                <div className="space-y-3">
+                  <button
+                    onClick={downloadBulkTemplate}
+                    className="w-full border border-[#2A2A2A] hover:border-[#D62B2B] text-[#999] hover:text-white font-body text-sm px-4 py-3 transition-colors tracking-widest uppercase"
+                  >
+                    ↓ Download CSV Template
+                  </button>
+                  <button
+                    onClick={downloadCurrentPreReadyRecipes}
+                    className="w-full border border-[#2A2A2A] hover:border-[#C8FF00] text-[#999] hover:text-white font-body text-sm px-4 py-3 transition-colors tracking-widest uppercase"
+                  >
+                    ↓ Export Current Pre-Ready Recipes
+                  </button>
+                  <button
+                    onClick={() => bulkInputRef.current?.click()}
+                    className="w-full bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-3 transition-colors tracking-widest uppercase"
+                  >
+                    Upload CSV
+                  </button>
+                  <input ref={bulkInputRef} type="file" accept=".csv" onChange={handleBulkCsvFile} className="hidden" />
+                  <div className="border border-[#2A2A2A] bg-[#0D0D0D] p-4 text-xs font-body text-[#888] space-y-1.5">
+                    <p className="text-white">Required columns:</p>
+                    <p><span className="text-[#C8FF00]">pre_ready_item_name</span> — must match an existing pre-ready item (case-insensitive)</p>
+                    <p><span className="text-[#C8FF00]">ingredient_name</span> — match inventory ingredient by name</p>
+                    <p><span className="text-[#C8FF00]">quantity</span> — numeric</p>
+                    <p><span className="text-[#888]">yield_quantity + yield_unit</span> — optional; first row of each group wins, defaults to the pre-ready item's own unit</p>
+                    <p><span className="text-[#888]">unit</span> — optional; defaults to the ingredient's own unit</p>
+                  </div>
+                </div>
+              )}
+
+              {bulkRows.length > 0 && !bulkResult && (
+                <>
+                  <div className="border border-[#2A2A2A] overflow-auto max-h-[40vh]">
+                    <table className="w-full text-xs font-body">
+                      <thead className="bg-[#0D0D0D] sticky top-0">
+                        <tr className="text-[#999] uppercase tracking-widest">
+                          <th className="px-3 py-2 text-left">#</th>
+                          <th className="px-3 py-2 text-left">Pre-Ready</th>
+                          <th className="px-3 py-2 text-right">Yield</th>
+                          <th className="px-3 py-2 text-left">Ingredient</th>
+                          <th className="px-3 py-2 text-right">Qty</th>
+                          <th className="px-3 py-2 text-left">Unit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bulkRows.map((r, i) => (
+                          <tr key={i} className="border-t border-[#2A2A2A] text-white">
+                            <td className="px-3 py-1.5 text-[#666]">{i + 1}</td>
+                            <td className="px-3 py-1.5">{r.preReadyItemName}</td>
+                            <td className="px-3 py-1.5 text-right text-[#999]">{r.yieldQuantity ? `${r.yieldQuantity} ${r.yieldUnit ?? ''}` : '—'}</td>
+                            <td className="px-3 py-1.5">{r.ingredientName}</td>
+                            <td className="px-3 py-1.5 text-right">{r.quantity}</td>
+                            <td className="px-3 py-1.5 text-[#999]">{r.unit ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-white font-body text-sm">
+                    {bulkRows.length} line{bulkRows.length !== 1 ? 's' : ''} across{' '}
+                    {new Set(bulkRows.map((r) => r.preReadyItemName.toLowerCase())).size} pre-ready item
+                    {new Set(bulkRows.map((r) => r.preReadyItemName.toLowerCase())).size !== 1 ? 's' : ''} ready to import
+                  </p>
+                </>
+              )}
+
+              {bulkResult && (
+                <div className="border border-[#2A2A2A] bg-[#0D0D0D] p-4 space-y-2">
+                  <p className="text-sm font-body">
+                    <span className="text-[#4CAF50]">{bulkResult.updated} recipe{bulkResult.updated !== 1 ? 's' : ''} updated</span>
+                    {bulkResult.skipped > 0 && <span className="text-[#FFA726] ml-3">{bulkResult.skipped} row{bulkResult.skipped !== 1 ? 's' : ''} skipped</span>}
+                    <span className="text-[#666] ml-3">of {bulkResult.totalRows} total</span>
+                  </p>
+                  {bulkResult.errors.length > 0 && (
+                    <div className="text-xs text-red-400 font-body space-y-0.5 max-h-40 overflow-auto">
+                      {bulkResult.errors.map((e, i) => <p key={i}>{e}</p>)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 justify-end px-5 py-4 border-t border-[#2A2A2A]">
+              <button
+                onClick={() => setBulkOpen(false)}
+                className="border border-[#2A2A2A] px-5 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors"
+              >
+                {bulkResult ? 'Done' : 'Cancel'}
+              </button>
+              {bulkRows.length > 0 && !bulkResult && (
+                <button
+                  onClick={() => bulkMutation.mutate(bulkRows)}
+                  disabled={bulkMutation.isPending}
+                  className="bg-[#D62B2B] text-white px-5 py-2 text-sm font-body font-medium hover:bg-[#F03535] transition-colors disabled:opacity-40"
+                >
+                  {bulkMutation.isPending ? 'Importing…' : `Import ${bulkRows.length} Line${bulkRows.length !== 1 ? 's' : ''}`}
+                </button>
+              )}
             </div>
           </div>
         </div>

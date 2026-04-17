@@ -101,6 +101,146 @@ export class PreReadyService {
     });
   }
 
+  /**
+   * Bulk upsert pre-ready recipes from a flat CSV-style list. One row per
+   * ingredient; grouped by pre_ready_item_name. Each group also carries
+   * yield_quantity + yield_unit — we take those from the first row of
+   * each group (Excel users repeat the same yield across all rows, but
+   * mismatches silently favor the first).
+   *
+   * Existing recipes are overwritten (deleteMany+createMany), same as
+   * the menu recipe bulk endpoint.
+   */
+  async bulkUpsertRecipes(
+    branchId: string,
+    rows: {
+      preReadyItemName: string;
+      yieldQuantity?: number;
+      yieldUnit?: string;
+      ingredientName: string;
+      quantity: number;
+      unit?: string;
+    }[],
+  ) {
+    // Resolve pre-ready items + ingredients once
+    const preReadyItems = await this.prisma.preReadyItem.findMany({
+      where: { branchId, deletedAt: null },
+      select: { id: true, name: true, unit: true },
+    });
+    const itemByName = new Map(preReadyItems.map((m) => [m.name.toLowerCase(), m] as const));
+
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { branchId, deletedAt: null },
+      select: { id: true, name: true, unit: true },
+    });
+    const ingredientByName = new Map(ingredients.map((i) => [i.name.toLowerCase(), i] as const));
+
+    interface Grouped {
+      itemId: string;
+      itemName: string;
+      defaultUnit: string;
+      yieldQuantity: number;
+      yieldUnit: string;
+      items: { ingredientId: string; quantity: number; unit: string }[];
+    }
+    const grouped = new Map<string, Grouped>();
+    const errors: string[] = [];
+    let skipped = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const prName = row.preReadyItemName?.trim().toLowerCase();
+      const ingName = row.ingredientName?.trim().toLowerCase();
+      if (!prName || !ingName) {
+        errors.push(`Row ${i + 1}: missing pre_ready_item_name or ingredient_name`);
+        skipped++;
+        continue;
+      }
+
+      const pri = itemByName.get(prName);
+      if (!pri) {
+        errors.push(`Row ${i + 1}: pre-ready item "${row.preReadyItemName}" not found`);
+        skipped++;
+        continue;
+      }
+
+      const ing = ingredientByName.get(ingName);
+      if (!ing) {
+        errors.push(`Row ${i + 1}: ingredient "${row.ingredientName}" not found`);
+        skipped++;
+        continue;
+      }
+
+      const qty = Number(row.quantity);
+      if (!qty || qty <= 0 || isNaN(qty)) {
+        errors.push(`Row ${i + 1}: invalid quantity "${row.quantity}"`);
+        skipped++;
+        continue;
+      }
+
+      let group = grouped.get(pri.id);
+      if (!group) {
+        // First row of the group carries the yield fields. Missing yield
+        // → default to 1 unit in the pre-ready item's own unit.
+        const yq = Number(row.yieldQuantity);
+        group = {
+          itemId: pri.id,
+          itemName: pri.name,
+          defaultUnit: pri.unit,
+          yieldQuantity: !isNaN(yq) && yq > 0 ? yq : 1,
+          yieldUnit: (row.yieldUnit?.trim().toUpperCase() || pri.unit),
+          items: [],
+        };
+        grouped.set(pri.id, group);
+      }
+
+      group.items.push({
+        ingredientId: ing.id,
+        quantity: qty,
+        unit: (row.unit?.trim().toUpperCase() || ing.unit),
+      });
+    }
+
+    let updated = 0;
+    for (const [itemId, group] of grouped) {
+      try {
+        await this.prisma.preReadyRecipe.upsert({
+          where: { preReadyItemId: itemId },
+          create: {
+            preReadyItemId: itemId,
+            yieldQuantity: group.yieldQuantity,
+            yieldUnit: group.yieldUnit as any,
+            items: {
+              create: group.items.map((i) => ({
+                ingredientId: i.ingredientId,
+                quantity: i.quantity,
+                unit: i.unit as any,
+              })),
+            },
+          },
+          update: {
+            yieldQuantity: group.yieldQuantity,
+            yieldUnit: group.yieldUnit as any,
+            items: {
+              deleteMany: {},
+              create: group.items.map((i) => ({
+                ingredientId: i.ingredientId,
+                quantity: i.quantity,
+                unit: i.unit as any,
+              })),
+            },
+          },
+        });
+        updated++;
+      } catch (e: any) {
+        errors.push(`Pre-ready "${group.itemName}": ${e.message?.slice(0, 80)}`);
+        skipped++;
+      }
+    }
+
+    return { updated, skipped, errors, totalRows: rows.length };
+  }
+
   // ── Production Orders ─────────────────────────────────────────────────────
 
   findAllProductions(branchId: string, status?: string) {

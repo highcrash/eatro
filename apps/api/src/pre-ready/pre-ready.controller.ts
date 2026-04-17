@@ -49,6 +49,24 @@ export class PreReadyController {
     return this.preReadyService.upsertRecipe(id, user.branchId, dto);
   }
 
+  @Post('recipes/bulk')
+  @Roles('OWNER', 'MANAGER')
+  bulkUpsertRecipes(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: {
+      rows: {
+        preReadyItemName: string;
+        yieldQuantity?: number;
+        yieldUnit?: string;
+        ingredientName: string;
+        quantity: number;
+        unit?: string;
+      }[];
+    },
+  ) {
+    return this.preReadyService.bulkUpsertRecipes(user.branchId, dto.rows);
+  }
+
   // Production Orders
   @Get('productions')
   @Roles('OWNER', 'MANAGER', 'KITCHEN', 'CASHIER')
