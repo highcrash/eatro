@@ -6,6 +6,7 @@ import { formatCurrency } from '@restora/utils';
 import { useCartStore } from '../store/cart.store';
 import { useSessionStore } from '../store/session.store';
 import { apiUrl } from '../lib/api';
+import { triggerGateRecheck } from '../App';
 
 export default function CartPage() {
   const navigate = useNavigate();
@@ -22,42 +23,38 @@ export default function CartPage() {
   const handleOrder = async () => {
     setSubmitting(true);
     try {
-      if (activeOrderId) {
-        // Add items to existing order
-        const res = await fetch(apiUrl(`/orders/qr/${activeOrderId}/items`), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-branch-id': branchId || '',
-          },
-          body: JSON.stringify({
-            items: items.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity })),
-          }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ message: 'Failed to add items' }));
-          throw new Error((err as { message?: string }).message || 'Failed to add items');
-        }
-        clearCart();
-        void navigate(`/order/${activeOrderId}`);
-      } else {
-        // Create new order
-        const res = await fetch(apiUrl('/orders/qr'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-branch-id': branchId || '',
-          },
-          body: JSON.stringify({
+      const url = activeOrderId
+        ? apiUrl(`/orders/qr/${activeOrderId}/items`)
+        : apiUrl('/orders/qr');
+      const body = activeOrderId
+        ? { items: items.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity })) }
+        : {
             tableId: tableId ?? undefined,
             type: tableId ? 'DINE_IN' : 'TAKEAWAY',
             items: items.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity })),
-          }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ message: 'Order failed' }));
-          throw new Error((err as { message?: string }).message || 'Order failed');
-        }
+          };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        // 403 with the gate message means the server now sees us as off
+        // the allowlist (admin changed it mid-session, or our IP rotated
+        // onto a different carrier). Kick the app-level gate re-check
+        // so the next render flips to the Wi-Fi page instead of an
+        // abstract alert.
+        if (res.status === 403) triggerGateRecheck();
+        const err = await res.json().catch(() => ({ message: 'Order failed' }));
+        throw new Error((err as { message?: string }).message || 'Order failed');
+      }
+
+      if (activeOrderId) {
+        clearCart();
+        void navigate(`/order/${activeOrderId}`);
+      } else {
         const order = await res.json() as { id: string };
         setActiveOrder(order.id);
         clearCart();
