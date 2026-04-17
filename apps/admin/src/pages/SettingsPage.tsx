@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import type { Branch, UpdateBranchDto, StockUnit } from '@restora/types';
+import type { Branch, UpdateBranchDto, CustomUnit } from '@restora/types';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/auth.store';
 import BrandingSection from './settings/BrandingSection';
 import ThemingSection from './settings/ThemingSection';
-
-const UNITS: StockUnit[] = ['KG', 'G', 'L', 'ML', 'PCS', 'DOZEN', 'BOX'];
+import { useStockUnits } from '../lib/units';
 
 interface UnitConversion {
   id: string;
@@ -342,7 +341,12 @@ export default function SettingsPage() {
 
       {tab === 'notifications' && <SmsSettingsSection isOwner={isOwner} />}
 
-      {tab === 'units' && <UnitConversionSection isOwner={isOwner} />}
+      {tab === 'units' && (
+        <>
+          <CustomUnitSection isOwner={isOwner} />
+          <UnitConversionSection isOwner={isOwner} />
+        </>
+      )}
 
       <style>{`
         .input-base {
@@ -557,9 +561,138 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
   );
 }
 
+function CustomUnitSection({ isOwner }: { isOwner: boolean }) {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({ code: '', label: '' });
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: customUnits = [] } = useQuery<CustomUnit[]>({
+    queryKey: ['custom-units'],
+    queryFn: () => api.get<CustomUnit[]>('/custom-units'),
+  });
+
+  const createMut = useMutation({
+    mutationFn: (dto: { code: string; label: string }) =>
+      api.post<CustomUnit>('/custom-units', dto),
+    onSuccess: () => {
+      setForm({ code: '', label: '' });
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ['custom-units'] });
+    },
+    onError: (e: Error) => setError(e.message || 'Failed to add unit'),
+  });
+
+  const removeMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/custom-units/${id}`),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['custom-units'] }),
+  });
+
+  const handleAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const code = form.code.trim().toUpperCase();
+    const label = form.label.trim();
+    if (!code || !label) { setError('Both code and label are required'); return; }
+    createMut.mutate({ code, label });
+  };
+
+  return (
+    <div className="mb-10">
+      <div className="mb-4">
+        <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Measurement</p>
+        <h2 className="font-display text-2xl text-white tracking-wide">CUSTOM UNITS</h2>
+      </div>
+      <p className="text-[#999] font-body text-sm mb-4">
+        Add new unit names (e.g. JAR, POUCH, SACHET) that appear in inventory and recipe
+        dropdowns alongside the built-in units (KG, G, L, ML, PCS, DOZEN, BOX, PACKET, PACK,
+        BOTTLE, BAG, BUNDLE, CAN, JAR, TIN, CARTON).
+      </p>
+
+      {customUnits.length > 0 && (
+        <div className="bg-[#161616] border border-[#2A2A2A] mb-6">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[#2A2A2A]">
+                <th className="text-left px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">Code</th>
+                <th className="text-left px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">Label</th>
+                {isOwner && <th className="text-right px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {customUnits.map((u) => (
+                <tr key={u.id} className="border-b border-[#2A2A2A] last:border-0">
+                  <td className="px-4 py-3 font-body text-sm text-white font-mono">{u.code}</td>
+                  <td className="px-4 py-3 font-body text-sm text-white">{u.label}</td>
+                  {isOwner && (
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => {
+                          if (confirm(`Hide "${u.code}" from dropdowns? Existing stock using this unit will not be affected.`)) {
+                            removeMut.mutate(u.id);
+                          }
+                        }}
+                        disabled={removeMut.isPending}
+                        className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs tracking-widest uppercase transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {customUnits.length === 0 && (
+        <p className="text-[#999] font-body text-sm mb-4 italic">No custom units yet.</p>
+      )}
+
+      {isOwner && (
+        <form onSubmit={handleAdd} className="bg-[#161616] border border-[#2A2A2A] p-5 flex items-end gap-3">
+          <div className="flex-1">
+            <label className="block text-[#999] text-[10px] font-body font-medium tracking-widest uppercase mb-1">Code</label>
+            <input
+              type="text"
+              value={form.code}
+              onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+              placeholder="e.g. JAR"
+              maxLength={24}
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] font-mono tracking-wider"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-[#999] text-[10px] font-body font-medium tracking-widest uppercase mb-1">Label</label>
+            <input
+              type="text"
+              value={form.label}
+              onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+              placeholder="e.g. Jar"
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={createMut.isPending || !form.code || !form.label}
+            className="bg-[#D62B2B] hover:bg-[#F03535] text-white px-5 py-2 text-sm font-body font-medium tracking-widest uppercase transition-colors disabled:opacity-40"
+          >
+            {createMut.isPending ? 'Adding…' : 'Add Unit'}
+          </button>
+        </form>
+      )}
+      {error && <p className="text-[#D62B2B] font-body text-sm mt-3">{error}</p>}
+      <p className="text-[#666] font-body text-xs mt-3">
+        Code must be uppercase letters/digits/underscore (e.g. <span className="font-mono text-[#999]">JAR</span>, <span className="font-mono text-[#999]">HALF_KG</span>). Removing a custom unit only hides it from dropdowns — items already using it keep the value.
+      </p>
+    </div>
+  );
+}
+
 function UnitConversionSection({ isOwner }: { isOwner: boolean }) {
   const queryClient = useQueryClient();
   const [convForm, setConvForm] = useState({ fromUnit: 'KG' as string, toUnit: 'G' as string, factor: '1000' });
+  const { units: UNITS } = useStockUnits();
 
   const { data: conversions = [] } = useQuery<UnitConversion[]>({
     queryKey: ['unit-conversions'],

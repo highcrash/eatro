@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 import type { Ingredient, Supplier, StockMovement, StockUnit, IngredientCategory } from '@restora/types';
 import VariantDialog from '../components/VariantDialog';
+import { useStockUnits } from '../lib/units';
 
 // Variant rows reference their parent via parent_code (matches an earlier
 // row's code OR an already-imported ingredient's item code). Variants
@@ -27,7 +28,9 @@ function downloadInventoryCSV() {
   URL.revokeObjectURL(url);
 }
 
-const UNITS: StockUnit[] = ['KG', 'G', 'L', 'ML', 'PCS', 'DOZEN', 'BOX'];
+// UNITS was hard-coded; it's now sourced via `useStockUnits()` at the
+// component level so custom units the admin has registered show up in
+// dropdowns alongside the built-in enum values.
 const CATEGORIES: IngredientCategory[] = ['RAW', 'CLEANING', 'PACKAGED', 'SPICE', 'DAIRY', 'BEVERAGE', 'OTHER'];
 
 // ─── Stock Report Tab Component ──────────────────────────────────────────────
@@ -220,6 +223,7 @@ export default function InventoryPage() {
     queryKey: ['ingredients'],
     queryFn: () => api.get('/ingredients'),
   });
+  const { units: UNITS } = useStockUnits();
 
   const searchLower = searchText.trim().toLowerCase();
   const filteredIngredients = ingredients.filter((ing) => {

@@ -188,6 +188,7 @@ model Branch {
   workPeriods           WorkPeriod[]
   cookingStations       CookingStation[]
   unitConversions       UnitConversion[]
+  customUnits           CustomUnit[]
   paymentMethods        PaymentMethodConfig[]
   paymentOptions        PaymentOption[]
   purchaseReturns       PurchaseReturn[]
@@ -1010,6 +1011,33 @@ enum StockUnit {
   PCS
   DOZEN
   BOX
+  PACKET
+  PACK
+  BOTTLE
+  BAG
+  BUNDLE
+  CAN
+  JAR
+  TIN
+  CARTON
+}
+
+// Admin-defined stock units. Rows are paired with an ALTER TYPE
+// "StockUnit" ADD VALUE at creation time so the enum accepts the value.
+// Soft-delete hides the unit from dropdowns without touching the enum
+// (Postgres can't drop enum values safely once in use).
+model CustomUnit {
+  id        String    @id @default(cuid())
+  branchId  String
+  code      String    // stored uppercase, must also be present in the StockUnit enum
+  label     String    // display name
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@unique([branchId, code])
+  @@map("custom_units")
 }
 
 model Supplier {

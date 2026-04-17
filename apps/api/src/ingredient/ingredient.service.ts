@@ -163,7 +163,11 @@ export class IngredientService {
       data: {
         branchId,
         name: dto.name,
-        unit: dto.unit,
+        // StockUnit is a broadened `BuiltinStockUnit | (string & {})` so
+        // custom units (registered via /custom-units) can be assigned.
+        // Prisma's generated enum type doesn't know about runtime
+        // additions, so we cast to satisfy the narrow typing.
+        unit: dto.unit as any,
         purchaseUnit: dto.purchaseUnit ?? null,
         purchaseUnitQty: dto.purchaseUnitQty ?? 1,
         minimumStock: dto.minimumStock ?? 0,
@@ -179,29 +183,32 @@ export class IngredientService {
 
   async update(id: string, branchId: string, dto: UpdateIngredientDto & { brandName?: string; packSize?: string | null; piecesPerPack?: number | null; sku?: string | null }) {
     await this.findOne(id, branchId);
+    // Cast the data object wholesale so Prisma picks the unchecked-update
+    // overload. Broadening StockUnit to accept custom strings narrowed
+    // inference the other way and made Prisma pick the checked-relation
+    // overload, which then rejected a scalar supplierId.
+    const data: any = {
+      ...(dto.name !== undefined ? { name: dto.name } : {}),
+      ...(dto.unit !== undefined ? { unit: dto.unit } : {}),
+      ...(dto.minimumStock !== undefined ? { minimumStock: dto.minimumStock } : {}),
+      ...(dto.costPerUnit !== undefined ? { costPerUnit: dto.costPerUnit } : {}),
+      ...(dto.supplierId !== undefined ? { supplierId: dto.supplierId || null } : {}),
+      ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      ...(dto.itemCode !== undefined ? { itemCode: dto.itemCode || null } : {}),
+      ...(dto.category !== undefined ? { category: dto.category } : {}),
+      ...(dto.purchaseUnit !== undefined ? { purchaseUnit: dto.purchaseUnit || null } : {}),
+      ...(dto.purchaseUnitQty !== undefined ? { purchaseUnitQty: dto.purchaseUnitQty } : {}),
+      ...(dto.costPerPurchaseUnit !== undefined ? { costPerPurchaseUnit: dto.costPerPurchaseUnit } : {}),
+      ...(dto.brandName !== undefined ? { brandName: dto.brandName } : {}),
+      ...(dto.packSize !== undefined ? { packSize: dto.packSize } : {}),
+      ...(dto.piecesPerPack !== undefined ? { piecesPerPack: dto.piecesPerPack } : {}),
+      ...(dto.sku !== undefined ? { sku: dto.sku } : {}),
+      ...((dto as any).imageUrl !== undefined ? { imageUrl: (dto as any).imageUrl } : {}),
+      ...((dto as any).showOnWebsite !== undefined ? { showOnWebsite: (dto as any).showOnWebsite } : {}),
+    };
     return this.prisma.ingredient.update({
       where: { id },
-      data: {
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.unit !== undefined ? { unit: dto.unit } : {}),
-        ...(dto.minimumStock !== undefined ? { minimumStock: dto.minimumStock } : {}),
-        ...(dto.costPerUnit !== undefined ? { costPerUnit: dto.costPerUnit } : {}),
-        ...(dto.supplierId !== undefined ? { supplierId: dto.supplierId || null } : {}),
-        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.itemCode !== undefined ? { itemCode: dto.itemCode || null } : {}),
-        ...(dto.category !== undefined ? { category: dto.category } : {}),
-        ...(dto.purchaseUnit !== undefined ? { purchaseUnit: dto.purchaseUnit || null } : {}),
-        ...(dto.purchaseUnitQty !== undefined ? { purchaseUnitQty: dto.purchaseUnitQty } : {}),
-        ...(dto.costPerPurchaseUnit !== undefined ? { costPerPurchaseUnit: dto.costPerPurchaseUnit } : {}),
-        // Variant-specific fields
-        ...(dto.brandName !== undefined ? { brandName: dto.brandName } : {}),
-        ...(dto.packSize !== undefined ? { packSize: dto.packSize } : {}),
-        ...(dto.piecesPerPack !== undefined ? { piecesPerPack: dto.piecesPerPack } : {}),
-        ...(dto.sku !== undefined ? { sku: dto.sku } : {}),
-        // Website display fields
-        ...((dto as any).imageUrl !== undefined ? { imageUrl: (dto as any).imageUrl } : {}),
-        ...((dto as any).showOnWebsite !== undefined ? { showOnWebsite: (dto as any).showOnWebsite } : {}),
-      },
+      data,
       include: this.ingredientInclude,
     });
   }

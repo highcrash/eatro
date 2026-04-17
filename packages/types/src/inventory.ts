@@ -1,5 +1,20 @@
 export type SupplierCategory = 'MEAT' | 'FISH' | 'VEGETABLES' | 'DAIRY' | 'SPICES' | 'CLEANING' | 'PACKAGING' | 'BEVERAGE' | 'GENERAL';
-export type StockUnit = 'KG' | 'G' | 'L' | 'ML' | 'PCS' | 'DOZEN' | 'BOX';
+export type BuiltinStockUnit =
+  | 'KG' | 'G' | 'L' | 'ML' | 'PCS' | 'DOZEN' | 'BOX'
+  | 'PACKET' | 'PACK' | 'BOTTLE' | 'BAG' | 'BUNDLE' | 'CAN' | 'JAR' | 'TIN' | 'CARTON';
+// Using `string & {}` keeps autocomplete for builtins while still allowing
+// admin-defined custom units (registered via POST /custom-units) as values.
+// eslint-disable-next-line @typescript-eslint/ban-types
+export type StockUnit = BuiltinStockUnit | (string & {});
+
+export interface CustomUnit {
+  id: string;
+  branchId: string;
+  code: string;
+  label: string;
+  createdAt: string;
+  deletedAt: string | null;
+}
 export type StockMovementType = 'PURCHASE' | 'SALE' | 'VOID_RETURN' | 'ADJUSTMENT' | 'WASTE';
 export type IngredientCategory = 'RAW' | 'CLEANING' | 'PACKAGED' | 'SPICE' | 'DAIRY' | 'BEVERAGE' | 'OTHER';
 

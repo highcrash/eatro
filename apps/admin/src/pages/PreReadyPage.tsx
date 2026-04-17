@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 import type { PreReadyItem, ProductionOrder, PreReadyBatch, Ingredient, ProductionStatus, Recipe } from '@restora/types';
 import type { MenuItem } from '@restora/types';
+import { useStockUnits } from '../lib/units';
 
 // Calculate recipe cost for a pre-ready item from its recipe + ingredient costs
 function calcPreReadyCost(item: PreReadyItem, ingredients: Ingredient[]): { recipeCost: number; yieldQty: number; costPerUnit: number } | null {
@@ -43,7 +44,8 @@ const STATUS_COLORS: Record<ProductionStatus, string> = {
   CANCELLED: 'text-[#666] bg-[#2A2A2A]',
 };
 
-const UNITS = ['KG', 'G', 'L', 'ML', 'PCS', 'DOZEN', 'BOX'];
+// UNITS is now sourced per-render via useStockUnits() so custom units
+// show up in dropdowns. See lib/units.ts.
 
 // Hardcoded local conversion factors for UI display
 const CONVERSION_MAP: Record<string, Record<string, number>> = {
@@ -94,6 +96,7 @@ export default function PreReadyPage() {
     queryKey: ['pre-ready-items'],
     queryFn: () => api.get('/pre-ready/items'),
   });
+  const { units: UNITS } = useStockUnits();
 
   const { data: productions = [] } = useQuery<ProductionOrder[]>({
     queryKey: ['productions'],
