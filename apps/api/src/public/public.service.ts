@@ -3,12 +3,16 @@ import { PrismaService } from '../prisma/prisma.service';
 
 // Fields safe to expose on the public website. Keep this list tight —
 // everything NOT listed here stays internal. In particular:
-//   - `costPrice` is cost of goods; never leak it.
-//   - `cookingStationId` / `type` expose internal kitchen routing.
-//   - `branchId` is a useful pointer the client may already know, so
-//     include it (endpoints already take branchId in the URL).
+//   - `costPrice` is cost of goods; NEVER leak it.
+//   - `cookingStationId` exposes internal kitchen routing.
+//   - `createdAt` / `updatedAt` / `deletedAt` are internal timestamps.
+//   - `websiteVisible` / `isCombo` are internal flags.
 // Any new MenuItem column with sensitive defaults (COGS, profit, internal
 // flags) MUST be added as exclusions, not included by default.
+//
+// `type` (FOOD/BEVERAGE) and `isAvailable` ARE exposed because the
+// public apps branch on them for display (emoji + filter). They don't
+// reveal anything a customer can't see by looking at the menu.
 const PUBLIC_MENU_ITEM_SELECT = {
   id: true,
   branchId: true,
@@ -18,9 +22,11 @@ const PUBLIC_MENU_ITEM_SELECT = {
   seoTitle: true,
   seoDescription: true,
   description: true,
+  type: true,
   price: true,
   imageUrl: true,
   tags: true,
+  isAvailable: true,
   sortOrder: true,
   pieces: true,
   prepTime: true,
