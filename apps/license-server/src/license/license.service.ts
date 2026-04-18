@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../crypto/crypto.service';
 import type { ProofPayload } from '../crypto/proof';
 import type { License, PurchaseCode, SigningKey } from '../../prisma/client';
+import { normalizePattern } from './domain-match';
 
 /**
  * Public license lifecycle. Three operations, all called by installed
@@ -79,7 +80,9 @@ export class LicenseService {
       throw new ForbiddenException({ result: 'REVOKED', message: 'Purchase code has been revoked' });
     }
 
-    const domain = normalizeDomain(input.domain);
+    // normalizePattern preserves a leading "*." so wildcard licenses
+    // round-trip correctly; plain domains lose www. + trailing dot.
+    const domain = normalizePattern(input.domain);
 
     // Idempotent: if a License already exists for this {code, domain,
     // fingerprint}, just re-issue a proof for it. Reinstall on the same
@@ -330,13 +333,8 @@ export class LicenseService {
   }
 }
 
-/** Lower-case + strip leading `www.` + drop trailing dot. */
-function normalizeDomain(domain: string): string {
-  return domain.trim().toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
-}
+// Normalisation moved to domain-match.ts so activation + verification
+// + the future client package share identical rules. See exports there.
 
-// Re-exported so other modules can use the same normalization.
-export { normalizeDomain };
-
-// Suppress unused-warning for PurchaseCode (it's used in service flow inferred types)
+// Suppress unused-warning for PurchaseCode (used via Prisma inferred types)
 export type { PurchaseCode };

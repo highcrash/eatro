@@ -1,8 +1,17 @@
 import { IsString, IsNotEmpty, MaxLength, MinLength, Matches } from 'class-validator';
 
-/** Domain pattern: hostname-y. No path, no scheme. Lowercase enforced
- *  by service code; we just guard against obvious garbage at the edge. */
-const DOMAIN_RE = /^(?!-)[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})*$/;
+/**
+ * Domain pattern at the edge. Two accepted shapes:
+ *   - Plain hostname:  example.com        (matches exactly after www-strip)
+ *   - Wildcard prefix: *.example.com      (matches any sub-depth + bare root)
+ *
+ * Nested wildcards (*.sub.*.foo.com) are rejected — they add complexity
+ * without a real use case. Service code normalises + the client-side
+ * matcher (domain-match.ts) does the runtime check.
+ *
+ * No path, no scheme. Lowercase enforced downstream.
+ */
+const DOMAIN_RE = /^(\*\.)?(?!-)[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})*$/;
 
 export class ActivateDto {
   @IsString() @IsNotEmpty() @MaxLength(80)

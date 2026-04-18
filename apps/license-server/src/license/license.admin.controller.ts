@@ -13,6 +13,7 @@ import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-
 
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminJwtGuard } from '../admin-auth/admin-jwt.guard';
+import { describeMatch } from './domain-match';
 
 class LicensesListQuery {
   @IsOptional() @IsString() productId?: string;
@@ -130,5 +131,23 @@ export class LicenseAdminController {
       }),
     ]);
     return { ok: true };
+  }
+
+  /**
+   * Tell the admin whether a given host would be allowed through a
+   * given license's domain pattern. Useful for validating "*.foo.com"
+   * wildcards before buyers start complaining.
+   *
+   * GET /admin/licenses/:id/test-match?host=sub.example.com
+   */
+  @Get(':id/test-match')
+  async testMatch(@Param('id') id: string, @Query('host') host: string) {
+    if (!host) return { ok: false, reason: 'host query parameter required' };
+    const lic = await this.prisma.license.findUnique({
+      where: { id },
+      select: { domain: true },
+    });
+    if (!lic) throw new NotFoundException({ result: 'NOT_FOUND' });
+    return describeMatch(lic.domain, host);
   }
 }
