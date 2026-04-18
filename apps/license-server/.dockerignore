@@ -1,0 +1,52 @@
+# Trim the build context. The Dockerfile is evaluated with the monorepo
+# root as context — without this file docker copies tens of MB of other
+# apps' node_modules and dist trees that the image never needs.
+
+**/node_modules
+**/dist
+**/build
+**/.turbo
+**/coverage
+**/.next
+**/out
+**/*.log
+
+# VCS + IDE
+.git
+.github
+.husky
+.vscode
+.idea
+
+# Local-only
+.env
+.env.*
+!.env.example
+
+# Other apps — license-server builds from apps/license-server + packages/config only
+apps/admin
+apps/api
+apps/kds
+apps/pos
+apps/pos-desktop
+apps/qr
+apps/qr-order
+apps/web
+apps/license-admin
+
+# Package dirs we don't pull in
+packages/types
+packages/utils
+packages/ui
+packages/license-client
+
+# Artifacts that aren't source
+mockups
+docs
+codecanyon
+temporary\ screenshots
+apps/api/uploads
+apps/api/backups
+infra/postgres-data
+infra/redis-data
+infra/license-droplet/backups

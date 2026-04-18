@@ -1,0 +1,62 @@
+# Caddy config for the license droplet.
+#
+# Caddy auto-issues + renews Let's Encrypt certs for each hostname. No
+# manual certbot step. Just make sure the A records below point at the
+# droplet's public IP BEFORE starting the stack, otherwise ACME HTTP-01
+# validation will fail and we'll hit rate limits retrying.
+#
+# Hostnames:
+#   api.neawaslic.top    → license-server:3002  (public license API)
+#   admin.neawaslic.top  → license-admin:80     (Vite admin SPA)
+#   neawaslic.top        → 301 → admin.neawaslic.top  (apex lands on UI)
+
+api.neawaslic.top {
+	encode zstd gzip
+
+	# The server runs behind this proxy — set X-Forwarded-* so req.ip
+	# reaches the real client (the license throttler + abuse tracker
+	# use CF-Connecting-IP / X-Real-IP / X-Forwarded-For in that order).
+	reverse_proxy license-server:3002 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	# Public license API — all origins allowed (no credentials). Admin
+	# CORS for credentialed requests is handled by the server itself
+	# using LICENSE_ADMIN_ORIGIN.
+
+	log {
+		output file /data/logs/api.log {
+			roll_size 10mb
+			roll_keep 7
+		}
+		format console
+	}
+}
+
+admin.neawaslic.top {
+	encode zstd gzip
+
+	reverse_proxy license-admin:80
+
+	# Defence-in-depth headers for the admin SPA. The license-server
+	# already sets helmet defaults on its responses; these protect the
+	# static bundle.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	log {
+		output file /data/logs/admin.log {
+			roll_size 10mb
+			roll_keep 7
+		}
+		format console
+	}
+}
+
+neawaslic.top {
+	redir https://admin.neawaslic.top{uri} permanent
+}

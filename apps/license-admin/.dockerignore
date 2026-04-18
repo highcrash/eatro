@@ -1,0 +1,45 @@
+**/node_modules
+**/dist
+**/build
+**/.turbo
+**/coverage
+**/.next
+**/out
+**/*.log
+
+.git
+.github
+.husky
+.vscode
+.idea
+
+.env
+.env.*
+!.env.example
+
+# Other apps we don't need — license-admin builds from apps/license-admin
+# + packages/config only.
+apps/admin
+apps/api
+apps/kds
+apps/pos
+apps/pos-desktop
+apps/qr
+apps/qr-order
+apps/web
+apps/license-server
+
+packages/types
+packages/utils
+packages/ui
+packages/license-client
+
+mockups
+docs
+codecanyon
+temporary\ screenshots
+apps/api/uploads
+apps/api/backups
+infra/postgres-data
+infra/redis-data
+infra/license-droplet/backups

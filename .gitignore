@@ -52,6 +52,12 @@ prisma/migrations/dev.db-journal
 infra/postgres-data/
 infra/redis-data/
 
+# License droplet runtime state — .env is covered by the rule above
+# but backups + caddy volumes shouldn't land in the repo either.
+infra/license-droplet/backups/
+infra/license-droplet/caddy-data/
+infra/license-droplet/caddy-config/
+
 # TypeScript build artifacts leaked into src directories
 packages/*/src/**/*.js
 packages/*/src/**/*.js.map
