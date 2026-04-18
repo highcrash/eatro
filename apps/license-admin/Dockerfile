@@ -19,7 +19,7 @@ COPY tsconfig.base.json ./
 COPY packages/config/package.json packages/config/
 COPY apps/license-admin/package.json apps/license-admin/
 
-RUN pnpm install --frozen-lockfile --filter @restora/license-admin...
+RUN pnpm install --frozen-lockfile --ignore-scripts --filter @restora/license-admin...
 
 COPY packages/config packages/config
 COPY apps/license-admin apps/license-admin

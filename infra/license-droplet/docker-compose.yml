@@ -41,7 +41,13 @@ services:
     expose:
       - "3002"
     env_file:
-      - ./.env
+      # Runtime secrets (KEK / pepper / JWT / bcrypt admin hash). Lives
+      # in a separate file from .env because compose interpolates env_file
+      # values — keeping bcrypt's $-laden hash in the auto-loaded .env
+      # would mangle it into substring substitutions. .env.secrets is
+      # NOT auto-loaded for YAML interpolation; values pass through raw.
+      # (You still need to escape $ as $$ in .env.secrets — see template.)
+      - ./.env.secrets
     environment:
       NODE_ENV: production
       PORT: "3002"
@@ -53,9 +59,14 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # wget is included in node:22-bookworm-slim. Uses the server's own
-      # /health endpoint which does a SELECT 1 against Postgres.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3002/api/v1/health || exit 1"]
+      # node ships in the image; wget/curl don't. Hits the server's own
+      # /health endpoint which does a SELECT 1 against Postgres. Block
+      # scalar form keeps the require(...) string readable.
+      test:
+        - CMD
+        - node
+        - -e
+        - require("node:http").get("http://localhost:3002/api/v1/health",r=>process.exit(r.statusCode===200?0:1)).on("error",()=>process.exit(1))
       interval: 30s
       timeout: 5s
       retries: 3

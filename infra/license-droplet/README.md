@@ -53,8 +53,18 @@ and Let's Encrypt rate-limits further attempts. Wait for propagation
 
 ## Secrets
 
-Fill `/opt/restora-license/infra/license-droplet/.env`. The file has
-inline generation commands for each secret. The critical ones:
+Compose interpolates `${VAR}` references in BOTH the YAML file AND in
+values loaded via `env_file:`. Bcrypt hashes contain literal `$`s that
+get mangled by interpolation, so we split the secrets into two files:
+
+- `/opt/restora-license/infra/license-droplet/.env` — only the
+  `POSTGRES_*` vars that compose needs to substitute into the YAML
+  (e.g. into `LICENSE_DB_URL`).
+- `/opt/restora-license/infra/license-droplet/.env.secrets` —
+  everything else (KEK, pepper, JWT, admin seed, rate limits). Loaded
+  by the license-server container via `env_file:` only.
+
+The critical ones:
 
 - `LICENSE_SIGNING_KEK` — 32B base64. Wraps every ed25519 private
   signing key in the DB. **Set once, never rotate** without a planned
@@ -67,7 +77,21 @@ inline generation commands for each secret. The critical ones:
   only on empty DB. Change the password from the admin UI after first
   login; the env values are ignored afterwards.
 
-`chmod 600 .env` so other users on the droplet (if any) can't read it.
+> **Bcrypt hash gotcha**: docker compose interpolates `$` in env_file
+> values too. Double every `$` in `ADMIN_PASSWORD_HASH` before saving
+> to `.env.secrets`:
+> `$2b$10$abc...` → `$$2b$$10$$abc...`
+> (compose collapses `$$` back to `$` when passing to the container.)
+> If the seeded admin row was created with a mangled hash, truncate
+> the table and restart the server to re-seed:
+> ```
+> docker exec restora-license-postgres-1 \
+>   psql -U license -d license_prod -c 'TRUNCATE admin_users RESTART IDENTITY CASCADE;'
+> docker compose restart license-server
+> ```
+
+`chmod 600 .env .env.secrets` so other users on the droplet can't read
+them.
 
 ## Start the stack
 
