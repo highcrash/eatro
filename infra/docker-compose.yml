@@ -5,10 +5,10 @@ version: '3.9'
 # Stop with:  pnpm infra:down
 #
 # Services:
-#   postgres  → localhost:5432   (PostgreSQL 15)
-#   redis     → localhost:6379   (Redis 7)
-#   pgadmin   → localhost:5050   (optional DB GUI)
-#   redis-ui  → localhost:8001   (optional Redis GUI)
+#   postgres          → localhost:5434   (main app DB, PostgreSQL 15)
+#   license-postgres  → localhost:5435   (license server DB, PostgreSQL 15)
+#   redis             → localhost:6380   (Redis 7)
+#   pgadmin           → localhost:5050   (optional DB GUI, --profile tools)
 
 services:
   postgres:
@@ -28,6 +28,30 @@ services:
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U restora -d restora_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # License server DB — dedicated cluster so an outage on the main app DB
+  # doesn't take activation/verification offline, and vice versa. Same
+  # pattern as prod: separate logical cluster, separate credentials,
+  # separate volume.
+  license-postgres:
+    image: postgres:15-alpine
+    container_name: restora-license-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: license
+      POSTGRES_PASSWORD: license_dev_password
+      POSTGRES_DB: license_dev
+      POSTGRES_HOST_AUTH_METHOD: md5
+      POSTGRES_INITDB_ARGS: "--auth-host=md5"
+    ports:
+      - "5435:5432"
+    volumes:
+      - license-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U license -d license_dev"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -70,5 +94,7 @@ services:
 volumes:
   postgres-data:
     name: restora-postgres-data
+  license-postgres-data:
+    name: restora-license-postgres-data
   redis-data:
     name: restora-redis-data
