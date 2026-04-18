@@ -80,17 +80,40 @@ If you add a new internal-only file, update both:
 ## Secret-scan safety net
 
 `scripts/lib/secret-scan.mjs` greps the working tree (or the zip at package time)
-for forbidden tokens:
+and fires on two kinds of hits:
 
-- `eatro`, `EATRO`, `Restora`, `restora-pos`, `@restora.app`, `eatrobd`
-- DigitalOcean-specific: `SPACES_`, `DO_`
-- Signing secrets: `KEYGEN_SECRET`, `LICENSE_SIGNING_KEK`, `LICENSE_HMAC_PEPPER`
+**1. Brand strings** — literal tokens that should never appear in shipped source:
+`eatro`, `EATRO`, `Restora`, `restora-pos`, `@restora.app`, `eatrobd`.
+
+**2. Value-shape patterns** — regex rules that catch accidental secret leaks
+regardless of variable name:
+- DigitalOcean Spaces access keys (pattern `DO[A-Z0-9]{18,22}`)
+- bcrypt hashes (`$2a$…` / `$2b$…`)
+- Base64-looking value assigned to a known secret env var
+  (`LICENSE_SIGNING_KEK=<real>`, `JWT_SECRET=<real>`, etc. —
+  the placeholder `CHANGE_ME_*` is specifically allowed).
+
+The scanner deliberately does NOT flag variable NAMES — those appear
+legitimately in `.env.example` files, schema comments, and docs.
 
 It fails the build on any hit. Run manually with:
 
 ```bash
 pnpm run codecanyon:secret-scan
+# or scan a specific dir (e.g. a staged release tree):
+node scripts/lib/secret-scan.mjs ./release/codecanyon-v1.0.0/
 ```
+
+### When is the scan expected to be clean?
+
+- **At package time** (scanning `release/codecanyon-*/`): MUST be clean.
+  The packager script fails if not.
+- **Mid-development on `codecanyon`**: may report brand-string hits in
+  source files that Section 5 (un-branding codemod) hasn't reached yet.
+  That's a baseline to work down, not a release blocker.
+- **On `main`**: not meaningful — main contains the internal license
+  server and internal deploy config, both of which legitimately mention
+  secret env-var names and are never packaged for buyers.
 
 ## Release cadence
 
