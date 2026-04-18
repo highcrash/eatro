@@ -90,4 +90,11 @@ scripts/seed-attendance.mjs
 scripts/seed-sales.mjs
 mockups/
 temporary screenshots/
+# Self-hosted license server + its admin UI. INFRASTRUCTURE we run on
+# our own domain (license.*, license-admin.*). Must NEVER ship in the
+# buyer's CodeCanyon zip — a buyer with the server code could stand up
+# their own license server and bypass activation. These live on `main`
+# only. Residual files from local `main` checkouts are silenced here.
+apps/license-server/
+apps/license-admin/
 

@@ -72,6 +72,11 @@ Listed in `.gitignore` under the codecanyon section. Currently:
 - `.do/app.yaml` — internal deploy spec for eatrobd.com
 - `scripts/screenshot.mjs`, `scripts/screenshot-pos.mjs`, `scripts/seed-attendance.mjs`, `scripts/seed-sales.mjs` — internal scripts
 - `mockups/`, `temporary screenshots/` — internal design artifacts
+- `apps/license-server/` — self-hosted license server (internal infra
+  running at `license.<your-domain>`). A buyer with the server code
+  could stand up their own license server and bypass ours. This is the
+  single most important path to keep off `codecanyon`.
+- `apps/license-admin/` — admin UI for the license server (same reasoning)
 
 If you add a new internal-only file, update both:
 1. Root `.gitignore` (the codecanyon section)
