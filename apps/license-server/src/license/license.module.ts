@@ -1,16 +1,20 @@
 import { Module } from '@nestjs/common';
 import { LicenseController } from './license.controller';
+import { LicenseAdminController } from './license.admin.controller';
 import { LicenseService } from './license.service';
 import { AbuseTracker } from './abuse-tracker';
 import { HmacRequestGuard } from './guards/hmac-request.guard';
+import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 
 /**
- * Public license endpoints + their service. CryptoModule, PrismaModule,
- * and LogModule are already @Global() so this module imports nothing
- * beyond Nest's own machinery — keeping the dependency graph flat.
+ * Public license endpoints + their service + admin read/revoke.
+ * CryptoModule, PrismaModule, LogModule are already @Global().
+ * AdminAuthModule is imported so the admin-jwt strategy is registered
+ * before LicenseAdminController mounts its AdminJwtGuard.
  */
 @Module({
-  controllers: [LicenseController],
+  imports: [AdminAuthModule],
+  controllers: [LicenseController, LicenseAdminController],
   providers: [LicenseService, AbuseTracker, HmacRequestGuard],
   exports: [LicenseService],
 })

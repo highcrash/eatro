@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ProductPublicController } from './product.public.controller';
+import { ProductAdminController } from './product.admin.controller';
+import { AdminAuthModule } from '../admin-auth/admin-auth.module';
+import { SigningKeyModule } from '../signing-key/signing-key.module';
 
-/**
- * Public product endpoints. Admin endpoints land in a sibling
- * controller (product.admin.controller.ts) when the admin module ships.
- */
 @Module({
-  controllers: [ProductPublicController],
+  imports: [AdminAuthModule, SigningKeyModule],
+  controllers: [ProductPublicController, ProductAdminController],
 })
 export class ProductModule {}

@@ -8,6 +8,9 @@ import { CryptoModule } from './crypto/crypto.module';
 import { LogModule } from './log/log.module';
 import { LicenseModule } from './license/license.module';
 import { ProductModule } from './product/product.module';
+import { PurchaseCodeModule } from './purchase-code/purchase-code.module';
+import { AdminAuthModule } from './admin-auth/admin-auth.module';
+import { SigningKeyModule } from './signing-key/signing-key.module';
 import { HealthModule } from './health/health.module';
 
 /**
@@ -27,9 +30,12 @@ import { HealthModule } from './health/health.module';
     ]),
     PrismaModule,
     CryptoModule,
+    AdminAuthModule,
+    SigningKeyModule,
     LogModule,
     LicenseModule,
     ProductModule,
+    PurchaseCodeModule,
     HealthModule,
   ],
 })
