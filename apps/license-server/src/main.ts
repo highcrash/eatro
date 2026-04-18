@@ -22,7 +22,10 @@ import { AppModule } from './app.module';
  *  - Port 3002 by default (3001 is the main app API).
  */
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody:true makes req.rawBody (Buffer) available — required by the
+  // HMAC guard which signs the original body bytes, not the parsed-then-
+  // restringified version (different whitespace = different hash).
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   const config = app.get(ConfigService);
   const port = config.get<number>('PORT', 3002);

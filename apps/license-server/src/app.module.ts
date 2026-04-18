@@ -5,6 +5,9 @@ import { ThrottlerModule, seconds } from '@nestjs/throttler';
 
 import { PrismaModule } from './prisma/prisma.module';
 import { CryptoModule } from './crypto/crypto.module';
+import { LogModule } from './log/log.module';
+import { LicenseModule } from './license/license.module';
+import { ProductModule } from './product/product.module';
 import { HealthModule } from './health/health.module';
 
 /**
@@ -24,6 +27,9 @@ import { HealthModule } from './health/health.module';
     ]),
     PrismaModule,
     CryptoModule,
+    LogModule,
+    LicenseModule,
+    ProductModule,
     HealthModule,
   ],
 })
