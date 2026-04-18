@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, seconds } from '@nestjs/throttler';
 
 import { PrismaModule } from './prisma/prisma.module';
+import { CryptoModule } from './crypto/crypto.module';
 import { HealthModule } from './health/health.module';
 
 /**
@@ -22,6 +23,7 @@ import { HealthModule } from './health/health.module';
       { name: 'default', ttl: seconds(60), limit: 120 },
     ]),
     PrismaModule,
+    CryptoModule,
     HealthModule,
   ],
 })
