@@ -1,0 +1,152 @@
+# DigitalOcean App Platform spec — License stack (standalone)
+# Domain: neawaslic.top
+# Region: SGP (Singapore)
+#
+# Deliberately separate from .do/app.yaml — a product-app outage (or
+# deploy) must not affect licensing and vice versa. Different App, its
+# own Postgres, its own env, its own billing line.
+#
+# To create the App the first time:
+#   doctl apps create --spec .do/license-app.yaml
+# Or paste this YAML into the App Platform "Create from spec" wizard.
+#
+# After creation, fill the SECRET env vars in the dashboard:
+#   - LICENSE_DB_URL              # if using option (B) below; skip for (A)
+#   - LICENSE_ADMIN_JWT_SECRET    # node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+#   - LICENSE_SIGNING_KEK         # 32-byte base64; NEVER rotate without re-wrapping every key
+#   - LICENSE_HMAC_PEPPER         # 32-byte base64; NEVER rotate without re-deriving every hmacSecret
+#   - ADMIN_EMAIL                 # first-boot admin seed
+#   - ADMIN_PASSWORD_HASH         # bcrypt of first-boot password
+#   - ENVATO_PERSONAL_TOKEN       # optional, v1.1
+#
+# DNS at your registrar:
+#   A/CNAME  neawaslic.top             → DO App Platform
+#   CNAME    admin.neawaslic.top       → DO App Platform
+#   CNAME    api.neawaslic.top         → DO App Platform
+# (DO will show the exact target values in the dashboard after the
+# first deploy — it's usually a `<slug>.ondigitalocean.app` CNAME.)
+
+name: restora-license
+region: sgp
+
+# ─── Database ────────────────────────────────────────────────────────────────
+# Pick ONE:
+#
+# (A) Provision a new managed Postgres alongside this app. ~$15/mo for dev size.
+#     LICENSE_DB_URL is auto-injected — leave the SECRET entry below commented.
+#
+# databases:
+#   - name: db
+#     engine: PG
+#     version: "15"
+#     production: false
+#
+# (B) Reuse an existing Postgres cluster. Create a separate database +
+#     user (e.g. `license_prod` / `license`). Leave `databases:` commented
+#     out and set LICENSE_DB_URL as a SECRET in the dashboard.
+#
+# Either way, keep this DB ISOLATED from the product-app DB — leaking
+# licenses into the product DB (or vice versa) would couple failure
+# domains we just split.
+
+# ─── License server (NestJS, port 3002) ─────────────────────────────────────
+services:
+  - name: license-server
+    github:
+      repo: highcrash/eatro      # ← change to your repo path if different
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    instance_size_slug: basic-xxs   # 512 MB / 1 vCPU — plenty for a license API
+    instance_count: 1
+    http_port: 3002
+
+    # Build: install workspace deps → generate the license-server's Prisma
+    # client (own schema, output to apps/license-server/prisma/client/)
+    # → nest build. Turbo's filter pulls in @restora/license-client + any
+    # workspace deps in the right order.
+    build_command: |
+      pnpm install --frozen-lockfile
+      pnpm --filter @restora/license-server exec prisma generate --schema ./prisma/schema.prisma
+      pnpm exec turbo run build --filter=@restora/license-server
+
+    # Start: migrate then boot. migrate deploy is idempotent — safe to run
+    # on every deploy.
+    run_command: |
+      pnpm --filter @restora/license-server exec prisma migrate deploy --schema ./prisma/schema.prisma
+      node apps/license-server/dist/main.js
+
+    health_check:
+      http_path: /api/v1/health
+      initial_delay_seconds: 20
+      period_seconds: 30
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 5
+
+    routes:
+      - path: /
+
+    domains:
+      - { domain: api.neawaslic.top }
+
+    envs:
+      - { key: NODE_ENV, value: production, scope: RUN_AND_BUILD_TIME }
+      - { key: PORT, value: "3002", scope: RUN_AND_BUILD_TIME }
+
+      # LICENSE_DB_URL — pick ONE:
+      # (A) Auto-injected when using the `databases:` block above:
+      # - { key: LICENSE_DB_URL, value: "${db.DATABASE_URL}", scope: RUN_AND_BUILD_TIME }
+      # (B) Reusing an existing cluster — set as a SECRET in the dashboard:
+      - { key: LICENSE_DB_URL, scope: RUN_AND_BUILD_TIME, type: SECRET }
+
+      # Cryptographic secrets — set once, guard forever.
+      - { key: LICENSE_ADMIN_JWT_SECRET, scope: RUN_TIME, type: SECRET }
+      - { key: LICENSE_SIGNING_KEK, scope: RUN_TIME, type: SECRET }
+      - { key: LICENSE_HMAC_PEPPER, scope: RUN_TIME, type: SECRET }
+
+      # First-boot admin seed. Used only when admin_users table is empty;
+      # change the password via the UI after first login.
+      - { key: ADMIN_EMAIL, scope: RUN_TIME, type: SECRET }
+      - { key: ADMIN_PASSWORD_HASH, scope: RUN_TIME, type: SECRET }
+
+      # Non-secret config
+      - { key: LICENSE_ADMIN_ORIGIN, value: "https://admin.neawaslic.top", scope: RUN_TIME }
+      - { key: LICENSE_ADMIN_JWT_EXPIRES_IN, value: "8h", scope: RUN_TIME }
+      - { key: LICENSE_PROOF_TTL_SECONDS, value: "86400", scope: RUN_TIME }
+      - { key: LICENSE_PROOF_GRACE_SECONDS, value: "604800", scope: RUN_TIME }
+      - { key: LICENSE_PUBLIC_API_RATE_ACTIVATE, value: "5", scope: RUN_TIME }
+      - { key: LICENSE_PUBLIC_API_RATE_VERIFY, value: "60", scope: RUN_TIME }
+
+      # Optional: Envato Personal Token for bulk purchase-code import.
+      # Leave empty until v1.1 Envato sync lands.
+      - { key: ENVATO_PERSONAL_TOKEN, scope: RUN_TIME, type: SECRET }
+
+# ─── License admin (Vite SPA) ───────────────────────────────────────────────
+static_sites:
+  - name: license-admin
+    github:
+      repo: highcrash/eatro
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    build_command: |
+      pnpm install --frozen-lockfile
+      pnpm exec turbo run build --filter=@restora/license-admin
+    output_dir: apps/license-admin/dist
+    catchall_document: index.html
+
+    envs:
+      # Admin UI calls api.neawaslic.top directly (CORS allow-listed to
+      # admin.neawaslic.top by the server via LICENSE_ADMIN_ORIGIN).
+      - { key: VITE_LICENSE_API_BASE_URL, value: "https://api.neawaslic.top/api/v1", scope: BUILD_TIME }
+
+    routes:
+      - path: /
+
+    domains:
+      # You can park the apex on the admin UI (common "landing → login"
+      # pattern) AND serve it at admin.*. If you prefer the apex to stay
+      # empty, drop the PRIMARY line and use only admin.*.
+      - { domain: neawaslic.top, type: PRIMARY }
+      - { domain: admin.neawaslic.top }

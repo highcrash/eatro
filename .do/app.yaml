@@ -98,73 +98,6 @@ services:
       # Optional SMS (sms.net.bd)
       - { key: SMS_API_KEY, scope: RUN_TIME, type: SECRET }
 
-  # ─── License server (self-hosted, product-agnostic) ───────────────────
-  # Backs the CodeCanyon Restora POS edition + any future products. Runs
-  # against its OWN Postgres database (LICENSE_DB_URL is a SECRET env —
-  # create a separate logical DB on the existing cluster, or a new cluster).
-  # Swagger at https://license.eatrobd.com/api/docs (disabled when
-  # NODE_ENV=production, so leave NODE_ENV=development if you want it
-  # reachable — or flip to production once the admin UI is the primary
-  # management surface).
-  - name: license-server
-    github:
-      repo: highcrash/eatro
-      branch: main
-      deploy_on_push: true
-    source_dir: /
-    instance_size_slug: basic-xxs
-    instance_count: 1
-    http_port: 3002
-
-    build_command: |
-      pnpm install --frozen-lockfile
-      pnpm --filter @restora/license-server exec prisma generate --schema ./prisma/schema.prisma
-      pnpm exec turbo run build --filter=@restora/license-server
-
-    run_command: |
-      pnpm --filter @restora/license-server exec prisma migrate deploy --schema ./prisma/schema.prisma
-      node apps/license-server/dist/main.js
-
-    health_check:
-      http_path: /api/v1/health
-      initial_delay_seconds: 20
-      period_seconds: 30
-      timeout_seconds: 5
-      success_threshold: 1
-      failure_threshold: 5
-
-    routes:
-      - path: /
-
-    domains:
-      - { domain: license.eatrobd.com }
-
-    envs:
-      - { key: NODE_ENV, value: production, scope: RUN_AND_BUILD_TIME }
-      - { key: PORT, value: "3002", scope: RUN_AND_BUILD_TIME }
-
-      # SECRETS — set in the dashboard. LICENSE_SIGNING_KEK and
-      # LICENSE_HMAC_PEPPER are 32-byte base64 values; rotating either
-      # requires re-wrapping every ed25519 private key and re-deriving
-      # every hmacSecret, so pick once and guard.
-      - { key: LICENSE_DB_URL, scope: RUN_AND_BUILD_TIME, type: SECRET }
-      - { key: LICENSE_ADMIN_JWT_SECRET, scope: RUN_TIME, type: SECRET }
-      - { key: LICENSE_SIGNING_KEK, scope: RUN_TIME, type: SECRET }
-      - { key: LICENSE_HMAC_PEPPER, scope: RUN_TIME, type: SECRET }
-      - { key: ADMIN_EMAIL, scope: RUN_TIME, type: SECRET }
-      - { key: ADMIN_PASSWORD_HASH, scope: RUN_TIME, type: SECRET }
-
-      - { key: LICENSE_ADMIN_ORIGIN, value: "https://license-admin.eatrobd.com", scope: RUN_TIME }
-      - { key: LICENSE_ADMIN_JWT_EXPIRES_IN, value: "8h", scope: RUN_TIME }
-      - { key: LICENSE_PROOF_TTL_SECONDS, value: "86400", scope: RUN_TIME }
-      - { key: LICENSE_PROOF_GRACE_SECONDS, value: "604800", scope: RUN_TIME }
-      - { key: LICENSE_PUBLIC_API_RATE_ACTIVATE, value: "5", scope: RUN_TIME }
-      - { key: LICENSE_PUBLIC_API_RATE_VERIFY, value: "60", scope: RUN_TIME }
-
-      # Optional: Envato Personal Token for bulk purchase-code import.
-      # Leave empty until v1.1 Envato sync lands.
-      - { key: ENVATO_PERSONAL_TOKEN, scope: RUN_TIME, type: SECRET }
-
 # ─── Static frontends ────────────────────────────────────────────────────────
 # Each Vite app builds into apps/<name>/dist and serves as a CDN-fronted static site.
 # Auto-deploy on push is enabled per component.
@@ -268,21 +201,6 @@ static_sites:
       # any printed QR codes that used it during early testing.
       - { domain: qr.eatrobd.com, type: PRIMARY }
       - { domain: order.eatrobd.com }
-
-  - name: license-admin
-    github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
-    source_dir: /
-    build_command: |
-      pnpm install --frozen-lockfile
-      pnpm exec turbo run build --filter=@restora/license-admin
-    output_dir: apps/license-admin/dist
-    catchall_document: index.html
-    envs:
-      - { key: VITE_LICENSE_API_BASE_URL, value: "https://license.eatrobd.com/api/v1", scope: BUILD_TIME }
-    routes:
-      - path: /
-    domains:
-      - { domain: license-admin.eatrobd.com }
 
 # Note on routing:
 # Each static site has its own DOMAIN, so all of them get path "/" — no conflicts.
