@@ -1,0 +1,37 @@
+{
+  "name": "@restora/license-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zero-dep client for the self-hosted license server. Activate / verify / deactivate + offline proof verification.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rimraf dist",
+    "type-check": "tsc --noEmit",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@restora/config": "workspace:*",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^22.0.0",
+    "jest": "^29.7.0",
+    "rimraf": "^6.0.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.6.0"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$"
+  }
+}

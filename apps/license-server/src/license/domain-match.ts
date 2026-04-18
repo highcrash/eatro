@@ -27,21 +27,25 @@
  * (next workspace) which runs it client-side against req.headers.host.
  */
 
-/** Lowercase, strip leading www., drop trailing dot + any :port. */
+/** Lowercase, strip leading www., drop trailing dot + any :port.
+ *  Order matters: port → trailing dot → www. — so "example.com.:8080"
+ *  collapses cleanly. Reordered (from port-last) 2026-04-18 after a
+ *  spec caught the degenerate case. */
 export function normalizeHost(host: string): string {
-  const trimmed = host.trim().toLowerCase().replace(/\.$/, '');
-  const noPort = trimmed.replace(/:\d+$/, '');
-  return noPort.replace(/^www\./, '');
+  const lower = host.trim().toLowerCase();
+  const noPort = lower.replace(/:\d+$/, '');
+  const noDot = noPort.replace(/\.$/, '');
+  return noDot.replace(/^www\./, '');
 }
 
 /** Same as normalizeHost but preserves a leading `*.` wildcard. */
 export function normalizePattern(pattern: string): string {
-  const p = pattern.trim().toLowerCase().replace(/\.$/, '');
-  if (p.startsWith('*.')) {
-    const rest = p.slice(2).replace(/^www\./, '').replace(/:\d+$/, '');
+  const lower = pattern.trim().toLowerCase();
+  if (lower.startsWith('*.')) {
+    const rest = lower.slice(2).replace(/:\d+$/, '').replace(/\.$/, '').replace(/^www\./, '');
     return `*.${rest}`;
   }
-  return normalizeHost(p);
+  return normalizeHost(lower);
 }
 
 /** Returns true iff `host` matches the registered `pattern`. Both are
