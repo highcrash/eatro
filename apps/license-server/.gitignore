@@ -1,0 +1,14 @@
+# License-server-specific ignores (in addition to the repo root .gitignore)
+
+# Prisma client output — generated on each build, never committed.
+src/generated/
+
+# Local env
+.env
+.env.local
+
+# Per-app tsconfig incremental artefacts
+tsconfig.tsbuildinfo
+
+# Nest CLI artefacts
+dist/
