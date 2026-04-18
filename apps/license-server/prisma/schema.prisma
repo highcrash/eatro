@@ -1,9 +1,17 @@
 // License Server — dedicated schema.
 //
-// Generator writes to src/generated/prisma-license so this Prisma Client
-// is isolated from the Restora POS main API's client (which lives at
-// root ../../node_modules/.prisma/client). A single process only ever
-// imports one or the other; cross-app type collisions are impossible.
+// Generator writes to prisma/client/ so the relative import path
+// `../../prisma/client` resolves identically whether it's executed from
+// src/prisma/prisma.service.ts (dev, via ts-node) or
+// dist/prisma/prisma.service.js (prod, after nest build). Putting the
+// generated output INSIDE src/ was a trap — nest build only compiles
+// src/*.ts and leaves src/generated/ behind, so production boot failed
+// with "Cannot find module '../generated/prisma-license'".
+//
+// This client stays isolated from the main app's client (which lives
+// at root ../../../node_modules/.prisma/client via the root
+// prisma/schema.prisma generator) — a single process only ever imports
+// one or the other, so cross-app type collisions are impossible.
 //
 // Datasource uses LICENSE_DB_URL — a SEPARATE Postgres cluster (or at
 // minimum a separate logical DB + user) from the main API. An outage of
@@ -12,7 +20,7 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/prisma-license"
+  output   = "./client"
 }
 
 datasource db {
