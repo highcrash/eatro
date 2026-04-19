@@ -5,10 +5,12 @@ version: '3.9'
 # Stop with:  pnpm infra:down
 #
 # Services:
-#   postgres  → localhost:5432   (PostgreSQL 15)
-#   redis     → localhost:6379   (Redis 7)
-#   pgadmin   → localhost:5050   (optional DB GUI)
-#   redis-ui  → localhost:8001   (optional Redis GUI)
+#   postgres          → localhost:5434   (main app DB, PostgreSQL 15)
+#   redis             → localhost:6380   (Redis 7)
+#   pgadmin           → localhost:5050   (optional DB GUI, --profile tools)
+#
+# License server moved to its own repo: github.com/highcrash/neawaslic.
+# Its dev DB lives there now, on its own port (5435 → 5432 inside).
 
 services:
   postgres:
