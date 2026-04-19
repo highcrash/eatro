@@ -326,6 +326,15 @@ server {
         proxy_set_header Host \\$host;
     }
 
+    # Bare /admin /pos /kds /qr without trailing slash → redirect.
+    # nginx does NOT auto-add the slash for alias-based locations
+    # (only for root-based ones), so without these the buyer hits
+    # 404 unless they remember to type the trailing slash.
+    location = /admin { return 301 /admin/; }
+    location = /pos   { return 301 /pos/; }
+    location = /kds   { return 301 /kds/; }
+    location = /qr    { return 301 /qr/; }
+
     # Admin dashboard at /admin.
     location /admin/ {
         alias \\$INSTALL_DIR/admin/;
