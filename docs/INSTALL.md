@@ -146,6 +146,147 @@ Most cPanel hosts ship the **Node.js App Manager**. If yours has Node
    `pos.yourdomain.com`, etc to their matching `dist/` dirs via
    cPanel's subdomain manager.
 
+## PostgreSQL setup
+
+The automated `install.sh` already installs PostgreSQL 15+ on Ubuntu
+and creates the `pos_prod` DB + `pos` user for you — this section is
+for operators who want to use an existing Postgres server, a managed
+service, or a different OS. Target: **PostgreSQL 15 or newer**
+(14 and below will fail because we use features added in 15).
+
+### Ubuntu 22.04 / 24.04 / 25.x
+
+Ubuntu's default `postgresql` apt package is Postgres 14 on 22.04
+and Postgres 16 on 24.04+. We need 15+; on 22.04 add the PGDG apt
+repo to pull a newer major:
+
+```bash
+# 22.04 — add PGDG for Postgres 16
+sudo apt install -y curl ca-certificates
+curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg
+echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  | sudo tee /etc/apt/sources.list.d/pgdg.list
+sudo apt update
+sudo apt install -y postgresql-16
+
+# 24.04+ — default apt package is already Postgres 16
+sudo apt install -y postgresql
+```
+
+Start + enable:
+
+```bash
+sudo systemctl enable --now postgresql
+sudo -u postgres psql -c "SELECT version();"   # confirm 15+
+```
+
+### Debian 12
+
+Same PGDG recipe — Debian's default is also often older than 15:
+
+```bash
+sudo apt install -y postgresql-common
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+sudo apt install -y postgresql-16
+```
+
+### RHEL / Rocky / AlmaLinux 9
+
+```bash
+sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-$(arch)/pgdg-redhat-repo-latest.noarch.rpm
+sudo dnf -qy module disable postgresql
+sudo dnf install -y postgresql16-server postgresql16
+sudo /usr/pgsql-16/bin/postgresql-16-setup initdb
+sudo systemctl enable --now postgresql-16
+```
+
+### macOS (dev only)
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+createdb pos_prod
+```
+
+### Create DB + user + PG 15+ grants
+
+Once Postgres is running, create the app's user + database with the
+**two public-schema grants** required on PG 15+. Skip these and
+`prisma migrate deploy` dies with `permission denied for schema
+public`.
+
+```bash
+# Pick a password — auto-generate one if you want:
+PG_PASS=$(openssl rand -base64 24 | tr -d '+/=' | head -c 24)
+echo "Generated DB password: $PG_PASS"
+
+sudo -u postgres psql <<SQL
+-- 1. Role (login + password)
+CREATE USER pos WITH PASSWORD '$PG_PASS';
+
+-- 2. Database owned by the new role
+CREATE DATABASE pos_prod OWNER pos;
+
+-- 3. PG 15+ public-schema grants — REQUIRED, don't skip
+\c pos_prod
+GRANT ALL ON SCHEMA public TO pos;
+ALTER SCHEMA public OWNER TO pos;
+SQL
+```
+
+Your `DATABASE_URL` is now:
+```
+postgresql://pos:THE_PASSWORD@127.0.0.1:5432/pos_prod?schema=public
+```
+
+### Remote Postgres / managed service
+
+If you're using DigitalOcean Managed PG, AWS RDS, Supabase, Neon,
+Railway, etc:
+
+1. Create a database named something like `pos_prod` in the
+   provider's console.
+2. Grab the connection string — it'll look like
+   `postgresql://user:pass@host:5432/db?sslmode=require`.
+3. Append `&schema=public` if it's not already there.
+4. Paste it into `.env` as `DATABASE_URL`.
+5. If the provider gave you a user that's NOT the database owner,
+   run the two `GRANT ALL ON SCHEMA public ... ALTER SCHEMA public
+   OWNER TO ...` statements from the console's SQL runner against
+   the new DB. Providers that hand you a superuser role (Railway,
+   Neon) handle this implicitly.
+
+SSL is required on most managed hosts — Prisma honors `sslmode` in
+the URL so no extra config is needed.
+
+### Firewall note
+
+If Postgres is on a separate host from the API, make sure:
+- Postgres's `postgresql.conf` has `listen_addresses = '*'` (or the
+  API host's IP).
+- `pg_hba.conf` has a line allowing the API host:
+  `host pos_prod pos <api-ip>/32 scram-sha-256`.
+- The OS firewall allows inbound 5432 from the API host only
+  (never from `0.0.0.0/0`).
+
+### Verifying the connection
+
+Before running `pnpm db:migrate`, sanity-check from the API host:
+
+```bash
+apt install -y postgresql-client      # only the psql CLI; no server
+psql "$DATABASE_URL" -c "SELECT 1;"
+# → ?column?
+#   ----------
+#          1
+```
+
+If that hangs: Postgres isn't reachable (firewall, wrong host). If
+it errors `FATAL: password authentication failed`: DB user or
+password is wrong. If it errors `SSL required`: add `?sslmode=require`
+to `DATABASE_URL`.
+
 ## URLs you end up with
 
 | Path        | What                              |
