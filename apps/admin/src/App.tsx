@@ -1,7 +1,10 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 
 import { useAuthStore } from './store/auth.store';
 import LoginPage from './pages/LoginPage';
+import InstallWizard from './install/InstallWizard';
+import { installApi } from './install/install-api';
 import AdminLayout from './layouts/AdminLayout';
 import DashboardPage from './pages/DashboardPage';
 import MenuPage from './pages/MenuPage';
@@ -39,6 +42,30 @@ import ReservationsPage from './pages/ReservationsPage';
 
 export default function AdminApp() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  // Install-wizard takeover. On every app boot we ping /install/status
+  // BEFORE showing login — if the DB has no config row yet, we flip
+  // the whole UI to the wizard instead. Status is @Public() so it
+  // works even when the license gate is locked (which it always is
+  // on a fresh install). Uses lightweight state rather than React
+  // Query so the check runs without the TanStack provider context
+  // that wraps the rest of the admin shell lower in the tree.
+  const [needsInstall, setNeedsInstall] = useState<boolean | null>(null);
+  useEffect(() => {
+    installApi
+      .status()
+      .then((s) => setNeedsInstall(s.needsInstall))
+      .catch(() => setNeedsInstall(false)); // fail-open on transient error
+  }, []);
+  if (needsInstall === null) {
+    // First paint. Intentionally blank — the wizard and login both
+    // have their own visuals; a loading spinner here would flash and
+    // look broken on fast networks. Browser shows the root html bg.
+    return null;
+  }
+  if (needsInstall) {
+    return <InstallWizard />;
+  }
 
   if (!isAuthenticated) {
     return <LoginPage />;

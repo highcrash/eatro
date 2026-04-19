@@ -1714,3 +1714,33 @@ model LicenseCheckLog {
   @@index([action, at])
   @@map("license_check_logs")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SYSTEM CONFIG — install wizard sentinel + brand defaults
+// ─────────────────────────────────────────────────────────────────────────────
+// Singleton row (id 'self'). The install wizard sets `installedAt` once it
+// finishes and from that point onward the /install/* routes 404. Buyer can
+// later edit the brand fields from Settings; the wizard does NOT touch them
+// after install completes.
+//
+// Why a separate model from BranchSetting: settings are PER-BRANCH (a chain
+// can theme each location), but install state + the global brand identity
+// are PER-INSTALL. Putting them on Branch would couple "did the wizard run?"
+// to "which branch is the operator looking at?", which falls apart on
+// multi-branch installs and on day-zero (no branch exists yet).
+
+model SystemConfig {
+  id           String    @id @default("self")
+  // null until the wizard's last step finishes. The InstallGuard checks
+  // this single column to decide whether to serve the wizard routes or
+  // 404 them. Buyer who wipes this row gets the wizard back — by design.
+  installedAt  DateTime?
+  brandName    String    @default("Your Restaurant")
+  siteName     String    @default("Your Restaurant")
+  logoUrl      String?
+  supportEmail String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("system_config")
+}

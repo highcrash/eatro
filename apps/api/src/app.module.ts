@@ -44,6 +44,7 @@ import { BackupModule } from './backup/backup.module';
 import { BranchSettingsModule } from './branch-settings/branch-settings.module';
 import { DeviceModule } from './device-registration/device.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
+import { InstallModule } from './install/install.module';
 import { LicenseModule } from './license/license.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
@@ -68,6 +69,11 @@ import { ScheduleModule } from '@nestjs/schedule';
     // the host + verdict checks.
     ScheduleModule.forRoot(),
     LicenseModule,
+    // InstallModule sits here so its routes are mounted but its guard
+    // 404s them once the wizard finishes. Order doesn't matter relative
+    // to feature modules — the wizard owns its own controller and
+    // doesn't depend on (or get depended on by) anything else.
+    InstallModule,
     WsGatewayModule,
 
     // Feature modules (Phase 1)
