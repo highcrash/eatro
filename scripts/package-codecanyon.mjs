@@ -545,15 +545,22 @@ ok ".env written (chmod 600)."
 # ─── 6. install deps, migrate, seed ───────────────────────────────────
 info "Installing Node dependencies (first run can take 2-5 minutes on slow networks)…"
 cd "\$INSTALL_DIR"
-pnpm install --prod 2>&1 | tee -a "\$LOG" | grep -E 'Progress:|added|devDependencies|dependencies:|\\+ |Done in' | tail -5 || true
-ok "Dependencies installed."
+# Full passthrough — silently filtering pnpm output hid a real
+# install failure in an earlier revision. Verbose output AND a
+# post-install existence check for the prisma CLI so "migrate"
+# doesn't fail with a cryptic "node_modules missing".
+pnpm install --prod 2>&1 | tee -a "\$LOG"
+if [ ! -x "node_modules/.bin/prisma" ]; then
+  die "pnpm install completed but node_modules/.bin/prisma is missing. See /var/log/restaurant-pos-install.log for details — common causes: network timeout (retry), disk full, pnpm store corrupted (pnpm store prune)."
+fi
+ok "Dependencies installed (\$(ls node_modules | wc -l) packages)."
 
 info "Running database migrations…"
-pnpm db:migrate 2>&1 | tee -a "\$LOG" | tail -5
+pnpm db:migrate 2>&1 | tee -a "\$LOG"
 ok "Migrations applied."
 
 info "Seeding initial SystemConfig row (wizard sentinel)…"
-pnpm db:seed:empty 2>&1 | tee -a "\$LOG" | tail -3
+pnpm db:seed:empty 2>&1 | tee -a "\$LOG"
 ok "Empty seed applied."
 
 # ─── 7. nginx site config ─────────────────────────────────────────────
