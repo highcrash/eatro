@@ -137,12 +137,26 @@ step('stage app artefacts', () => {
         },
         dependencies: liftedDeps,
         // Whitelist the build-script-running deps so pnpm 10 doesn't
-        // skip prisma's postinstall (which downloads the query engine
-        // binary the migrator needs). Without this the install
-        // succeeds but the engine is missing → first `prisma migrate`
-        // re-downloads or errors out.
+        // skip them on install. Two categories here:
+        //   1. Normal deps with postinstalls (prisma downloads the
+        //      query engine; nestjs-core registers decorators; etc).
+        //   2. `@restora/license-client` — git-hosted dep with a
+        //      `prepare: tsc` hook. pnpm 10 blocks git-dep build
+        //      scripts by default, so the install fails with
+        //      "needs to execute build scripts but is not in the
+        //      onlyBuiltDependencies allowlist". Adding it here
+        //      unblocks the tsc run that produces dist/.
         pnpm: {
-          onlyBuiltDependencies: ['@nestjs/core', '@prisma/client', '@prisma/engines', 'bcrypt', 'esbuild', 'msgpackr-extract', 'prisma'],
+          onlyBuiltDependencies: [
+            '@nestjs/core',
+            '@prisma/client',
+            '@prisma/engines',
+            '@restora/license-client',
+            'bcrypt',
+            'esbuild',
+            'msgpackr-extract',
+            'prisma',
+          ],
         },
       },
       null,
