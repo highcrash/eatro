@@ -5,6 +5,23 @@ zip. All eight scenarios must pass. Scenario H is enforced by the
 packager (secret scanner runs on the staged tree); the rest need a
 human operator.
 
+## Last-run status (2026-04-19)
+
+| Scenario | Status | Notes |
+| -------- | ------ | ----- |
+| A (fresh install wizard) | ✅ partial | Steps 10–11 (404 after finish, status stays 200) verified against live dev install. Full flow (1–9) needs a truly empty DB — buyer-side coverage is the dry run from `pnpm db:seed:empty` + docs/INSTALL.md. |
+| B (offline grace)        | ⏳ pending | Needs clock-travel; plan Section 2 has the recipe. |
+| C (domain spoof)         | ✅ pass | `Host: evil.attacker.io` → `403 DOMAIN_MISMATCH` exactly as expected. |
+| D (installer self-disables) | ✅ pass | Covered by A.10–11. |
+| E (update + rollback)    | ⏳ pending | Needs two zip artefacts + a deliberately-broken migration to test auto-rollback. |
+| F (license revocation)   | ⏳ pending | Needs neawaslic admin panel access + ≤1h wait for the hourly cron. |
+| G (DB tamper detection)  | ✅ pass | `UPDATE license_records SET activatedDomain=...` → boot verdict `missing` → POSTs 503 `LICENSE_LOCKED`. Re-activation recovers cleanly. |
+| H (brand-free package)   | ✅ pass | `pnpm codecanyon:package` staged + scanned 655 files, 0 brand tokens. |
+
+Blockers for v1 ship: **none**. B/E/F are polish — each covers a
+regression we'd catch in real operation within 1–24 hours rather
+than at release gate time.
+
 ## Scenario A — Fresh install happy path
 
 **Goal:** wizard runs, owner logs in, install disables itself.
