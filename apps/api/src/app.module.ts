@@ -46,6 +46,7 @@ import { DeviceModule } from './device-registration/device.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
 import { InstallModule } from './install/install.module';
 import { LicenseModule } from './license/license.module';
+import { UpdaterModule } from './updater/updater.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -74,6 +75,9 @@ import { ScheduleModule } from '@nestjs/schedule';
     // to feature modules — the wizard owns its own controller and
     // doesn't depend on (or get depended on by) anything else.
     InstallModule,
+    // Updater sits next to Install — same lifecycle-surgery shape:
+    // mutates the install tree at runtime. OWNER-only in the admin UI.
+    UpdaterModule,
     WsGatewayModule,
 
     // Feature modules (Phase 1)

@@ -8,5 +8,8 @@ import { BackupScheduler } from './backup.scheduler';
   imports: [PrismaModule],
   controllers: [BackupController],
   providers: [BackupService, BackupScheduler],
+  // Exported so UpdaterModule can inject BackupService for pre-apply
+  // snapshots + rollback DB restores.
+  exports: [BackupService],
 })
 export class BackupModule {}

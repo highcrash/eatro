@@ -1744,3 +1744,62 @@ model SystemConfig {
 
   @@map("system_config")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UPDATER — in-app zip upload + apply flow
+// ─────────────────────────────────────────────────────────────────────────────
+// Tracks every update attempt so the Settings → Updates page can show
+// history (previous version, when applied, whether rolled back) and
+// support can diagnose buyers who crashed mid-update.
+//
+// Flow a row goes through:
+//   upload   → Buyer drops a zip. We save to updates/staging/<id>/zip,
+//              unzip, verify manifest.sig against the bundled public
+//              key. Row created with status=STAGED.
+//   apply    → Buyer clicks Apply. We create a DB backup (reuse
+//              BackupService), run `prisma migrate deploy` from the
+//              staged tree's schema, atomically swap current/ ↔ new/,
+//              write applyMarker.json, then exit. PM2 restarts us
+//              pointing at the new code. Row status=APPLIED after the
+//              new process confirms health on the other side.
+//   rollback → If the post-apply health check fails (or buyer hits
+//              the button), swap back, restore DB from backup, mark
+//              row ROLLED_BACK + write the failure reason.
+
+enum UpdateStatus {
+  STAGED       // zip uploaded + signature OK, not yet applied
+  APPLYING     // apply started; file swap + migrate in progress
+  APPLIED      // new version booted + health-checked ok
+  ROLLED_BACK  // apply failed health or buyer chose to revert
+  FAILED       // upload or pre-apply verification hard-failed
+}
+
+model UpdateRecord {
+  id              String       @id @default(cuid())
+  // Semver from the staged release's manifest.json.
+  toVersion       String
+  fromVersion     String
+  status          UpdateStatus @default(STAGED)
+  // Where on disk the staged zip + extracted tree live. Cleaned up
+  // only AFTER a successful apply + a second successful update — we
+  // keep one previous tree around as the rollback target.
+  stagingPath     String
+  // ID of the pre-apply backup (from BackupRecord) so a manual
+  // rollback can find its snapshot even after the row's prev-tree
+  // dir is cleaned up.
+  backupRecordId  String?
+  // SHA-256 of the uploaded zip, for idempotency + tamper checks
+  // across the staging lifetime.
+  zipSha256       String
+  // Human-readable note captured from the buyer's Apply Reason text
+  // box + any auto-failure diagnostic.
+  notes           String?      @db.Text
+  uploadedById    String?      // Staff.id of the OWNER who uploaded
+  uploadedAt      DateTime     @default(now())
+  appliedAt       DateTime?
+  rolledBackAt    DateTime?
+
+  @@index([uploadedAt])
+  @@index([status, uploadedAt])
+  @@map("update_records")
+}
