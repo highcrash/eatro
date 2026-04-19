@@ -1,218 +1,183 @@
 # Install Guide
 
 Three install paths. All three end with the install wizard at
-`https://yourdomain.com/admin`.
+`http(s)://yourdomain.com/admin/`.
 
-## 1) Docker (recommended for VPS)
+> **TL;DR (Ubuntu 22.04 / 24.04):** three commands, fully automated.
+>
+> ```bash
+> unzip restaurant-pos-v1.0.0.zip
+> cd restaurant-pos-v1.0.0
+> sudo bash install.sh
+> ```
+>
+> The installer detects Docker if present; otherwise installs Node 22 +
+> PostgreSQL 15+ + nginx + PM2, creates the DB with the right PG 15+
+> schema perms, writes a random-secret `.env`, runs migrations, seeds
+> the wizard sentinel row, drops an nginx config, starts the API under
+> PM2, and prints the URL to visit. You'll be prompted for the DB
+> password (auto-generated default) + domain (`_` for IP-only testing).
 
-Easiest if your VPS already has Docker. The bundled compose brings up
-the API, all SPAs, Postgres, and Caddy with auto-TLS.
+## 1) Automated installer (recommended)
+
+See the TL;DR above. The script is `install.sh` at the root of the
+extracted zip. Pass `--ubuntu` or `--docker` to force a path:
 
 ```bash
-# 1. Extract the zip somewhere persistent
-sudo mkdir -p /opt/restaurant-pos && sudo chown $USER /opt/restaurant-pos
-tar -xzf restaurant-pos-v1.0.0.zip -C /opt/restaurant-pos --strip-components=1
-cd /opt/restaurant-pos
+sudo bash install.sh --docker   # skip system Postgres, use the
+                                # docker-compose stack + Caddy
+sudo bash install.sh --ubuntu   # skip Docker even if it's installed
+```
 
-# 2. Edit env: DB credentials, JWT secrets, Caddyfile domain
+Works on Ubuntu 22.04, 24.04, 25.x, Debian 12. For other distros
+(RHEL / Alpine / Arch), follow the manual path in section 3 below.
+
+Re-running `install.sh` is safe — it reuses existing DB/users and
+only re-applies config. The DB is never dropped.
+
+## 2) Docker Compose (manual)
+
+If you prefer to drive Docker yourself:
+
+```bash
+cd restaurant-pos-v1.0.0
 cp .env.example .env
-nano .env           # set DATABASE_URL, JWT_SECRET, JWT_REFRESH_SECRET
-nano Caddyfile      # replace yourdomain.com with your real domain
-
-# 3. Start
+nano .env            # DATABASE_URL, JWT_SECRET, JWT_REFRESH_SECRET
+nano Caddyfile       # replace yourdomain.com with your real domain
 docker compose up -d --build
 docker compose logs -f api
 ```
 
-Then visit `https://yourdomain.com/admin` and walk the install wizard.
+Then visit `https://yourdomain.com/admin/` and walk the wizard.
 
-## 2) Ubuntu VPS without Docker
+## 3) Ubuntu manual (if the installer won't run)
 
-Manual setup with Node 22 + Postgres 15 + PM2 + nginx. Run each block
-in order. Ubuntu 22.04 / 24.04 assumed.
-
-### 2.1 — Base tools + remove any stale Node
-
-Ubuntu's default `nodejs` package is Node 20; installing it in the
-same line as Postgres + nginx will leave you on Node 20 and pnpm
-will warn about the engine mismatch. Wipe any pre-existing Node
-first, then install from NodeSource to get Node 22.
+If you're on an unusual distro or want to understand what the
+installer does, here's the explicit sequence. Ubuntu 22.04 / 24.04 /
+25.x assumed.
 
 ```bash
+# 3.1 — Prereqs
 sudo apt update
-sudo apt install -y curl ca-certificates gnupg unzip postgresql nginx
-# Remove any older Node that came in via apt (safe even if none is installed).
-sudo apt remove -y nodejs npm libnode-dev libnode72 || true
-sudo apt autoremove -y
-```
+sudo apt install -y curl ca-certificates gnupg unzip nginx postgresql
 
-### 2.2 — Install Node 22 from NodeSource
-
-```bash
+# 3.2 — Node 22
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
-# Verify — both should print a version:
-node -v          # expect v22.x
-npm -v           # expect 10.x (shipped with Node 22)
-```
-
-If `node -v` still says v20.x, the NodeSource repo wasn't picked up.
-Re-run the `curl ... nodesource.com ...` line — it adds the apt
-source — and re-run `apt install -y nodejs`.
-
-### 2.3 — Install pnpm + PM2
-
-```bash
 sudo npm install -g pnpm pm2
-pnpm -v          # expect 10.x
-```
 
-### 2.4 — Database
-
-Postgres 15+ revoked the default CREATE privilege on the `public`
-schema, so `CREATE DATABASE ... OWNER pos` alone is not enough — the
-new owner has to be granted against the public schema explicitly.
-Miss this and `prisma migrate deploy` fails with
-`permission denied for schema public`.
-
-```bash
+# 3.3 — DB (PG 15+ needs the public-schema grants)
+PG_PASS=$(openssl rand -base64 24 | tr -d '+/=' | head -c 24)
 sudo -u postgres psql <<SQL
-CREATE USER pos WITH PASSWORD 'choose-a-strong-one';
+CREATE USER pos WITH PASSWORD '$PG_PASS';
 CREATE DATABASE pos_prod OWNER pos;
 \c pos_prod
 GRANT ALL ON SCHEMA public TO pos;
 ALTER SCHEMA public OWNER TO pos;
 SQL
-```
 
-(If you ran an older version of this guide and got the "permission
-denied" error, run the last three lines against the existing
-database — `\c your_db_name` then the two grants — and retry
-`pnpm db:migrate`.)
-
-### 2.5 — Extract + install the app
-
-The release is a **zip** (not a tarball), so use `unzip`. Adjust the
-version in the file name.
-
-```bash
+# 3.4 — App
 sudo mkdir -p /opt/restaurant-pos && sudo chown $USER /opt/restaurant-pos
 unzip restaurant-pos-v1.0.0.zip -d /tmp/pos-extract
-# The zip contains one top-level directory; move its contents up.
-mv /tmp/pos-extract/*/.* /tmp/pos-extract/*/* /opt/restaurant-pos/ 2>/dev/null || true
-mv /tmp/pos-extract/*/* /opt/restaurant-pos/
-rm -rf /tmp/pos-extract
-
+cp -a /tmp/pos-extract/*/. /opt/restaurant-pos/
 cd /opt/restaurant-pos
-pnpm install --prod    # `prisma` + `tsx` are runtime deps so --prod works
-cp .env.example .env
-nano .env              # DATABASE_URL=postgresql://pos:CHOSEN_PW@127.0.0.1:5432/pos_prod
-                       # JWT_SECRET + JWT_REFRESH_SECRET — generate with:
-                       #   node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
-pnpm db:migrate        # → prisma migrate deploy --schema prisma/schema.prisma
-pnpm db:seed:empty     # or db:seed:demo-light if you want sample data
-```
+pnpm install --prod
 
-### 2.6 — Run with PM2
+cat > .env <<ENV
+NODE_ENV=production
+PORT=3001
+DATABASE_URL="postgresql://pos:$PG_PASS@127.0.0.1:5432/pos_prod?schema=public"
+JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')
+JWT_REFRESH_SECRET=$(openssl rand -base64 48 | tr -d '\n')
+JWT_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=30d
+ENV
+chmod 600 .env
 
-```bash
-pm2 start api/dist/main.js --name pos-api
-pm2 save
-pm2 startup               # copy + run the line it prints to make PM2 survive reboot
-```
+pnpm db:migrate
+pnpm db:seed:empty
 
-### 2.7 — Reverse-proxy + TLS
-
-The API listens on `:3001` and only serves `/api/*`. nginx fronts the
-five static SPAs and proxies `/api/*` + `/socket.io/*` to the API.
-The zip ships an `nginx-example.conf` template you can drop in:
-
-```bash
-# 1. Copy the template + edit the install path + your domain
+# 3.5 — nginx
 sudo cp nginx-example.conf /etc/nginx/sites-available/restaurant-pos
-sudo nano /etc/nginx/sites-available/restaurant-pos
-#   - server_name → yourdomain.com (or `_` for IP-only test)
-#   - $INSTALL_DIR → /opt/restaurant-pos (or wherever you extracted)
-
-# 2. Enable + disable Ubuntu's default site (which would 404 us)
+sudo sed -i "s|\$INSTALL_DIR|/opt/restaurant-pos|g; s|yourdomain.com|_|" /etc/nginx/sites-available/restaurant-pos
 sudo rm -f /etc/nginx/sites-enabled/default
-sudo ln -sf /etc/nginx/sites-available/restaurant-pos \
-            /etc/nginx/sites-enabled/restaurant-pos
+sudo ln -sf /etc/nginx/sites-available/restaurant-pos /etc/nginx/sites-enabled/restaurant-pos
+sudo chmod -R o+rX /opt/restaurant-pos
 sudo nginx -t && sudo systemctl reload nginx
 
-# 3. (optional) HTTPS with Let's Encrypt — needs DNS pointing at this box
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+# 3.6 — Run
+pm2 start api/dist/main.js --name pos-api --cwd /opt/restaurant-pos
+pm2 save
+pm2 startup
+
+# 3.7 — Verify
+curl -I  http://$(hostname -I | awk '{print $1}')/admin/    # 200
+curl     http://$(hostname -I | awk '{print $1}')/api/v1/health   # ok
 ```
 
-Verify the routes work before declaring victory:
-
-```bash
-curl -I http://yourdomain.com/admin/          # → 200, text/html
-curl    http://yourdomain.com/api/v1/health   # → {"status":"ok",...}
-```
-
-Then visit `http://yourdomain.com/admin/` in a browser — the install
-wizard auto-renders if the DB is fresh.
-
-URLs the buyer ends up with:
-
-| Path                 | Purpose                          |
-| -------------------- | -------------------------------- |
-| `/`                  | Public marketing website         |
-| `/admin/`            | Admin dashboard + install wizard |
-| `/pos/`              | Touch POS terminal               |
-| `/kds/`              | Kitchen display                  |
-| `/qr/`               | QR self-order PWA                |
-| `/api/v1/*`          | NestJS API (auto-proxied)        |
-
-## 3) cPanel (shared hosting)
+## 4) cPanel (shared hosting)
 
 Most cPanel hosts ship the **Node.js App Manager**. If yours has Node
 22 and PostgreSQL, you can install without SSH-only access.
 
-1. **Database** — In cPanel → "PostgreSQL Databases", create a DB +
-   user. Note the connection string format your host provides.
+1. **Database** — cPanel → "PostgreSQL Databases" → create DB + user.
+   After creating them, use phpPgAdmin or the cPanel SQL console to
+   run `GRANT ALL ON SCHEMA public TO yourdbuser; ALTER SCHEMA public
+   OWNER TO yourdbuser;` against the new database.
 2. **Upload** — File Manager → upload the zip → Extract.
 3. **Node app** — "Setup Node.js App":
    - Node version: 22
-   - Application root: `/home/<you>/restaurant-pos`
+   - Application root: `/home/<you>/restaurant-pos-v1.0.0`
    - Application URL: `yourdomain.com`
    - Application startup file: `api/dist/main.js`
-4. **Environment** — Add the env vars from `.env.example` in the Node
-   app's environment-variables section.
-5. **Install dependencies** — In the Node app panel, click "Run NPM
-   Install" (it'll use pnpm if it sees `pnpm-lock.yaml`).
-6. **Migrate + seed** — Open the in-cPanel terminal, `cd` into the
-   app, `pnpm prisma migrate deploy --schema prisma/schema.prisma &&
-   pnpm db:seed:empty`.
-7. **Subdomains for SPAs** — point `admin.yourdomain.com`,
-   `pos.yourdomain.com`, etc to the matching `dist/` directories via
-   cPanel's subdomain manager (each pointing at the SPA's folder
-   in your install).
+4. **Environment** — Add in the Node app's env-vars section (or edit
+   `.env` via File Manager):
+   - `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET` (use
+     `openssl rand -base64 48` or an online secret generator)
+5. **Install dependencies** — Click "Run NPM Install" in the Node app
+   panel. It'll use pnpm if it sees `pnpm-lock.yaml`.
+6. **Migrate + seed** — In the in-cPanel terminal:
+   ```
+   cd ~/restaurant-pos-v1.0.0
+   pnpm db:migrate
+   pnpm db:seed:empty
+   ```
+7. **Subdomain routing** — point `admin.yourdomain.com`,
+   `pos.yourdomain.com`, etc to their matching `dist/` dirs via
+   cPanel's subdomain manager.
+
+## URLs you end up with
+
+| Path        | What                              |
+| ----------- | --------------------------------- |
+| `/`         | Public marketing website          |
+| `/admin/`   | Admin dashboard + install wizard  |
+| `/pos/`     | Touch POS terminal                |
+| `/kds/`     | Kitchen display                   |
+| `/qr/`      | QR self-order PWA                 |
+| `/api/v1/*` | API (auto-proxied by nginx/Caddy) |
 
 ## License activation
 
-After the install wizard finishes you'll land on the login page. Sign
-in as the owner you just created, then visit **Settings → License**
-and paste your CodeCanyon purchase code + your domain. The system
-verifies against the license server and unlocks mutations.
+The install wizard's second step prompts for your CodeCanyon
+purchase code + domain. If activation fails, no other data is
+written — the wizard stops and lets you retry or try a different
+code. No purchase code + no clean bypass; the server-side install
+won't mark itself complete without an active license.
 
-If you skip activation, all GET endpoints work but POST/PUT/PATCH
-return `503 LICENSE_LOCKED` until you activate.
+If you ever need to re-activate (moved domains, revoked code,
+replaced hardware), use the **License** page in the admin sidebar.
 
 ## Troubleshooting
 
-See [docs/FAQ.md](FAQ.md) for product-level questions. Common install
-problems below.
+See [docs/FAQ.md](FAQ.md) for product-level questions. Install-side
+gotchas:
 
-### `ETIMEDOUT` / `Request took 14000ms` during `pnpm install`
+### `ETIMEDOUT` during `pnpm install`
 
-Your server can reach npmjs.org but the connection is slow or
-flaky — common on new VPS instances, behind corporate firewalls,
-or in regions far from npm's CDN. pnpm retries three times and
-usually succeeds; the install just takes 5–10 minutes instead of
-30 seconds. If retries exhaust, raise the timeout + retry budget:
+Slow npmjs.org connection. pnpm retries automatically; on a slow
+link the install just takes 5-10 minutes. If it keeps timing out,
+raise the retry budget and timeout:
 
 ```bash
 pnpm config set fetch-timeout 120000
@@ -220,57 +185,44 @@ pnpm config set fetch-retries 5
 pnpm install
 ```
 
-If you're in a region where npmjs.org is heavily rate-limited,
-point pnpm at a mirror:
-
-```bash
-# Cloudflare-backed mirror (good global latency):
-pnpm config set registry https://registry.npmmirror.com/
-pnpm install
-# revert to npmjs.org after the install:
-pnpm config set registry https://registry.npmjs.org/
-```
-
-### `Command "prisma" not found` after install
-
-Your lockfile + package.json are from an older release that had
-`prisma` in devDependencies. Delete `node_modules` + `pnpm-lock.yaml`
-from your install dir, re-extract the latest zip over it, and re-run
-`pnpm install`. The 1.0.0+ zip has `prisma` and `tsx` in
-dependencies so they're always installed.
-
-### `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` for `@restora/license-client`
-
-Same lockfile-is-stale cause as above. The 1.0.0+ `package.json`
-allowlists `@restora/license-client` in `pnpm.onlyBuiltDependencies`
-so its `prepare: tsc` hook runs. Re-extract the latest zip.
-
-### "Build scripts are not allowed" for several other packages
-
-pnpm 10 added a safety default that blocks postinstall scripts
-unless the package is allowlisted. The zip's root `package.json`
-already lists the ones we use (prisma, esbuild, bcrypt, etc). If
-you add custom deps that need build scripts, append them to
-`pnpm.onlyBuiltDependencies` before re-running install.
-
-### Install-wizard never appears — admin login shows instead
-
-You extracted over an already-installed DB. Either start fresh
-(`pnpm prisma migrate reset` → `pnpm db:seed:empty`), or sign in
-with your existing owner credentials. The wizard only appears when
-`system_config.installedAt IS NULL`.
-
 ### `ERROR: permission denied for schema public` during migrate
 
-PostgreSQL 15+ tightened the default privileges on the `public`
-schema — `CREATE DATABASE ... OWNER pos` alone no longer lets `pos`
-create tables. See section 2.4 above for the fix, or run directly:
+PostgreSQL 15+ revoked the default CREATE privilege. Run:
 
 ```bash
-sudo -u postgres psql -d your_db_name <<SQL
-GRANT ALL ON SCHEMA public TO your_user;
-ALTER SCHEMA public OWNER TO your_user;
+sudo -u postgres psql -d pos_prod <<SQL
+GRANT ALL ON SCHEMA public TO pos;
+ALTER SCHEMA public OWNER TO pos;
 SQL
+pnpm db:migrate
 ```
 
-Then re-run `pnpm db:migrate`.
+### `Command "prisma" not found` / `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`
+
+Old 0.x extract left in place. Delete `node_modules` +
+`pnpm-lock.yaml`, re-extract the latest zip over it, re-run
+`pnpm install`. The 1.0+ release ships `prisma` + `tsx` as
+runtime deps and allowlists the git-hosted license client.
+
+### Install wizard never appears — admin login shows instead
+
+You extracted over an already-installed DB. Either start fresh:
+
+```bash
+pnpm prisma migrate reset   # drops everything
+pnpm db:seed:empty
+```
+
+Or sign in with your existing owner credentials. The wizard only
+appears when `system_config.installedAt IS NULL`.
+
+### Admin SPA loads but all pages are blank after login
+
+Browser cached an older admin bundle from a partial install.
+Hard-refresh the page (Ctrl+Shift+R / Cmd+Shift+R).
+
+### "NO LICENSE — READ-ONLY MODE" banner won't go away after activation
+
+Your install successfully activated, but the banner's polling
+query cached the previous "missing" state for 60s. It'll clear on
+the next refetch, or just refresh the admin page once.

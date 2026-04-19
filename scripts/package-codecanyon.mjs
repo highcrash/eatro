@@ -366,20 +366,235 @@ server {
 
   writeFileSync(
     join(STAGE, 'install.sh'),
-    `#!/usr/bin/env sh
-# One-shot installer. Picks up .env, brings the stack up, and prints
-# the URL for the install wizard.
-set -e
-if [ ! -f .env ]; then
-  cp .env.example .env
-  echo "→ created .env from template — edit it before re-running"
+    `#!/usr/bin/env bash
+# One-shot installer. Handles the full Ubuntu 22.04 / 24.04 / 25.x
+# bootstrap AND the Docker Compose path. Autodetects which one fits.
+#
+# Usage (from inside the extracted zip dir):
+#   sudo bash install.sh            # interactive
+#   sudo bash install.sh --docker   # force Docker Compose path
+#   sudo bash install.sh --ubuntu   # force Ubuntu + nginx + PM2 path
+#
+# Requires root (for apt, nginx config, systemd, postgres). Run via
+# sudo or as root directly.
+
+set -euo pipefail
+
+# ─── styling ──────────────────────────────────────────────────────────
+RED='\\033[0;31m'; GRN='\\033[0;32m'; YLW='\\033[0;33m'; BLU='\\033[0;34m'; NC='\\033[0m'
+die()  { printf "\${RED}✗\${NC} %s\\n" "\$*" >&2; exit 1; }
+info() { printf "\${BLU}→\${NC} %s\\n" "\$*"; }
+ok()   { printf "\${GRN}✓\${NC} %s\\n" "\$*"; }
+warn() { printf "\${YLW}!\${NC} %s\\n" "\$*"; }
+
+[ "\$(id -u)" -eq 0 ] || die "Run as root (or use \\\`sudo bash install.sh\\\`)."
+
+INSTALL_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+cd "\$INSTALL_DIR"
+
+# ─── mode detection ───────────────────────────────────────────────────
+MODE=""
+for arg in "\$@"; do
+  case "\$arg" in
+    --docker) MODE="docker" ;;
+    --ubuntu) MODE="ubuntu" ;;
+    -h|--help) grep '^# ' "\$0" | sed 's/^# //'; exit 0 ;;
+  esac
+done
+
+if [ -z "\$MODE" ]; then
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    info "Detected Docker — defaulting to Docker Compose path (\\\`--ubuntu\\\` to override)."
+    MODE="docker"
+  else
+    info "No Docker — using the Ubuntu + nginx + PostgreSQL + PM2 path."
+    MODE="ubuntu"
+  fi
+fi
+
+# ═══════════════════════ DOCKER PATH ═════════════════════════════════
+if [ "\$MODE" = "docker" ]; then
+  [ -f .env ] || { cp .env.example .env; warn "Created .env from template — edit DATABASE_URL / JWT_* BEFORE re-running."; exit 0; }
+  info "Starting docker compose stack (API + Postgres + Caddy)…"
+  docker compose up -d --build
+  ok "Stack is up. Visit https://\\\$(grep -E '^[^#].*neawaslic.top|^[^#].*yourdomain' Caddyfile | head -1 | awk '{print \\\$1}')/admin"
   exit 0
 fi
-docker compose up -d --build
-echo
-echo "── done ─────────────────────────────────────────────"
-echo "Visit https://yourdomain.com/admin to run the install wizard."
-echo "(Update Caddyfile with your real domain first.)"
+
+# ═══════════════════════ UBUNTU PATH ═════════════════════════════════
+# Everything below only runs for the no-Docker install.
+
+if ! command -v apt-get >/dev/null 2>&1; then
+  die "This script only handles Ubuntu / Debian-family systems. For other OSes, follow docs/INSTALL.md manually."
+fi
+
+info "Collecting config. Press ENTER to accept the bracketed default."
+read -rp "DB password to set for user 'pos' [auto-generated]: " PG_PASSWORD
+: "\${PG_PASSWORD:=\$(openssl rand -base64 24 | tr -d '+/=' | head -c 24)}"
+read -rp "Your domain (or _ for IP-only testing) [_]: " DOMAIN
+: "\${DOMAIN:=_}"
+
+JWT1="\$(openssl rand -base64 48 | tr -d '\\n')"
+JWT2="\$(openssl rand -base64 48 | tr -d '\\n')"
+
+# ─── 1. base packages ─────────────────────────────────────────────────
+info "Installing base tools (apt)…"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq ca-certificates curl gnupg unzip nginx postgresql openssl >/dev/null
+
+# ─── 2. Node 22 from NodeSource ───────────────────────────────────────
+NODE_MAJOR="\$(node -v 2>/dev/null | sed 's/v//; s/\\..*//')"
+if [ "\$NODE_MAJOR" != "22" ]; then
+  info "Installing Node 22 from NodeSource…"
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
+  apt-get install -y -qq nodejs >/dev/null
+  ok "Node \$(node -v) installed."
+else
+  ok "Node 22 already present."
+fi
+
+# ─── 3. pnpm + pm2 ────────────────────────────────────────────────────
+command -v pnpm >/dev/null 2>&1 || npm install -g pnpm >/dev/null 2>&1 || die "pnpm install failed"
+command -v pm2  >/dev/null 2>&1 || npm install -g pm2  >/dev/null 2>&1 || die "pm2 install failed"
+ok "pnpm \$(pnpm -v) + pm2 \$(pm2 -v) ready."
+
+# ─── 4. PostgreSQL DB + user with PG 15+ perms ────────────────────────
+info "Configuring PostgreSQL…"
+systemctl enable --now postgresql >/dev/null 2>&1 || true
+# Drop + recreate user idempotently; pre-existing DB is KEPT (don't nuke
+# the buyer's data on a re-run).
+sudo -u postgres psql -tAc "DO \\\$\\\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='pos') THEN
+    EXECUTE format('CREATE ROLE pos LOGIN PASSWORD %L', '\$PG_PASSWORD');
+  ELSE
+    EXECUTE format('ALTER ROLE pos WITH LOGIN PASSWORD %L', '\$PG_PASSWORD');
+  END IF;
+END \\\$\\\$;" >/dev/null
+sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='pos_prod';" | grep -q 1 \\
+  || sudo -u postgres psql -c "CREATE DATABASE pos_prod OWNER pos;" >/dev/null
+# PG 15+ revoked the default CREATE on public — explicit grant.
+sudo -u postgres psql -d pos_prod -c "GRANT ALL ON SCHEMA public TO pos; ALTER SCHEMA public OWNER TO pos;" >/dev/null
+ok "Database pos_prod ready (user: pos)."
+
+# ─── 5. .env ──────────────────────────────────────────────────────────
+info "Writing .env…"
+cat > "\$INSTALL_DIR/.env" <<EOF
+NODE_ENV=production
+PORT=3001
+DATABASE_URL="postgresql://pos:\${PG_PASSWORD}@127.0.0.1:5432/pos_prod?schema=public"
+JWT_SECRET="\${JWT1}"
+JWT_REFRESH_SECRET="\${JWT2}"
+JWT_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=30d
+CORS_ORIGINS=http://localhost
+EOF
+chmod 600 "\$INSTALL_DIR/.env"
+ok ".env written (chmod 600)."
+
+# ─── 6. install deps, migrate, seed ───────────────────────────────────
+info "Installing Node dependencies (first run can take 2-3 minutes)…"
+cd "\$INSTALL_DIR"
+pnpm install --prod >/dev/null
+ok "Dependencies installed."
+
+info "Running database migrations…"
+pnpm db:migrate >/dev/null
+ok "22 migrations applied."
+
+info "Seeding initial SystemConfig row (wizard sentinel)…"
+pnpm db:seed:empty >/dev/null
+ok "Empty seed applied."
+
+# ─── 7. nginx site config ─────────────────────────────────────────────
+info "Writing nginx config…"
+cat > /etc/nginx/sites-available/restaurant-pos <<NGINX
+server {
+    listen 80 default_server;
+    server_name \${DOMAIN};
+    client_max_body_size 25M;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
+    }
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\\$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \\\$host;
+    }
+
+    location = /admin { return 301 /admin/; }
+    location = /pos   { return 301 /pos/; }
+    location = /kds   { return 301 /kds/; }
+    location = /qr    { return 301 /qr/; }
+
+    location /admin/ { alias \${INSTALL_DIR}/admin/; try_files \\\$uri \\\$uri/ /admin/index.html; }
+    location /pos/   { alias \${INSTALL_DIR}/pos/;   try_files \\\$uri \\\$uri/ /pos/index.html; }
+    location /kds/   { alias \${INSTALL_DIR}/kds/;   try_files \\\$uri \\\$uri/ /kds/index.html; }
+    location /qr/    { alias \${INSTALL_DIR}/qr-order/; try_files \\\$uri \\\$uri/ /qr/index.html; }
+    location /       { root \${INSTALL_DIR}/web; try_files \\\$uri \\\$uri/ /index.html; }
+}
+NGINX
+
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/restaurant-pos /etc/nginx/sites-enabled/restaurant-pos
+chmod -R o+rX "\$INSTALL_DIR"
+nginx -t >/dev/null && systemctl reload nginx
+ok "nginx configured."
+
+# ─── 8. pm2 ───────────────────────────────────────────────────────────
+info "Starting the API under PM2…"
+pm2 delete pos-api >/dev/null 2>&1 || true
+pm2 start api/dist/main.js --name pos-api --cwd "\$INSTALL_DIR" >/dev/null
+pm2 save >/dev/null 2>&1 || true
+pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
+ok "API running."
+
+# ─── 9. health probe ──────────────────────────────────────────────────
+sleep 4
+HEALTH="\$(curl -sS http://127.0.0.1/api/v1/health 2>/dev/null || true)"
+if echo "\$HEALTH" | grep -q '"status":"ok"'; then
+  ok "Health check passed."
+else
+  warn "Health endpoint didn't respond cleanly yet. Check \\\`pm2 logs pos-api\\\`."
+fi
+
+# ─── done ─────────────────────────────────────────────────────────────
+IP="\$(hostname -I | awk '{print \\\$1}')"
+cat <<EOF
+
+────────────────────────────────────────────────
+ INSTALL COMPLETE
+────────────────────────────────────────────────
+Admin:   http://\${IP}/admin/      (run the install wizard here)
+POS:     http://\${IP}/pos/
+KDS:     http://\${IP}/kds/
+QR:      http://\${IP}/qr/
+Website: http://\${IP}/
+Health:  http://\${IP}/api/v1/health
+
+Database: pos_prod
+  User:   pos
+  Pass:   \${PG_PASSWORD}
+  (saved in .env — chmod 600)
+
+Next steps:
+  1. Point DNS \${DOMAIN} → \${IP} (if you set a real domain above).
+  2. Add HTTPS:
+       apt install -y certbot python3-certbot-nginx
+       certbot --nginx -d \${DOMAIN}
+  3. Visit http://\${IP}/admin/ and walk the wizard (license →
+     branch → owner → brand → finish).
+
+Troubleshooting: pm2 logs pos-api, or docs/INSTALL.md §Troubleshooting.
+────────────────────────────────────────────────
+EOF
 `,
   );
 

@@ -71,6 +71,9 @@ const ALLOWLIST = new Set([
   // the whole infra/ tree EXCEPT the per-deploy subdirectory.
   'infra/docker-compose.yml',
   'infra/init-db.sql',
+  // License-gate constants: product SKU must match the server-side
+  // record. Deliberate, not a leak.
+  'apps/api/src/license/license.constants.ts',
 ]);
 
 // Skip entirely — not sources we ship.

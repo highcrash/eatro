@@ -42,6 +42,11 @@ const EXCLUDE_FILES = new Set([
   // Main-only deploy doc; gitignored on codecanyon but still on disk
   // in mixed working trees.
   'DEPLOYMENT.md',
+  // License gate constants — the product SKU ('restora-pos-cc') must
+  // match the record on the live license server and can't be
+  // rewritten. Not a user-facing brand leak; the API ID space is
+  // deliberately opaque.
+  'apps/api/src/license/license.constants.ts',
 ]);
 
 // Intentionally targeted — NOT a broad /EATRO/g because the grep
