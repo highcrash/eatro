@@ -22,7 +22,7 @@ export const UPDATER_CONSTANTS = {
   //
   // Empty string means "reject every zip" — safer default than "",
   // which would fail open. The seller sets this on first release.
-  signingPublicKey: '',
+  signingPublicKey: 'wf_xjn4i6sXSklKVNJ5kywj_-AyVYsmxSNV1ta70VhE',
   signingPublicKeyKid: 'v1',
 
   // Paths relative to the install root where we stage + archive
