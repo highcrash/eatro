@@ -326,16 +326,22 @@ export class UpdaterService {
       });
     });
     // The zip contains one top-level dir (your-restaurant-pos-v1.2.3/) —
-    // flatten it into destDir.
-    const entries = (await import('node:fs/promises')).readdir(destDir);
-    const children = await entries;
-    if (children.length === 1 && !children[0]!.includes('.')) {
-      const inner = join(destDir, children[0]!);
-      const innerChildren = await (await import('node:fs/promises')).readdir(inner);
-      for (const c of innerChildren) {
-        await rename(join(inner, c), join(destDir, c));
+    // flatten it into destDir. Detect by "single child that's a directory",
+    // NOT by name pattern: version numbers have dots (v0.1.2), and a
+    // dot-based heuristic incorrectly treats those as files and skips
+    // the flatten step, breaking manifest.json lookup.
+    const fsp = await import('node:fs/promises');
+    const children = await fsp.readdir(destDir);
+    if (children.length === 1) {
+      const innerPath = join(destDir, children[0]!);
+      const innerStat = await fsp.stat(innerPath);
+      if (innerStat.isDirectory()) {
+        const innerChildren = await fsp.readdir(innerPath);
+        for (const c of innerChildren) {
+          await rename(join(innerPath, c), join(destDir, c));
+        }
+        await rm(innerPath, { recursive: true, force: true });
       }
-      await rm(inner, { recursive: true, force: true });
     }
     // Unused import shims to keep stream imports used by the type checker.
     void pipeline;
