@@ -190,6 +190,21 @@ export class UpdaterService {
       await rename(staged, current);
     }
 
+    // Root-level files we also swap so currentVersion() (reads root
+    // package.json) reports the right number after restart, and so
+    // the manifest stays alongside the dist for the History page.
+    const appFiles = ['package.json', 'manifest.json', 'manifest.sig'];
+    for (const f of appFiles) {
+      const current = join(this.installRoot, f);
+      const staged = join(row.stagingPath, f);
+      const prev = join(prevBase, f);
+      if (!existsSync(staged)) continue;
+      if (existsSync(current)) {
+        await rename(current, prev).catch(() => undefined);
+      }
+      await rename(staged, current);
+    }
+
     // 3. Leave a breadcrumb the new process will read on boot so its
     //    UpdaterBootCheck can mark the row APPLIED + start the
     //    health watchdog.
@@ -243,6 +258,7 @@ export class UpdaterService {
 
     // 2. Swap prev/ → current/
     const appDirs = ['api', 'admin', 'pos', 'kds', 'qr-order', 'web', 'prisma', 'packages'];
+    const appFiles = ['package.json', 'manifest.json', 'manifest.sig'];
     const swapTemp = join(this.installRoot, 'updates/swap-tmp');
     await rm(swapTemp, { recursive: true, force: true });
     await mkdir(swapTemp, { recursive: true });
@@ -250,6 +266,14 @@ export class UpdaterService {
       const current = join(this.installRoot, dir);
       const prev = join(prevBase, dir);
       const temp = join(swapTemp, dir);
+      if (!existsSync(prev)) continue;
+      if (existsSync(current)) await rename(current, temp).catch(() => undefined);
+      await rename(prev, current);
+    }
+    for (const f of appFiles) {
+      const current = join(this.installRoot, f);
+      const prev = join(prevBase, f);
+      const temp = join(swapTemp, f);
       if (!existsSync(prev)) continue;
       if (existsSync(current)) await rename(current, temp).catch(() => undefined);
       await rename(prev, current);
