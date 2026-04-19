@@ -1,4 +1,7 @@
 import {
+  BadGatewayException,
+  BadRequestException,
+  HttpException,
   Injectable,
   Logger,
   OnModuleInit,
@@ -12,6 +15,7 @@ import {
   localVerdict,
   hostMatchesLicense,
   parseProof,
+  LicenseApiError,
   type LicenseClientConfig,
   type Verdict,
 } from '@restora/license-client';
@@ -107,34 +111,54 @@ export class LicenseService implements OnModuleInit {
    * Run by /license/activate. Stores the new state + refreshes the
    * cached verdict so the gate flips from 'missing' → 'active' without
    * needing a process restart.
+   *
+   * LicenseApiError (wrong purchase code, code exhausted, revoked,
+   * etc) gets mapped to the same HTTP status the server returned,
+   * with the server's human-readable message preserved. Without this
+   * translation Nest's default exception filter swallows everything
+   * as 500 "Internal server error" and the operator has no idea what
+   * to retry.
    */
   async activate(input: { purchaseCode: string; domain: string }): Promise<Verdict> {
-    const verdict = await clientActivate(this.config, {
-      purchaseCode: input.purchaseCode,
-      domain: input.domain,
-      fingerprint: deriveFingerprint(),
-    });
-    await this.storage.setPurchaseCodeTail(input.purchaseCode.slice(-8));
-    setVerdictGlobally(verdict);
-    this.logger.log(`activated: ${verdict.mode} on ${input.domain}`);
-    await this.logCheck('ACTIVATE', verdict.mode, null);
-    return verdict;
+    try {
+      const verdict = await clientActivate(this.config, {
+        purchaseCode: input.purchaseCode,
+        domain: input.domain,
+        fingerprint: deriveFingerprint(),
+      });
+      await this.storage.setPurchaseCodeTail(input.purchaseCode.slice(-8));
+      setVerdictGlobally(verdict);
+      this.logger.log(`activated: ${verdict.mode} on ${input.domain}`);
+      await this.logCheck('ACTIVATE', verdict.mode, null);
+      return verdict;
+    } catch (err) {
+      throw translateLicenseError(err, 'activate');
+    }
   }
 
   async verifyOnline(): Promise<Verdict> {
-    const verdict = await clientVerify(this.config);
-    setVerdictGlobally(verdict);
-    await this.logCheck('VERIFY', verdict.mode, null);
-    return verdict;
+    try {
+      const verdict = await clientVerify(this.config);
+      setVerdictGlobally(verdict);
+      await this.logCheck('VERIFY', verdict.mode, null);
+      return verdict;
+    } catch (err) {
+      throw translateLicenseError(err, 'verify');
+    }
   }
 
   async deactivate(): Promise<void> {
     try {
       await clientDeactivate(this.config);
-    } finally {
-      setVerdictGlobally(missingVerdict('Deactivated'));
-      await this.logCheck('DEACTIVATE', 'missing', null);
+    } catch (err) {
+      // Deactivate is best-effort — failing shouldn't block the
+      // operator from clearing their local cache. Still, propagate
+      // the error with its real status so the UI can surface it.
+      setVerdictGlobally(missingVerdict('Deactivated locally — server call failed'));
+      throw translateLicenseError(err, 'deactivate');
     }
+    setVerdictGlobally(missingVerdict('Deactivated'));
+    await this.logCheck('DEACTIVATE', 'missing', null);
   }
 
   /**
@@ -259,3 +283,33 @@ function getVerdictGlobally(): Verdict {
 // admin /license/status endpoint to pretty-print the proof's expiry
 // dates without re-fetching the row.
 void parseProof;
+
+/**
+ * Map errors from @restora/license-client into Nest HttpExceptions
+ * the controller can return as proper 4xx responses. Without this,
+ * a "purchase code not recognised" error becomes a 500 Internal
+ * Server Error in the admin UI and the operator can't tell whether
+ * they typed the code wrong or the server is broken.
+ */
+function translateLicenseError(err: unknown, op: 'activate' | 'verify' | 'deactivate'): HttpException {
+  if (err instanceof LicenseApiError) {
+    // Server returned a structured 4xx — preserve the status + body.
+    // Common results: INVALID_CODE, REVOKED, EXHAUSTED, RATE_LIMITED.
+    return new HttpException(
+      { result: err.result, message: err.message, op },
+      err.status >= 400 && err.status < 500 ? err.status : 400,
+    );
+  }
+  // Network failure (DNS, timeout, refused) — license server is
+  // unreachable. 502 Bad Gateway is the right semantic.
+  const msg = err instanceof Error ? err.message : String(err);
+  return new BadGatewayException({
+    result: 'LICENSE_SERVER_UNREACHABLE',
+    message: `Could not reach the license server (${op}): ${msg}`,
+    op,
+  });
+}
+
+// Re-export the BadRequestException to silence unused-import lint; it
+// shows up in callers via the install service's prereq checks.
+void BadRequestException;
