@@ -90,13 +90,13 @@ mv /tmp/pos-extract/*/* /opt/restaurant-pos/
 rm -rf /tmp/pos-extract
 
 cd /opt/restaurant-pos
-pnpm install --frozen-lockfile --prod
+pnpm install --prod    # `prisma` + `tsx` are runtime deps so --prod works
 cp .env.example .env
-nano .env                 # set DATABASE_URL=postgresql://pos:CHOSEN_PW@127.0.0.1:5432/pos_prod
-                          # set JWT_SECRET, JWT_REFRESH_SECRET (generate with:
-                          #   node -e "console.log(require('crypto').randomBytes(48).toString('base64'))")
-pnpm prisma migrate deploy --schema prisma/schema.prisma
-pnpm db:seed:empty
+nano .env              # DATABASE_URL=postgresql://pos:CHOSEN_PW@127.0.0.1:5432/pos_prod
+                       # JWT_SECRET + JWT_REFRESH_SECRET — generate with:
+                       #   node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+pnpm db:migrate        # → prisma migrate deploy --schema prisma/schema.prisma
+pnpm db:seed:empty     # or db:seed:demo-light if you want sample data
 ```
 
 ### 2.6 — Run with PM2

@@ -103,9 +103,24 @@ step('stage app artefacts', () => {
   // Docs.
   cpSync(join(ROOT, 'docs'), join(STAGE, 'docs'), { recursive: true });
 
-  // Workspace bones the buyer needs to do `pnpm install`. We ship a
-  // SLIM root package.json so they can install API prod deps without
-  // pulling Electron/Puppeteer.
+  // Build the buyer's root package.json by LIFTING the API workspace's
+  // prod deps to the root. The buyer runs ONE `pnpm install` at root —
+  // no workspace, no filters, no surprises. Prior version shipped a
+  // SLIM package.json with no deps and used `pnpm --filter`, which
+  // broke because the zip ships no pnpm-workspace.yaml — buyers got
+  // `Command "prisma" not found` on the very first migrate command.
+  const apiPkg = JSON.parse(readFileSync(join(ROOT, 'apps/api/package.json'), 'utf8'));
+  const liftedDeps = { ...apiPkg.dependencies };
+  // Drop workspace: protocol entries — those don't resolve outside the
+  // monorepo. The license-client comes from a git URL (already the
+  // right form). The other workspace deps (@restora/types,
+  // @restora/utils) are bundled INTO api/dist by nest build, so the
+  // runtime doesn't need them at install time.
+  for (const k of Object.keys(liftedDeps)) {
+    if (typeof liftedDeps[k] === 'string' && liftedDeps[k].startsWith('workspace:')) {
+      delete liftedDeps[k];
+    }
+  }
   writeFileSync(
     join(STAGE, 'package.json'),
     JSON.stringify(
@@ -116,9 +131,18 @@ step('stage app artefacts', () => {
         engines: { node: '22.x' },
         scripts: {
           start: 'node api/dist/main.js',
-          'db:migrate': 'pnpm --filter restaurant-pos-api exec prisma migrate deploy --schema ../prisma/schema.prisma',
-          'db:seed:empty': 'pnpm exec tsx prisma/seed.ts --variant empty',
-          'db:seed:demo-light': 'pnpm exec tsx prisma/seed.ts --variant demo-light',
+          'db:migrate': 'prisma migrate deploy --schema prisma/schema.prisma',
+          'db:seed:empty': 'tsx prisma/seed.ts --variant empty',
+          'db:seed:demo-light': 'tsx prisma/seed.ts --variant demo-light',
+        },
+        dependencies: liftedDeps,
+        // Whitelist the build-script-running deps so pnpm 10 doesn't
+        // skip prisma's postinstall (which downloads the query engine
+        // binary the migrator needs). Without this the install
+        // succeeds but the engine is missing → first `prisma migrate`
+        // re-downloads or errors out.
+        pnpm: {
+          onlyBuiltDependencies: ['@nestjs/core', '@prisma/client', '@prisma/engines', 'bcrypt', 'esbuild', 'msgpackr-extract', 'prisma'],
         },
       },
       null,
