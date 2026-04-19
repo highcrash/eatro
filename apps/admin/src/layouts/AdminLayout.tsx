@@ -29,6 +29,7 @@ import {
   Globe,
   Database,
   Monitor,
+  KeyRound,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -99,6 +100,7 @@ const NAV_GROUPS = [
       { to: '/data-cleanup', icon: Trash2, label: 'Data Cleanup' },
       { to: '/backups', icon: Database, label: 'Backups' },
       { to: '/devices', icon: Monitor, label: 'Terminals' },
+      { to: '/license', icon: KeyRound, label: 'License' },
     ],
   },
 ];

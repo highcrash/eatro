@@ -37,6 +37,7 @@ import DiscountsPage from './pages/DiscountsPage';
 import CustomersPage from './pages/CustomersPage';
 import DataCleanupPage from './pages/DataCleanupPage';
 import BackupPage from './pages/BackupPage';
+import LicensePage from './pages/LicensePage';
 import DevicesPage from './pages/DevicesPage';
 import ReservationsPage from './pages/ReservationsPage';
 
@@ -108,6 +109,7 @@ export default function AdminApp() {
         <Route path="/data-cleanup" element={<DataCleanupPage />} />
         <Route path="/backups" element={<BackupPage />} />
         <Route path="/devices" element={<DevicesPage />} />
+        <Route path="/license" element={<LicensePage />} />
       </Route>
     </Routes>
   );
