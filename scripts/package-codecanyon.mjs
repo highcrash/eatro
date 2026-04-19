@@ -380,12 +380,22 @@ server {
 
 set -euo pipefail
 
+# Print what step failed + its exit code so buyers can paste a
+# usable error instead of a silent exit back to the shell.
+trap 'rc=\$?; printf "\\n\${RED:-}✗ install.sh failed at line \$LINENO (exit \$rc)\${NC:-}\\n  Paste the last screen to support.\\n" >&2' ERR
+
 # ─── styling ──────────────────────────────────────────────────────────
 RED='\\033[0;31m'; GRN='\\033[0;32m'; YLW='\\033[0;33m'; BLU='\\033[0;34m'; NC='\\033[0m'
 die()  { printf "\${RED}✗\${NC} %s\\n" "\$*" >&2; exit 1; }
 info() { printf "\${BLU}→\${NC} %s\\n" "\$*"; }
 ok()   { printf "\${GRN}✓\${NC} %s\\n" "\$*"; }
 warn() { printf "\${YLW}!\${NC} %s\\n" "\$*"; }
+
+# Tee every step's output to a log so buyers can send us the whole
+# session if something breaks. Also unmutes apt so they see progress.
+LOG="/var/log/restaurant-pos-install.log"
+mkdir -p "\$(dirname \$LOG)"
+echo "=== install.sh \$(date -u --iso-8601=seconds) ===" >> "\$LOG"
 
 [ "\$(id -u)" -eq 0 ] || die "Run as root (or use \\\`sudo bash install.sh\\\`)."
 
@@ -437,44 +447,78 @@ read -rp "Your domain (or _ for IP-only testing) [_]: " DOMAIN
 JWT1="\$(openssl rand -base64 48 | tr -d '\\n')"
 JWT2="\$(openssl rand -base64 48 | tr -d '\\n')"
 
-# ─── 1. base packages ─────────────────────────────────────────────────
+# ─── 1. base packages + PostgreSQL 15+ ───────────────────────────────
 info "Installing base tools (apt)…"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg unzip nginx postgresql openssl >/dev/null
+apt-get update 2>&1 | tee -a "\$LOG" | tail -3
+apt-get install -y ca-certificates curl gnupg unzip nginx openssl lsb-release postgresql-common 2>&1 | tee -a "\$LOG" | tail -3
+
+# PostgreSQL: default apt on Ubuntu 22.04 is Postgres 14 which our
+# migrations refuse (we need 15+). Detect Ubuntu codename and, if
+# needed, add the PGDG apt repo BEFORE installing postgresql.
+# postgresql-common is pre-installed above so PGDG per-version
+# postinst hooks (which call pg_lsclusters) don't fail.
+UBUNTU_CODENAME="\$(lsb_release -cs 2>/dev/null || echo unknown)"
+info "Distro codename: \$UBUNTU_CODENAME"
+if [ "\$UBUNTU_CODENAME" = "jammy" ] || [ "\$UBUNTU_CODENAME" = "bullseye" ]; then
+  info "Adding PGDG repo for Postgres 16 (default is 14 on \$UBUNTU_CODENAME)…"
+  /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y 2>&1 | tee -a "\$LOG" | tail -3
+  apt-get install -y postgresql-16 2>&1 | tee -a "\$LOG" | tail -3
+else
+  info "Installing distro-default postgresql…"
+  apt-get install -y postgresql 2>&1 | tee -a "\$LOG" | tail -3
+fi
+systemctl enable --now postgresql 2>&1 | tee -a "\$LOG" | tail -2
+
+# Sanity: refuse to continue on PG <15.
+PG_MAJOR="\$(sudo -u postgres psql -tAc 'SHOW server_version_num;' 2>/dev/null | cut -c1-2 || echo 0)"
+if [ -n "\$PG_MAJOR" ] && [ "\$PG_MAJOR" -lt 15 ] 2>/dev/null; then
+  die "Installed PostgreSQL is version \$PG_MAJOR (need 15+). See docs/INSTALL.md § PostgreSQL setup for the PGDG recipe for your distro."
+fi
+ok "PostgreSQL \$(sudo -u postgres psql -tAc 'SHOW server_version;' | xargs) ready."
 
 # ─── 2. Node 22 from NodeSource ───────────────────────────────────────
 NODE_MAJOR="\$(node -v 2>/dev/null | sed 's/v//; s/\\..*//')"
 if [ "\$NODE_MAJOR" != "22" ]; then
   info "Installing Node 22 from NodeSource…"
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
-  apt-get install -y -qq nodejs >/dev/null
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - 2>&1 | tee -a "\$LOG" | tail -3
+  apt-get install -y nodejs 2>&1 | tee -a "\$LOG" | tail -3
   ok "Node \$(node -v) installed."
 else
   ok "Node 22 already present."
 fi
 
 # ─── 3. pnpm + pm2 ────────────────────────────────────────────────────
-command -v pnpm >/dev/null 2>&1 || npm install -g pnpm >/dev/null 2>&1 || die "pnpm install failed"
-command -v pm2  >/dev/null 2>&1 || npm install -g pm2  >/dev/null 2>&1 || die "pm2 install failed"
+if ! command -v pnpm >/dev/null 2>&1; then
+  info "Installing pnpm…"
+  npm install -g pnpm 2>&1 | tee -a "\$LOG" | tail -3
+fi
+if ! command -v pm2 >/dev/null 2>&1; then
+  info "Installing pm2…"
+  npm install -g pm2 2>&1 | tee -a "\$LOG" | tail -3
+fi
 ok "pnpm \$(pnpm -v) + pm2 \$(pm2 -v) ready."
 
 # ─── 4. PostgreSQL DB + user with PG 15+ perms ────────────────────────
-info "Configuring PostgreSQL…"
-systemctl enable --now postgresql >/dev/null 2>&1 || true
+info "Configuring PostgreSQL role + database (idempotent, re-runnable)…"
 # Drop + recreate user idempotently; pre-existing DB is KEPT (don't nuke
 # the buyer's data on a re-run).
-sudo -u postgres psql -tAc "DO \\\$\\\$ BEGIN
+sudo -u postgres psql 2>&1 <<PSQL | tee -a "\$LOG" | tail -4
+DO \\\$\\\$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='pos') THEN
     EXECUTE format('CREATE ROLE pos LOGIN PASSWORD %L', '\$PG_PASSWORD');
   ELSE
     EXECUTE format('ALTER ROLE pos WITH LOGIN PASSWORD %L', '\$PG_PASSWORD');
   END IF;
-END \\\$\\\$;" >/dev/null
+END \\\$\\\$;
+SELECT 'db-exists' FROM pg_database WHERE datname='pos_prod';
+PSQL
+# Create DB if missing (separate statement — CREATE DATABASE can't
+# run inside a DO block).
 sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='pos_prod';" | grep -q 1 \\
-  || sudo -u postgres psql -c "CREATE DATABASE pos_prod OWNER pos;" >/dev/null
+  || sudo -u postgres psql -c "CREATE DATABASE pos_prod OWNER pos;" 2>&1 | tee -a "\$LOG" | tail -2
 # PG 15+ revoked the default CREATE on public — explicit grant.
-sudo -u postgres psql -d pos_prod -c "GRANT ALL ON SCHEMA public TO pos; ALTER SCHEMA public OWNER TO pos;" >/dev/null
+sudo -u postgres psql -d pos_prod -c "GRANT ALL ON SCHEMA public TO pos; ALTER SCHEMA public OWNER TO pos;" 2>&1 | tee -a "\$LOG" | tail -2
 ok "Database pos_prod ready (user: pos)."
 
 # ─── 5. .env ──────────────────────────────────────────────────────────
@@ -493,17 +537,17 @@ chmod 600 "\$INSTALL_DIR/.env"
 ok ".env written (chmod 600)."
 
 # ─── 6. install deps, migrate, seed ───────────────────────────────────
-info "Installing Node dependencies (first run can take 2-3 minutes)…"
+info "Installing Node dependencies (first run can take 2-5 minutes on slow networks)…"
 cd "\$INSTALL_DIR"
-pnpm install --prod >/dev/null
+pnpm install --prod 2>&1 | tee -a "\$LOG" | grep -E 'Progress:|added|devDependencies|dependencies:|\\+ |Done in' | tail -5 || true
 ok "Dependencies installed."
 
 info "Running database migrations…"
-pnpm db:migrate >/dev/null
-ok "22 migrations applied."
+pnpm db:migrate 2>&1 | tee -a "\$LOG" | tail -5
+ok "Migrations applied."
 
 info "Seeding initial SystemConfig row (wizard sentinel)…"
-pnpm db:seed:empty >/dev/null
+pnpm db:seed:empty 2>&1 | tee -a "\$LOG" | tail -3
 ok "Empty seed applied."
 
 # ─── 7. nginx site config ─────────────────────────────────────────────
@@ -545,15 +589,16 @@ NGINX
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/restaurant-pos /etc/nginx/sites-enabled/restaurant-pos
 chmod -R o+rX "\$INSTALL_DIR"
-nginx -t >/dev/null && systemctl reload nginx
+nginx -t 2>&1 | tee -a "\$LOG" | tail -3
+systemctl reload nginx 2>&1 | tee -a "\$LOG" | tail -2
 ok "nginx configured."
 
 # ─── 8. pm2 ───────────────────────────────────────────────────────────
 info "Starting the API under PM2…"
-pm2 delete pos-api >/dev/null 2>&1 || true
-pm2 start api/dist/main.js --name pos-api --cwd "\$INSTALL_DIR" >/dev/null
-pm2 save >/dev/null 2>&1 || true
-pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
+pm2 delete pos-api 2>/dev/null || true
+pm2 start api/dist/main.js --name pos-api --cwd "\$INSTALL_DIR" 2>&1 | tee -a "\$LOG" | tail -5
+pm2 save 2>&1 | tee -a "\$LOG" | tail -2
+pm2 startup systemd -u root --hp /root 2>&1 | tee -a "\$LOG" | tail -2 || true
 ok "API running."
 
 # ─── 9. health probe ──────────────────────────────────────────────────

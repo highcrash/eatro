@@ -158,20 +158,30 @@ service, or a different OS. Target: **PostgreSQL 15 or newer**
 
 Ubuntu's default `postgresql` apt package is Postgres 14 on 22.04
 and Postgres 16 on 24.04+. We need 15+; on 22.04 add the PGDG apt
-repo to pull a newer major:
+repo to pull a newer major. **Install `postgresql-common` first** —
+PGDG's per-version packages call `pg_lsclusters` in their postinst
+hook, which ships in `postgresql-common`. Skip that install and the
+postinst fails with `pg_lsclusters: not found`.
 
 ```bash
-# 22.04 — add PGDG for Postgres 16
-sudo apt install -y curl ca-certificates
-curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-  | sudo gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg
-echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-  | sudo tee /etc/apt/sources.list.d/pgdg.list
-sudo apt update
+# 22.04 — add PGDG + pull Postgres 16
+sudo apt install -y curl ca-certificates postgresql-common
+# The PGDG helper adds the repo + keyring for you (more reliable
+# than hand-rolling the curl | gpg | tee recipe):
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
 sudo apt install -y postgresql-16
 
-# 24.04+ — default apt package is already Postgres 16
+# 24.04+ — default apt package is already Postgres 16, no PGDG needed
 sudo apt install -y postgresql
+```
+
+If you already hit the `pg_lsclusters: not found` error, recover
+with:
+
+```bash
+sudo apt install -y postgresql-common
+sudo dpkg --configure -a       # completes the interrupted install
+sudo systemctl enable --now postgresql
 ```
 
 Start + enable:
@@ -186,8 +196,8 @@ sudo -u postgres psql -c "SELECT version();"   # confirm 15+
 Same PGDG recipe — Debian's default is also often older than 15:
 
 ```bash
-sudo apt install -y postgresql-common
-sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+sudo apt install -y curl ca-certificates postgresql-common
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
 sudo apt install -y postgresql-16
 ```
 
@@ -356,6 +366,26 @@ pnpm db:seed:empty
 
 Or sign in with your existing owner credentials. The wizard only
 appears when `system_config.installedAt IS NULL`.
+
+### `pg_lsclusters: not found` during PostgreSQL install
+
+You're trying to install a PGDG `postgresql-NN` package without the
+`postgresql-common` helper that provides `pg_lsclusters`. PGDG's
+postinst scripts call that tool on every install/upgrade; without
+it, dpkg stops halfway through configuring the new cluster.
+
+Fix + recover:
+
+```bash
+sudo apt install -y postgresql-common
+sudo dpkg --configure -a          # finishes the interrupted postinst
+sudo systemctl enable --now postgresql
+sudo -u postgres psql -c "SELECT version();"
+```
+
+Prevention: always install `postgresql-common` in the same
+`apt install` as the per-version package — see the PostgreSQL
+section above.
 
 ### Admin SPA loads but all pages are blank after login
 
