@@ -133,11 +133,15 @@ async function scan(root) {
     scannedFiles++;
 
     for (const needle of FORBIDDEN) {
-      // Case-sensitive match — brand tokens like "EATRO" vs "eatro" are
-      // both forbidden but we want them reported distinctly if they hit.
-      const idx = content.indexOf(needle);
-      if (idx < 0) continue;
-      const lineNo = content.slice(0, idx).split('\n').length;
+      // Case-sensitive, word-boundaried match. Plain indexOf() falsely
+      // hits substrings inside third-party enum names like
+      // `UseScrollRestoration` (react-router) → `Restora`. Wrapping in
+      // a regex with explicit word boundaries (or punctuation/quote
+      // delimiters) keeps the false-positive rate near zero.
+      const re = new RegExp(`(?:^|[^A-Za-z0-9_])${escapeRegex(needle)}(?:[^A-Za-z0-9_]|$)`);
+      const m = re.exec(content);
+      if (!m) continue;
+      const lineNo = content.slice(0, m.index).split('\n').length;
       hits.push({ file: relPath, token: needle, line: lineNo });
     }
     for (const { label, re } of FORBIDDEN_PATTERNS) {
@@ -149,6 +153,10 @@ async function scan(root) {
   }
 
   return { hits, scannedFiles };
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 const target = argv[2] ? argv[2] : cwd();

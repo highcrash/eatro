@@ -35,6 +35,8 @@
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "infra:logs": "docker compose -f infra/docker-compose.yml logs -f",
     "codecanyon:secret-scan": "node scripts/lib/secret-scan.mjs",
+    "codecanyon:strip-branding": "node scripts/strip-branding.mjs",
+    "codecanyon:package": "node scripts/package-codecanyon.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
