@@ -451,7 +451,7 @@ JWT2="\$(openssl rand -base64 48 | tr -d '\\n')"
 info "Installing base tools (apt)…"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update 2>&1 | tee -a "\$LOG" | tail -3
-apt-get install -y ca-certificates curl gnupg unzip nginx openssl lsb-release postgresql-common 2>&1 | tee -a "\$LOG" | tail -3
+apt-get install -y ca-certificates curl git gnupg unzip nginx openssl lsb-release postgresql-common 2>&1 | tee -a "\$LOG" | tail -3
 
 # PostgreSQL: default apt on Ubuntu 22.04 is Postgres 14 which our
 # migrations refuse (we need 15+). Detect Ubuntu codename and, if

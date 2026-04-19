@@ -57,9 +57,10 @@ installer does, here's the explicit sequence. Ubuntu 22.04 / 24.04 /
 25.x assumed.
 
 ```bash
-# 3.1 — Prereqs
+# 3.1 — Prereqs  (git is required — pnpm fetches @restora/license-client
+#                 from GitHub at install time)
 sudo apt update
-sudo apt install -y curl ca-certificates gnupg unzip nginx postgresql
+sudo apt install -y curl ca-certificates git gnupg unzip nginx postgresql
 
 # 3.2 — Node 22
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
@@ -366,6 +367,22 @@ pnpm db:seed:empty
 
 Or sign in with your existing owner credentials. The wizard only
 appears when `system_config.installedAt IS NULL`.
+
+### `spawn git ENOENT` during `pnpm install`
+
+`git` isn't installed on the host. pnpm needs it to clone the
+`@restora/license-client` dependency from GitHub. Install git and
+re-run:
+
+```bash
+sudo apt install -y git
+pnpm install --prod
+```
+
+The automated `install.sh` 1.0.1+ pulls git in the base apt list so
+this shouldn't happen on fresh installs — the fix is only relevant
+if you extracted a stripped-down container image or custom base
+that left git out.
 
 ### `pg_lsclusters: not found` during PostgreSQL install
 
