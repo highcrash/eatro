@@ -478,9 +478,15 @@ fi
 ok "PostgreSQL \$(sudo -u postgres psql -tAc 'SHOW server_version;' | xargs) ready."
 
 # ─── 2. Node 22 from NodeSource ───────────────────────────────────────
-NODE_MAJOR="\$(node -v 2>/dev/null | sed 's/v//; s/\\..*//')"
+# Use command -v FIRST — \`node -v 2>/dev/null | sed ...\` in a
+# \$(...) substitution exits 127 when node is missing, and pipefail
+# + set -e kills the script before we can handle it.
+NODE_MAJOR=""
+if command -v node >/dev/null 2>&1; then
+  NODE_MAJOR="\$(node -v | sed 's/v//; s/\\..*//')"
+fi
 if [ "\$NODE_MAJOR" != "22" ]; then
-  info "Installing Node 22 from NodeSource…"
+  info "Installing Node 22 from NodeSource (current: \${NODE_MAJOR:-none})…"
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash - 2>&1 | tee -a "\$LOG" | tail -3
   apt-get install -y nodejs 2>&1 | tee -a "\$LOG" | tail -3
   ok "Node \$(node -v) installed."
@@ -603,15 +609,18 @@ ok "API running."
 
 # ─── 9. health probe ──────────────────────────────────────────────────
 sleep 4
+# Both || true so a failing curl/grep doesn't kill the script under
+# set -e + pipefail — the warn() path is how we tell the buyer it's
+# not responding.
 HEALTH="\$(curl -sS http://127.0.0.1/api/v1/health 2>/dev/null || true)"
-if echo "\$HEALTH" | grep -q '"status":"ok"'; then
+if echo "\$HEALTH" | grep -q '"status":"ok"' 2>/dev/null; then
   ok "Health check passed."
 else
   warn "Health endpoint didn't respond cleanly yet. Check \\\`pm2 logs pos-api\\\`."
 fi
 
 # ─── done ─────────────────────────────────────────────────────────────
-IP="\$(hostname -I | awk '{print \\\$1}')"
+IP="\$(hostname -I 2>/dev/null | awk '{print \\\$1}' || echo 'your-server-ip')"
 cat <<EOF
 
 ────────────────────────────────────────────────
