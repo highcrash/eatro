@@ -22,6 +22,7 @@ import {
 
 import { PrismaService } from '../prisma/prisma.service';
 import { PrismaLicenseStorage } from './license.storage';
+import { LICENSE_CONSTANTS } from './license.constants';
 import { fingerprint as deriveFingerprint } from './license.crypto';
 import { isDevHost, normalizeHost } from './license.domain';
 
@@ -50,14 +51,15 @@ export class LicenseService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly cfg: ConfigService,
   ) {
-    const baseUrl = required(this.cfg, 'LICENSE_SERVER_URL');
-    const productSku = required(this.cfg, 'LICENSE_PRODUCT_SKU');
-    const publicKey = required(this.cfg, 'LICENSE_PUBLIC_KEY_ED25519');
-    const publicKeyKid = required(this.cfg, 'LICENSE_PUBLIC_KEY_KID');
+    // Baked-in constants, NOT env vars. The buyer's .env is
+    // freely editable — anything env-driven here would be a
+    // one-line bypass (swap URL + pubkey to their own mock
+    // server). See license.constants.ts for the full rationale.
+    const { serverUrl, productSku, publicKey, publicKeyKid } = LICENSE_CONSTANTS;
 
     this.storage = new PrismaLicenseStorage(this.prisma, publicKey);
     this.config = {
-      baseUrl,
+      baseUrl: serverUrl,
       productSku,
       publicKey,
       publicKeyKid,
@@ -240,12 +242,6 @@ export class LicenseService implements OnModuleInit {
       // Logging failures must never break a request.
     }
   }
-}
-
-function required(cfg: ConfigService, key: string): string {
-  const v = cfg.get<string>(key);
-  if (!v) throw new Error(`License gate misconfigured: ${key} is required at build/start time`);
-  return v;
 }
 
 function missingVerdict(reason: string): Verdict {
