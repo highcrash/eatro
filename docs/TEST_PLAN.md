@@ -14,13 +14,13 @@ human operator.
 | C (domain spoof)         | ✅ pass | `Host: evil.attacker.io` → `403 DOMAIN_MISMATCH` exactly as expected. |
 | D (installer self-disables) | ✅ pass | Covered by A. |
 | E (update + rollback)    | ✅ pass | End-to-end on 192.168.86.47: v0.1.1 → upload v0.1.3 → APPLIED in 3 s → rollback → ROLLED_BACK in 3 s. Caught two real bugs along the way (commits 1e3f7d2 unzip-flatten, 8d0d6c4 rollback DB restore). |
-| F (license revocation)   | ⏳ pending | Needs neawaslic admin panel access + ≤1h wait for the hourly cron. |
+| F (license revocation)   | ✅ pass | Driven via `POST /license/deactivate` on the LAN box: client cache flipped to `missing` immediately, restart preserved state, GET `/branches` 200, POST `/branches` + POST `/updater/upload` both `403 LICENSE_LOCKED`, re-activate with same code → `REVOKED` (sticky). |
 | G (DB tamper detection)  | ✅ pass | `UPDATE license_records SET activatedDomain=...` → boot verdict `missing` → POSTs 503 `LICENSE_LOCKED`. Re-activation recovers cleanly. |
 | H (brand-free package)   | ✅ pass | `pnpm codecanyon:package` staged + scanned 858 files, 0 brand tokens. |
 
-Blockers for v1 ship: **none**. B and F are polish — each covers a
-regression we'd catch in real operation within 1–24 hours rather
-than at release gate time.
+Blockers for v1 ship: **none**. Only B (offline grace) is still
+pending — it's a regression we'd catch in real operation within
+1–7 days rather than at release gate time.
 
 ## Scenario A — Fresh install happy path
 
