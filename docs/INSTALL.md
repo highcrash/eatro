@@ -311,14 +311,21 @@ to `DATABASE_URL`.
 
 ## License activation
 
-The install wizard's second step prompts for your CodeCanyon
-purchase code + domain. If activation fails, no other data is
-written — the wizard stops and lets you retry or try a different
-code. No purchase code + no clean bypass; the server-side install
-won't mark itself complete without an active license.
+The install wizard's second step prompts for your purchase code +
+domain. If activation fails, no other data is written — the wizard
+stops and lets you retry or try a different code. No purchase code +
+no clean bypass; the server-side install won't mark itself complete
+without an active license.
 
 If you ever need to re-activate (moved domains, revoked code,
 replaced hardware), use the **License** page in the admin sidebar.
+
+## Updating to a newer version
+
+After install, new releases can be applied from the admin UI itself
+— no SSH required. Sidebar → **Updates** (OWNER role only) → drop
+the new release zip. See [docs/UPDATE.md](UPDATE.md) for the full
+flow, rollback rules, and the SSH fallback path.
 
 ## Troubleshooting
 

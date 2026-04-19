@@ -38,6 +38,7 @@ import CustomersPage from './pages/CustomersPage';
 import DataCleanupPage from './pages/DataCleanupPage';
 import BackupPage from './pages/BackupPage';
 import LicensePage from './pages/LicensePage';
+import UpdatesPage from './pages/UpdatesPage';
 import DevicesPage from './pages/DevicesPage';
 import ReservationsPage from './pages/ReservationsPage';
 
@@ -110,6 +111,7 @@ export default function AdminApp() {
         <Route path="/backups" element={<BackupPage />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/license" element={<LicensePage />} />
+        <Route path="/updates" element={<UpdatesPage />} />
       </Route>
     </Routes>
   );

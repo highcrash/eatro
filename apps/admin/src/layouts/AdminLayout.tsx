@@ -102,6 +102,7 @@ const NAV_GROUPS = [
       { to: '/backups', icon: Database, label: 'Backups' },
       { to: '/devices', icon: Monitor, label: 'Terminals' },
       { to: '/license', icon: KeyRound, label: 'License' },
+      { to: '/updates', icon: Package, label: 'Updates' },
     ],
   },
 ];
