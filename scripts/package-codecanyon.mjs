@@ -119,13 +119,88 @@ step('stage app artefacts', () => {
   // entries, which left the buyer's `node dist/main.js` crashing with
   // MODULE_NOT_FOUND on @restora/types.
   const shippedWorkspacePkgs = [];
+
+  // Special case: @restora/license-client lives in the SEPARATE
+  // neawaslic repo (private GitHub). The fork's apps/api/package.json
+  // references it as a git URL — fine for developers with access, but
+  // a buyer running `pnpm install` from the zip hits:
+  //     ENOENT: git ls-remote https://github.com/highcrash/neawaslic.git
+  // because the repo is private AND the URL leaks our infra name. Fix
+  // at zip time: git-clone the license-client subpath into the stage
+  // and rewrite the reference to a local file: dep, the same way
+  // shipped workspace packages work.
+  //
+  // Uses NEAWASLIC_LOCAL env to skip the clone and use a local path
+  // (for the seller's own dev iteration — e.g. pointing at
+  // d:/RESTURANT SOFTWARE/neawaslic-tmp).
+  const licClientKey = '@restora/license-client';
+  const licClientSpec = liftedDeps[licClientKey];
+  if (typeof licClientSpec === 'string' && licClientSpec.startsWith('github:')) {
+    console.log(`  vendoring ${licClientKey} from ${licClientSpec}`);
+    const targetDir = join(STAGE, 'packages/license-client');
+    mkdirSync(targetDir, { recursive: true });
+
+    // Filter: strip node_modules, built dist (will be regenerated
+    // by the buyer's pnpm install via the `prepare: tsc` hook), and
+    // test files (buyers don't need *.spec.ts / __tests__ / .test.ts
+    // — those also contain internal brand references like the test
+    // SKU that trip the secret scanner).
+    const vendorFilter = (p) =>
+      !p.includes('node_modules') &&
+      !p.includes(`${sep}dist${sep}`) &&
+      !/\.(spec|test)\.ts$/i.test(p) &&
+      !p.includes(`${sep}__tests__${sep}`);
+
+    if (process.env.NEAWASLIC_LOCAL) {
+      const src = join(process.env.NEAWASLIC_LOCAL, 'packages/license-client');
+      console.log(`    using local copy: ${src}`);
+      cpSync(src, targetDir, { recursive: true, filter: vendorFilter });
+    } else {
+      // Parse github:org/repo#ref&path:/subdir.
+      const m = licClientSpec.match(/^github:([^#]+)(#[^&]+)?(&path:(.+))?$/);
+      if (!m) throw new Error(`license-client: can't parse git spec "${licClientSpec}"`);
+      const [, orgRepo, refWithHash, , subpath] = m;
+      const ref = refWithHash ? refWithHash.slice(1) : 'main';
+      const sub = subpath ? subpath.replace(/^\//, '') : '';
+      const gitUrl = `https://github.com/${orgRepo}.git`;
+      const tmp = join(ROOT, '.package-tmp-neawaslic');
+      if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+      sh(`git clone --depth=1 --branch=${ref} ${gitUrl} "${tmp}"`);
+      cpSync(join(tmp, sub), targetDir, { recursive: true, filter: vendorFilter });
+      rmSync(tmp, { recursive: true, force: true });
+    }
+
+    // Same inner-package.json rewrite as the other shipped workspace
+    // packages: drop devDeps, no scripts, no workspace: refs.
+    const innerPkgPath = join(targetDir, 'package.json');
+    const innerPkg = JSON.parse(readFileSync(innerPkgPath, 'utf8'));
+    delete innerPkg.devDependencies;
+    // Keep the `prepare: tsc` script — buyers' pnpm install will run
+    // it to produce dist/ on their machine. The `onlyBuiltDependencies`
+    // allowlist on the staged root package.json permits this.
+    if (innerPkg.dependencies) {
+      for (const dk of Object.keys(innerPkg.dependencies)) {
+        if (typeof innerPkg.dependencies[dk] === 'string' && innerPkg.dependencies[dk].startsWith('workspace:')) {
+          if (dk.startsWith('@restora/')) {
+            innerPkg.dependencies[dk] = `file:../${dk.slice('@restora/'.length)}`;
+          } else {
+            delete innerPkg.dependencies[dk];
+          }
+        }
+      }
+    }
+    writeFileSync(innerPkgPath, JSON.stringify(innerPkg, null, 2));
+
+    liftedDeps[licClientKey] = `file:./packages/license-client`;
+    shippedWorkspacePkgs.push('license-client');
+  }
+
   for (const k of Object.keys(liftedDeps)) {
     if (typeof liftedDeps[k] === 'string' && liftedDeps[k].startsWith('workspace:')) {
       if (k === '@restora/license-client') {
-        // This one's special: it lives in the neawaslic repo, consumed
-        // via git+URL. The apps/api/package.json already references it
-        // that way, so this branch is only hit if a future monorepo
-        // refactor re-adds it as workspace:*.
+        // Unreachable now (handled above as a git dep), but kept so
+        // future refactors that move license-client into the fork's
+        // own workspace don't accidentally double-ship it.
         delete liftedDeps[k];
       } else if (k.startsWith('@restora/')) {
         const localName = k.slice('@restora/'.length);
