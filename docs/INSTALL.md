@@ -69,12 +69,26 @@ pnpm -v          # expect 10.x
 
 ### 2.4 — Database
 
+Postgres 15+ revoked the default CREATE privilege on the `public`
+schema, so `CREATE DATABASE ... OWNER pos` alone is not enough — the
+new owner has to be granted against the public schema explicitly.
+Miss this and `prisma migrate deploy` fails with
+`permission denied for schema public`.
+
 ```bash
 sudo -u postgres psql <<SQL
 CREATE USER pos WITH PASSWORD 'choose-a-strong-one';
 CREATE DATABASE pos_prod OWNER pos;
+\c pos_prod
+GRANT ALL ON SCHEMA public TO pos;
+ALTER SCHEMA public OWNER TO pos;
 SQL
 ```
+
+(If you ran an older version of this guide and got the "permission
+denied" error, run the last three lines against the existing
+database — `\c your_db_name` then the two grants — and retry
+`pnpm db:migrate`.)
 
 ### 2.5 — Extract + install the app
 
@@ -210,3 +224,18 @@ You extracted over an already-installed DB. Either start fresh
 (`pnpm prisma migrate reset` → `pnpm db:seed:empty`), or sign in
 with your existing owner credentials. The wizard only appears when
 `system_config.installedAt IS NULL`.
+
+### `ERROR: permission denied for schema public` during migrate
+
+PostgreSQL 15+ tightened the default privileges on the `public`
+schema — `CREATE DATABASE ... OWNER pos` alone no longer lets `pos`
+create tables. See section 2.4 above for the fix, or run directly:
+
+```bash
+sudo -u postgres psql -d your_db_name <<SQL
+GRANT ALL ON SCHEMA public TO your_user;
+ALTER SCHEMA public OWNER TO your_user;
+SQL
+```
+
+Then re-run `pnpm db:migrate`.
