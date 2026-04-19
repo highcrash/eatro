@@ -28,38 +28,88 @@ Then visit `https://yourdomain.com/admin` and walk the install wizard.
 
 ## 2) Ubuntu VPS without Docker
 
-Manual setup with Node 22 + Postgres 15 + PM2 + nginx.
+Manual setup with Node 22 + Postgres 15 + PM2 + nginx. Run each block
+in order. Ubuntu 22.04 / 24.04 assumed.
+
+### 2.1 — Base tools + remove any stale Node
+
+Ubuntu's default `nodejs` package is Node 20; installing it in the
+same line as Postgres + nginx will leave you on Node 20 and pnpm
+will warn about the engine mismatch. Wipe any pre-existing Node
+first, then install from NodeSource to get Node 22.
 
 ```bash
-# Prerequisites
 sudo apt update
-sudo apt install -y curl postgresql nginx
+sudo apt install -y curl ca-certificates gnupg unzip postgresql nginx
+# Remove any older Node that came in via apt (safe even if none is installed).
+sudo apt remove -y nodejs npm libnode-dev libnode72 || true
+sudo apt autoremove -y
+```
+
+### 2.2 — Install Node 22 from NodeSource
+
+```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
-sudo npm install -g pnpm pm2
+# Verify — both should print a version:
+node -v          # expect v22.x
+npm -v           # expect 10.x (shipped with Node 22)
+```
 
-# Database
+If `node -v` still says v20.x, the NodeSource repo wasn't picked up.
+Re-run the `curl ... nodesource.com ...` line — it adds the apt
+source — and re-run `apt install -y nodejs`.
+
+### 2.3 — Install pnpm + PM2
+
+```bash
+sudo npm install -g pnpm pm2
+pnpm -v          # expect 10.x
+```
+
+### 2.4 — Database
+
+```bash
 sudo -u postgres psql <<SQL
 CREATE USER pos WITH PASSWORD 'choose-a-strong-one';
 CREATE DATABASE pos_prod OWNER pos;
 SQL
+```
 
-# Install
+### 2.5 — Extract + install the app
+
+The release is a **zip** (not a tarball), so use `unzip`. Adjust the
+version in the file name.
+
+```bash
 sudo mkdir -p /opt/restaurant-pos && sudo chown $USER /opt/restaurant-pos
-tar -xzf restaurant-pos-v1.0.0.zip -C /opt/restaurant-pos --strip-components=1
+unzip restaurant-pos-v1.0.0.zip -d /tmp/pos-extract
+# The zip contains one top-level directory; move its contents up.
+mv /tmp/pos-extract/*/.* /tmp/pos-extract/*/* /opt/restaurant-pos/ 2>/dev/null || true
+mv /tmp/pos-extract/*/* /opt/restaurant-pos/
+rm -rf /tmp/pos-extract
+
 cd /opt/restaurant-pos
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --prod
 cp .env.example .env
-nano .env  # set DATABASE_URL=postgresql://pos:...@127.0.0.1:5432/pos_prod
+nano .env                 # set DATABASE_URL=postgresql://pos:CHOSEN_PW@127.0.0.1:5432/pos_prod
+                          # set JWT_SECRET, JWT_REFRESH_SECRET (generate with:
+                          #   node -e "console.log(require('crypto').randomBytes(48).toString('base64'))")
 pnpm prisma migrate deploy --schema prisma/schema.prisma
 pnpm db:seed:empty
+```
 
-# Run
+### 2.6 — Run with PM2
+
+```bash
 pm2 start api/dist/main.js --name pos-api
 pm2 save
-pm2 startup           # follow the printed instructions
+pm2 startup               # copy + run the line it prints to make PM2 survive reboot
+```
 
-# nginx + Let's Encrypt
+### 2.7 — Reverse-proxy + TLS
+
+```bash
 sudo cp infra/nginx-example.conf /etc/nginx/sites-available/pos
 sudo ln -sf /etc/nginx/sites-available/pos /etc/nginx/sites-enabled/pos
 sudo nginx -t && sudo systemctl reload nginx
