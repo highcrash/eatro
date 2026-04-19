@@ -12,7 +12,7 @@ import { join } from 'path';
  *   - outbox: FIFO of mutations waiting for sync
  *   - cache_orders, cache_tables, cache_menu etc. as needed
  *
- * The DB file lives in %APPDATA%/Restora POS/local.db. File permissions are
+ * The DB file lives in %APPDATA%/Your Restaurant POS/local.db. File permissions are
  * per-Windows-user by default. Contents are NOT encrypted as a blob — PIN
  * hashes are bcrypt so they're safe at rest even if the file leaks.
  */

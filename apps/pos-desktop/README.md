@@ -1,4 +1,4 @@
-# Restora POS — Desktop (Windows Cashier Terminal)
+# Your Restaurant POS — Desktop (Windows Cashier Terminal)
 
 Electron app that wraps the web POS with native printing, cash drawer, and offline support.
 
@@ -21,7 +21,7 @@ Opens a 1280×800 Electron window showing the Phase 0 scaffolding screen. The ma
 pnpm --filter @restora/pos-desktop dist
 ```
 
-Produces `apps/pos-desktop/release/RestoraPOS-Setup-{version}.exe` plus `latest.yml` and `.blockmap` files used by auto-update. The installer runs on Windows 10+ x64.
+Produces `apps/pos-desktop/release/YourRestaurantPOS-Setup-{version}.exe` plus `latest.yml` and `.blockmap` files used by auto-update. The installer runs on Windows 10+ x64.
 
 ## Layout
 

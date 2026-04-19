@@ -80,7 +80,7 @@ export default function MenuPage() {
       <div className="sticky top-0 z-20 bg-[#0D0D0D] px-5 pt-5 pb-3">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="font-display text-3xl text-white tracking-wider">{branchName || 'Restora'}</h1>
+            <h1 className="font-display text-3xl text-white tracking-wider">{branchName || 'Your Restaurant'}</h1>
             {tableNumber && <p className="text-xs text-[#666] font-body">Table {tableNumber}</p>}
           </div>
           {cartCount > 0 && (

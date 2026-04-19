@@ -1,8 +1,8 @@
 {
-  "name": "restora-pos",
+  "name": "your-restaurant-pos",
   "version": "0.1.0",
   "private": true,
-  "description": "Restora POS — Restaurant Management Software",
+  "description": "Restaurant Management Software — POS, KDS, QR Ordering, Inventory, and Public Website",
   "engines": {
     "node": "22.x"
   },

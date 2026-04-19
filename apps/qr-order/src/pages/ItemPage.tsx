@@ -48,7 +48,7 @@ export default function ItemPage() {
         <button onClick={() => void navigate(-1)} className="w-9 h-9 bg-[#1A1A1A] border border-[#2A2A2A] flex items-center justify-center text-white">
           <ArrowLeft size={16} />
         </button>
-        <span className="font-display text-xl text-white tracking-wider">{branchName || 'Restora'}</span>
+        <span className="font-display text-xl text-white tracking-wider">{branchName || 'Your Restaurant'}</span>
         {cartCount > 0 ? (
           <button onClick={() => void navigate('/cart')} className="relative w-9 h-9 bg-[#C8FF00] flex items-center justify-center">
             <ShoppingCart size={14} className="text-[#0D0D0D]" />

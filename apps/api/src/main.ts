@@ -57,7 +57,7 @@ async function bootstrap(): Promise<void> {
   // Swagger (dev only)
   if (config.get<string>('NODE_ENV') !== 'production') {
     const swaggerConfig = new DocumentBuilder()
-      .setTitle('Restora POS API')
+      .setTitle('Your Restaurant POS API')
       .setDescription('Restaurant Management Software — REST API')
       .setVersion('1.0')
       .addBearerAuth()
@@ -68,7 +68,7 @@ async function bootstrap(): Promise<void> {
   }
 
   await app.listen(port);
-  console.warn(`🚀 Restora API running on http://localhost:${port}/api`);
+  console.warn(`🚀 Your Restaurant API running on http://localhost:${port}/api`);
   console.warn(`📚 Swagger docs: http://localhost:${port}/api/docs`);
 }
 

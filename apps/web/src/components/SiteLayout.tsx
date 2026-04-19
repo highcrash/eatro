@@ -29,7 +29,7 @@ export default function SiteLayout() {
   const { data: content } = useWebsiteContent();
   const location = useLocation();
 
-  const brandName = branding?.name ?? 'Restora';
+  const brandName = branding?.name ?? 'Your Restaurant';
   const logo = resolveLogoUrl(branding?.logoUrl);
 
   /* ---------- theme ---------- */

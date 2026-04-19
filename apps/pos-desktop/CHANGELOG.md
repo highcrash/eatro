@@ -1,11 +1,11 @@
-# Changelog — Restora POS Desktop
+# Changelog — Your Restaurant POS Desktop
 
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
 ## 0.6.0 — installer + auto-update (2026-04-15)
 
-- **`pnpm dist` now produces a working Windows installer.** `release/RestoraPOS-Setup-{version}.exe` (~90 MB NSIS), along with `latest.yml` and `.blockmap` for auto-update.
+- **`pnpm dist` now produces a working Windows installer.** `release/YourRestaurantPOS-Setup-{version}.exe` (~90 MB NSIS), along with `latest.yml` and `.blockmap` for auto-update.
 - **electron-updater integrated** — the main process checks GitHub releases 15 s after launch, then every 6 h. `UpdateToast` surfaces Checking / Available / Downloading / Ready / Error states as a bottom-left pill. "Restart now" button installs + relaunches.
 - **Desktop menu** now shows the app version and a **Check for updates** button.
 - **Release workflow enabled**: tag with `pos-desktop-v*` and push → GitHub Actions builds on `windows-latest` and publishes the installer + manifest to that tag's release.
@@ -44,14 +44,14 @@ Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 - **PrinterSettings UI**: full-screen config page with per-slot mode picker, host:port inputs, OS printer dropdown (populated via Chromium's `getPrintersAsync()`), and a Test Print button for each slot.
 - Sample Test Prints: realistic kitchen ticket, receipt with totals + drawer kick, and A4 sales-summary layout — so cashiers can verify paper, character set, and drawer wiring.
 - IPC surface: `window.desktop.printers.{listOs, get, set, test, openCashDrawer}` + `window.desktop.print.{kitchen, receipt, reportA4}` — ready for Phase 5 to consume from the real POS flow.
-- Printer config lives inside the DPAPI-encrypted config blob at `%APPDATA%/Restora POS/config.enc`.
+- Printer config lives inside the DPAPI-encrypted config blob at `%APPDATA%/Your Restaurant POS/config.enc`.
 
 ## 0.2.0 — cashier lock screen + PIN auth (2026-04-15)
 
 - **Lock screen**: grid of cashier tiles (auto-populated from paired branch). Each tile shows initials, name, role, and a "Set PIN" badge for first-time users.
 - **PIN pad**: 4–6 digit PIN entry with 12-key numeric pad, auto-submit prompt, dot-masked display. Lockout after 3 wrong attempts (30 s) and 8 attempts (5 min).
 - **First-time setup**: cashier enters password once → proves identity against the server → picks a 4–6 digit PIN stored locally as a bcrypt hash. Never repeats on this terminal.
-- **Local SQLite** (`better-sqlite3`) at `%APPDATA%/Restora POS/local.db` — schema: `cashier_pins`, `cashiers` cache. Migrations run on app start.
+- **Local SQLite** (`better-sqlite3`) at `%APPDATA%/Your Restaurant POS/local.db` — schema: `cashier_pins`, `cashiers` cache. Migrations run on app start.
 - **In-memory session holder** in main process keeps access/refresh tokens; never exposed to renderer. Tokens do not persist across restarts by design.
 - Backend: new `POST /devices/cashiers` endpoint (auth via device token) so terminals refresh their lock-screen list when online. `POST /devices/register` response also primes the cache.
 - IPC surface: `window.desktop.cashier.{list, pinStatus, verifyPin, setPin}` + `window.desktop.session.{current, signout}`.
@@ -59,7 +59,7 @@ Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 ## 0.1.0 — device pairing (2026-04-15)
 
 - **First-Run Setup screen**: owner enters server URL, credentials, branch id, terminal name.
-- **DPAPI-encrypted config store** at `%APPDATA%/Restora POS/config.enc`. Device token never crosses the IPC bridge.
+- **DPAPI-encrypted config store** at `%APPDATA%/Your Restaurant POS/config.enc`. Device token never crosses the IPC bridge.
 - Backend: new `Device` Prisma model + `POST /devices/register`, `GET/DELETE/PATCH /devices` admin endpoints.
 - Backend: new auth routes `POST /auth/pin-login` and `POST /auth/password-login-on-device` (Phase 2 will consume them).
 - Admin: **Terminals** page lists paired devices with online/offline badges and revoke action.

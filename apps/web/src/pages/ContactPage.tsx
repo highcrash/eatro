@@ -4,7 +4,7 @@ import SEO from '../components/SEO';
 export default function ContactPage() {
   const { data: branding } = useBranding();
   const { data: content } = useWebsiteContent();
-  const siteName = (content as any)?.seoSiteName || branding?.name || 'EATRO';
+  const siteName = (content as any)?.seoSiteName || branding?.name || 'Your Restaurant';
 
   return (
     <div>

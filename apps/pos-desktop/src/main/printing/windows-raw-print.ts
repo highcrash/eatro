@@ -74,7 +74,7 @@ public static class RawPrinterHelper {
     }
     try {
       DOCINFOA di = new DOCINFOA();
-      di.pDocName = "Restora POS ESC/POS";
+      di.pDocName = "Your Restaurant POS ESC/POS";
       di.pDataType = "RAW";
       if (!StartDocPrinter(h, 1, ref di)) {
         return "StartDocPrinter failed (Win32 " + Marshal.GetLastWin32Error() + ")";

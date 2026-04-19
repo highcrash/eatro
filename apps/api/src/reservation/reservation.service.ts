@@ -2,7 +2,7 @@ import { Injectable, BadRequestException, NotFoundException, ConflictException }
 import type { CreateReservationDto, ConfirmReservationDto, ReservationSlot, ReservationSettings } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
-import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
+import { RealtimeGateway } from '../ws-gateway/realtime.gateway';
 
 const RESERVATION_INCLUDE = {
   table: { select: { id: true, tableNumber: true, capacity: true } },
@@ -15,7 +15,7 @@ export class ReservationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sms: SmsService,
-    private readonly ws: RestoraPosGateway,
+    private readonly ws: RealtimeGateway,
   ) {}
 
   // ── Settings ──────────────────────────────────────────────────────────────

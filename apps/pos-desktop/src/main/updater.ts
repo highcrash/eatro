@@ -5,7 +5,7 @@ import log from 'electron-log';
 /**
  * Auto-update lifecycle:
  *   - on app launch (non-dev), check the feed configured in
- *     electron-builder.yml (currently a GitHub release on highcrash/eatro)
+ *     electron-builder.yml (currently a GitHub release on your-org/your-repo)
  *   - download in the background; when ready, notify the renderer and
  *     wait for the cashier to accept before restarting
  *   - status is broadcast as `update:status` IPC events so the renderer

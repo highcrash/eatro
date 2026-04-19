@@ -16,7 +16,7 @@ export default function ChefsSpecialPage() {
   const navigate = useNavigate();
   const { data: content } = useWebsiteContent();
   const { data: branding } = useBranding();
-  const siteName = (content as any)?.seoSiteName || branding?.name || 'EATRO';
+  const siteName = (content as any)?.seoSiteName || branding?.name || 'Your Restaurant';
 
   const { data: items = [], isLoading } = useQuery<Item[]>({
     queryKey: ['recommended', getActiveBranchId()],

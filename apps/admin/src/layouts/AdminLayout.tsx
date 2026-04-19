@@ -106,7 +106,7 @@ const NAV_GROUPS = [
 export default function AdminLayout() {
   const { user, setAuth, clearAuth } = useAuthStore();
   const { data: branding } = useBranding();
-  const brandName = branding?.name ?? 'Restora';
+  const brandName = branding?.name ?? 'Your Restaurant';
   const brandInitial = brandName.charAt(0).toUpperCase();
   const logoUrl = resolveLogoUrl(branding?.logoUrl);
   const qc = useQueryClient();

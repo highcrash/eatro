@@ -29,9 +29,9 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'Restora Order',
-        short_name: 'Restora',
-        description: 'Scan, Browse & Order — Restora QR Self-Order',
+        name: 'QR Order',
+        short_name: 'QR Order',
+        description: 'Scan, Browse & Order — QR Self-Order',
         theme_color: '#0D0D0D',
         background_color: '#0D0D0D',
         display: 'standalone',

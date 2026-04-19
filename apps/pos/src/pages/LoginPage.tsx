@@ -72,7 +72,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="text-center text-xs text-theme-text-muted mt-6">Restora POS · Sunrise Theme</p>
+        <p className="text-center text-xs text-theme-text-muted mt-6">Your Restaurant POS · Sunrise Theme</p>
       </div>
     </div>
   );

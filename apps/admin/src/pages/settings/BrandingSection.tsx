@@ -232,7 +232,7 @@ export default function BrandingSection({ isOwner }: Props) {
             </Field>
           </div>
           <Field label="Wi-Fi Password (optional, printed on bill)">
-            <input value={form.wifiPass} onChange={(e) => setForm((f) => ({ ...f, wifiPass: e.target.value }))} disabled={!isOwner} className="input-base" placeholder="e.g. eatrobadda" />
+            <input value={form.wifiPass} onChange={(e) => setForm((f) => ({ ...f, wifiPass: e.target.value }))} disabled={!isOwner} className="input-base" placeholder="e.g. mywifipass" />
           </Field>
           <Field label={`Bill Logo Width (${form.billLogoWidthPct}% of 80 mm paper)`}>
             <div className="flex items-center gap-3">

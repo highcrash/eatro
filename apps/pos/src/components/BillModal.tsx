@@ -13,7 +13,7 @@ interface BillModalProps {
 
 export default function BillModal({ order, onClose }: BillModalProps) {
   const { data: branding } = useBranding();
-  const brandName = branding?.name ?? 'Restora';
+  const brandName = branding?.name ?? 'Your Restaurant';
   const subtotal = Number(order.subtotal);
   const tax = Number(order.taxAmount);
   const total = Number(order.totalAmount);

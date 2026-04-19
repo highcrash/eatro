@@ -86,7 +86,7 @@ export default function ReservationPage() {
   const branchId = getActiveBranchId();
   const { data: branding } = useBranding();
   const { data: wContent } = useWebsiteContent();
-  const siteName = (wContent as any)?.seoSiteName || branding?.name || 'EATRO';
+  const siteName = (wContent as any)?.seoSiteName || branding?.name || 'Your Restaurant';
 
   /* Step state */
   const [step, setStep] = useState<Step>('date');

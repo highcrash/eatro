@@ -12,10 +12,10 @@ interface DiningTable {
 
 // Public base URL for the customer-facing QR ordering app. Override via
 // VITE_QR_BASE_URL at build time (set to http://localhost:5176 locally,
-// https://qr.eatrobd.com in production).
+// https://qr.example.com in production).
 const QR_BASE_URL =
   ((import.meta as any).env?.VITE_QR_BASE_URL as string | undefined) ??
-  'https://qr.eatrobd.com';
+  'https://qr.example.com';
 
 export default function QrCodesPage() {
   const [copied, setCopied] = useState<string | null>(null);

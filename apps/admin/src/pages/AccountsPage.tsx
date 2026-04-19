@@ -496,7 +496,7 @@ function StatementModal({ account, from, to, onFromChange, onToChange, onClose }
         </div>
         <div style="text-align:right">
           <p style="color:#999;font-size:10px">Generated: ${new Date().toLocaleString()}</p>
-          <p style="color:#999;font-size:10px">Restora POS</p>
+          <p style="color:#999;font-size:10px">Your Restaurant POS</p>
         </div>
       </div>
 
@@ -527,7 +527,7 @@ function StatementModal({ account, from, to, onFromChange, onToChange, onClose }
       </table>
 
       <div style="margin-top:24px;border-top:1px solid #ccc;padding-top:8px;text-align:center;color:#999;font-size:10px">
-        Restora POS — Account Statement
+        Your Restaurant POS — Account Statement
       </div>
     </body></html>`);
     w.document.close();

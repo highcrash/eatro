@@ -67,8 +67,8 @@ export class PublicController {
   ) {
     const item = await this.publicService.getMenuItem(branchId, itemSlug);
     const branch = await this.publicService.getBranchById(branchId);
-    const siteName = branch?.name ?? 'EATRO';
-    const siteUrl = 'https://eatrobd.com';
+    const siteName = branch?.name ?? 'Your Restaurant';
+    const siteUrl = 'https://example.com';
 
     if (!item) {
       res.status(404).send('<html><head><title>Not Found</title></head><body>Not Found</body></html>');
@@ -106,8 +106,8 @@ export class PublicController {
   @Header('Content-Type', 'text/html')
   async getHomepageOG(@Param('branchId') branchId: string, @Res() res: Response) {
     const branch = await this.publicService.getBranchById(branchId);
-    const siteName = branch?.name ?? 'EATRO';
-    const siteUrl = 'https://eatrobd.com';
+    const siteName = branch?.name ?? 'Your Restaurant';
+    const siteUrl = 'https://example.com';
     const logo = (branch as any)?.logoUrl || '';
 
     const html = `<!DOCTYPE html>

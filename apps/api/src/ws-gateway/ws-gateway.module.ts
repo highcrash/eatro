@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { RestoraPosGateway } from './restora-pos.gateway';
+import { RealtimeGateway } from './realtime.gateway';
 
 @Module({
   imports: [PrismaModule],
-  providers: [RestoraPosGateway],
-  exports: [RestoraPosGateway],
+  providers: [RealtimeGateway],
+  exports: [RealtimeGateway],
 })
 export class WsGatewayModule {}

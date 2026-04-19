@@ -628,7 +628,7 @@ export default function SuppliersPage() {
                       ` : '<p style="color:#999">No payments recorded.</p>'}
 
                       <div style="margin-top:32px;border-top:1px solid #ccc;padding-top:8px;text-align:center;color:#999;font-size:10px">
-                        Restora POS — Supplier Ledger Report
+                        Your Restaurant POS — Supplier Ledger Report
                       </div>
                     </body></html>`);
                     w.document.close();

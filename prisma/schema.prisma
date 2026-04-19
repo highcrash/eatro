@@ -1,4 +1,4 @@
-// ─── Restora POS — Prisma Schema ──────────────────────────────────────────────
+// ─── Prisma Schema ────────────────────────────────────────────────────────────
 // Phase 1: Core POS & Orders
 // Database: PostgreSQL 15
 // Monetary values: Decimal(14,2) stored as smallest unit (paisa)
@@ -299,7 +299,7 @@ model WebsiteContent {
   notFoundBg                String? // background image for 404 page
   notFoundText              String? // custom 404 text
   // SEO — Global
-  seoSiteName               String? // e.g. "EATRO Restaurant"
+  seoSiteName               String? // e.g. "Your Restaurant"
   seoHomeTitle              String? // Home page title tag
   seoHomeDescription        String? // Home page meta description
   seoHomeKeywords           String? // comma-separated keywords

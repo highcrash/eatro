@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import type { CreateWasteLogDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
-import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
+import { RealtimeGateway } from '../ws-gateway/realtime.gateway';
 import { IngredientService } from '../ingredient/ingredient.service';
 
 @Injectable()
 export class WasteService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly ws: RestoraPosGateway,
+    private readonly ws: RealtimeGateway,
     private readonly ingredientService: IngredientService,
   ) {}
 

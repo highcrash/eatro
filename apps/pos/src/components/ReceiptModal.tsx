@@ -14,7 +14,7 @@ interface ReceiptModalProps {
 
 export default function ReceiptModal({ order, cashReceived, onDone }: ReceiptModalProps) {
   const { data: branding } = useBranding();
-  const brandName = branding?.name ?? 'Restora';
+  const brandName = branding?.name ?? 'Your Restaurant';
   const total = Number(order.totalAmount);
   const subtotal = Number(order.subtotal);
   const tax = Number(order.taxAmount);

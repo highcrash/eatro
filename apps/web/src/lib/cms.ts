@@ -65,7 +65,9 @@ export const DEFAULT_BRANCH = 'branch-main';
 
 /** Get the active branch ID from localStorage (set by BranchSelector) */
 export function getActiveBranchId(): string {
-  return localStorage.getItem('eatro-branch') || DEFAULT_BRANCH;
+  // 'rp-branch' (rp = restaurant POS, brand-neutral). Buyers have no
+  // pre-existing localStorage so a clean break is fine here.
+  return localStorage.getItem('rp-branch') || DEFAULT_BRANCH;
 }
 
 export function useBranding(branchId?: string) {

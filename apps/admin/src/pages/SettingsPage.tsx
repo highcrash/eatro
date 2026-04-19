@@ -167,7 +167,7 @@ export default function SettingsPage() {
                 onChange={(e) => handleChange('name', e.target.value)}
                 disabled={!isOwner}
                 className="input-base"
-                placeholder="e.g. Restora Downtown"
+                placeholder="e.g. Your Restaurant Downtown"
               />
             </Field>
             <Field label="Address" required>
@@ -843,7 +843,7 @@ function QrGateSection({ isOwner }: { isOwner: boolean }) {
               value={form.wifiPass}
               onChange={(e) => setForm((f) => ({ ...f, wifiPass: e.target.value }))}
               disabled={!isOwner}
-              placeholder="e.g. eatrobadda"
+              placeholder="e.g. mywifipass"
               className="input-base"
             />
           </Field>

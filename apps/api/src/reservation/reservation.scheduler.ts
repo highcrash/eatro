@@ -2,14 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
-import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
+import { RealtimeGateway } from '../ws-gateway/realtime.gateway';
 
 @Injectable()
 export class ReservationScheduler {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sms: SmsService,
-    private readonly ws: RestoraPosGateway,
+    private readonly ws: RealtimeGateway,
   ) {}
 
   @Interval(60_000) // every 60 seconds

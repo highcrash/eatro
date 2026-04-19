@@ -12,16 +12,16 @@ export function useBranchId(): string {
     queryFn: () => fetch(`${BASE}/public/branches`).then((r) => r.json()),
     staleTime: 300_000,
   });
-  const [id, setId] = useState(() => localStorage.getItem('eatro-branch') || '');
+  const [id, setId] = useState(() => localStorage.getItem('rp-branch') || '');
 
   useEffect(() => {
     if (!id && branches.length > 0) {
       setId(branches[0].id);
-      localStorage.setItem('eatro-branch', branches[0].id);
+      localStorage.setItem('rp-branch', branches[0].id);
     }
   }, [branches, id]);
 
-  return id || localStorage.getItem('eatro-branch') || 'branch-main';
+  return id || localStorage.getItem('rp-branch') || 'branch-main';
 }
 
 export default function BranchSelector() {
@@ -31,12 +31,12 @@ export default function BranchSelector() {
     staleTime: 300_000,
   });
 
-  const [selected, setSelected] = useState(() => localStorage.getItem('eatro-branch') || '');
+  const [selected, setSelected] = useState(() => localStorage.getItem('rp-branch') || '');
 
   useEffect(() => {
     if (!selected && branches.length > 0) {
       setSelected(branches[0].id);
-      localStorage.setItem('eatro-branch', branches[0].id);
+      localStorage.setItem('rp-branch', branches[0].id);
     }
   }, [branches, selected]);
 
@@ -48,7 +48,7 @@ export default function BranchSelector() {
       value={selected}
       onChange={(e) => {
         setSelected(e.target.value);
-        localStorage.setItem('eatro-branch', e.target.value);
+        localStorage.setItem('rp-branch', e.target.value);
         window.location.reload(); // reload to refetch all data with new branch
       }}
       className="bg-transparent border border-border text-text text-xs px-2 py-1 focus:outline-none focus:border-accent"

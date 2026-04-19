@@ -1,6 +1,6 @@
 appId: app.restora.pos.desktop
-productName: Restora POS
-copyright: Copyright © 2026 Restora
+productName: Your Restaurant POS
+copyright: Copyright © 2026 Your Restaurant
 
 directories:
   output: release
@@ -37,8 +37,8 @@ win:
     - target: nsis
       arch:
         - x64
-  executableName: Restora POS
-  artifactName: RestoraPOS-Setup-${version}.${ext}
+  executableName: Your Restaurant POS
+  artifactName: YourRestaurantPOS-Setup-${version}.${ext}
   # icon auto-resolves from build/icon.ico (Windows) or build/icon.png.
   # Drop a 256x256+ .ico in build/ before cutting a real release — the
   # default Electron icon ships until then.
@@ -49,8 +49,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Restora POS
-  uninstallDisplayName: Restora POS ${version}
+  shortcutName: Your Restaurant POS
+  uninstallDisplayName: Your Restaurant POS ${version}
   deleteAppDataOnUninstall: false   # preserve paired config + PIN hashes
 
 # Auto-update feed. electron-updater fetches https://github.com/<owner>/<repo>/releases/latest
@@ -58,5 +58,5 @@ nsis:
 publish:
   - provider: github
     owner: highcrash
-    repo: eatro
+    repo: your-repo
     releaseType: release

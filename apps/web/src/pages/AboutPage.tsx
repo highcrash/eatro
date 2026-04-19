@@ -4,7 +4,7 @@ import SEO from '../components/SEO';
 export default function AboutPage() {
   const { data: content } = useWebsiteContent();
   const { data: branding } = useBranding();
-  const siteName = (content as any)?.seoSiteName || branding?.name || 'EATRO';
+  const siteName = (content as any)?.seoSiteName || branding?.name || 'Your Restaurant';
 
   const points = [content?.aboutPoint1, content?.aboutPoint2, content?.aboutPoint3, content?.aboutPoint4];
   const hasPoints = points.some(Boolean);

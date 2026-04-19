@@ -121,7 +121,7 @@ export function orderToReceiptInput(
   const isPaid = order.status === 'PAID' || (payments?.length ?? 0) > 0;
 
   return {
-    brandName: branding?.name ?? 'Restora',
+    brandName: branding?.name ?? 'Your Restaurant',
     branchName: branding?.name ?? '',
     branchAddress: branding?.address ?? undefined,
     branchPhone: branding?.phone ?? undefined,

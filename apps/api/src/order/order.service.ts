@@ -3,7 +3,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto } from '@restora/types';
 import { generateOrderNumber } from '@restora/utils';
 import { PrismaService } from '../prisma/prisma.service';
-import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
+import { RealtimeGateway } from '../ws-gateway/realtime.gateway';
 import { RecipeService } from '../recipe/recipe.service';
 import { AccountService } from '../account/account.service';
 import { BranchSettingsService } from '../branch-settings/branch-settings.service';
@@ -47,7 +47,7 @@ function computeTotals(branch: TaxableBranch, subtotal: number, discountAmount =
 export class OrderService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly ws: RestoraPosGateway,
+    private readonly ws: RealtimeGateway,
     private readonly recipeService: RecipeService,
     private readonly accountService: AccountService,
     private readonly branchSettings: BranchSettingsService,

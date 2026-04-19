@@ -59,6 +59,18 @@ const FORBIDDEN_PATTERNS = [
 const ALLOWLIST = new Set([
   'scripts/lib/secret-scan.mjs',
   'codecanyon/docs/BRANCH_HYGIENE.md',
+  // Codemod that REPLACES brand strings; the patterns live here as
+  // string literals so the file legitimately contains them.
+  'scripts/strip-branding.mjs',
+  // Placeholder seed that documents (in comments) what was stripped
+  // from the legacy seed.ts. Not user-facing.
+  'prisma/seeds/demo-full.ts',
+  // Internal dev-only docker compose. The buyer's zip ships its own
+  // generic compose at infra/<buyer-deploy>/docker-compose.yml and
+  // does NOT include these files. Section 8 packager filter excludes
+  // the whole infra/ tree EXCEPT the per-deploy subdirectory.
+  'infra/docker-compose.yml',
+  'infra/init-db.sql',
 ]);
 
 // Skip entirely — not sources we ship.
@@ -81,6 +93,9 @@ const IGNORE_FILES = new Set([
   // Lockfiles — benign to scan but noisy when brand strings appear in
   // transitive dep metadata.
   'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock',
+  // Internal main-only deploy notes. Gitignored on codecanyon but the
+  // file stays on disk in mixed-branch checkouts.
+  'DEPLOYMENT.md',
 ]);
 
 // Only scan text-like files; binaries can't contain readable secrets for

@@ -56,7 +56,7 @@ export interface DiagnosticsSnapshot {
     failedSamples: Array<{ id: string; method: string; path: string; attempts: number; lastError: string | null; createdAtMs: number }>;
   };
   localDb: {
-    pathHint: string; // %APPDATA%/Restora POS/local.db — no absolute path for privacy
+    pathHint: string; // %APPDATA%/Your Restaurant POS/local.db — no absolute path for privacy
     tables: Array<{ name: string; rows: number }>;
   };
   logs: {
@@ -172,7 +172,7 @@ export async function captureDiagnosticsSnapshot(): Promise<DiagnosticsSnapshot>
       mainLogPath: log.transports.file.getFile().path,
     },
     localDb: {
-      pathHint: '%APPDATA%/Restora POS/local.db',
+      pathHint: '%APPDATA%/Your Restaurant POS/local.db',
       tables: [
         { name: 'cashier_pins', rows: rowCount('cashier_pins') },
         { name: 'cashiers', rows: rowCount('cashiers') },

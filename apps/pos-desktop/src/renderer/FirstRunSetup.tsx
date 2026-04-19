@@ -49,7 +49,7 @@ export function FirstRunSetup({ onPaired }: Props): JSX.Element {
         <p style={styles.kicker}>Setup</p>
         <h1 style={styles.title}>PAIR THIS TERMINAL</h1>
         <p style={styles.subtitle}>
-          Enter your Restora server details and owner credentials. This runs once — the device is
+          Enter your Your Restaurant server details and owner credentials. This runs once — the device is
           permanently registered to this branch after setup.
         </p>
 

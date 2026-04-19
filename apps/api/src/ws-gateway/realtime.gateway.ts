@@ -22,7 +22,7 @@ type IoSocket = any;
   cors: { origin: '*' },
   namespace: '/ws',
 })
-export class RestoraPosGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: IoServer;
 

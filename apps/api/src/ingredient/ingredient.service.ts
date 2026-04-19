@@ -1,13 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import type { CreateIngredientDto, UpdateIngredientDto, AdjustStockDto, CreateVariantDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
-import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
+import { RealtimeGateway } from '../ws-gateway/realtime.gateway';
 
 @Injectable()
 export class IngredientService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly ws: RestoraPosGateway,
+    private readonly ws: RealtimeGateway,
   ) {}
 
   private readonly ingredientInclude = {

@@ -69,7 +69,7 @@ git push origin codecanyon
 
 Listed in `.gitignore` under the codecanyon section. Currently:
 
-- `.do/app.yaml` — internal deploy spec for eatrobd.com
+- `.do/app.yaml` — internal deploy spec for example.com
 - `scripts/screenshot.mjs`, `scripts/screenshot-pos.mjs`, `scripts/seed-attendance.mjs`, `scripts/seed-sales.mjs` — internal scripts
 - `mockups/`, `temporary screenshots/` — internal design artifacts
 - `apps/license-server/` — self-hosted license server (internal infra
@@ -88,7 +88,7 @@ If you add a new internal-only file, update both:
 and fires on two kinds of hits:
 
 **1. Brand strings** — literal tokens that should never appear in shipped source:
-`eatro`, `EATRO`, `Restora`, `restora-pos`, `@restora.app`, `eatrobd`.
+`eatro`, `EATRO`, `Restora`, `restora-pos`, `@example.com`, `eatrobd`.
 
 **2. Value-shape patterns** — regex rules that catch accidental secret leaks
 regardless of variable name:

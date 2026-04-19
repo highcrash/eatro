@@ -9,7 +9,7 @@ import { join } from 'path';
  * with per-user scope — the ciphertext can only be decrypted by the same
  * Windows user on the same machine.
  *
- * File location: %APPDATA%/Restora POS/config.enc
+ * File location: %APPDATA%/Your Restaurant POS/config.enc
  *
  * We keep the schema small: anything secret (deviceToken) is encrypted;
  * non-secret but useful metadata (serverUrl, deviceName, branch) is

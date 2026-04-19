@@ -90,6 +90,7 @@ apps/api/apps/
 # codecanyon/docs/BRANCH_HYGIENE.md.
 # ─────────────────────────────────────────────────────────────────────────────
 .do/
+DEPLOYMENT.md
 scripts/screenshot.mjs
 scripts/screenshot-pos.mjs
 scripts/seed-attendance.mjs

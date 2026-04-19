@@ -5,7 +5,7 @@ export default function MaintenancePage() {
   const { data: content } = useWebsiteContent();
   const bg = (content as any)?.maintenanceBg;
   const text = (content as any)?.maintenanceText;
-  const brandName = branding?.name ?? 'EATRO';
+  const brandName = branding?.name ?? 'Your Restaurant';
 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden" style={{ background: '#0D0D0D' }}>

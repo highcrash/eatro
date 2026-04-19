@@ -56,7 +56,7 @@ export async function testPrint(slot: 'kitchen' | 'bill' | 'reports'): Promise<v
       table { width: 100%; border-collapse: collapse; margin-top: 16px; }
       td, th { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
     </style></head><body>
-      <p class="kicker">Restora POS — Reports printer test</p>
+      <p class="kicker">Your Restaurant POS — Reports printer test</p>
       <h1>Test Print</h1>
       <p>Printed at ${new Date().toLocaleString()}</p>
       <div class="box">

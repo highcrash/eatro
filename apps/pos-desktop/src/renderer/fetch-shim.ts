@@ -1,5 +1,5 @@
 /**
- * Monkey-patch the global `fetch` so every request to the paired Restora API
+ * Monkey-patch the global `fetch` so every request to the paired Your Restaurant API
  * gets routed through the Electron main process via IPC.
  *
  * Why: the renderer runs with `contextIsolation: true` at a file:// or

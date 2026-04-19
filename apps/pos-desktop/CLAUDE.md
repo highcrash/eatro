@@ -17,7 +17,7 @@ A **Windows-only Electron cashier terminal** that wraps the existing web POS UI
 5. Offline-resilient order entry (mutations queue locally, drain on reconnect)
 6. DPAPI-encrypted device credentials + local bcrypt PIN auth for cashiers
 
-The app is paired to a specific Restora API server + branch at first run by
+The app is paired to a specific Your Restaurant API server + branch at first run by
 the owner; after that, only cashier PINs are needed to use it, even offline.
 
 ## Process model — THIS IS THE MOST IMPORTANT RULE
@@ -81,7 +81,7 @@ When reviewing PRs that touch `prisma/schema.prisma`, always re-run
 1. Bump `version` in `apps/pos-desktop/package.json`.
 2. Append a section to `CHANGELOG.md`.
 3. `git tag pos-desktop-v{version} && git push --tags`.
-4. GitHub Actions builds `RestoraPOS-Setup-{version}.exe` + `latest.yml` and
+4. GitHub Actions builds `YourRestaurantPOS-Setup-{version}.exe` + `latest.yml` and
    publishes them to the GitHub release named `pos-desktop-v{version}`.
 5. Installed terminals pick up the new build on next launch via
    `electron-updater` reading `latest.yml`.

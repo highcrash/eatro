@@ -39,7 +39,7 @@ export default function CustomerDisplayPage() {
   const { tableId } = useParams<{ tableId?: string }>();
   const { data: branding } = useBranding();
   const logoUrl = resolveLogoUrl(branding?.logoUrl ?? branding?.posLogoUrl);
-  const brandName = branding?.name ?? 'Restora';
+  const brandName = branding?.name ?? 'Your Restaurant';
 
   // Public endpoint — no auth required, so the customer-facing device
   // can sit on its own (tablet / separate login) without needing to
@@ -95,7 +95,7 @@ export default function CustomerDisplayPage() {
 
       {/* Footer */}
       <footer className="border-t border-theme-border py-3 text-center text-theme-text-muted font-theme-body text-sm tracking-widest uppercase">
-        {order ? `Order #${order.orderNumber}` : 'Restora POS'}
+        {order ? `Order #${order.orderNumber}` : 'Your Restaurant POS'}
       </footer>
     </div>
   );

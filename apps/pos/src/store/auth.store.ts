@@ -24,6 +24,6 @@ export const useAuthStore = create<AuthState>()(
       clearAuth: () =>
         set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false }),
     }),
-    { name: 'restora-pos-auth' },
+    { name: 'rp-auth' },
   ),
 );

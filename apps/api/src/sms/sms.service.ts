@@ -111,7 +111,7 @@ export class SmsService {
 
     const manager = managers[0];
     const branch = await this.prisma.branch.findFirst({ where: { id: branchId }, select: { name: true } });
-    const brandName = branch?.name ?? 'Restora';
+    const brandName = branch?.name ?? 'Your Restaurant';
     const message = `[${brandName}] Void OTP: ${otp}\n${itemQty}x ${itemName}\nReason: ${reason}\nExpires in 5 min.`;
 
     if (settings.smsEnabled && settings.smsApiKey && settings.notifyVoidOtp) {
@@ -171,7 +171,7 @@ export class SmsService {
 
     const manager = managers[0];
     const branch = await this.prisma.branch.findFirst({ where: { id: branchId }, select: { name: true } });
-    const brandName = branch?.name ?? 'Restora';
+    const brandName = branch?.name ?? 'Your Restaurant';
     const message = `[${brandName}] ${action} OTP: ${otp}\n${summary}\nExpires in 5 min.`;
 
     if (settings.smsEnabled && settings.smsApiKey && settings.notifyVoidOtp) {

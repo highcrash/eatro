@@ -572,7 +572,7 @@ export default function WebsitePage() {
           <div className="space-y-4">
             <p className="text-[#666] font-body text-[10px]">Control how your website appears in Google search results. Leave blank to use auto-generated defaults.</p>
 
-            <Field label="Site Name (used across all pages)" value={content.seoSiteName ?? ''} onChange={(v) => update('seoSiteName', v || null)} placeholder="EATRO Restaurant" />
+            <Field label="Site Name (used across all pages)" value={content.seoSiteName ?? ''} onChange={(v) => update('seoSiteName', v || null)} placeholder="Your Restaurant" />
 
             <div className="grid grid-cols-2 gap-3">
               <ImageField label="Default OG Image (social sharing)" value={content.seoOgImage} onUpload={(f) => void handleUpload(f, 'seoOgImage' as any)} onClear={() => update('seoOgImage' as any, null)} />
@@ -580,24 +580,24 @@ export default function WebsitePage() {
             </div>
 
             <p className="text-[#D62B2B] text-[10px] font-body font-medium tracking-widest uppercase pt-2">Home Page</p>
-            <Field label="Title Tag" value={content.seoHomeTitle ?? ''} onChange={(v) => update('seoHomeTitle', v || null)} placeholder="EATRO — Where Flavor Takes The Lead" />
+            <Field label="Title Tag" value={content.seoHomeTitle ?? ''} onChange={(v) => update('seoHomeTitle', v || null)} placeholder="Your Restaurant — Where Flavor Takes The Lead" />
             <Field label="Meta Description" value={content.seoHomeDescription ?? ''} onChange={(v) => update('seoHomeDescription', v || null)} placeholder="Fine dining restaurant with fusion cuisine..." />
             <Field label="Keywords (comma-separated)" value={content.seoHomeKeywords ?? ''} onChange={(v) => update('seoHomeKeywords', v || null)} placeholder="restaurant, fine dining, reservation, menu" />
 
             <p className="text-[#D62B2B] text-[10px] font-body font-medium tracking-widest uppercase pt-2">Menu Page</p>
-            <Field label="Title Tag" value={content.seoMenuTitle ?? ''} onChange={(v) => update('seoMenuTitle', v || null)} placeholder="Menu — EATRO" />
+            <Field label="Title Tag" value={content.seoMenuTitle ?? ''} onChange={(v) => update('seoMenuTitle', v || null)} placeholder="Menu" />
             <Field label="Meta Description" value={content.seoMenuDescription ?? ''} onChange={(v) => update('seoMenuDescription', v || null)} placeholder="Explore our full menu..." />
 
             <p className="text-[#D62B2B] text-[10px] font-body font-medium tracking-widest uppercase pt-2">About Page</p>
-            <Field label="Title Tag" value={content.seoAboutTitle ?? ''} onChange={(v) => update('seoAboutTitle', v || null)} placeholder="About Us — EATRO" />
+            <Field label="Title Tag" value={content.seoAboutTitle ?? ''} onChange={(v) => update('seoAboutTitle', v || null)} placeholder="About Us" />
             <Field label="Meta Description" value={content.seoAboutDescription ?? ''} onChange={(v) => update('seoAboutDescription', v || null)} />
 
             <p className="text-[#D62B2B] text-[10px] font-body font-medium tracking-widest uppercase pt-2">Contact Page</p>
-            <Field label="Title Tag" value={content.seoContactTitle ?? ''} onChange={(v) => update('seoContactTitle', v || null)} placeholder="Contact — EATRO" />
+            <Field label="Title Tag" value={content.seoContactTitle ?? ''} onChange={(v) => update('seoContactTitle', v || null)} placeholder="Contact" />
             <Field label="Meta Description" value={content.seoContactDescription ?? ''} onChange={(v) => update('seoContactDescription', v || null)} />
 
             <p className="text-[#D62B2B] text-[10px] font-body font-medium tracking-widest uppercase pt-2">Reservation Page</p>
-            <Field label="Title Tag" value={content.seoReservationTitle ?? ''} onChange={(v) => update('seoReservationTitle', v || null)} placeholder="Book a Table — EATRO" />
+            <Field label="Title Tag" value={content.seoReservationTitle ?? ''} onChange={(v) => update('seoReservationTitle', v || null)} placeholder="Book a Table" />
             <Field label="Meta Description" value={content.seoReservationDescription ?? ''} onChange={(v) => update('seoReservationDescription', v || null)} />
 
             <p className="text-[#555] text-[10px] font-body mt-2">Individual menu item SEO (title, description) can be set per-item in the Menu page editor.</p>

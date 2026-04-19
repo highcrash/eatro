@@ -116,7 +116,7 @@ export default function MenuPage() {
 
   const { data: content } = useWebsiteContent();
   const { data: branding } = useBranding();
-  const siteName = (content as any)?.seoSiteName || branding?.name || 'EATRO';
+  const siteName = (content as any)?.seoSiteName || branding?.name || 'Your Restaurant';
 
   return (
     <div>

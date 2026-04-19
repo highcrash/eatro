@@ -304,7 +304,7 @@ function FirstTimePin({
         <p style={styles.pinRole}>First time on this terminal</p>
 
         <p style={styles.setPinHelp}>
-          Prove it's you with your Restora password, then pick a 4–6 digit PIN you'll use on this terminal.
+          Prove it's you with your Your Restaurant password, then pick a 4–6 digit PIN you'll use on this terminal.
           The password is never stored here.
         </p>
 

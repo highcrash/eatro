@@ -41,7 +41,7 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
         dto.isActive = form.isActive;
         return api.patch(`/staff/${initial.id}`, dto);
       }
-      dto.password = form.password || 'password123';
+      dto.password = form.password || 'change-me-on-first-login';
       return api.post('/staff', dto);
     },
     onSuccess: () => {
@@ -88,7 +88,7 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
               {initial ? 'New Password (leave blank to keep)' : 'Password *'}
             </label>
             <input type="password" value={form.password} onChange={(e) => set('password', e.target.value)}
-              placeholder={initial ? '••••••' : 'password123'}
+              placeholder={initial ? '••••••' : 'change-me-on-first-login'}
               className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
           </div>
           {initial && (

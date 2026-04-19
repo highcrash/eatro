@@ -85,7 +85,7 @@ export default function HomePage() {
   });
 
   const logo = resolveLogoUrl(branding?.logoUrl);
-  const brandName = branding?.name ?? 'Restora';
+  const brandName = branding?.name ?? 'Your Restaurant';
 
   const galleryImages: string[] = useMemo(() => {
     if (!content?.galleryImages) return [];
@@ -122,7 +122,7 @@ export default function HomePage() {
     return categories.filter((c) => set.has(c.id));
   }, [categories, featuredIds]);
 
-  const siteName = (content as any)?.seoSiteName || branding?.name || 'EATRO';
+  const siteName = (content as any)?.seoSiteName || branding?.name || 'Your Restaurant';
 
   return (
     <div>
