@@ -140,6 +140,13 @@ export class LicenseService implements OnModuleInit {
   /**
    * Returns whether `host` is allowed for the cached license. Used by
    * the gate. Localhost is always allowed in NODE_ENV=development.
+   *
+   * When the license is MISSING (fresh install, pre-activation), we
+   * return true unconditionally — there's no activated domain to
+   * match against, and blocking here would break the admin UI's
+   * License page (the only way to activate). The mode check that
+   * runs AFTER this host check still blocks all POST/PATCH/DELETE
+   * with LICENSE_LOCKED, so pirates can't mutate without a license.
    */
   hostAllowed(host: string | undefined | null): boolean {
     if (!host) return false;
@@ -147,6 +154,7 @@ export class LicenseService implements OnModuleInit {
       return true;
     }
     const v = this.currentVerdict();
+    if (v.mode === 'missing') return true;
     if (!v.domain) return false;
     // Decode payload from cached proof to feed into the matcher — the
     // verdict's `.domain` is the registered pattern (incl. *. wildcards),

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { LicenseService } from '../license/license.service';
 
 /**
  * Drives the install wizard's server side. Strict invariants:
@@ -21,7 +22,10 @@ import { PrismaService } from '../prisma/prisma.service';
 export class InstallService {
   private readonly logger = new Logger('Install');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly license: LicenseService,
+  ) {}
 
   async getStatus(): Promise<{
     needsInstall: boolean;
@@ -144,6 +148,21 @@ export class InstallService {
     const [staff, branch] = await Promise.all([this.prisma.staff.count(), this.prisma.branch.count()]);
     if (staff === 0 || branch === 0) {
       throw new BadRequestException('Cannot finish install — owner and first branch are required');
+    }
+
+    // Require an active (or grace-period) license before the install
+    // wizard can be marked complete. A pirate could otherwise hit
+    // /install/finish directly and get an "installed" DB without ever
+    // activating. The wizard UI also prompts for license BEFORE owner
+    // creation, but the server-side gate is the authoritative check.
+    const verdict = this.license.currentVerdict();
+    if (verdict.mode !== 'active' && verdict.mode !== 'grace') {
+      throw new BadRequestException({
+        result: 'LICENSE_REQUIRED',
+        message:
+          'Activate your license via POST /api/v1/license/activate before completing install. ' +
+          'The wizard handles this automatically on the License step.',
+      });
     }
 
     const cfg = await this.prisma.systemConfig.upsert({

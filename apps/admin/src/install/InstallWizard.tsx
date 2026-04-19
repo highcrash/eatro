@@ -77,6 +77,35 @@ export default function InstallWizard() {
             />
           )}
 
+          {flow.step === 'license' && (
+            <LicenseStep
+              value={flow.license}
+              onChange={flow.setLicense}
+              busy={busy}
+              onBack={flow.back}
+              onNext={() =>
+                run(async () => {
+                  // If already activated (re-running wizard after a
+                  // crash mid-flow), skip forward without prompting.
+                  const status = await installApi.licenseStatus();
+                  if (status.mode === 'active' || status.mode === 'grace') {
+                    flow.next();
+                    return;
+                  }
+                  const trimmed = {
+                    purchaseCode: flow.license.purchaseCode.trim(),
+                    domain: flow.license.domain.trim(),
+                  };
+                  const res = await installApi.activateLicense(trimmed);
+                  if (res.mode !== 'active' && res.mode !== 'grace') {
+                    throw new InstallApiError(400, `Activation returned mode=${res.mode}`);
+                  }
+                  flow.next();
+                })
+              }
+            />
+          )}
+
           {flow.step === 'branch' && (
             <BranchStep
               value={flow.branch}
@@ -187,6 +216,56 @@ function SystemCheckStep({ busy, onNext }: { busy: boolean; onNext: () => void }
           Next →
         </Button>
       </div>
+    </div>
+  );
+}
+
+function LicenseStep({
+  value,
+  onChange,
+  busy,
+  onBack,
+  onNext,
+}: {
+  value: { purchaseCode: string; domain: string };
+  onChange: (v: { purchaseCode: string; domain: string }) => void;
+  busy: boolean;
+  onBack: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div>
+      <h2 className="text-lg font-medium mb-2">Activate your license</h2>
+      <p className="text-sm text-gray-500 mb-4">
+        Paste the purchase code from your CodeCanyon order email + the domain
+        this install will run on. Activation binds the license to this domain;
+        you can move it later via <strong>Settings → License → Deactivate</strong>.
+      </p>
+      <div className="space-y-3">
+        <Input
+          label="Purchase code"
+          value={value.purchaseCode}
+          onChange={(purchaseCode) => onChange({ ...value, purchaseCode })}
+        />
+        <Input
+          label="Domain (this hostname)"
+          value={value.domain}
+          onChange={(domain) => onChange({ ...value, domain })}
+        />
+      </div>
+      <p className="text-xs text-gray-400 mt-3 leading-relaxed">
+        This step requires an internet connection to reach the license server.
+        If activation keeps failing, check your firewall allows outbound
+        HTTPS to <span className="font-mono">api.neawaslic.top</span>, or ask
+        support for help. The wizard will not continue without an active
+        license.
+      </p>
+      <Nav
+        onBack={onBack}
+        onNext={onNext}
+        disabled={busy || value.purchaseCode.trim().length < 8 || value.domain.trim().length < 3}
+        nextLabel={busy ? 'Activating…' : 'Activate + continue →'}
+      />
     </div>
   );
 }

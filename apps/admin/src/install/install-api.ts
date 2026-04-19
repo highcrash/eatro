@@ -59,6 +59,18 @@ async function getJson<T>(path: string): Promise<T> {
 export const installApi = {
   status: () => getJson<InstallStatus>('/install/status'),
   systemCheck: () => postJson<SystemCheck>('/install/system-check', {}),
+  // License activation — same endpoint as Settings → License, but the
+  // wizard calls it BEFORE creating any real data (branch / owner).
+  // If it fails, the buyer hasn't committed anything and can retry.
+  activateLicense: (dto: { purchaseCode: string; domain: string }) =>
+    postJson<{ mode: string; status: string | null; domain: string | null; daysRemaining: number }>(
+      '/license/activate',
+      dto,
+    ),
+  licenseStatus: () =>
+    getJson<{ mode: string; status: string | null; daysRemaining: number; domain: string | null; reason: string }>(
+      '/license/status',
+    ),
   createBranch: (dto: { name: string; address: string; phone: string; timezone?: string; currency?: string }) =>
     postJson<{ id: string; name: string }>('/install/branch', dto),
   createOwner: (dto: { name: string; email: string; password: string }) =>

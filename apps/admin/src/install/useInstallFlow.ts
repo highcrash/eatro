@@ -1,9 +1,15 @@
 import { useState } from 'react';
 
-export type StepKey = 'system-check' | 'branch' | 'owner' | 'brand' | 'done';
+export type StepKey = 'system-check' | 'license' | 'branch' | 'owner' | 'brand' | 'done';
 
 export const STEPS: { key: StepKey; label: string }[] = [
   { key: 'system-check', label: 'System Check' },
+  // License activation is deliberately BEFORE branch/owner creation.
+  // If a buyer can't activate (wrong code, code already used, offline),
+  // the wizard refuses to create any real data — nothing to clean up on
+  // a failed attempt. Also prevents the "install, browse, never pay"
+  // attack where a pirate completes the wizard and gets read access.
+  { key: 'license', label: 'License' },
   { key: 'branch', label: 'First Branch' },
   { key: 'owner', label: 'Owner Account' },
   { key: 'brand', label: 'Branding' },
@@ -22,6 +28,13 @@ export const STEPS: { key: StepKey; label: string }[] = [
  */
 export function useInstallFlow() {
   const [step, setStep] = useState<StepKey>('system-check');
+  const [license, setLicense] = useState<{ purchaseCode: string; domain: string }>({
+    purchaseCode: '',
+    // Prefill from the URL the wizard is running under — 90% of buyers
+    // activate against the same hostname they visited to install. They
+    // can edit if using a wildcard license (*.example.com).
+    domain: typeof window !== 'undefined' ? window.location.hostname : '',
+  });
   const [branch, setBranch] = useState<{ name: string; address: string; phone: string }>({
     name: '',
     address: '',
@@ -47,5 +60,5 @@ export function useInstallFlow() {
     if (i > 0) setStep(STEPS[i - 1]!.key);
   };
 
-  return { step, setStep, next, back, branch, setBranch, owner, setOwner, brand, setBrand };
+  return { step, setStep, next, back, license, setLicense, branch, setBranch, owner, setOwner, brand, setBrand };
 }
