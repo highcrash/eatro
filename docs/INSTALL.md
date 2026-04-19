@@ -154,4 +154,59 @@ return `503 LICENSE_LOCKED` until you activate.
 
 ## Troubleshooting
 
-See [docs/FAQ.md](FAQ.md) for common issues.
+See [docs/FAQ.md](FAQ.md) for product-level questions. Common install
+problems below.
+
+### `ETIMEDOUT` / `Request took 14000ms` during `pnpm install`
+
+Your server can reach npmjs.org but the connection is slow or
+flaky — common on new VPS instances, behind corporate firewalls,
+or in regions far from npm's CDN. pnpm retries three times and
+usually succeeds; the install just takes 5–10 minutes instead of
+30 seconds. If retries exhaust, raise the timeout + retry budget:
+
+```bash
+pnpm config set fetch-timeout 120000
+pnpm config set fetch-retries 5
+pnpm install
+```
+
+If you're in a region where npmjs.org is heavily rate-limited,
+point pnpm at a mirror:
+
+```bash
+# Cloudflare-backed mirror (good global latency):
+pnpm config set registry https://registry.npmmirror.com/
+pnpm install
+# revert to npmjs.org after the install:
+pnpm config set registry https://registry.npmjs.org/
+```
+
+### `Command "prisma" not found` after install
+
+Your lockfile + package.json are from an older release that had
+`prisma` in devDependencies. Delete `node_modules` + `pnpm-lock.yaml`
+from your install dir, re-extract the latest zip over it, and re-run
+`pnpm install`. The 1.0.0+ zip has `prisma` and `tsx` in
+dependencies so they're always installed.
+
+### `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` for `@restora/license-client`
+
+Same lockfile-is-stale cause as above. The 1.0.0+ `package.json`
+allowlists `@restora/license-client` in `pnpm.onlyBuiltDependencies`
+so its `prepare: tsc` hook runs. Re-extract the latest zip.
+
+### "Build scripts are not allowed" for several other packages
+
+pnpm 10 added a safety default that blocks postinstall scripts
+unless the package is allowlisted. The zip's root `package.json`
+already lists the ones we use (prisma, esbuild, bcrypt, etc). If
+you add custom deps that need build scripts, append them to
+`pnpm.onlyBuiltDependencies` before re-running install.
+
+### Install-wizard never appears — admin login shows instead
+
+You extracted over an already-installed DB. Either start fresh
+(`pnpm prisma migrate reset` → `pnpm db:seed:empty`), or sign in
+with your existing owner credentials. The wizard only appears when
+`system_config.installedAt IS NULL`.
