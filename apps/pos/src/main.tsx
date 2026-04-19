@@ -12,10 +12,19 @@ const queryClient = new QueryClient({
   },
 });
 
+// Derive basename from the loaded HTML's URL so the SPA works at any
+// mount point (/, /pos/, etc). See apps/admin/src/main.tsx for the
+// rationale.
+function getSpaBasename(): string {
+  const path = new URL(document.baseURI).pathname;
+  const dir = path.endsWith('/') ? path.slice(0, -1) : path.replace(/\/[^/]*$/, '');
+  return dir || '/';
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={getSpaBasename()}>
         <App />
       </BrowserRouter>
     </QueryClientProvider>
