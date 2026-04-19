@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useBranding, resolveLogoUrl } from '../lib/branding';
+import LicenseBanner from '../components/LicenseBanner';
 import {
   LayoutDashboard,
   UtensilsCrossed,
@@ -226,10 +227,14 @@ export default function AdminLayout() {
         </div>
       </aside>
 
-      {/* Main content — always has padding */}
-      <main className="flex-1 overflow-auto p-8">
-        <Outlet />
-      </main>
+      {/* Main content column — banner (if any) pinned above the
+          scrollable routed page so it's visible on every screen. */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <LicenseBanner />
+        <main className="flex-1 overflow-auto p-8">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
