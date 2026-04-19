@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Restaurant POS — Self-Hosted Web + Desktop Edition</title>
+    <meta name="description" content="A complete restaurant management suite — POS, KDS, QR ordering, inventory, multi-branch, and a public website. Self-hosted on your own VPS or cPanel; one-click installer; lifetime updates via the admin UI." />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      :root {
+        --ink: #0d0d0d;
+        --paper: #fafafa;
+        --line: #d4d4d8;
+        --accent: #c8ff00;
+        --muted: #71717a;
+      }
+      html { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; color: var(--ink); background: var(--paper); }
+      body { line-height: 1.6; }
+      .wrap { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+      header.hero { padding: 5rem 0 4rem; border-bottom: 2px solid var(--ink); }
+      header.hero h1 { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+      header.hero h1 span { background: var(--accent); padding: 0 0.4rem; }
+      header.hero p.tag { margin-top: 1.25rem; font-size: 1.15rem; color: var(--muted); max-width: 50ch; }
+      .ctas { margin-top: 2rem; display: flex; gap: 0.75rem; flex-wrap: wrap; }
+      .btn { display: inline-block; padding: 0.85rem 1.4rem; text-decoration: none; font-weight: 600; border: 2px solid var(--ink); }
+      .btn-primary { background: var(--ink); color: var(--paper); }
+      .btn-secondary { background: transparent; color: var(--ink); }
+      section { padding: 4rem 0; border-bottom: 1px solid var(--line); }
+      section h2 { font-size: 1.75rem; font-weight: 700; margin-bottom: 1.5rem; letter-spacing: -0.01em; }
+      section h3 { font-size: 1.1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+      .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.5rem; }
+      .feature { padding: 1.25rem; border: 1px solid var(--line); background: white; }
+      .feature h3 { margin-top: 0; font-size: 1rem; }
+      .feature p { font-size: 0.95rem; color: var(--muted); }
+      .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin-top: 1rem; }
+      .shot { aspect-ratio: 16 / 10; background: linear-gradient(135deg, #e4e4e7 0%, #f4f4f5 100%); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.85rem; text-align: center; padding: 1rem; }
+      table.matrix { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      table.matrix th, table.matrix td { border: 1px solid var(--line); padding: 0.6rem 0.85rem; text-align: left; font-size: 0.95rem; }
+      table.matrix th { background: white; font-weight: 600; }
+      table.matrix .check { color: #16a34a; font-weight: 700; }
+      table.matrix .x { color: #ef4444; }
+      details { margin: 0.5rem 0; padding: 0.85rem 1rem; border: 1px solid var(--line); background: white; }
+      details[open] { border-color: var(--ink); }
+      details summary { cursor: pointer; font-weight: 600; outline: none; }
+      details > *:not(summary) { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
+      pre { background: var(--ink); color: var(--paper); padding: 1rem; overflow-x: auto; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.85rem; }
+      code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: #f4f4f5; padding: 0.1rem 0.3rem; }
+      ul { padding-left: 1.5rem; margin: 0.5rem 0; }
+      ul li { margin: 0.25rem 0; }
+      footer { padding: 2.5rem 0; text-align: center; color: var(--muted); font-size: 0.9rem; }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="wrap">
+        <h1>One <span>POS</span> for the whole restaurant — no SaaS lock-in.</h1>
+        <p class="tag">
+          POS, kitchen display, QR self-order, inventory, multi-branch, and a public website.
+          You own the source. Self-host on a $6 VPS or shared cPanel. Updates via the admin UI.
+        </p>
+        <div class="ctas">
+          <a class="btn btn-primary" href="#install">View install guide</a>
+          <a class="btn btn-secondary" href="#features">See features</a>
+        </div>
+      </div>
+    </header>
+
+    <section id="screenshots">
+      <div class="wrap">
+        <h2>What it looks like</h2>
+        <p>Five apps in one codebase, all themable. Replace each placeholder with a screenshot of your install.</p>
+        <div class="shots">
+          <div class="shot">Admin dashboard<br />(reports + orders)</div>
+          <div class="shot">POS terminal<br />(touch-first cashier UI)</div>
+          <div class="shot">Kitchen display<br />(KDS / printer routes)</div>
+          <div class="shot">QR self-order<br />(scan-to-order PWA)</div>
+          <div class="shot">Public website<br />(menu + reservations)</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="wrap">
+        <h2>Everything in the box</h2>
+        <div class="features">
+          <div class="feature"><h3>POS terminal</h3><p>Touch-first cashier UI for dine-in, takeaway, and delivery. Discounts, coupons, split checks, void with manager OTP.</p></div>
+          <div class="feature"><h3>Kitchen Display (KDS)</h3><p>Per-station ticket queue, printer routing, ack/recall workflow. Each station has its own VAT toggle.</p></div>
+          <div class="feature"><h3>QR self-order</h3><p>Customer scans a table QR, browses the menu, sends the order to the kitchen. Optional Wi-Fi gate keeps it on-premise.</p></div>
+          <div class="feature"><h3>Inventory + recipes</h3><p>Ingredients, suppliers, purchase orders, returns, waste log, low-stock shopping list. Recipes auto-deduct ingredients on sale.</p></div>
+          <div class="feature"><h3>Pre-ready foods</h3><p>Production orders for items prepped in advance (sauces, doughs). Approval workflow with batch tracking.</p></div>
+          <div class="feature"><h3>Reports + accounts</h3><p>Daily / sales / void reports, expense tracking, multi-account ledger with payment-method linkage.</p></div>
+          <div class="feature"><h3>Staff + payroll</h3><p>Roles, attendance, leave, monthly payroll with approval workflow.</p></div>
+          <div class="feature"><h3>Multi-branch</h3><p>One install, many locations. Branch-scoped data with shared owners + reports.</p></div>
+          <div class="feature"><h3>Public website</h3><p>Built-in CMS for the restaurant's marketing site — menu, reservations, contact, branding.</p></div>
+          <div class="feature"><h3>POS Desktop (separate license)</h3><p>Optional Windows app for cashier terminals. Local SQLite cache, offline-tolerant, prints via the OS print system.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="requirements">
+      <div class="wrap">
+        <h2>What you need to host it</h2>
+        <table class="matrix">
+          <thead><tr><th>Component</th><th>Minimum</th><th>Recommended</th></tr></thead>
+          <tbody>
+            <tr><td>Node.js</td><td>22.x</td><td>22.x LTS</td></tr>
+            <tr><td>PostgreSQL</td><td>15</td><td>15 or 16</td></tr>
+            <tr><td>RAM</td><td>2 GB</td><td>4 GB</td></tr>
+            <tr><td>Disk</td><td>20 GB</td><td>40 GB SSD</td></tr>
+            <tr><td>OS</td><td>Ubuntu 22.04 / 24.04, or any Docker host</td><td>Ubuntu 24.04 LTS</td></tr>
+            <tr><td>SSL</td><td>Caddy auto-TLS (included), or your own nginx + certbot</td><td>Caddy auto-TLS</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="matrix">
+      <div class="wrap">
+        <h2>Web edition vs Desktop edition</h2>
+        <table class="matrix">
+          <thead><tr><th>Capability</th><th>Web edition</th><th>Desktop edition</th></tr></thead>
+          <tbody>
+            <tr><td>Admin dashboard + reports</td><td class="check">✓</td><td class="x">—</td></tr>
+            <tr><td>POS in any browser</td><td class="check">✓</td><td class="x">—</td></tr>
+            <tr><td>POS as a Windows app</td><td class="x">—</td><td class="check">✓</td></tr>
+            <tr><td>Kitchen Display</td><td class="check">✓</td><td class="x">—</td></tr>
+            <tr><td>QR self-order PWA</td><td class="check">✓</td><td class="x">—</td></tr>
+            <tr><td>Public website / CMS</td><td class="check">✓</td><td class="x">—</td></tr>
+            <tr><td>Local SQLite cache + offline mode</td><td class="x">—</td><td class="check">✓</td></tr>
+            <tr><td>Direct OS printing (no PrintNode)</td><td class="x">—</td><td class="check">✓</td></tr>
+            <tr><td>License binding</td><td>One license per domain</td><td>One license per Windows install</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:1rem;color:var(--muted);font-size:0.95rem;">Sold separately on CodeCanyon. Both halves talk to the same self-hosted backend.</p>
+      </div>
+    </section>
+
+    <section id="install">
+      <div class="wrap">
+        <h2>Install guide</h2>
+        <p>Three paths. All three end with the install wizard at <code>/admin</code>.</p>
+
+        <details>
+          <summary>1) Docker Compose (easiest, ~5 minutes)</summary>
+          <p>Best when your VPS already has Docker installed. The bundled compose file brings up the API, all SPAs, Postgres, and Caddy.</p>
+          <pre>tar -xzf restaurant-pos-v1.0.0.zip
+cd restaurant-pos-v1.0.0
+cp .env.example .env
+nano .env            # fill DATABASE_URL, JWT_SECRET, etc
+docker compose up -d
+# visit https://yourdomain.com/admin → run the install wizard</pre>
+        </details>
+
+        <details>
+          <summary>2) Ubuntu VPS (no Docker)</summary>
+          <p>Manual setup with PM2 + nginx. Good when you want full control.</p>
+          <pre># Node 22 + Postgres 15 + PM2
+sudo apt install nodejs postgresql nginx
+sudo npm install -g pm2 pnpm
+
+# Install + build
+tar -xzf restaurant-pos-v1.0.0.zip
+cd restaurant-pos-v1.0.0
+pnpm install --frozen-lockfile
+cp .env.example .env
+nano .env
+pnpm prisma migrate deploy
+pnpm db:seed:empty   # or db:seed:demo-light
+pnpm exec turbo run build
+
+# Start API + serve SPA dists via nginx
+pm2 start apps/api/dist/main.js --name pos-api
+sudo cp infra/nginx-example.conf /etc/nginx/sites-enabled/pos
+sudo systemctl reload nginx</pre>
+        </details>
+
+        <details>
+          <summary>3) cPanel (shared hosting with Node.js App Manager)</summary>
+          <p>Works on most cPanel hosts that ship Node 22. Uses your hosting provider's Postgres + nginx. See <code>docs/INSTALL.md</code> for the full step-by-step.</p>
+          <ul>
+            <li>Create a Node.js app (Node 22, document root → <code>apps/api/dist</code>).</li>
+            <li>Add a Postgres DB from cPanel's database tools.</li>
+            <li>Upload the zip via File Manager, extract.</li>
+            <li>SSH in once to <code>pnpm install</code> and <code>pnpm prisma migrate deploy</code>.</li>
+            <li>cPanel's Node App Manager handles starting the API; nginx serves the SPAs.</li>
+          </ul>
+        </details>
+      </div>
+    </section>
+
+    <section id="updates">
+      <div class="wrap">
+        <h2>Updates</h2>
+        <p>Two paths. Pick whichever fits your hosting.</p>
+        <ul>
+          <li><strong>Admin UI re-upload (recommended).</strong> Download the new release zip, upload it via Settings → Updates. The system takes a backup, applies migrations, swaps the running version, and rolls back automatically if the post-update health check fails.</li>
+          <li><strong>SSH update.</strong> Re-extract the zip over the install dir, run <code>pnpm install</code> + <code>pnpm prisma migrate deploy</code>, restart with <code>pm2 reload pos-api</code>.</li>
+        </ul>
+        <p>Either way: your custom branding, menu, customers, and order history stay put. Only the application code changes.</p>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="wrap">
+        <h2>FAQ</h2>
+
+        <details>
+          <summary>Do I need an internet connection?</summary>
+          <p>The license verification requires a quick internet check at activation and once per day to keep your install in "active" mode. If you go offline, you have a 7-day grace period during which everything keeps working. After 7 days offline, mutations are blocked but reads (reports, history) stay open.</p>
+        </details>
+
+        <details>
+          <summary>Can I run this on shared cPanel hosting?</summary>
+          <p>Yes, as long as your host supports Node.js 22 and Postgres 15. Most modern cPanel installs include both via the "Node.js App Manager" feature.</p>
+        </details>
+
+        <details>
+          <summary>How do customisations survive updates?</summary>
+          <p>Branding, menu, prices, staff, customers, and reports all live in the database — updates only touch application code. Theme overrides go in <code>apps/admin/src/styles/branding.css</code> which is preserved during admin-UI updates. For deeper code customisation, fork the repo and merge upstream changes manually.</p>
+        </details>
+
+        <details>
+          <summary>Does the license check phone home with my data?</summary>
+          <p>No. The license check sends only your purchase code, your domain, and an opaque machine fingerprint. Nothing about your menu, orders, or customers leaves your server. Source for the verification client ships with the product — you can read every line.</p>
+        </details>
+
+        <details>
+          <summary>What happens if your license server goes down?</summary>
+          <p>Your install keeps working for up to 7 days on its cached license proof. The proof is signed with a key bundled at build time, so even if our server is unreachable you can still operate normally.</p>
+        </details>
+
+        <details>
+          <summary>Can I move my install to a new domain?</summary>
+          <p>Yes. From the admin UI, deactivate the license (releases the seat), then activate again on the new domain. Each license can only be on one domain at a time.</p>
+        </details>
+
+        <details>
+          <summary>Do I get the source code?</summary>
+          <p>Yes — the full TypeScript source for the API, admin, POS, KDS, QR-order PWA, and public website. Not minified, not obfuscated. Modify freely under the CodeCanyon Regular or Extended license terms (see <code>LICENSE.txt</code>).</p>
+        </details>
+
+        <details>
+          <summary>Is the POS Desktop edition included?</summary>
+          <p>No — it's a separate purchase. Buy the desktop edition if you want the Windows app for cashier terminals. The web edition's POS works fine in any browser, including a wall-mounted touch screen running Chrome in kiosk mode.</p>
+        </details>
+
+        <details>
+          <summary>How do I get support?</summary>
+          <p>Use the CodeCanyon item's comment thread for general questions, or open a support ticket via the link in the item description. Custom development isn't included with the regular license.</p>
+        </details>
+
+        <details>
+          <summary>Can I run this multi-tenant for several restaurants?</summary>
+          <p>Each install is single-tenant by design. To run a SaaS service yourself with this, you'd need an Extended license per tenant. Most buyers use the multi-branch feature instead — one install can support many physical locations under the same owner.</p>
+        </details>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">
+        <p>© 2026 — Restaurant POS Web edition. License terms in <code>LICENSE.txt</code>.</p>
+      </div>
+    </footer>
+  </body>
+</html>
