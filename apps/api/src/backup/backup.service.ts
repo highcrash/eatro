@@ -221,6 +221,26 @@ export class BackupService {
     return { success: true, restored: Object.fromEntries(BACKUP_MODELS.map((m) => [m.accessor, payload.data[m.accessor]?.length ?? 0])) };
   }
 
+  /**
+   * Internal restore — used by the in-app updater's rollback path.
+   * Skips the OWNER password check that the public restore() requires,
+   * because the updater has already authenticated + authorized the
+   * caller at the controller layer (OWNER role + JWT). Not exposed via
+   * any HTTP route.
+   */
+  async restoreFromBackupId(recordId: string): Promise<void> {
+    const rec = await this.prisma.backupRecord.findUnique({ where: { id: recordId } });
+    if (!rec) throw new NotFoundException(`Backup ${recordId} not found`);
+    const compressed = await fs.readFile(join(BACKUP_DIR, rec.filename));
+    const decompressed = await gunzip(compressed);
+    const payload = JSON.parse(decompressed.toString('utf8')) as { version: number; data: Record<string, any[]> };
+    if (!payload.version || payload.version > BACKUP_FILE_VERSION) {
+      throw new BadRequestException(`Unsupported backup version: ${payload.version}`);
+    }
+    await this.applyRestore(payload.data);
+    this.logger.warn(`Database restored from backup ${recordId} (internal — no password check)`);
+  }
+
   private async applyRestore(data: Record<string, any[]>) {
     const tables = BACKUP_MODELS.map((m) => `"${m.table}"`).join(', ');
     try {

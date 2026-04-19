@@ -229,24 +229,14 @@ export class UpdaterService {
       throw new BadRequestException('Previous version tree has been cleaned up — rollback not possible.');
     }
 
-    // 1. Restore DB.
+    // 1. Restore DB. Calls BackupService's internal restore path
+    // (no password check — the controller already enforced JWT + OWNER).
     if (row.backupRecordId) {
       this.logger.log(`rollback ${updateId}: restoring DB from backup ${row.backupRecordId}…`);
-      // BackupService.restore signature takes { recordId, ownerId, password }.
-      // Rolling back is OWNER-level action already guarded at the controller.
-      // We use a reserved password 'ROLLBACK_BYPASS_<id>' that the backup
-      // service accepts on an internal code path; this is mutual-trust
-      // inside one process, not a security boundary.
-      // For simplicity here we only support the happy restore path —
-      // full error handling is in backup.service.
-      await this.backup.restore({
-        recordId: row.backupRecordId,
-        ownerId: row.uploadedById ?? 'updater-rollback',
-        password: 'ROLLBACK_BYPASS_' + row.id,
-      }).catch((err) => {
+      await this.backup.restoreFromBackupId(row.backupRecordId).catch((err) => {
         this.logger.error(`rollback DB restore failed: ${err.message}`);
         throw new BadRequestException(
-          `DB restore failed: ${err.message}. The file swap will still proceed; contact support.`,
+          `DB restore failed: ${err.message}. File swap aborted; the install remains on the new version.`,
         );
       });
     }
