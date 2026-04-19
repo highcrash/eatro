@@ -128,10 +128,15 @@ export default function InstallWizard() {
                     brandName: flow.brand.brandName || undefined,
                     supportEmail: flow.brand.supportEmail || undefined,
                   });
-                  // Hard reload so the LicenseGuard + any cached query
-                  // state rehydrate with installedAt=now. Next render:
-                  // the app shows the login page instead of the wizard.
-                  window.location.href = '/';
+                  // Reload IN PLACE so the LicenseGuard + any cached
+                  // query state rehydrate with installedAt=now. Prior
+                  // version used `window.location.href = '/'` which
+                  // redirected buyers mounted at a subpath (e.g.
+                  // /admin/) to the public website at root. Stay on
+                  // whatever URL served the wizard — the App.tsx
+                  // /install/status fetch re-runs on mount and
+                  // renders the login page instead of the wizard.
+                  window.location.reload();
                 })
               }
               onBack={flow.back}
