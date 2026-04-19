@@ -140,14 +140,11 @@ step('stage app artefacts', () => {
     const targetDir = join(STAGE, 'packages/license-client');
     mkdirSync(targetDir, { recursive: true });
 
-    // Filter: strip node_modules, built dist (will be regenerated
-    // by the buyer's pnpm install via the `prepare: tsc` hook), and
-    // test files (buyers don't need *.spec.ts / __tests__ / .test.ts
-    // — those also contain internal brand references like the test
-    // SKU that trip the secret scanner).
+    // Filter: strip node_modules + tests + spec files. Keep dist —
+    // we PRE-BUILD it below so the buyer's pnpm install --prod
+    // doesn't need typescript (devDep) or the prepare hook to run.
     const vendorFilter = (p) =>
       !p.includes('node_modules') &&
-      !p.includes(`${sep}dist${sep}`) &&
       !/\.(spec|test)\.ts$/i.test(p) &&
       !p.includes(`${sep}__tests__${sep}`);
 
@@ -170,14 +167,37 @@ step('stage app artefacts', () => {
       rmSync(tmp, { recursive: true, force: true });
     }
 
+    // Pre-build dist/ at packager time. Buyer's `pnpm install --prod`
+    // strips devDeps (typescript), so the `prepare: tsc` hook would
+    // fail if we shipped source-only. Building here means the buyer
+    // just links the pre-built file: dep and we're done.
+    if (!existsSync(join(targetDir, 'dist', 'index.js'))) {
+      console.log('    building license-client dist…');
+      // Run tsc via the source's own node_modules if the seller has
+      // NEAWASLIC_LOCAL; otherwise install tsc in the temp stage.
+      if (process.env.NEAWASLIC_LOCAL) {
+        // Run the build in the local checkout and copy dist over.
+        sh(`pnpm --filter @restora/license-client build`, { cwd: process.env.NEAWASLIC_LOCAL });
+        cpSync(
+          join(process.env.NEAWASLIC_LOCAL, 'packages/license-client/dist'),
+          join(targetDir, 'dist'),
+          { recursive: true },
+        );
+      } else {
+        // The git-clone branch already placed src/ here. tsc needs a
+        // local install — use npx to fetch it ephemerally.
+        sh(`npx -y typescript@5 tsc -p tsconfig.json`, { cwd: targetDir });
+      }
+    }
+
     // Same inner-package.json rewrite as the other shipped workspace
-    // packages: drop devDeps, no scripts, no workspace: refs.
+    // packages: drop devDeps, drop scripts (including the `prepare`
+    // hook — we already built dist/ above, no need to re-run tsc on
+    // the buyer's machine).
     const innerPkgPath = join(targetDir, 'package.json');
     const innerPkg = JSON.parse(readFileSync(innerPkgPath, 'utf8'));
     delete innerPkg.devDependencies;
-    // Keep the `prepare: tsc` script — buyers' pnpm install will run
-    // it to produce dist/ on their machine. The `onlyBuiltDependencies`
-    // allowlist on the staged root package.json permits this.
+    delete innerPkg.scripts;
     if (innerPkg.dependencies) {
       for (const dk of Object.keys(innerPkg.dependencies)) {
         if (typeof innerPkg.dependencies[dk] === 'string' && innerPkg.dependencies[dk].startsWith('workspace:')) {
@@ -475,7 +495,29 @@ echo "=== install.sh \$(date -u --iso-8601=seconds) ===" >> "\$LOG"
 [ "\$(id -u)" -eq 0 ] || die "Run as root (or use \\\`sudo bash install.sh\\\`)."
 
 INSTALL_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-cd "\$INSTALL_DIR"
+
+# Guard: nginx runs as www-data and can't traverse /root (mode 700).
+# If the buyer extracted into /root, relocate to /opt/restaurant-pos
+# BEFORE any work — after the install it's too late (DB, pm2 state,
+# nginx config all point at the wrong path). Uses rsync for a clean
+# move without nuking .env from a re-run.
+case "\$INSTALL_DIR" in
+  /root|/root/*)
+    TARGET="/opt/restaurant-pos"
+    warn "You extracted into \$INSTALL_DIR — nginx can't serve from /root (permission denied)."
+    info "Relocating to \$TARGET…"
+    mkdir -p "\$TARGET"
+    # cp -a preserves perms; keep any existing .env if the buyer
+    # already edited one in /opt during a prior run.
+    cp -a "\$INSTALL_DIR/." "\$TARGET/"
+    cd "\$TARGET"
+    INSTALL_DIR="\$TARGET"
+    ok "Relocated. Continuing from \$INSTALL_DIR."
+    ;;
+  *)
+    cd "\$INSTALL_DIR"
+    ;;
+esac
 
 # ─── mode detection ───────────────────────────────────────────────────
 MODE=""
