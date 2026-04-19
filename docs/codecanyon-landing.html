@@ -5,260 +5,937 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Restaurant POS — Self-Hosted Web + Desktop Edition</title>
     <meta name="description" content="A complete restaurant management suite — POS, KDS, QR ordering, inventory, multi-branch, and a public website. Self-hosted on your own VPS or cPanel; one-click installer; lifetime updates via the admin UI." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
+      *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
       :root {
-        --ink: #0d0d0d;
-        --paper: #fafafa;
-        --line: #d4d4d8;
-        --accent: #c8ff00;
-        --muted: #71717a;
+        --ink: #0a0a0a;
+        --paper: #ffffff;
+        --bg: #fafafa;
+        --line: #e4e4e7;
+        --line-strong: #a1a1aa;
+        --muted: #52525b;
+        --muted-2: #71717a;
+        --accent: #6366f1;      /* indigo */
+        --accent-2: #8b5cf6;    /* violet */
+        --accent-lime: #a3e635; /* lime */
+        --accent-green: #10b981;
+        --accent-red: #ef4444;
+        --accent-amber: #f59e0b;
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+        --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+        --shadow-lg: 0 20px 40px -12px rgba(0,0,0,0.18);
+        --radius: 10px;
       }
-      html { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; color: var(--ink); background: var(--paper); }
-      body { line-height: 1.6; }
-      .wrap { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
-      header.hero { padding: 5rem 0 4rem; border-bottom: 2px solid var(--ink); }
-      header.hero h1 { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
-      header.hero h1 span { background: var(--accent); padding: 0 0.4rem; }
-      header.hero p.tag { margin-top: 1.25rem; font-size: 1.15rem; color: var(--muted); max-width: 50ch; }
-      .ctas { margin-top: 2rem; display: flex; gap: 0.75rem; flex-wrap: wrap; }
-      .btn { display: inline-block; padding: 0.85rem 1.4rem; text-decoration: none; font-weight: 600; border: 2px solid var(--ink); }
-      .btn-primary { background: var(--ink); color: var(--paper); }
-      .btn-secondary { background: transparent; color: var(--ink); }
-      section { padding: 4rem 0; border-bottom: 1px solid var(--line); }
-      section h2 { font-size: 1.75rem; font-weight: 700; margin-bottom: 1.5rem; letter-spacing: -0.01em; }
-      section h3 { font-size: 1.1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
-      .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.5rem; }
-      .feature { padding: 1.25rem; border: 1px solid var(--line); background: white; }
-      .feature h3 { margin-top: 0; font-size: 1rem; }
-      .feature p { font-size: 0.95rem; color: var(--muted); }
-      .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin-top: 1rem; }
-      .shot { aspect-ratio: 16 / 10; background: linear-gradient(135deg, #e4e4e7 0%, #f4f4f5 100%); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.85rem; text-align: center; padding: 1rem; }
-      table.matrix { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-      table.matrix th, table.matrix td { border: 1px solid var(--line); padding: 0.6rem 0.85rem; text-align: left; font-size: 0.95rem; }
-      table.matrix th { background: white; font-weight: 600; }
-      table.matrix .check { color: #16a34a; font-weight: 700; }
-      table.matrix .x { color: #ef4444; }
-      details { margin: 0.5rem 0; padding: 0.85rem 1rem; border: 1px solid var(--line); background: white; }
-      details[open] { border-color: var(--ink); }
-      details summary { cursor: pointer; font-weight: 600; outline: none; }
-      details > *:not(summary) { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
-      pre { background: var(--ink); color: var(--paper); padding: 1rem; overflow-x: auto; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.85rem; }
-      code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: #f4f4f5; padding: 0.1rem 0.3rem; }
-      ul { padding-left: 1.5rem; margin: 0.5rem 0; }
-      ul li { margin: 0.25rem 0; }
-      footer { padding: 2.5rem 0; text-align: center; color: var(--muted); font-size: 0.9rem; }
+      html { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; color: var(--ink); background: var(--bg); scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+      body { line-height: 1.55; }
+      .wrap { max-width: 1160px; margin: 0 auto; padding: 0 1.5rem; }
+
+      /* ─── NAV ─── */
+      nav.top { position: sticky; top: 0; z-index: 50; background: rgba(255,255,255,0.9); backdrop-filter: saturate(180%) blur(20px); border-bottom: 1px solid var(--line); }
+      nav.top .inner { display: flex; align-items: center; justify-content: space-between; padding: 0.9rem 0; }
+      nav.top .logo { display: flex; align-items: center; gap: 0.6rem; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; }
+      nav.top .logo-mark { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%); display: grid; place-items: center; color: white; font-weight: 900; font-size: 0.8rem; }
+      nav.top .links { display: flex; gap: 1.75rem; font-size: 0.93rem; font-weight: 500; color: var(--muted); }
+      nav.top .links a { color: inherit; text-decoration: none; transition: color 0.15s; }
+      nav.top .links a:hover { color: var(--ink); }
+      @media (max-width: 720px) { nav.top .links { display: none; } }
+
+      /* ─── HERO ─── */
+      header.hero { position: relative; padding: 6rem 0 5rem; overflow: hidden; }
+      header.hero::before { content: ''; position: absolute; inset: 0; background:
+        radial-gradient(circle at 15% -10%, rgba(99,102,241,0.12), transparent 50%),
+        radial-gradient(circle at 85% 30%, rgba(139,92,246,0.10), transparent 50%),
+        radial-gradient(circle at 50% 110%, rgba(163,230,53,0.08), transparent 50%);
+        pointer-events: none; }
+      .pill { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.85rem; border-radius: 100px; font-size: 0.78rem; font-weight: 600; border: 1px solid var(--line); background: var(--paper); box-shadow: var(--shadow-sm); }
+      .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 0 3px rgba(16,185,129,0.2); }
+      header.hero h1 { font-size: clamp(2.5rem, 6vw, 4rem); font-weight: 900; letter-spacing: -0.035em; line-height: 1.05; margin-top: 1.25rem; max-width: 20ch; }
+      header.hero h1 .grad { background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+      header.hero p.lead { margin-top: 1.25rem; font-size: 1.2rem; color: var(--muted); max-width: 52ch; line-height: 1.55; }
+      .ctas { margin-top: 2.25rem; display: flex; gap: 0.85rem; flex-wrap: wrap; }
+      .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.95rem 1.6rem; text-decoration: none; font-weight: 600; border-radius: var(--radius); font-size: 0.97rem; border: 1px solid transparent; transition: transform 0.12s, box-shadow 0.2s; }
+      .btn-primary { background: var(--ink); color: var(--paper); box-shadow: var(--shadow-md); }
+      .btn-primary:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+      .btn-secondary { background: var(--paper); color: var(--ink); border-color: var(--line); }
+      .btn-secondary:hover { border-color: var(--ink); transform: translateY(-1px); }
+      .trust-row { margin-top: 3rem; display: flex; align-items: center; gap: 2rem; flex-wrap: wrap; font-size: 0.87rem; color: var(--muted); }
+      .trust-row .sep { width: 1px; height: 18px; background: var(--line-strong); }
+      .trust-row strong { color: var(--ink); font-weight: 700; }
+
+      /* ─── HERO PRODUCT SHOT ─── */
+      .hero-shot { margin-top: 4rem; position: relative; }
+      .browser-frame { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-lg); overflow: hidden; }
+      .browser-bar { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 1rem; background: #f4f4f5; border-bottom: 1px solid var(--line); }
+      .browser-dots { display: flex; gap: 0.4rem; }
+      .browser-dots span { width: 11px; height: 11px; border-radius: 50%; }
+      .browser-dots span:nth-child(1) { background: #ff5f56; }
+      .browser-dots span:nth-child(2) { background: #ffbd2e; }
+      .browser-dots span:nth-child(3) { background: #27c93f; }
+      .browser-url { flex: 1; background: var(--paper); border: 1px solid var(--line); border-radius: 7px; padding: 0.3rem 0.75rem; font-size: 0.78rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+      /* SVG product shots */
+      .product-svg { width: 100%; display: block; }
+      .product-svg.admin { aspect-ratio: 16 / 9; background: #fafafa; }
+      .product-svg.pos   { aspect-ratio: 16 / 10; background: #0a0a0a; }
+      .product-svg.qr    { aspect-ratio: 9 / 16; background: #0a0a0a; max-width: 280px; margin: 0 auto; }
+      .product-svg.kds   { aspect-ratio: 16 / 10; background: #fafafa; }
+
+      /* ─── SECTIONS ─── */
+      section { padding: 5rem 0; }
+      section.tinted { background: var(--paper); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+      section h2 { font-size: clamp(1.8rem, 3vw, 2.4rem); font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; margin-bottom: 0.6rem; }
+      section .eyebrow { color: var(--accent); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.6rem; }
+      section p.sub { font-size: 1.08rem; color: var(--muted); max-width: 55ch; margin-bottom: 3rem; }
+
+      /* ─── STATS ─── */
+      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-top: 1rem; }
+      .stat { padding: 1.75rem 1.5rem; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); }
+      .stat .num { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.03em; background: linear-gradient(135deg, var(--ink) 0%, var(--accent) 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+      .stat .label { font-size: 0.88rem; color: var(--muted); margin-top: 0.3rem; }
+
+      /* ─── FEATURE GRID ─── */
+      .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 1rem; }
+      .feature { padding: 1.75rem; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); transition: transform 0.15s, box-shadow 0.2s, border-color 0.2s; }
+      .feature:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--line-strong); }
+      .feature .icon { width: 38px; height: 38px; border-radius: 9px; display: grid; place-items: center; margin-bottom: 1rem; }
+      .feature .icon svg { width: 20px; height: 20px; }
+      .feature h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.35rem; letter-spacing: -0.01em; }
+      .feature p { font-size: 0.93rem; color: var(--muted); line-height: 1.5; }
+      .feat-c1 .icon { background: #eef2ff; color: var(--accent); }
+      .feat-c2 .icon { background: #f5f3ff; color: var(--accent-2); }
+      .feat-c3 .icon { background: #ecfdf5; color: var(--accent-green); }
+      .feat-c4 .icon { background: #fef3c7; color: var(--accent-amber); }
+      .feat-c5 .icon { background: #fef2f2; color: var(--accent-red); }
+      .feat-c6 .icon { background: #ecfeff; color: #0891b2; }
+
+      /* ─── PRODUCT SHOWCASE ROWS ─── */
+      .showcase-row { display: grid; grid-template-columns: 1fr 1.5fr; gap: 3rem; align-items: center; padding: 4rem 0; border-top: 1px solid var(--line); }
+      .showcase-row:first-child { border-top: none; padding-top: 0; }
+      .showcase-row.reverse { grid-template-columns: 1.5fr 1fr; }
+      .showcase-row.reverse .copy { order: 2; }
+      .showcase-row .copy .eyebrow { margin-bottom: 0.75rem; }
+      .showcase-row .copy h3 { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 0.75rem; }
+      .showcase-row .copy p { color: var(--muted); font-size: 1rem; margin-bottom: 1rem; }
+      .showcase-row .copy ul.check { list-style: none; }
+      .showcase-row .copy ul.check li { display: flex; gap: 0.55rem; padding: 0.3rem 0; font-size: 0.95rem; }
+      .showcase-row .copy ul.check li::before { content: '✓'; color: var(--accent-green); font-weight: 700; flex-shrink: 0; }
+      @media (max-width: 820px) {
+        .showcase-row { grid-template-columns: 1fr; gap: 1.5rem; }
+        .showcase-row.reverse .copy { order: 0; }
+      }
+
+      /* ─── MATRIX ─── */
+      table.matrix { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 1.25rem; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+      table.matrix th, table.matrix td { padding: 0.85rem 1rem; text-align: left; font-size: 0.95rem; border-bottom: 1px solid var(--line); }
+      table.matrix tr:last-child th, table.matrix tr:last-child td { border-bottom: none; }
+      table.matrix th { background: #fafafa; font-weight: 700; }
+      table.matrix .check { color: var(--accent-green); font-weight: 700; font-size: 1.05rem; }
+      table.matrix .x { color: #d4d4d8; font-size: 1.05rem; }
+      table.matrix td:first-child { font-weight: 500; }
+
+      /* ─── PRICING ─── */
+      .pricing { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; margin-top: 1rem; }
+      .tier { padding: 2rem; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; position: relative; }
+      .tier.featured { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(99,102,241,0.08), var(--shadow-md); }
+      .tier .badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); padding: 0.3rem 0.85rem; border-radius: 100px; font-size: 0.72rem; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; letter-spacing: 0.02em; }
+      .tier h4 { font-size: 1.15rem; font-weight: 800; margin-bottom: 0.4rem; }
+      .tier .tagline { font-size: 0.9rem; color: var(--muted); margin-bottom: 1.25rem; min-height: 2.5em; }
+      .tier .price { font-size: 2.5rem; font-weight: 900; letter-spacing: -0.03em; margin-bottom: 0.25rem; }
+      .tier .price small { font-size: 0.9rem; color: var(--muted); font-weight: 500; margin-left: 0.3rem; }
+      .tier ul { list-style: none; margin: 1.25rem 0; }
+      .tier ul li { font-size: 0.92rem; padding: 0.32rem 0; color: var(--muted); display: flex; gap: 0.55rem; }
+      .tier ul li::before { content: '✓'; color: var(--accent-green); font-weight: 700; }
+      .tier ul li.absent { color: #d4d4d8; }
+      .tier ul li.absent::before { content: '—'; color: #d4d4d8; }
+
+      /* ─── FAQ ─── */
+      details { padding: 1.1rem 1.25rem; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); margin: 0.5rem 0; transition: border-color 0.15s; }
+      details[open] { border-color: var(--accent); }
+      details summary { cursor: pointer; font-weight: 600; outline: none; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 1rem; font-size: 0.98rem; }
+      details summary::-webkit-details-marker { display: none; }
+      details summary::after { content: '+'; font-size: 1.3rem; font-weight: 400; color: var(--muted); transition: transform 0.2s; }
+      details[open] summary::after { content: '−'; color: var(--accent); transform: rotate(0deg); }
+      details > *:not(summary) { margin-top: 0.85rem; font-size: 0.95rem; color: var(--muted); line-height: 1.6; }
+
+      /* ─── INSTALL SNIPPETS ─── */
+      .install-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+      .install-card { padding: 1.75rem; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); }
+      .install-card .num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: var(--ink); color: var(--paper); border-radius: 7px; font-weight: 700; font-size: 0.85rem; margin-bottom: 0.85rem; }
+      .install-card h4 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.3rem; }
+      .install-card p.desc { font-size: 0.9rem; color: var(--muted); margin-bottom: 1rem; }
+      pre { background: var(--ink); color: #e4e4e7; padding: 1rem; border-radius: 7px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.81rem; line-height: 1.55; }
+      pre .cmt { color: #71717a; }
+      pre .str { color: var(--accent-lime); }
+
+      /* ─── FINAL CTA ─── */
+      section.final-cta { background: linear-gradient(135deg, var(--ink) 0%, #1a1a1a 100%); color: var(--paper); text-align: center; border: none; margin-top: 4rem; }
+      section.final-cta h2 { font-size: clamp(1.8rem, 3vw, 2.6rem); color: var(--paper); margin-bottom: 1rem; }
+      section.final-cta p { font-size: 1.1rem; color: #a1a1aa; margin-bottom: 2rem; max-width: 50ch; margin-left: auto; margin-right: auto; }
+      section.final-cta .btn-primary { background: var(--paper); color: var(--ink); }
+      section.final-cta .btn-secondary { background: transparent; color: var(--paper); border-color: #3f3f46; }
+      section.final-cta .btn-secondary:hover { border-color: var(--paper); }
+
+      footer { padding: 2.5rem 0; text-align: center; color: var(--muted-2); font-size: 0.88rem; border-top: 1px solid var(--line); }
+      footer a { color: var(--muted); }
     </style>
   </head>
   <body>
+
+    <nav class="top">
+      <div class="wrap inner">
+        <div class="logo">
+          <div class="logo-mark">R</div>
+          <span>Restaurant POS</span>
+        </div>
+        <div class="links">
+          <a href="#features">Features</a>
+          <a href="#showcase">Screens</a>
+          <a href="#install">Install</a>
+          <a href="#pricing">Editions</a>
+          <a href="#faq">FAQ</a>
+        </div>
+        <a class="btn btn-primary" style="padding:0.55rem 1.1rem;font-size:0.88rem;" href="#install">Get started →</a>
+      </div>
+    </nav>
+
+    <!-- ════════════════════════════ HERO ════════════════════════════ -->
     <header class="hero">
       <div class="wrap">
-        <h1>One <span>POS</span> for the whole restaurant — no SaaS lock-in.</h1>
-        <p class="tag">
-          POS, kitchen display, QR self-order, inventory, multi-branch, and a public website.
-          You own the source. Self-host on a $6 VPS or shared cPanel. Updates via the admin UI.
+        <span class="pill"><span class="dot"></span> Version 1.0 · Self-hosted · No SaaS fees</span>
+        <h1>Run your restaurant on software <span class="grad">you actually own.</span></h1>
+        <p class="lead">
+          A full restaurant management suite — POS, kitchen display, QR self-order, inventory,
+          multi-branch, and a public website. Host it on a $6 VPS. Pay once. No per-order fees,
+          no per-staff seats, no lock-in.
         </p>
         <div class="ctas">
-          <a class="btn btn-primary" href="#install">View install guide</a>
-          <a class="btn btn-secondary" href="#features">See features</a>
+          <a class="btn btn-primary" href="#install">View install guide →</a>
+          <a class="btn btn-secondary" href="#showcase">See it in action</a>
+        </div>
+        <div class="trust-row">
+          <span><strong>10-min</strong> install wizard</span>
+          <span class="sep"></span>
+          <span><strong>7-day</strong> offline grace</span>
+          <span class="sep"></span>
+          <span><strong>Full source</strong> included</span>
+          <span class="sep"></span>
+          <span><strong>Lifetime</strong> updates via admin UI</span>
+        </div>
+
+        <!-- Hero product shot: inline SVG admin dashboard -->
+        <div class="hero-shot">
+          <div class="browser-frame">
+            <div class="browser-bar">
+              <div class="browser-dots"><span></span><span></span><span></span></div>
+              <div class="browser-url">🔒 yourdomain.com/admin/dashboard</div>
+            </div>
+            <svg class="product-svg admin" viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+              <!-- Sidebar -->
+              <rect x="0" y="0" width="240" height="900" fill="#0a0a0a" />
+              <rect x="24" y="32" width="180" height="36" rx="7" fill="#27272a" />
+              <text x="48" y="56" fill="#fafafa" font-family="Inter" font-size="15" font-weight="700">Your Restaurant</text>
+              <!-- Nav items -->
+              <g font-family="Inter" font-size="13" fill="#a1a1aa">
+                <rect x="16" y="110" width="208" height="34" rx="7" fill="#6366f1" />
+                <text x="56" y="132" fill="#fff" font-weight="600">Dashboard</text>
+                <text x="56" y="176">Orders</text>
+                <text x="56" y="212">Menu</text>
+                <text x="56" y="248">Inventory</text>
+                <text x="56" y="284">Suppliers</text>
+                <text x="56" y="320">Purchases</text>
+                <text x="56" y="356">Reports</text>
+                <text x="56" y="392">Staff</text>
+                <text x="56" y="428">Customers</text>
+                <text x="56" y="464">Accounts</text>
+                <text x="56" y="500">Branches</text>
+                <text x="56" y="536">Settings</text>
+              </g>
+              <!-- Nav dot markers -->
+              <g fill="#a1a1aa">
+                <circle cx="32" cy="172" r="4" />
+                <circle cx="32" cy="208" r="4" />
+                <circle cx="32" cy="244" r="4" />
+                <circle cx="32" cy="280" r="4" />
+                <circle cx="32" cy="316" r="4" />
+                <circle cx="32" cy="352" r="4" />
+                <circle cx="32" cy="388" r="4" />
+                <circle cx="32" cy="424" r="4" />
+                <circle cx="32" cy="460" r="4" />
+                <circle cx="32" cy="496" r="4" />
+                <circle cx="32" cy="532" r="4" />
+              </g>
+              <circle cx="32" cy="128" r="4" fill="#fff" />
+
+              <!-- Main content header -->
+              <text x="280" y="64" font-family="Inter" font-size="24" font-weight="800" fill="#0a0a0a">Dashboard</text>
+              <text x="280" y="92" font-family="Inter" font-size="13" fill="#71717a">Thursday, April 18 — Main Branch</text>
+              <rect x="1360" y="44" width="220" height="36" rx="7" fill="#fff" stroke="#e4e4e7" />
+              <text x="1380" y="68" font-family="Inter" font-size="13" fill="#71717a">Search orders, items…</text>
+
+              <!-- KPI cards -->
+              <g>
+                <rect x="280" y="128" width="300" height="120" rx="10" fill="#fff" stroke="#e4e4e7" />
+                <text x="304" y="160" font-family="Inter" font-size="12" fill="#71717a" font-weight="600">TODAY'S REVENUE</text>
+                <text x="304" y="200" font-family="Inter" font-size="30" font-weight="800" fill="#0a0a0a">$4,287</text>
+                <text x="304" y="228" font-family="Inter" font-size="12" fill="#10b981" font-weight="600">▲ 12% vs yesterday</text>
+
+                <rect x="600" y="128" width="300" height="120" rx="10" fill="#fff" stroke="#e4e4e7" />
+                <text x="624" y="160" font-family="Inter" font-size="12" fill="#71717a" font-weight="600">ORDERS</text>
+                <text x="624" y="200" font-family="Inter" font-size="30" font-weight="800" fill="#0a0a0a">142</text>
+                <text x="624" y="228" font-family="Inter" font-size="12" fill="#10b981" font-weight="600">▲ 8% vs yesterday</text>
+
+                <rect x="920" y="128" width="300" height="120" rx="10" fill="#fff" stroke="#e4e4e7" />
+                <text x="944" y="160" font-family="Inter" font-size="12" fill="#71717a" font-weight="600">AVG TICKET</text>
+                <text x="944" y="200" font-family="Inter" font-size="30" font-weight="800" fill="#0a0a0a">$30.19</text>
+                <text x="944" y="228" font-family="Inter" font-size="12" fill="#ef4444" font-weight="600">▼ 2% vs yesterday</text>
+
+                <rect x="1240" y="128" width="340" height="120" rx="10" fill="#fff" stroke="#e4e4e7" />
+                <text x="1264" y="160" font-family="Inter" font-size="12" fill="#71717a" font-weight="600">ACTIVE TABLES</text>
+                <text x="1264" y="200" font-family="Inter" font-size="30" font-weight="800" fill="#0a0a0a">18 / 24</text>
+                <text x="1264" y="228" font-family="Inter" font-size="12" fill="#6366f1" font-weight="600">3 waiting for bill</text>
+              </g>
+
+              <!-- Chart -->
+              <rect x="280" y="272" width="940" height="420" rx="10" fill="#fff" stroke="#e4e4e7" />
+              <text x="304" y="304" font-family="Inter" font-size="15" fill="#0a0a0a" font-weight="700">Sales this week</text>
+              <text x="304" y="324" font-family="Inter" font-size="12" fill="#71717a">Revenue by hour, Apr 14–20</text>
+              <!-- Chart bars -->
+              <g>
+                <rect x="320" y="560" width="40" height="80" rx="4" fill="#6366f1" opacity="0.2" />
+                <rect x="380" y="520" width="40" height="120" rx="4" fill="#6366f1" opacity="0.3" />
+                <rect x="440" y="470" width="40" height="170" rx="4" fill="#6366f1" opacity="0.4" />
+                <rect x="500" y="440" width="40" height="200" rx="4" fill="#6366f1" opacity="0.5" />
+                <rect x="560" y="400" width="40" height="240" rx="4" fill="#6366f1" opacity="0.6" />
+                <rect x="620" y="370" width="40" height="270" rx="4" fill="#6366f1" opacity="0.7" />
+                <rect x="680" y="390" width="40" height="250" rx="4" fill="#6366f1" opacity="0.7" />
+                <rect x="740" y="420" width="40" height="220" rx="4" fill="#6366f1" opacity="0.6" />
+                <rect x="800" y="450" width="40" height="190" rx="4" fill="#6366f1" opacity="0.5" />
+                <rect x="860" y="430" width="40" height="210" rx="4" fill="#6366f1" opacity="0.5" />
+                <rect x="920" y="400" width="40" height="240" rx="4" fill="#6366f1" opacity="0.6" />
+                <rect x="980" y="370" width="40" height="270" rx="4" fill="#6366f1" opacity="0.7" />
+                <rect x="1040" y="350" width="40" height="290" rx="4" fill="#6366f1" opacity="0.8" />
+                <rect x="1100" y="320" width="40" height="320" rx="4" fill="#6366f1" />
+                <rect x="1160" y="360" width="40" height="280" rx="4" fill="#6366f1" opacity="0.75" />
+              </g>
+              <line x1="310" y1="640" x2="1200" y2="640" stroke="#e4e4e7" />
+
+              <!-- Recent orders panel -->
+              <rect x="1240" y="272" width="340" height="420" rx="10" fill="#fff" stroke="#e4e4e7" />
+              <text x="1264" y="304" font-family="Inter" font-size="15" fill="#0a0a0a" font-weight="700">Recent orders</text>
+              <g font-family="Inter" font-size="12">
+                <rect x="1264" y="324" width="292" height="56" rx="7" fill="#fafafa" />
+                <text x="1280" y="348" fill="#0a0a0a" font-weight="700">#1042 · Table 7</text>
+                <text x="1280" y="368" fill="#71717a">2× Burger, Fries, Coke</text>
+                <text x="1520" y="348" fill="#10b981" font-weight="700" text-anchor="end">$42.50</text>
+                <text x="1520" y="368" fill="#71717a" text-anchor="end">PAID</text>
+
+                <rect x="1264" y="390" width="292" height="56" rx="7" fill="#fafafa" />
+                <text x="1280" y="414" fill="#0a0a0a" font-weight="700">#1041 · QR-Table 3</text>
+                <text x="1280" y="434" fill="#71717a">Salad, Mojito, Tiramisu</text>
+                <text x="1520" y="414" fill="#f59e0b" font-weight="700" text-anchor="end">$28.00</text>
+                <text x="1520" y="434" fill="#71717a" text-anchor="end">PREPARING</text>
+
+                <rect x="1264" y="456" width="292" height="56" rx="7" fill="#fafafa" />
+                <text x="1280" y="480" fill="#0a0a0a" font-weight="700">#1040 · Takeaway</text>
+                <text x="1280" y="500" fill="#71717a">Family Platter</text>
+                <text x="1520" y="480" fill="#10b981" font-weight="700" text-anchor="end">$89.00</text>
+                <text x="1520" y="500" fill="#71717a" text-anchor="end">SERVED</text>
+
+                <rect x="1264" y="522" width="292" height="56" rx="7" fill="#fafafa" />
+                <text x="1280" y="546" fill="#0a0a0a" font-weight="700">#1039 · Table 12</text>
+                <text x="1280" y="566" fill="#71717a">4× Pizza, Drinks</text>
+                <text x="1520" y="546" fill="#10b981" font-weight="700" text-anchor="end">$64.75</text>
+                <text x="1520" y="566" fill="#71717a" text-anchor="end">PAID</text>
+
+                <rect x="1264" y="588" width="292" height="56" rx="7" fill="#fafafa" />
+                <text x="1280" y="612" fill="#0a0a0a" font-weight="700">#1038 · Delivery</text>
+                <text x="1280" y="632" fill="#71717a">Pasta Special, Wine</text>
+                <text x="1520" y="612" fill="#10b981" font-weight="700" text-anchor="end">$45.25</text>
+                <text x="1520" y="632" fill="#71717a" text-anchor="end">SERVED</text>
+              </g>
+            </svg>
+          </div>
         </div>
       </div>
     </header>
 
-    <section id="screenshots">
+    <!-- ════════════════════════════ STATS ════════════════════════════ -->
+    <section class="tinted" style="padding: 3rem 0;">
       <div class="wrap">
-        <h2>What it looks like</h2>
-        <p>Five apps in one codebase, all themable. Replace each placeholder with a screenshot of your install.</p>
-        <div class="shots">
-          <div class="shot">Admin dashboard<br />(reports + orders)</div>
-          <div class="shot">POS terminal<br />(touch-first cashier UI)</div>
-          <div class="shot">Kitchen display<br />(KDS / printer routes)</div>
-          <div class="shot">QR self-order<br />(scan-to-order PWA)</div>
-          <div class="shot">Public website<br />(menu + reservations)</div>
+        <div class="stats">
+          <div class="stat"><div class="num">5</div><div class="label">Apps in one codebase</div></div>
+          <div class="stat"><div class="num">50+</div><div class="label">API endpoints</div></div>
+          <div class="stat"><div class="num">~$6</div><div class="label">Monthly hosting</div></div>
+          <div class="stat"><div class="num">0</div><div class="label">Per-order fees</div></div>
+          <div class="stat"><div class="num">∞</div><div class="label">Transactions</div></div>
         </div>
       </div>
     </section>
 
+    <!-- ════════════════════════════ FEATURES ════════════════════════════ -->
     <section id="features">
       <div class="wrap">
-        <h2>Everything in the box</h2>
+        <div class="eyebrow">Everything in the box</div>
+        <h2>One purchase, the whole restaurant stack.</h2>
+        <p class="sub">POS terminal, kitchen display, QR ordering, inventory, multi-branch, and a public website. Built as one monorepo, shipped as one zip.</p>
+
         <div class="features">
-          <div class="feature"><h3>POS terminal</h3><p>Touch-first cashier UI for dine-in, takeaway, and delivery. Discounts, coupons, split checks, void with manager OTP.</p></div>
-          <div class="feature"><h3>Kitchen Display (KDS)</h3><p>Per-station ticket queue, printer routing, ack/recall workflow. Each station has its own VAT toggle.</p></div>
-          <div class="feature"><h3>QR self-order</h3><p>Customer scans a table QR, browses the menu, sends the order to the kitchen. Optional Wi-Fi gate keeps it on-premise.</p></div>
-          <div class="feature"><h3>Inventory + recipes</h3><p>Ingredients, suppliers, purchase orders, returns, waste log, low-stock shopping list. Recipes auto-deduct ingredients on sale.</p></div>
-          <div class="feature"><h3>Pre-ready foods</h3><p>Production orders for items prepped in advance (sauces, doughs). Approval workflow with batch tracking.</p></div>
-          <div class="feature"><h3>Reports + accounts</h3><p>Daily / sales / void reports, expense tracking, multi-account ledger with payment-method linkage.</p></div>
-          <div class="feature"><h3>Staff + payroll</h3><p>Roles, attendance, leave, monthly payroll with approval workflow.</p></div>
-          <div class="feature"><h3>Multi-branch</h3><p>One install, many locations. Branch-scoped data with shared owners + reports.</p></div>
-          <div class="feature"><h3>Public website</h3><p>Built-in CMS for the restaurant's marketing site — menu, reservations, contact, branding.</p></div>
-          <div class="feature"><h3>POS Desktop (separate license)</h3><p>Optional Windows app for cashier terminals. Local SQLite cache, offline-tolerant, prints via the OS print system.</p></div>
+          <div class="feature feat-c1">
+            <div class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+            <h3>POS terminal</h3>
+            <p>Touch-first cashier UI for dine-in, takeaway, and delivery. Discounts, coupons, split checks, manager-OTP voids.</p>
+          </div>
+          <div class="feature feat-c2">
+            <div class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 10h20"/><path d="M7 15h4"/></svg></div>
+            <h3>Kitchen display (KDS)</h3>
+            <p>Per-station ticket queues with printer routing, acknowledge/recall, and per-section VAT toggles.</p>
+          </div>
+          <div class="feature feat-c3">
+            <div class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h4v4h-4zM21 14v7M14 21h7"/></svg></div>
+            <h3>QR self-order</h3>
+            <p>Customers scan the table QR and send orders straight to the kitchen. Optional Wi-Fi gate keeps it on-premise.</p>
+          </div>
+          <div class="feature feat-c4">
+            <div class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg></div>
+            <h3>Inventory &amp; recipes</h3>
+            <p>Ingredients, suppliers, POs, returns, waste log, low-stock shopping list. Recipes auto-deduct on every sale.</p>
+          </div>
+          <div class="feature feat-c5">
+            <div class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18M9 17V9M13 17V5M17 17v-5"/></svg></div>
+            <h3>Reports &amp; accounts</h3>
+            <p>Daily, sales, and void reports. Expense tracking, multi-account ledger linked to payment methods.</p>
+          </div>
+          <div class="feature feat-c6">
+            <div class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></div>
+            <h3>Staff &amp; payroll</h3>
+            <p>Roles, attendance, leave, monthly payroll with approval workflow. Multi-branch aware.</p>
+          </div>
+          <div class="feature feat-c1">
+            <div class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg></div>
+            <h3>Pre-ready foods</h3>
+            <p>Production orders for prep-ahead items (sauces, doughs) with approval workflow and batch tracking.</p>
+          </div>
+          <div class="feature feat-c2">
+            <div class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></div>
+            <h3>Public website</h3>
+            <p>Built-in CMS for your restaurant's marketing site — menu, reservations, contact, and branding.</p>
+          </div>
+          <div class="feature feat-c3">
+            <div class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg></div>
+            <h3>Multi-branch</h3>
+            <p>One install, many locations. Branch-scoped data with shared owners, staff transfers, and combined reports.</p>
+          </div>
         </div>
       </div>
     </section>
 
-    <section id="requirements">
+    <!-- ════════════════════════════ SHOWCASE ════════════════════════════ -->
+    <section id="showcase" class="tinted">
       <div class="wrap">
-        <h2>What you need to host it</h2>
-        <table class="matrix">
-          <thead><tr><th>Component</th><th>Minimum</th><th>Recommended</th></tr></thead>
-          <tbody>
-            <tr><td>Node.js</td><td>22.x</td><td>22.x LTS</td></tr>
-            <tr><td>PostgreSQL</td><td>15</td><td>15 or 16</td></tr>
-            <tr><td>RAM</td><td>2 GB</td><td>4 GB</td></tr>
-            <tr><td>Disk</td><td>20 GB</td><td>40 GB SSD</td></tr>
-            <tr><td>OS</td><td>Ubuntu 22.04 / 24.04, or any Docker host</td><td>Ubuntu 24.04 LTS</td></tr>
-            <tr><td>SSL</td><td>Caddy auto-TLS (included), or your own nginx + certbot</td><td>Caddy auto-TLS</td></tr>
-          </tbody>
-        </table>
+        <div class="eyebrow">Screens</div>
+        <h2>Built for the real floor.</h2>
+        <p class="sub">Five apps, one consistent system. Every screen below is part of the zip you buy — swap in your own branding, content, and screenshots after install.</p>
+
+        <!-- Row 1: POS Terminal -->
+        <div class="showcase-row reverse">
+          <div class="shot">
+            <div class="browser-frame">
+              <div class="browser-bar">
+                <div class="browser-dots"><span></span><span></span><span></span></div>
+                <div class="browser-url">🔒 yourdomain.com/pos</div>
+              </div>
+              <svg class="product-svg pos" viewBox="0 0 1600 1000" xmlns="http://www.w3.org/2000/svg">
+                <rect width="1600" height="1000" fill="#0a0a0a" />
+                <!-- Top bar -->
+                <rect x="0" y="0" width="1600" height="70" fill="#18181b" />
+                <text x="24" y="44" font-family="Inter" font-size="18" font-weight="700" fill="#fafafa">Table 7</text>
+                <text x="100" y="44" font-family="Inter" font-size="14" fill="#a1a1aa">4 guests · Opened 18 min ago</text>
+                <rect x="1440" y="18" width="140" height="36" rx="7" fill="#6366f1" />
+                <text x="1510" y="42" font-family="Inter" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">CASH OUT</text>
+                <!-- Categories -->
+                <g font-family="Inter" font-size="13" font-weight="600">
+                  <rect x="24" y="96" width="110" height="42" rx="7" fill="#6366f1" />
+                  <text x="79" y="122" fill="#fff" text-anchor="middle">Burgers</text>
+                  <rect x="144" y="96" width="110" height="42" rx="7" fill="#27272a" />
+                  <text x="199" y="122" fill="#a1a1aa" text-anchor="middle">Pizzas</text>
+                  <rect x="264" y="96" width="110" height="42" rx="7" fill="#27272a" />
+                  <text x="319" y="122" fill="#a1a1aa" text-anchor="middle">Sides</text>
+                  <rect x="384" y="96" width="110" height="42" rx="7" fill="#27272a" />
+                  <text x="439" y="122" fill="#a1a1aa" text-anchor="middle">Drinks</text>
+                  <rect x="504" y="96" width="110" height="42" rx="7" fill="#27272a" />
+                  <text x="559" y="122" fill="#a1a1aa" text-anchor="middle">Desserts</text>
+                </g>
+                <!-- Menu grid -->
+                <g>
+                  <!-- Row 1 -->
+                  <rect x="24" y="158" width="220" height="160" rx="10" fill="#1f1f23" stroke="#27272a" />
+                  <rect x="24" y="158" width="220" height="100" rx="10" fill="#a3e635" opacity="0.1" />
+                  <text x="134" y="220" font-family="Inter" font-size="24" fill="#a3e635" font-weight="800" text-anchor="middle">🍔</text>
+                  <text x="40" y="292" font-family="Inter" font-size="14" fill="#fafafa" font-weight="700">Classic Burger</text>
+                  <text x="40" y="312" font-family="Inter" font-size="13" fill="#a3e635" font-weight="700">$8.50</text>
+
+                  <rect x="254" y="158" width="220" height="160" rx="10" fill="#1f1f23" stroke="#27272a" />
+                  <rect x="254" y="158" width="220" height="100" rx="10" fill="#a3e635" opacity="0.1" />
+                  <text x="364" y="220" font-family="Inter" font-size="24" fill="#a3e635" font-weight="800" text-anchor="middle">🍔</text>
+                  <text x="270" y="292" font-family="Inter" font-size="14" fill="#fafafa" font-weight="700">Cheese Burger</text>
+                  <text x="270" y="312" font-family="Inter" font-size="13" fill="#a3e635" font-weight="700">$9.50</text>
+
+                  <rect x="484" y="158" width="220" height="160" rx="10" fill="#1f1f23" stroke="#27272a" />
+                  <rect x="484" y="158" width="220" height="100" rx="10" fill="#a3e635" opacity="0.1" />
+                  <text x="594" y="220" font-family="Inter" font-size="24" fill="#a3e635" font-weight="800" text-anchor="middle">🥓</text>
+                  <text x="500" y="292" font-family="Inter" font-size="14" fill="#fafafa" font-weight="700">Bacon Burger</text>
+                  <text x="500" y="312" font-family="Inter" font-size="13" fill="#a3e635" font-weight="700">$11.00</text>
+
+                  <rect x="714" y="158" width="220" height="160" rx="10" fill="#1f1f23" stroke="#27272a" />
+                  <rect x="714" y="158" width="220" height="100" rx="10" fill="#a3e635" opacity="0.1" />
+                  <text x="824" y="220" font-family="Inter" font-size="24" fill="#a3e635" font-weight="800" text-anchor="middle">🌱</text>
+                  <text x="730" y="292" font-family="Inter" font-size="14" fill="#fafafa" font-weight="700">Veggie Burger</text>
+                  <text x="730" y="312" font-family="Inter" font-size="13" fill="#a3e635" font-weight="700">$8.00</text>
+                  <!-- Row 2 -->
+                  <rect x="24" y="338" width="220" height="160" rx="10" fill="#1f1f23" stroke="#27272a" />
+                  <rect x="24" y="338" width="220" height="100" rx="10" fill="#a3e635" opacity="0.1" />
+                  <text x="134" y="400" font-family="Inter" font-size="24" fill="#a3e635" font-weight="800" text-anchor="middle">🍔</text>
+                  <text x="40" y="472" font-family="Inter" font-size="14" fill="#fafafa" font-weight="700">Double Stack</text>
+                  <text x="40" y="492" font-family="Inter" font-size="13" fill="#a3e635" font-weight="700">$13.50</text>
+
+                  <rect x="254" y="338" width="220" height="160" rx="10" fill="#1f1f23" stroke="#27272a" />
+                  <rect x="254" y="338" width="220" height="100" rx="10" fill="#a3e635" opacity="0.1" />
+                  <text x="364" y="400" font-family="Inter" font-size="24" fill="#a3e635" font-weight="800" text-anchor="middle">🔥</text>
+                  <text x="270" y="472" font-family="Inter" font-size="14" fill="#fafafa" font-weight="700">BBQ Burger</text>
+                  <text x="270" y="492" font-family="Inter" font-size="13" fill="#a3e635" font-weight="700">$10.50</text>
+
+                  <rect x="484" y="338" width="220" height="160" rx="10" fill="#1f1f23" stroke="#27272a" />
+                  <rect x="484" y="338" width="220" height="100" rx="10" fill="#a3e635" opacity="0.1" />
+                  <text x="594" y="400" font-family="Inter" font-size="24" fill="#a3e635" font-weight="800" text-anchor="middle">🍟</text>
+                  <text x="500" y="472" font-family="Inter" font-size="14" fill="#fafafa" font-weight="700">French Fries</text>
+                  <text x="500" y="492" font-family="Inter" font-size="13" fill="#a3e635" font-weight="700">$3.50</text>
+
+                  <rect x="714" y="338" width="220" height="160" rx="10" fill="#1f1f23" stroke="#27272a" />
+                  <rect x="714" y="338" width="220" height="100" rx="10" fill="#a3e635" opacity="0.1" />
+                  <text x="824" y="400" font-family="Inter" font-size="24" fill="#a3e635" font-weight="800" text-anchor="middle">🥤</text>
+                  <text x="730" y="472" font-family="Inter" font-size="14" fill="#fafafa" font-weight="700">Coca Cola</text>
+                  <text x="730" y="492" font-family="Inter" font-size="13" fill="#a3e635" font-weight="700">$2.50</text>
+                </g>
+                <!-- Cart panel -->
+                <rect x="970" y="96" width="610" height="860" rx="10" fill="#18181b" stroke="#27272a" />
+                <text x="994" y="130" font-family="Inter" font-size="16" font-weight="700" fill="#fafafa">Current Order</text>
+                <line x1="994" y1="150" x2="1556" y2="150" stroke="#27272a" />
+                <g font-family="Inter" font-size="14">
+                  <text x="994" y="184" fill="#fafafa" font-weight="600">2× Classic Burger</text>
+                  <text x="1556" y="184" fill="#a3e635" font-weight="700" text-anchor="end">$17.00</text>
+                  <text x="994" y="222" fill="#fafafa" font-weight="600">1× Cheese Burger</text>
+                  <text x="1556" y="222" fill="#a3e635" font-weight="700" text-anchor="end">$9.50</text>
+                  <text x="994" y="260" fill="#fafafa" font-weight="600">3× French Fries</text>
+                  <text x="1556" y="260" fill="#a3e635" font-weight="700" text-anchor="end">$10.50</text>
+                  <text x="994" y="298" fill="#fafafa" font-weight="600">4× Coca Cola</text>
+                  <text x="1556" y="298" fill="#a3e635" font-weight="700" text-anchor="end">$10.00</text>
+                </g>
+                <line x1="994" y1="760" x2="1556" y2="760" stroke="#27272a" />
+                <g font-family="Inter">
+                  <text x="994" y="800" font-size="14" fill="#a1a1aa">Subtotal</text>
+                  <text x="1556" y="800" font-size="14" fill="#fafafa" font-weight="600" text-anchor="end">$47.00</text>
+                  <text x="994" y="828" font-size="14" fill="#a1a1aa">Service (10%)</text>
+                  <text x="1556" y="828" font-size="14" fill="#fafafa" font-weight="600" text-anchor="end">$4.70</text>
+                  <text x="994" y="856" font-size="14" fill="#a1a1aa">VAT (15%)</text>
+                  <text x="1556" y="856" font-size="14" fill="#fafafa" font-weight="600" text-anchor="end">$7.75</text>
+                  <text x="994" y="908" font-size="22" fill="#fafafa" font-weight="800">Total</text>
+                  <text x="1556" y="908" font-size="26" fill="#a3e635" font-weight="800" text-anchor="end">$59.45</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+          <div class="copy">
+            <div class="eyebrow">POS Terminal</div>
+            <h3>Tap, sell, done.</h3>
+            <p>A touch-first cashier screen that runs in any browser. Plug in a touchscreen PC, a USB receipt printer, and a cash drawer — you're done.</p>
+            <ul class="check">
+              <li>Dine-in, takeaway, and delivery in one flow</li>
+              <li>Split checks, discounts, coupons, manager-OTP voids</li>
+              <li>Auto-fires kitchen tickets by section</li>
+              <li>Live WebSocket sync across every terminal</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Row 2: KDS -->
+        <div class="showcase-row">
+          <div class="copy">
+            <div class="eyebrow">Kitchen Display</div>
+            <h3>No more shouting across the line.</h3>
+            <p>Each cooking station gets its own screen with its own tickets. Acknowledge when you start, mark done when it's ready.</p>
+            <ul class="check">
+              <li>Per-station routing (Hot line / Cold / Bar / Bakery)</li>
+              <li>Printer fallback for stations without a screen</li>
+              <li>Voided items visibly crossed out in red</li>
+              <li>Recall button for the manager when something goes wrong</li>
+            </ul>
+          </div>
+          <div class="shot">
+            <div class="browser-frame">
+              <div class="browser-bar">
+                <div class="browser-dots"><span></span><span></span><span></span></div>
+                <div class="browser-url">🔒 yourdomain.com/kds</div>
+              </div>
+              <svg class="product-svg kds" viewBox="0 0 1600 1000" xmlns="http://www.w3.org/2000/svg">
+                <rect width="1600" height="1000" fill="#fafafa" />
+                <rect x="0" y="0" width="1600" height="64" fill="#0a0a0a" />
+                <text x="24" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#fafafa">Kitchen Display — Hot Line</text>
+                <text x="300" y="40" font-family="Inter" font-size="14" fill="#a1a1aa">12 active tickets · 3 waiting</text>
+                <!-- Tickets grid -->
+                <g>
+                  <!-- Ticket 1: NEW (amber) -->
+                  <rect x="24" y="96" width="300" height="280" rx="10" fill="#fff" stroke="#f59e0b" stroke-width="2" />
+                  <rect x="24" y="96" width="300" height="40" rx="10" fill="#f59e0b" />
+                  <text x="40" y="122" font-family="Inter" font-size="15" font-weight="700" fill="#fff">#1042 · Table 7</text>
+                  <text x="308" y="122" font-family="Inter" font-size="13" fill="#fff" text-anchor="end">1m ago</text>
+                  <g font-family="Inter" font-size="14" fill="#0a0a0a">
+                    <text x="40" y="170" font-weight="700">2× Classic Burger</text>
+                    <text x="40" y="194" fill="#52525b" font-size="12">— No pickles</text>
+                    <text x="40" y="224" font-weight="700">1× Cheese Burger</text>
+                    <text x="40" y="254" font-weight="700">3× French Fries</text>
+                  </g>
+                  <rect x="40" y="308" width="268" height="48" rx="7" fill="#f59e0b" />
+                  <text x="174" y="338" font-family="Inter" font-size="14" fill="#fff" font-weight="700" text-anchor="middle">ACKNOWLEDGE</text>
+
+                  <!-- Ticket 2: PREPARING (blue) -->
+                  <rect x="344" y="96" width="300" height="280" rx="10" fill="#fff" stroke="#6366f1" stroke-width="2" />
+                  <rect x="344" y="96" width="300" height="40" rx="10" fill="#6366f1" />
+                  <text x="360" y="122" font-family="Inter" font-size="15" font-weight="700" fill="#fff">#1041 · QR-Table 3</text>
+                  <text x="628" y="122" font-family="Inter" font-size="13" fill="#fff" text-anchor="end">4m ago</text>
+                  <g font-family="Inter" font-size="14" fill="#0a0a0a">
+                    <text x="360" y="170" font-weight="700">1× Chicken Wings</text>
+                    <text x="360" y="200" font-weight="700">1× Pasta Carbonara</text>
+                    <text x="360" y="224" fill="#52525b" font-size="12">— Extra cheese</text>
+                  </g>
+                  <rect x="360" y="308" width="268" height="48" rx="7" fill="#10b981" />
+                  <text x="494" y="338" font-family="Inter" font-size="14" fill="#fff" font-weight="700" text-anchor="middle">MARK READY</text>
+
+                  <!-- Ticket 3: READY (green) -->
+                  <rect x="664" y="96" width="300" height="280" rx="10" fill="#fff" stroke="#10b981" stroke-width="2" />
+                  <rect x="664" y="96" width="300" height="40" rx="10" fill="#10b981" />
+                  <text x="680" y="122" font-family="Inter" font-size="15" font-weight="700" fill="#fff">#1040 · Takeaway</text>
+                  <text x="948" y="122" font-family="Inter" font-size="13" fill="#fff" text-anchor="end">8m ago</text>
+                  <g font-family="Inter" font-size="14" fill="#0a0a0a">
+                    <text x="680" y="170" font-weight="700">1× Family Platter</text>
+                    <text x="680" y="194" fill="#52525b" font-size="12">Serves 4</text>
+                  </g>
+                  <rect x="680" y="212" width="84" height="26" rx="5" fill="#10b98120" />
+                  <text x="722" y="231" font-family="Inter" font-size="12" fill="#10b981" font-weight="700" text-anchor="middle">READY</text>
+                  <rect x="680" y="308" width="268" height="48" rx="7" fill="#0a0a0a" />
+                  <text x="814" y="338" font-family="Inter" font-size="14" fill="#fff" font-weight="700" text-anchor="middle">SERVED</text>
+
+                  <!-- Ticket 4: NEW -->
+                  <rect x="984" y="96" width="300" height="280" rx="10" fill="#fff" stroke="#f59e0b" stroke-width="2" />
+                  <rect x="984" y="96" width="300" height="40" rx="10" fill="#f59e0b" />
+                  <text x="1000" y="122" font-family="Inter" font-size="15" font-weight="700" fill="#fff">#1039 · Table 12</text>
+                  <text x="1268" y="122" font-family="Inter" font-size="13" fill="#fff" text-anchor="end">just now</text>
+                  <g font-family="Inter" font-size="14" fill="#0a0a0a">
+                    <text x="1000" y="170" font-weight="700">4× Pizza Margherita</text>
+                    <text x="1000" y="194" fill="#52525b" font-size="12">— 2 with extra mushrooms</text>
+                  </g>
+                  <rect x="1000" y="308" width="268" height="48" rx="7" fill="#f59e0b" />
+                  <text x="1134" y="338" font-family="Inter" font-size="14" fill="#fff" font-weight="700" text-anchor="middle">ACKNOWLEDGE</text>
+
+                  <!-- Row 2 tickets: lighter, collapsed -->
+                  <g opacity="0.75">
+                    <rect x="24" y="396" width="300" height="280" rx="10" fill="#fff" stroke="#e4e4e7" />
+                    <rect x="24" y="396" width="300" height="40" rx="10" fill="#6366f1" />
+                    <text x="40" y="422" font-family="Inter" font-size="15" font-weight="700" fill="#fff">#1038 · Delivery</text>
+                    <g font-family="Inter" font-size="13" fill="#52525b">
+                      <text x="40" y="470" font-weight="700" fill="#0a0a0a">2× Pasta, Wine</text>
+                    </g>
+                    <rect x="344" y="396" width="300" height="280" rx="10" fill="#fff" stroke="#e4e4e7" />
+                    <rect x="344" y="396" width="300" height="40" rx="10" fill="#6366f1" />
+                    <text x="360" y="422" font-family="Inter" font-size="15" font-weight="700" fill="#fff">#1037 · Table 4</text>
+                    <rect x="664" y="396" width="300" height="280" rx="10" fill="#fff" stroke="#e4e4e7" />
+                    <rect x="664" y="396" width="300" height="40" rx="10" fill="#10b981" />
+                    <text x="680" y="422" font-family="Inter" font-size="15" font-weight="700" fill="#fff">#1036 · Table 9</text>
+                    <rect x="984" y="396" width="300" height="280" rx="10" fill="#fff" stroke="#e4e4e7" />
+                    <rect x="984" y="396" width="300" height="40" rx="10" fill="#f59e0b" />
+                    <text x="1000" y="422" font-family="Inter" font-size="15" font-weight="700" fill="#fff">#1035 · Table 2</text>
+                  </g>
+                </g>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 3: QR PWA -->
+        <div class="showcase-row reverse">
+          <div class="shot">
+            <div style="max-width: 320px; margin: 0 auto; background: #0a0a0a; border-radius: 30px; padding: 10px; box-shadow: var(--shadow-lg);">
+              <svg class="product-svg qr" viewBox="0 0 450 800" xmlns="http://www.w3.org/2000/svg">
+                <rect width="450" height="800" fill="#0a0a0a" rx="20" />
+                <!-- Status bar -->
+                <text x="30" y="36" font-family="Inter" font-size="14" fill="#fff" font-weight="600">9:41</text>
+                <g transform="translate(380, 22)">
+                  <rect x="0" y="0" width="24" height="12" rx="3" fill="#fff" opacity="0.3" />
+                  <rect x="2" y="2" width="18" height="8" rx="2" fill="#fff" />
+                </g>
+                <!-- Header -->
+                <text x="30" y="100" font-family="Inter" font-size="22" fill="#fff" font-weight="800">Your Restaurant</text>
+                <text x="30" y="124" font-family="Inter" font-size="12" fill="#a1a1aa">Table 7 · 3 items in cart</text>
+                <!-- Category pills -->
+                <rect x="30" y="150" width="80" height="32" rx="16" fill="#a3e635" />
+                <text x="70" y="170" font-family="Inter" font-size="12" fill="#0a0a0a" font-weight="700" text-anchor="middle">Burgers</text>
+                <rect x="120" y="150" width="70" height="32" rx="16" fill="#27272a" />
+                <text x="155" y="170" font-family="Inter" font-size="12" fill="#a1a1aa" text-anchor="middle">Pizza</text>
+                <rect x="200" y="150" width="70" height="32" rx="16" fill="#27272a" />
+                <text x="235" y="170" font-family="Inter" font-size="12" fill="#a1a1aa" text-anchor="middle">Sides</text>
+                <rect x="280" y="150" width="80" height="32" rx="16" fill="#27272a" />
+                <text x="320" y="170" font-family="Inter" font-size="12" fill="#a1a1aa" text-anchor="middle">Drinks</text>
+                <!-- Item cards -->
+                <g>
+                  <rect x="30" y="210" width="390" height="130" rx="12" fill="#18181b" />
+                  <rect x="46" y="226" width="98" height="98" rx="8" fill="#a3e635" opacity="0.2" />
+                  <text x="95" y="290" font-family="Inter" font-size="40" text-anchor="middle">🍔</text>
+                  <text x="160" y="254" font-family="Inter" font-size="16" fill="#fff" font-weight="700">Classic Burger</text>
+                  <text x="160" y="276" font-family="Inter" font-size="12" fill="#a1a1aa">Beef patty, lettuce, tomato</text>
+                  <text x="160" y="314" font-family="Inter" font-size="18" fill="#a3e635" font-weight="800">$8.50</text>
+                  <rect x="360" y="298" width="44" height="32" rx="8" fill="#a3e635" />
+                  <text x="382" y="320" font-family="Inter" font-size="18" fill="#0a0a0a" font-weight="700" text-anchor="middle">+</text>
+
+                  <rect x="30" y="360" width="390" height="130" rx="12" fill="#18181b" />
+                  <rect x="46" y="376" width="98" height="98" rx="8" fill="#a3e635" opacity="0.2" />
+                  <text x="95" y="440" font-family="Inter" font-size="40" text-anchor="middle">🥓</text>
+                  <text x="160" y="404" font-family="Inter" font-size="16" fill="#fff" font-weight="700">Bacon Burger</text>
+                  <text x="160" y="426" font-family="Inter" font-size="12" fill="#a1a1aa">Double beef, crispy bacon</text>
+                  <text x="160" y="464" font-family="Inter" font-size="18" fill="#a3e635" font-weight="800">$11.00</text>
+                  <rect x="360" y="448" width="44" height="32" rx="8" fill="#a3e635" />
+                  <text x="382" y="470" font-family="Inter" font-size="18" fill="#0a0a0a" font-weight="700" text-anchor="middle">+</text>
+
+                  <rect x="30" y="510" width="390" height="130" rx="12" fill="#18181b" />
+                  <rect x="46" y="526" width="98" height="98" rx="8" fill="#a3e635" opacity="0.2" />
+                  <text x="95" y="590" font-family="Inter" font-size="40" text-anchor="middle">🌱</text>
+                  <text x="160" y="554" font-family="Inter" font-size="16" fill="#fff" font-weight="700">Veggie Burger</text>
+                  <text x="160" y="576" font-family="Inter" font-size="12" fill="#a1a1aa">Black bean, avocado</text>
+                  <text x="160" y="614" font-family="Inter" font-size="18" fill="#a3e635" font-weight="800">$8.00</text>
+                  <rect x="360" y="598" width="44" height="32" rx="8" fill="#a3e635" />
+                  <text x="382" y="620" font-family="Inter" font-size="18" fill="#0a0a0a" font-weight="700" text-anchor="middle">+</text>
+                </g>
+                <!-- Bottom CTA -->
+                <rect x="30" y="700" width="390" height="70" rx="12" fill="#a3e635" />
+                <text x="225" y="732" font-family="Inter" font-size="16" fill="#0a0a0a" font-weight="800" text-anchor="middle">VIEW CART · 3 items</text>
+                <text x="225" y="754" font-family="Inter" font-size="13" fill="#0a0a0a" font-weight="600" text-anchor="middle">$28.50</text>
+              </svg>
+            </div>
+          </div>
+          <div class="copy">
+            <div class="eyebrow">QR Self-Order PWA</div>
+            <h3>From scan to kitchen in 30 seconds.</h3>
+            <p>A Progressive Web App — no app-store install. Customers scan the QR on their table, browse your menu, and send orders straight to the kitchen.</p>
+            <ul class="check">
+              <li>Installs to the home screen on iOS &amp; Android</li>
+              <li>Optional Wi-Fi gate so off-premise customers can't spam orders</li>
+              <li>Real-time order status ("preparing" → "ready")</li>
+              <li>Branded to match your restaurant automatically</li>
+            </ul>
+          </div>
+        </div>
       </div>
     </section>
 
-    <section id="matrix">
+    <!-- ════════════════════════════ INSTALL ════════════════════════════ -->
+    <section id="install">
       <div class="wrap">
-        <h2>Web edition vs Desktop edition</h2>
+        <div class="eyebrow">Install</div>
+        <h2>Three paths. Pick the one that matches your hosting.</h2>
+        <p class="sub">All three end with the install wizard at <code style="background:#f4f4f5;padding:0.15rem 0.4rem;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:0.9em;">/admin</code>.</p>
+        <div class="install-tabs">
+          <div class="install-card">
+            <div class="num">1</div>
+            <h4>Docker (recommended)</h4>
+            <p class="desc">~5 minutes. Bundled compose brings up the whole stack plus Caddy auto-TLS.</p>
+            <pre><span class="cmt"># Extract + configure</span>
+unzip restaurant-pos-v1.0.0.zip
+cd restaurant-pos-v1.0.0
+cp .env.example .env
+nano .env  <span class="cmt"># DATABASE_URL, JWT</span>
+
+<span class="cmt"># Start</span>
+docker compose up -d --build
+
+<span class="cmt"># Visit</span>
+<span class="str">https://yourdomain.com/admin</span></pre>
+          </div>
+          <div class="install-card">
+            <div class="num">2</div>
+            <h4>Ubuntu VPS (no Docker)</h4>
+            <p class="desc">Full control. Node 22 + Postgres 15 + PM2 + nginx + certbot.</p>
+            <pre><span class="cmt"># Node 22 from NodeSource</span>
+curl -fsSL https://deb.nodesource.com/setup_22.x \
+  | sudo -E bash -
+sudo apt install -y nodejs unzip
+sudo npm i -g pnpm pm2
+
+unzip restaurant-pos-v1.0.0.zip
+cd restaurant-pos-v1.0.0
+pnpm install --frozen-lockfile --prod
+pnpm prisma migrate deploy
+pm2 start api/dist/main.js --name pos</pre>
+          </div>
+          <div class="install-card">
+            <div class="num">3</div>
+            <h4>cPanel shared hosting</h4>
+            <p class="desc">Node.js App Manager + Postgres from cPanel's database tools. No SSH required.</p>
+            <pre><span class="cmt">1. Create PG database in cPanel</span>
+<span class="cmt">2. File Manager → upload zip → extract</span>
+<span class="cmt">3. Setup Node.js App:</span>
+   Node: 22
+   Root: ~/restaurant-pos
+   Startup: api/dist/main.js
+<span class="cmt">4. Run NPM Install (in cPanel UI)</span>
+<span class="cmt">5. Terminal:</span>
+   pnpm prisma migrate deploy
+   pnpm db:seed:empty</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════ PRICING ════════════════════════════ -->
+    <section id="pricing" class="tinted">
+      <div class="wrap">
+        <div class="eyebrow">Editions</div>
+        <h2>One-time purchase. No SaaS.</h2>
+        <p class="sub">Regular and Extended CodeCanyon licenses available. The Desktop edition is a separate purchase for cashier terminals that need offline tolerance.</p>
+        <div class="pricing">
+          <div class="tier">
+            <h4>Web Edition</h4>
+            <div class="tagline">POS, KDS, QR ordering, admin + public website. Runs in any browser.</div>
+            <div class="price">CodeCanyon<small>pricing</small></div>
+            <ul>
+              <li>Full source code (TypeScript)</li>
+              <li>POS, KDS, QR, admin, public website</li>
+              <li>Multi-branch</li>
+              <li>Install wizard + updater</li>
+              <li>Lifetime updates</li>
+              <li class="absent">Desktop app (separate license)</li>
+              <li class="absent">Offline-tolerant local cache</li>
+            </ul>
+          </div>
+
+          <div class="tier featured">
+            <div class="badge">MOST POPULAR</div>
+            <h4>Web + Desktop Bundle</h4>
+            <div class="tagline">Both editions — browser POS plus dedicated Windows terminal. One machine, one backend.</div>
+            <div class="price">Bundle<small>save 20%</small></div>
+            <ul>
+              <li>Everything in Web Edition</li>
+              <li>Windows cashier app (Electron)</li>
+              <li>Offline-tolerant SQLite cache</li>
+              <li>Direct USB printer support</li>
+              <li>DPAPI-encrypted device tokens</li>
+              <li>Auto-update channel</li>
+              <li>Priority support thread</li>
+            </ul>
+          </div>
+
+          <div class="tier">
+            <h4>Desktop Edition Only</h4>
+            <div class="tagline">Just the Windows cashier terminal. Pairs with any existing Web edition install.</div>
+            <div class="price">CodeCanyon<small>pricing</small></div>
+            <ul>
+              <li>Windows installer (.exe)</li>
+              <li>Local SQLite + outbox retries</li>
+              <li>Direct ESC/POS printing</li>
+              <li>PIN login, staff locks</li>
+              <li>Auto-update from GitHub Releases</li>
+              <li class="absent">Does NOT include Web edition</li>
+              <li class="absent">Requires an existing backend</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════ MATRIX ════════════════════════════ -->
+    <section>
+      <div class="wrap">
+        <div class="eyebrow">Feature matrix</div>
+        <h2>Web vs Desktop editions.</h2>
+        <p class="sub">Buyers who want the best of both worlds pick the bundle. Most restaurants start with the Web edition and add Desktop later as a standalone per-terminal purchase.</p>
         <table class="matrix">
-          <thead><tr><th>Capability</th><th>Web edition</th><th>Desktop edition</th></tr></thead>
+          <thead><tr><th>Capability</th><th>Web</th><th>Desktop</th></tr></thead>
           <tbody>
             <tr><td>Admin dashboard + reports</td><td class="check">✓</td><td class="x">—</td></tr>
-            <tr><td>POS in any browser</td><td class="check">✓</td><td class="x">—</td></tr>
+            <tr><td>Touch POS (browser)</td><td class="check">✓</td><td class="x">—</td></tr>
             <tr><td>POS as a Windows app</td><td class="x">—</td><td class="check">✓</td></tr>
-            <tr><td>Kitchen Display</td><td class="check">✓</td><td class="x">—</td></tr>
+            <tr><td>Kitchen Display (KDS)</td><td class="check">✓</td><td class="x">—</td></tr>
             <tr><td>QR self-order PWA</td><td class="check">✓</td><td class="x">—</td></tr>
             <tr><td>Public website / CMS</td><td class="check">✓</td><td class="x">—</td></tr>
-            <tr><td>Local SQLite cache + offline mode</td><td class="x">—</td><td class="check">✓</td></tr>
+            <tr><td>Local SQLite + offline tolerance</td><td class="x">—</td><td class="check">✓</td></tr>
             <tr><td>Direct OS printing (no PrintNode)</td><td class="x">—</td><td class="check">✓</td></tr>
+            <tr><td>Auto-updater</td><td class="check">✓ admin zip upload</td><td class="check">✓ GitHub releases</td></tr>
             <tr><td>License binding</td><td>One license per domain</td><td>One license per Windows install</td></tr>
           </tbody>
         </table>
-        <p style="margin-top:1rem;color:var(--muted);font-size:0.95rem;">Sold separately on CodeCanyon. Both halves talk to the same self-hosted backend.</p>
       </div>
     </section>
 
-    <section id="install">
+    <!-- ════════════════════════════ FAQ ════════════════════════════ -->
+    <section id="faq" class="tinted">
       <div class="wrap">
-        <h2>Install guide</h2>
-        <p>Three paths. All three end with the install wizard at <code>/admin</code>.</p>
-
-        <details>
-          <summary>1) Docker Compose (easiest, ~5 minutes)</summary>
-          <p>Best when your VPS already has Docker installed. The bundled compose file brings up the API, all SPAs, Postgres, and Caddy.</p>
-          <pre>tar -xzf restaurant-pos-v1.0.0.zip
-cd restaurant-pos-v1.0.0
-cp .env.example .env
-nano .env            # fill DATABASE_URL, JWT_SECRET, etc
-docker compose up -d
-# visit https://yourdomain.com/admin → run the install wizard</pre>
-        </details>
-
-        <details>
-          <summary>2) Ubuntu VPS (no Docker)</summary>
-          <p>Manual setup with PM2 + nginx. Good when you want full control.</p>
-          <pre># Node 22 + Postgres 15 + PM2
-sudo apt install nodejs postgresql nginx
-sudo npm install -g pm2 pnpm
-
-# Install + build
-tar -xzf restaurant-pos-v1.0.0.zip
-cd restaurant-pos-v1.0.0
-pnpm install --frozen-lockfile
-cp .env.example .env
-nano .env
-pnpm prisma migrate deploy
-pnpm db:seed:empty   # or db:seed:demo-light
-pnpm exec turbo run build
-
-# Start API + serve SPA dists via nginx
-pm2 start apps/api/dist/main.js --name pos-api
-sudo cp infra/nginx-example.conf /etc/nginx/sites-enabled/pos
-sudo systemctl reload nginx</pre>
-        </details>
-
-        <details>
-          <summary>3) cPanel (shared hosting with Node.js App Manager)</summary>
-          <p>Works on most cPanel hosts that ship Node 22. Uses your hosting provider's Postgres + nginx. See <code>docs/INSTALL.md</code> for the full step-by-step.</p>
-          <ul>
-            <li>Create a Node.js app (Node 22, document root → <code>apps/api/dist</code>).</li>
-            <li>Add a Postgres DB from cPanel's database tools.</li>
-            <li>Upload the zip via File Manager, extract.</li>
-            <li>SSH in once to <code>pnpm install</code> and <code>pnpm prisma migrate deploy</code>.</li>
-            <li>cPanel's Node App Manager handles starting the API; nginx serves the SPAs.</li>
-          </ul>
-        </details>
-      </div>
-    </section>
-
-    <section id="updates">
-      <div class="wrap">
-        <h2>Updates</h2>
-        <p>Two paths. Pick whichever fits your hosting.</p>
-        <ul>
-          <li><strong>Admin UI re-upload (recommended).</strong> Download the new release zip, upload it via Settings → Updates. The system takes a backup, applies migrations, swaps the running version, and rolls back automatically if the post-update health check fails.</li>
-          <li><strong>SSH update.</strong> Re-extract the zip over the install dir, run <code>pnpm install</code> + <code>pnpm prisma migrate deploy</code>, restart with <code>pm2 reload pos-api</code>.</li>
-        </ul>
-        <p>Either way: your custom branding, menu, customers, and order history stay put. Only the application code changes.</p>
-      </div>
-    </section>
-
-    <section id="faq">
-      <div class="wrap">
-        <h2>FAQ</h2>
-
+        <div class="eyebrow">FAQ</div>
+        <h2>Questions buyers usually have.</h2>
+        <p class="sub">Short versions below. Full details in the included <code style="background:#fff;padding:0.15rem 0.4rem;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:0.9em;border:1px solid var(--line);">docs/FAQ.md</code> inside the zip.</p>
         <details>
           <summary>Do I need an internet connection?</summary>
-          <p>The license verification requires a quick internet check at activation and once per day to keep your install in "active" mode. If you go offline, you have a 7-day grace period during which everything keeps working. After 7 days offline, mutations are blocked but reads (reports, history) stay open.</p>
+          <p>Only for the daily license check. If you go offline, you have a 7-day grace period during which everything keeps working. After 7 days offline, mutations are blocked but reads (reports, history) stay open. Activation is the only step that strictly requires internet.</p>
         </details>
-
         <details>
           <summary>Can I run this on shared cPanel hosting?</summary>
-          <p>Yes, as long as your host supports Node.js 22 and Postgres 15. Most modern cPanel installs include both via the "Node.js App Manager" feature.</p>
+          <p>Yes, if your host supports Node.js 22 and PostgreSQL 15. Most modern cPanel installs include both via the Node.js App Manager feature. See install path #3.</p>
         </details>
-
         <details>
           <summary>How do customisations survive updates?</summary>
-          <p>Branding, menu, prices, staff, customers, and reports all live in the database — updates only touch application code. Theme overrides go in <code>apps/admin/src/styles/branding.css</code> which is preserved during admin-UI updates. For deeper code customisation, fork the repo and merge upstream changes manually.</p>
+          <p>Database content (menu, customers, orders, settings) survives everything. Source modifications get overwritten by the buyer-zip update path. If you're modifying source, fork the repo and merge upstream releases manually rather than using the in-app updater.</p>
         </details>
-
         <details>
           <summary>Does the license check phone home with my data?</summary>
-          <p>No. The license check sends only your purchase code, your domain, and an opaque machine fingerprint. Nothing about your menu, orders, or customers leaves your server. Source for the verification client ships with the product — you can read every line.</p>
+          <p>No. Only your purchase code, your domain, and an opaque per-machine fingerprint. Source for the verification client is in the zip — every line is auditable.</p>
         </details>
-
         <details>
           <summary>What happens if your license server goes down?</summary>
-          <p>Your install keeps working for up to 7 days on its cached license proof. The proof is signed with a key bundled at build time, so even if our server is unreachable you can still operate normally.</p>
+          <p>Your install keeps working for up to 7 days on the locally-cached signed proof. The proof is ed25519-signed with a key bundled at build time, so even if our server is unreachable you operate normally.</p>
         </details>
-
         <details>
           <summary>Can I move my install to a new domain?</summary>
-          <p>Yes. From the admin UI, deactivate the license (releases the seat), then activate again on the new domain. Each license can only be on one domain at a time.</p>
+          <p>Yes. Settings → License → Deactivate (releases the seat), then re-activate on the new domain. Each license can only be on one domain at a time. Wildcard licenses (<code>*.yourchain.com</code>) cover any subdomain depth — buy one of those if you run multiple branded subdomains for franchises.</p>
         </details>
-
         <details>
           <summary>Do I get the source code?</summary>
-          <p>Yes — the full TypeScript source for the API, admin, POS, KDS, QR-order PWA, and public website. Not minified, not obfuscated. Modify freely under the CodeCanyon Regular or Extended license terms (see <code>LICENSE.txt</code>).</p>
+          <p>Yes — the full TypeScript source for API, admin, POS, KDS, QR-order, and public website. Not minified, not obfuscated. Modify freely under the CodeCanyon Regular or Extended terms.</p>
         </details>
-
-        <details>
-          <summary>Is the POS Desktop edition included?</summary>
-          <p>No — it's a separate purchase. Buy the desktop edition if you want the Windows app for cashier terminals. The web edition's POS works fine in any browser, including a wall-mounted touch screen running Chrome in kiosk mode.</p>
-        </details>
-
-        <details>
-          <summary>How do I get support?</summary>
-          <p>Use the CodeCanyon item's comment thread for general questions, or open a support ticket via the link in the item description. Custom development isn't included with the regular license.</p>
-        </details>
-
         <details>
           <summary>Can I run this multi-tenant for several restaurants?</summary>
-          <p>Each install is single-tenant by design. To run a SaaS service yourself with this, you'd need an Extended license per tenant. Most buyers use the multi-branch feature instead — one install can support many physical locations under the same owner.</p>
+          <p>Each install is single-tenant. For SaaS with multiple independent restaurants, use an Extended license per tenant. Most buyers use the built-in multi-branch feature instead — one install can support many physical locations under the same owner.</p>
         </details>
+        <details>
+          <summary>How do I get support?</summary>
+          <p>CodeCanyon item comments for quick questions; the support link in the item description for tickets. Custom development isn't included with the regular license but is available on request.</p>
+        </details>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════ FINAL CTA ════════════════════════════ -->
+    <section class="final-cta">
+      <div class="wrap">
+        <h2>Stop paying $49/month per terminal.</h2>
+        <p>One purchase, lifetime updates, full source. Installs in under ten minutes on a $6 VPS.</p>
+        <div class="ctas" style="justify-content: center;">
+          <a class="btn btn-primary" href="#install">Get started →</a>
+          <a class="btn btn-secondary" href="#features">See all features</a>
+        </div>
       </div>
     </section>
 
     <footer>
       <div class="wrap">
-        <p>© 2026 — Restaurant POS Web edition. License terms in <code>LICENSE.txt</code>.</p>
+        <p>© 2026 — Restaurant POS, Self-Hosted Edition. License terms in <code style="color:var(--muted);">LICENSE.txt</code>. Support via CodeCanyon item page.</p>
       </div>
     </footer>
   </body>
