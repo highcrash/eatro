@@ -123,13 +123,48 @@ pm2 startup               # copy + run the line it prints to make PM2 survive re
 
 ### 2.7 — Reverse-proxy + TLS
 
+The API listens on `:3001` and only serves `/api/*`. nginx fronts the
+five static SPAs and proxies `/api/*` + `/socket.io/*` to the API.
+The zip ships an `nginx-example.conf` template you can drop in:
+
 ```bash
-sudo cp infra/nginx-example.conf /etc/nginx/sites-available/pos
-sudo ln -sf /etc/nginx/sites-available/pos /etc/nginx/sites-enabled/pos
+# 1. Copy the template + edit the install path + your domain
+sudo cp nginx-example.conf /etc/nginx/sites-available/restaurant-pos
+sudo nano /etc/nginx/sites-available/restaurant-pos
+#   - server_name → yourdomain.com (or `_` for IP-only test)
+#   - $INSTALL_DIR → /opt/restaurant-pos (or wherever you extracted)
+
+# 2. Enable + disable Ubuntu's default site (which would 404 us)
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo ln -sf /etc/nginx/sites-available/restaurant-pos \
+            /etc/nginx/sites-enabled/restaurant-pos
 sudo nginx -t && sudo systemctl reload nginx
+
+# 3. (optional) HTTPS with Let's Encrypt — needs DNS pointing at this box
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
 ```
+
+Verify the routes work before declaring victory:
+
+```bash
+curl -I http://yourdomain.com/admin/          # → 200, text/html
+curl    http://yourdomain.com/api/v1/health   # → {"status":"ok",...}
+```
+
+Then visit `http://yourdomain.com/admin/` in a browser — the install
+wizard auto-renders if the DB is fresh.
+
+URLs the buyer ends up with:
+
+| Path                 | Purpose                          |
+| -------------------- | -------------------------------- |
+| `/`                  | Public marketing website         |
+| `/admin/`            | Admin dashboard + install wizard |
+| `/pos/`              | Touch POS terminal               |
+| `/kds/`              | Kitchen display                  |
+| `/qr/`               | QR self-order PWA                |
+| `/api/v1/*`          | NestJS API (auto-proxied)        |
 
 ## 3) cPanel (shared hosting)
 

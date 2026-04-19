@@ -263,7 +263,11 @@ volumes: { pgdata: {}, caddy-data: {} }
   writeFileSync(
     join(STAGE, 'Caddyfile'),
     `# Replace yourdomain.com with your real domain BEFORE first start.
-# Caddy issues Let's Encrypt certs automatically once DNS points here.
+# Caddy auto-issues Let's Encrypt certs once DNS points here.
+# This Caddyfile is for the DOCKER deploy (paths are container-side
+# at /srv/*). For Ubuntu+nginx (no Docker), use nginx-example.conf
+# in this same directory.
+
 yourdomain.com {
   encode zstd gzip
   # Static SPAs — each served from its own subpath.
@@ -271,10 +275,82 @@ yourdomain.com {
   handle_path /pos*   { root * /srv/pos;   try_files {path} /index.html; file_server }
   handle_path /kds*   { root * /srv/kds;   try_files {path} /index.html; file_server }
   handle_path /qr*    { root * /srv/qr-order; try_files {path} /index.html; file_server }
-  # API.
+  # API + WebSocket — Nest listens on :3001.
   handle /api/* { reverse_proxy api:3001 }
-  # Public website (root path).
+  handle /socket.io/* { reverse_proxy api:3001 }
+  # Public website at root /.
   handle { root * /srv/web; try_files {path} /index.html; file_server }
+}
+`,
+  );
+
+  writeFileSync(
+    join(STAGE, 'nginx-example.conf'),
+    `# nginx site config for the Ubuntu (non-Docker) install path.
+# Copy to /etc/nginx/sites-available/restaurant-pos and symlink into
+# sites-enabled. Edit \\$INSTALL_DIR + server_name for your install.
+#
+#   sudo cp nginx-example.conf /etc/nginx/sites-available/restaurant-pos
+#   # — edit paths + server_name —
+#   sudo ln -sf /etc/nginx/sites-available/restaurant-pos \\
+#               /etc/nginx/sites-enabled/restaurant-pos
+#   sudo rm -f /etc/nginx/sites-enabled/default
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Then add HTTPS with:
+#   sudo apt install certbot python3-certbot-nginx
+#   sudo certbot --nginx -d yourdomain.com
+
+server {
+    listen 80;
+    server_name yourdomain.com;       # ← change to your domain (or _)
+
+    # Edit this to where you extracted the zip.
+    set \\$INSTALL_DIR /opt/restaurant-pos;
+
+    client_max_body_size 25M;
+
+    # API + WebSocket → Nest on :3001.
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host \\$host;
+        proxy_set_header X-Real-IP \\$remote_addr;
+        proxy_set_header X-Forwarded-For \\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\$scheme;
+    }
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \\$host;
+    }
+
+    # Admin dashboard at /admin.
+    location /admin/ {
+        alias \\$INSTALL_DIR/admin/;
+        try_files \\$uri \\$uri/ /admin/index.html;
+    }
+    # POS terminal at /pos.
+    location /pos/ {
+        alias \\$INSTALL_DIR/pos/;
+        try_files \\$uri \\$uri/ /pos/index.html;
+    }
+    # Kitchen display at /kds.
+    location /kds/ {
+        alias \\$INSTALL_DIR/kds/;
+        try_files \\$uri \\$uri/ /kds/index.html;
+    }
+    # QR self-order PWA at /qr.
+    location /qr/ {
+        alias \\$INSTALL_DIR/qr-order/;
+        try_files \\$uri \\$uri/ /qr/index.html;
+    }
+    # Public website at /.
+    location / {
+        root \\$INSTALL_DIR/web;
+        try_files \\$uri \\$uri/ /index.html;
+    }
 }
 `,
   );
