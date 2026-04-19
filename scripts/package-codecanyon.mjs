@@ -105,21 +105,71 @@ step('stage app artefacts', () => {
 
   // Build the buyer's root package.json by LIFTING the API workspace's
   // prod deps to the root. The buyer runs ONE `pnpm install` at root —
-  // no workspace, no filters, no surprises. Prior version shipped a
-  // SLIM package.json with no deps and used `pnpm --filter`, which
-  // broke because the zip ships no pnpm-workspace.yaml — buyers got
-  // `Command "prisma" not found` on the very first migrate command.
+  // no workspace, no filters, no surprises.
   const apiPkg = JSON.parse(readFileSync(join(ROOT, 'apps/api/package.json'), 'utf8'));
   const liftedDeps = { ...apiPkg.dependencies };
-  // Drop workspace: protocol entries — those don't resolve outside the
-  // monorepo. The license-client comes from a git URL (already the
-  // right form). The other workspace deps (@restora/types,
-  // @restora/utils) are bundled INTO api/dist by nest build, so the
-  // runtime doesn't need them at install time.
+
+  // Workspace deps (`workspace:*`) don't resolve outside the monorepo.
+  // The API's dist/ keeps require() calls to `@restora/types` and
+  // `@restora/utils` — nest build does NOT bundle them — so we SHIP
+  // the packages inside the zip and rewrite each workspace entry to a
+  // `file:` reference pnpm resolves at install time.
+  //
+  // Earlier commits wrongly assumed nest bundled these and deleted the
+  // entries, which left the buyer's `node dist/main.js` crashing with
+  // MODULE_NOT_FOUND on @restora/types.
+  const shippedWorkspacePkgs = [];
   for (const k of Object.keys(liftedDeps)) {
     if (typeof liftedDeps[k] === 'string' && liftedDeps[k].startsWith('workspace:')) {
-      delete liftedDeps[k];
+      if (k === '@restora/license-client') {
+        // This one's special: it lives in the neawaslic repo, consumed
+        // via git+URL. The apps/api/package.json already references it
+        // that way, so this branch is only hit if a future monorepo
+        // refactor re-adds it as workspace:*.
+        delete liftedDeps[k];
+      } else if (k.startsWith('@restora/')) {
+        const localName = k.slice('@restora/'.length);
+        const localDir = `packages/${localName}`;
+        cpSync(join(ROOT, localDir), join(STAGE, localDir), {
+          recursive: true,
+          filter: (src) => !src.includes('node_modules'),
+        });
+        // A shipped workspace package may itself depend on other
+        // workspace packages (e.g. utils → types). Rewrite the nested
+        // package.json so those refs become file: too — pnpm will then
+        // link the sibling packages/ directory at install time instead
+        // of trying to resolve them in the (non-existent) workspace.
+        const innerPkgPath = join(STAGE, localDir, 'package.json');
+        const innerPkg = JSON.parse(readFileSync(innerPkgPath, 'utf8'));
+        // Rewrite runtime workspace: refs to file: so pnpm links the
+        // sibling packages/ dirs we also shipped. devDependencies are
+        // not needed in a buyer's install (no rebuilds happen here),
+        // and keeping workspace:*/file: refs for stuff we didn't ship
+        // (like @restora/config, which is eslint+tsconfig only) would
+        // break the install — so drop devDependencies outright.
+        delete innerPkg.devDependencies;
+        delete innerPkg.scripts;
+        if (innerPkg.dependencies) {
+          for (const dk of Object.keys(innerPkg.dependencies)) {
+            if (typeof innerPkg.dependencies[dk] === 'string' && innerPkg.dependencies[dk].startsWith('workspace:')) {
+              if (dk.startsWith('@restora/')) {
+                innerPkg.dependencies[dk] = `file:../${dk.slice('@restora/'.length)}`;
+              } else {
+                delete innerPkg.dependencies[dk];
+              }
+            }
+          }
+        }
+        writeFileSync(innerPkgPath, JSON.stringify(innerPkg, null, 2));
+        liftedDeps[k] = `file:./${localDir}`;
+        shippedWorkspacePkgs.push(localName);
+      } else {
+        delete liftedDeps[k];
+      }
     }
+  }
+  if (shippedWorkspacePkgs.length) {
+    console.log(`  shipped workspace packages: ${shippedWorkspacePkgs.join(', ')}`);
   }
   writeFileSync(
     join(STAGE, 'package.json'),
@@ -366,9 +416,12 @@ step('zip', () => {
   const releaseDir = join(ROOT, 'release');
   const tryZip = () => sh(`zip -rq "${ZIP}" "${RELEASE_NAME}/"`, { cwd: releaseDir });
   const try7z = () => sh(`7z a -tzip -bd "${ZIP}" "${RELEASE_NAME}/" -mx5`, { cwd: releaseDir });
-  const tryPwsh = () => sh(`powershell -NoProfile -Command "Compress-Archive -Path '${RELEASE_NAME}' -DestinationPath '${ZIP.replace(/\\/g, '/')}' -Force"`, { cwd: releaseDir });
+  // Python's zipfile module writes POSIX forward-slash paths. Tried
+  // PowerShell's Compress-Archive first — it produces Windows-style
+  // backslash paths that Linux `unzip` drops silently. Don't do that.
+  const tryPython = () => sh(`python -c "import zipfile, os, pathlib; src=pathlib.Path('${RELEASE_NAME}'); dst=pathlib.Path(r'${ZIP}'); dst.unlink(missing_ok=True); z=zipfile.ZipFile(dst,'w',zipfile.ZIP_DEFLATED,compresslevel=6); [z.write(p, arcname=p.as_posix()) for p in src.rglob('*') if p.is_file()]; z.close()"`, { cwd: releaseDir });
 
-  const attempts = [['zip', tryZip], ['7z', try7z], ['Compress-Archive', tryPwsh]];
+  const attempts = [['zip', tryZip], ['7z', try7z], ['python-zipfile', tryPython]];
   let ok = false;
   for (const [name, fn] of attempts) {
     try {
