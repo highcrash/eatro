@@ -3,6 +3,16 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.9.0 — license activation (2026-04-20)
+
+- **First-run flow now License → Pairing → Lock.** Fresh installs prompt for a purchase code from the seller's checkout before the device-pairing step. Activations bind to the Windows MachineGuid so a copied install file doesn't dual-activate.
+- **One license per Windows install.** Activation slot is keyed by `sha256(MachineGuid + hostname + app salt)`, derived in main process — renderer never sees the raw fingerprint.
+- **Server URL + product SKU + ed25519 public key are baked into the main bundle**, not env-read. A buyer can edit `.env` but they can't trivially patch the compiled `dist/main/index.js` to point at a mock license server.
+- **DPAPI-encrypted local cache** at `%APPDATA%/Your Restaurant POS/license.enc`, mirroring the existing config blob: per-user Windows DPAPI on real machines, plaintext fallback on dev hosts.
+- **Hourly background verify** in main process. Verdict transitions (active → grace → locked) are pushed to the renderer via `desktop:license:verdict-changed` so the cashier sees `LicenseRequiredScreen` within minutes of a server-side revoke, no restart required.
+- **Offline grace: 7 days** (handled by `@restora/license-client`). Cached proof keeps the app working through router outages; clock-rewinding doesn't extend grace because the window is measured against `lastVerifiedAtMs` not the proof's `issuedAt`.
+- **`window.desktop.license.{status,activate,deactivate,onVerdictChanged}`** added to the preload bridge.
+
 ## 0.6.0 — installer + auto-update (2026-04-15)
 
 - **`pnpm dist` now produces a working Windows installer.** `release/YourRestaurantPOS-Setup-{version}.exe` (~90 MB NSIS), along with `latest.yml` and `.blockmap` for auto-update.

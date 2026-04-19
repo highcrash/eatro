@@ -242,6 +242,29 @@ export interface DesktopApi {
     clearRevoked: () => Promise<{ ok: true }>;
     onRevoked: (cb: () => void) => () => void;
   };
+  license: {
+    status: () => Promise<LicenseVerdict>;
+    activate: (purchaseCode: string) => Promise<LicenseVerdict | LicenseError>;
+    deactivate: () => Promise<{ ok: true }>;
+    onVerdictChanged: (cb: (mode: LicenseMode) => void) => () => void;
+  };
+}
+
+export type LicenseMode = 'active' | 'grace' | 'locked' | 'missing';
+
+export interface LicenseVerdict {
+  mode: LicenseMode;
+  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED' | 'PENDING' | null;
+  graceDaysRemaining: number;
+  licenseId: string | null;
+  domain: string | null;
+  reason: string;
+}
+
+export interface LicenseError {
+  error: true;
+  result: string;
+  message: string;
 }
 
 const api: DesktopApi = {
@@ -321,6 +344,16 @@ const api: DesktopApi = {
       const listener = () => cb();
       ipcRenderer.on('device:revoked', listener);
       return () => ipcRenderer.off('device:revoked', listener);
+    },
+  },
+  license: {
+    status: () => ipcRenderer.invoke('license:status'),
+    activate: (purchaseCode) => ipcRenderer.invoke('license:activate', purchaseCode),
+    deactivate: () => ipcRenderer.invoke('license:deactivate'),
+    onVerdictChanged: (cb) => {
+      const listener = (_event: unknown, mode: LicenseMode) => cb(mode);
+      ipcRenderer.on('desktop:license:verdict-changed', listener);
+      return () => ipcRenderer.off('desktop:license:verdict-changed', listener);
     },
   },
 };

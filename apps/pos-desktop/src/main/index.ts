@@ -7,6 +7,9 @@ import { startSyncWorker } from './sync/sync-worker';
 import { installUploadProxy } from './upload-proxy';
 import { setupAutoUpdater } from './updater';
 import { startHeartbeat } from './session/device-heartbeat';
+import { registerLicenseIpc } from './license/ipc';
+import { startLicenseScheduler } from './license/scheduler';
+import { verify as verifyLicense } from './license/service';
 
 // Phase 1 — Electron main process with device pairing + encrypted config.
 // Later phases add printer, SQLite outbox, etc.
@@ -60,6 +63,7 @@ function createWindow(): void {
 
 void app.whenReady().then(async () => {
   registerIpcHandlers();
+  registerLicenseIpc();
   wireSyncBroadcast();
   startSyncWorker();
   onlineDetector.start();
@@ -67,6 +71,11 @@ void app.whenReady().then(async () => {
   createWindow();
   setupAutoUpdater();
   startHeartbeat();
+  startLicenseScheduler();
+  // Boot-time license verify — fire-and-forget. Updates the cached
+  // verdict so the renderer's first license:status read reflects
+  // server reality (or a fresh local fallback if offline).
+  void verifyLicense().catch(() => undefined);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

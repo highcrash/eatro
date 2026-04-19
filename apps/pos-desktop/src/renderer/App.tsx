@@ -6,13 +6,16 @@ import { SyncBanner } from './SyncBanner';
 import { SyncPanel } from './SyncPanel';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { RevokedScreen } from './RevokedScreen';
+import { LicenseStep } from './LicenseStep';
+import { LicenseRequiredScreen } from './LicenseRequiredScreen';
 import { PosEmbed } from './PosEmbed';
 import { UpdateToast } from './UpdateToast';
 import { ChangePinDialog } from './ChangePinDialog';
 import { OwnerPasswordDialog } from './OwnerPasswordDialog';
 import type { PairedConfig, SessionUser } from './desktop-api';
+import type { LicenseVerdict } from '../preload/index';
 
-type View = 'loading' | 'pairing' | 'locked' | 'signed-in' | 'printer-settings' | 'sync-panel' | 'diagnostics';
+type View = 'loading' | 'license' | 'pairing' | 'locked' | 'signed-in' | 'printer-settings' | 'sync-panel' | 'diagnostics';
 
 export function App(): JSX.Element {
   const [view, setView] = useState<View>('loading');
@@ -22,16 +25,25 @@ export function App(): JSX.Element {
   const [changePinOpen, setChangePinOpen] = useState(false);
   const [unpairPromptOpen, setUnpairPromptOpen] = useState(false);
   const [revoked, setRevoked] = useState(false);
+  const [license, setLicense] = useState<LicenseVerdict | null>(null);
 
   useEffect(() => {
     void (async () => {
-      const [cfg, ver, alreadyRevoked] = await Promise.all([
+      const [cfg, ver, alreadyRevoked, lic] = await Promise.all([
         window.desktop.config.get(),
         window.desktop.app.version(),
         window.desktop.deviceStatus.isRevoked(),
+        window.desktop.license.status(),
       ]);
       setAppVersion(ver.version);
       if (alreadyRevoked) setRevoked(true);
+      setLicense(lic);
+      // License gates everything. mode=missing → activation step; mode=locked
+      // (REVOKED / EXPIRED / grace blown) → LicenseRequiredScreen overlays.
+      if (lic.mode === 'missing') {
+        setView('license');
+        return;
+      }
       if (!cfg) {
         setView('pairing');
         return;
@@ -45,6 +57,18 @@ export function App(): JSX.Element {
   // the cashier straight into the hard lock, regardless of current view.
   useEffect(() => {
     return window.desktop.deviceStatus.onRevoked(() => setRevoked(true));
+  }, []);
+
+  // Listen for license verdict transitions pushed by the hourly verifier
+  // in the main process. A flip to locked / missing immediately swaps the
+  // cashier into the LicenseRequiredScreen — no waiting for a status poll.
+  useEffect(() => {
+    return window.desktop.license.onVerdictChanged((mode) => {
+      void window.desktop.license.status().then(setLicense);
+      // Only the takeover screens care about the mode flip; if we end
+      // up active again, the existing view stays.
+      if (mode === 'missing') setView('license');
+    });
   }, []);
 
   async function unpair() {
@@ -63,6 +87,44 @@ export function App(): JSX.Element {
   }
 
   if (view === 'loading') return <CenterText>Loading…</CenterText>;
+
+  // License takeover takes priority over EVERYTHING else (incl. revoked
+  // device + first-run pairing). Without an active license the desktop
+  // is read-only at the API layer; the UI mirrors that boundary so the
+  // cashier knows what to do instead of seeing confusing 403s.
+  if (view === 'license' || (license && license.mode === 'missing')) {
+    return (
+      <LicenseStep
+        onActivated={(v) => {
+          setLicense(v);
+          // After activation, fall back into the original boot decision:
+          // paired → locked, unpaired → pairing.
+          if (config) {
+            setView('locked');
+          } else {
+            setView('pairing');
+          }
+        }}
+      />
+    );
+  }
+  if (license && license.mode === 'locked') {
+    return (
+      <LicenseRequiredScreen
+        verdict={license}
+        onRecovered={(v) => {
+          setLicense(v);
+          if (v.mode === 'missing') {
+            setView('license');
+          } else if (config) {
+            setView('locked');
+          } else {
+            setView('pairing');
+          }
+        }}
+      />
+    );
+  }
 
   // Revoked takes priority over every other state — the terminal's token is
   // no longer valid so the cashier cannot do anything until the owner
