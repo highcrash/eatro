@@ -3,12 +3,16 @@ import * as bcrypt from 'bcryptjs';
 
 import type { CreateStaffDto, UpdateStaffDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { LicenseService } from '../license/license.service';
 
 const BCRYPT_ROUNDS = 12;
 
 @Injectable()
 export class StaffService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly license: LicenseService,
+  ) {}
 
   findAll(branchId: string) {
     return this.prisma.staff.findMany({
@@ -28,6 +32,7 @@ export class StaffService {
   }
 
   async create(branchId: string, dto: CreateStaffDto) {
+    this.license.assertMutation('staff.create');
     const exists = await this.prisma.staff.findFirst({ where: { email: dto.email, deletedAt: null } });
     if (exists) throw new ConflictException('Email already in use');
 

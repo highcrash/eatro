@@ -7,6 +7,7 @@ import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
 import { RecipeService } from '../recipe/recipe.service';
 import { AccountService } from '../account/account.service';
 import { BranchSettingsService } from '../branch-settings/branch-settings.service';
+import { LicenseService } from '../license/license.service';
 
 /**
  * Service charge + VAT calculator used by every place that recomputes an
@@ -50,6 +51,9 @@ export class OrderService {
     private readonly recipeService: RecipeService,
     private readonly accountService: AccountService,
     private readonly branchSettings: BranchSettingsService,
+    // Inline license check — defence-in-depth so a cracker who patches
+    // out the global APP_GUARD still trips on this in the hot path.
+    private readonly license: LicenseService,
   ) {}
 
   findAll(branchId: string, tableId?: string, status?: string, from?: string, to?: string) {
@@ -110,6 +114,7 @@ export class OrderService {
   }
 
   async create(branchId: string, cashierId: string, dto: CreateOrderDto) {
+    this.license.assertMutation('order.create');
     // Fetch menu items to get prices and names
     const menuItemIds = dto.items.map((i) => i.menuItemId);
     const menuItems = await this.prisma.menuItem.findMany({
@@ -1071,6 +1076,7 @@ export class OrderService {
   }
 
   async voidOrder(id: string, branchId: string, dto: VoidOrderDto) {
+    this.license.assertMutation('order.void');
     const order = await this.findOne(id, branchId);
     if (order.status === 'PAID') throw new BadRequestException('Cannot void a paid order');
     if (order.status === 'VOID') throw new BadRequestException('Order already voided');

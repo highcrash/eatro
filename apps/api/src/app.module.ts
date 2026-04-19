@@ -44,6 +44,7 @@ import { BackupModule } from './backup/backup.module';
 import { BranchSettingsModule } from './branch-settings/branch-settings.module';
 import { DeviceModule } from './device-registration/device.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
+import { LicenseModule } from './license/license.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -61,6 +62,12 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // Infrastructure
     PrismaModule,
+    // License gate — must come right after Prisma (depends on it) and
+    // before any feature module whose mutations call `assertMutation()`.
+    // Also installs the global APP_GUARD so every request goes through
+    // the host + verdict checks.
+    ScheduleModule.forRoot(),
+    LicenseModule,
     WsGatewayModule,
 
     // Feature modules (Phase 1)
@@ -155,7 +162,6 @@ import { ScheduleModule } from '@nestjs/schedule';
     IdempotencyModule,
 
     // Reservation System
-    ScheduleModule.forRoot(),
     ReservationModule,
   ],
 })

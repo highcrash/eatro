@@ -48,12 +48,12 @@ enum OrderStatus {
 
 // Level 1: Payment Category (e.g., CASH, CARD, MFS, DIGITAL, FOOD_DELIVERY)
 model PaymentMethodConfig {
-  id        String  @id @default(cuid())
+  id        String   @id @default(cuid())
   branchId  String
-  code      String  // CASH, CARD, MFS, DIGITAL, FOOD_DELIVERY
-  name      String  // "Cash", "Card", "Mobile Banking", "Digital Payment", "Food Delivery"
-  isActive  Boolean @default(true)
-  sortOrder Int     @default(0)
+  code      String // CASH, CARD, MFS, DIGITAL, FOOD_DELIVERY
+  name      String // "Cash", "Card", "Mobile Banking", "Digital Payment", "Food Delivery"
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
   createdAt DateTime @default(now())
 
   // Relations
@@ -67,16 +67,16 @@ model PaymentMethodConfig {
 
 // Level 2: Payment Option (e.g., "City POS" under CARD, "bKash" under MFS)
 model PaymentOption {
-  id              String  @id @default(cuid())
-  branchId        String
-  categoryId      String  // links to PaymentMethodConfig
-  code            String  // CITY_POS, DBBL_POS, BKASH, NAGAD, FOOD_PANDA
-  name            String  // "City POS Machine", "bKash", "Food Panda"
-  accountId       String? // linked Account for balance tracking
-  isActive        Boolean @default(true)
-  isDefault       Boolean @default(false) // default option in its category
-  sortOrder       Int     @default(0)
-  createdAt       DateTime @default(now())
+  id         String   @id @default(cuid())
+  branchId   String
+  categoryId String // links to PaymentMethodConfig
+  code       String // CITY_POS, DBBL_POS, BKASH, NAGAD, FOOD_PANDA
+  name       String // "City POS Machine", "bKash", "Food Panda"
+  accountId  String? // linked Account for balance tracking
+  isActive   Boolean  @default(true)
+  isDefault  Boolean  @default(false) // default option in its category
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
 
   // Relations
   branch   Branch              @relation(fields: [branchId], references: [id])
@@ -135,97 +135,97 @@ enum DiscountScope {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Branch {
-  id        String   @id @default(cuid())
-  name      String
-  address   String
-  phone     String
-  email     String?
-  currency  String   @default("BDT")
-  timezone  String   @default("Asia/Dhaka")
-  taxRate   Decimal  @default(0) @db.Decimal(5, 2)   // percentage e.g. 15.00
-  vatEnabled Boolean @default(true)                   // master toggle — when false, taxRate is ignored on new orders
-  serviceChargeEnabled Boolean @default(false)        // adds a service charge line above VAT
-  serviceChargeRate    Decimal @default(0) @db.Decimal(5, 2) // percentage e.g. 10.00
-  stockPricingMethod String @default("LAST_PURCHASE") // LAST_PURCHASE or WEIGHTED_AVERAGE
+  id                   String    @id @default(cuid())
+  name                 String
+  address              String
+  phone                String
+  email                String?
+  currency             String    @default("BDT")
+  timezone             String    @default("Asia/Dhaka")
+  taxRate              Decimal   @default(0) @db.Decimal(5, 2) // percentage e.g. 15.00
+  vatEnabled           Boolean   @default(true) // master toggle — when false, taxRate is ignored on new orders
+  serviceChargeEnabled Boolean   @default(false) // adds a service charge line above VAT
+  serviceChargeRate    Decimal   @default(0) @db.Decimal(5, 2) // percentage e.g. 10.00
+  stockPricingMethod   String    @default("LAST_PURCHASE") // LAST_PURCHASE or WEIGHTED_AVERAGE
   // ── Branding ──
-  logoUrl         String?    // main brand logo (used in admin, web, and as POS fallback)
-  posLogoUrl      String?    // optional override for POS sidebar
-  websiteTagline  String?    // hero tagline for the public website
-  billHeaderText  String?    // optional header text rendered above items on bill/receipt
-  billFooterText  String?    // free text shown at bottom of bills/receipts (multi-line)
-  bin             String?    // Bangladesh Business Identification Number, shown under phone
-  mushakVersion   String?    // e.g. "Mushak-6.3" — printed below BIN on paper bills
-  wifiPass        String?    // guest Wi-Fi password, optionally printed on the bill
-  wifiSsid        String?    // guest Wi-Fi network name (SSID) — shown on QR gate page
-  qrGateEnabled   Boolean  @default(false)   // when true, QR ordering requires the client IP to match qrAllowedIps
-  qrAllowedIps    String?    // comma-separated IPs and CIDR blocks (e.g. "192.168.1.0/24,203.0.113.42")
-  qrGateMessage   String?    // optional instructions shown under Wi-Fi details on the gate page
-  billLogoWidthPct Int       @default(80) // how wide the logo prints on the receipt (% of 80mm paper)
-  facebookUrl     String?
-  instagramUrl    String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
+  logoUrl              String? // main brand logo (used in admin, web, and as POS fallback)
+  posLogoUrl           String? // optional override for POS sidebar
+  websiteTagline       String? // hero tagline for the public website
+  billHeaderText       String? // optional header text rendered above items on bill/receipt
+  billFooterText       String? // free text shown at bottom of bills/receipts (multi-line)
+  bin                  String? // Bangladesh Business Identification Number, shown under phone
+  mushakVersion        String? // e.g. "Mushak-6.3" — printed below BIN on paper bills
+  wifiPass             String? // guest Wi-Fi password, optionally printed on the bill
+  wifiSsid             String? // guest Wi-Fi network name (SSID) — shown on QR gate page
+  qrGateEnabled        Boolean   @default(false) // when true, QR ordering requires the client IP to match qrAllowedIps
+  qrAllowedIps         String? // comma-separated IPs and CIDR blocks (e.g. "192.168.1.0/24,203.0.113.42")
+  qrGateMessage        String? // optional instructions shown under Wi-Fi details on the gate page
+  billLogoWidthPct     Int       @default(80) // how wide the logo prints on the receipt (% of 80mm paper)
+  facebookUrl          String?
+  instagramUrl         String?
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
 
   // Relations
-  staff          Staff[]
-  tables         DiningTable[]
-  categories     MenuCategory[]
-  menuItems      MenuItem[]
-  orders         Order[]
-  suppliers      Supplier[]
-  ingredients    Ingredient[]
-  stockMovements StockMovement[]
-  purchaseOrders PurchaseOrder[]
-  attendance     Attendance[]
-  payrolls       Payroll[]
-  wasteLogs      WasteLog[]
-  expenses       Expense[]
-  accounts              Account[]
-  accountTransactions   AccountTransaction[]
-  preReadyItems         PreReadyItem[]
-  productionOrders      ProductionOrder[]
-  preReadyBatches       PreReadyBatch[]
-  supplierPayments      SupplierPayment[]
-  leaveApplications     LeaveApplication[]
-  workPeriods           WorkPeriod[]
-  cookingStations       CookingStation[]
-  unitConversions       UnitConversion[]
-  customUnits           CustomUnit[]
-  paymentMethods        PaymentMethodConfig[]
-  paymentOptions        PaymentOption[]
-  purchaseReturns       PurchaseReturn[]
-  discounts             Discount[]
-  coupons               Coupon[]
-  customers             Customer[]
-  reviews               Review[]
-  reservations          Reservation[]
-  settings              BranchSetting?
-  websiteContent        WebsiteContent?
-  devices               Device[]
+  staff               Staff[]
+  tables              DiningTable[]
+  categories          MenuCategory[]
+  menuItems           MenuItem[]
+  orders              Order[]
+  suppliers           Supplier[]
+  ingredients         Ingredient[]
+  stockMovements      StockMovement[]
+  purchaseOrders      PurchaseOrder[]
+  attendance          Attendance[]
+  payrolls            Payroll[]
+  wasteLogs           WasteLog[]
+  expenses            Expense[]
+  accounts            Account[]
+  accountTransactions AccountTransaction[]
+  preReadyItems       PreReadyItem[]
+  productionOrders    ProductionOrder[]
+  preReadyBatches     PreReadyBatch[]
+  supplierPayments    SupplierPayment[]
+  leaveApplications   LeaveApplication[]
+  workPeriods         WorkPeriod[]
+  cookingStations     CookingStation[]
+  unitConversions     UnitConversion[]
+  customUnits         CustomUnit[]
+  paymentMethods      PaymentMethodConfig[]
+  paymentOptions      PaymentOption[]
+  purchaseReturns     PurchaseReturn[]
+  discounts           Discount[]
+  coupons             Coupon[]
+  customers           Customer[]
+  reviews             Review[]
+  reservations        Reservation[]
+  settings            BranchSetting?
+  websiteContent      WebsiteContent?
+  devices             Device[]
 
   @@index([isActive])
   @@map("branches")
 }
 
 model BranchSetting {
-  id        String  @id @default(cuid())
-  branchId  String  @unique
+  id                              String  @id @default(cuid())
+  branchId                        String  @unique
   // SMS Gateway
-  smsEnabled       Boolean @default(false)
-  smsApiKey        String?
-  smsApiUrl        String  @default("https://api.sms.net.bd/sendsms")
+  smsEnabled                      Boolean @default(false)
+  smsApiKey                       String?
+  smsApiUrl                       String  @default("https://api.sms.net.bd/sendsms")
   // Notification toggles
-  notifyVoidOtp    Boolean @default(true)  // Send OTP to manager for void approval
+  notifyVoidOtp                   Boolean @default(true) // Send OTP to manager for void approval
   // Theming
-  posTheme         String  @default("sunrise")  // built-in slug or custom slug
-  websiteTheme     String  @default("sunrise")
-  customThemes     String? // JSON array of custom theme objects (slug, name, scope, tokens)
+  posTheme                        String  @default("sunrise") // built-in slug or custom slug
+  websiteTheme                    String  @default("sunrise")
+  customThemes                    String? // JSON array of custom theme objects (slug, name, scope, tokens)
   // Cashier permissions (Phase 6)
-  cashierPermissions String? // JSON: per-action enabled+approval mode
+  cashierPermissions              String? // JSON: per-action enabled+approval mode
   // Kitchen
-  useKds             Boolean @default(true)  // When false, kitchen tickets auto-print from POS (no KDS screen)
+  useKds                          Boolean @default(true) // When false, kitchen tickets auto-print from POS (no KDS screen)
   // ── Reservation Settings ──
   openingTime                     String  @default("09:00")
   closingTime                     String  @default("23:00")
@@ -249,80 +249,80 @@ model BranchSetting {
 
 // ─── Website CMS (Phase 5) ───────────────────────────────────────────────────
 model WebsiteContent {
-  id            String   @id @default(cuid())
-  branchId      String   @unique
+  id                        String   @id @default(cuid())
+  branchId                  String   @unique
   // Hero
-  heroTitle     String   @default("Welcome")
-  heroSubtitle  String?
-  heroImageUrl  String?
-  heroVideoUrl  String?                          // MP4 URL for hero background video
-  heroCtaText   String   @default("View Menu")
+  heroTitle                 String   @default("Welcome")
+  heroSubtitle              String?
+  heroImageUrl              String?
+  heroVideoUrl              String? // MP4 URL for hero background video
+  heroCtaText               String   @default("View Menu")
   // About
-  aboutTitle    String   @default("About Us")
-  aboutBody     String   @default("")
-  aboutImageUrl String?
-  aboutPoint1   String?                          // numbered about card 1
-  aboutPoint2   String?
-  aboutPoint3   String?
-  aboutPoint4   String?
-  openingHours  String?                          // "Daily 11:00 - 23:00"
+  aboutTitle                String   @default("About Us")
+  aboutBody                 String   @default("")
+  aboutImageUrl             String?
+  aboutPoint1               String? // numbered about card 1
+  aboutPoint2               String?
+  aboutPoint3               String?
+  aboutPoint4               String?
+  openingHours              String? // "Daily 11:00 - 23:00"
   // Contact
-  contactNote   String?
-  mapEmbedUrl   String?
+  contactNote               String?
+  mapEmbedUrl               String?
   // Featured menu (JSON array of MenuCategory ids)
-  featuredCategoryIds String?
+  featuredCategoryIds       String?
   // Section visibility toggles
-  showReservation     Boolean @default(true)
-  showReviews         Boolean @default(true)
-  showGallery         Boolean @default(true)
-  showKeyIngredients  Boolean @default(true)
-  showPieces          Boolean @default(true)
-  showPrepTime        Boolean @default(true)
-  showSpiceLevel      Boolean @default(true)
-  showDeals           Boolean @default(true)
-  showChefsSpecial    Boolean @default(true)
+  showReservation           Boolean  @default(true)
+  showReviews               Boolean  @default(true)
+  showGallery               Boolean  @default(true)
+  showKeyIngredients        Boolean  @default(true)
+  showPieces                Boolean  @default(true)
+  showPrepTime              Boolean  @default(true)
+  showSpiceLevel            Boolean  @default(true)
+  showDeals                 Boolean  @default(true)
+  showChefsSpecial          Boolean  @default(true)
   // Gallery
-  galleryImages       String?                    // JSON array of image URLs
+  galleryImages             String? // JSON array of image URLs
   // Section backgrounds (admin uploads image/video)
-  menuSectionBg       String?
-  aboutSectionBg      String?
-  reviewsSectionBg    String?
-  reservationSectionBg String?
-  contactSectionBg    String?
-  bannerBg            String?                    // full-width banner image
-  bannerText          String?                    // banner large text
+  menuSectionBg             String?
+  aboutSectionBg            String?
+  reviewsSectionBg          String?
+  reservationSectionBg      String?
+  contactSectionBg          String?
+  bannerBg                  String? // full-width banner image
+  bannerText                String? // banner large text
   // Theme & Colors
-  websiteMode         String  @default("dark")   // "dark" | "light"
-  maintenanceMode     Boolean @default(false)    // when true, website shows maintenance page
-  maintenanceBg       String?                    // background image for maintenance page
-  maintenanceText     String?                    // custom maintenance text
-  notFoundBg          String?                    // background image for 404 page
-  notFoundText        String?                    // custom 404 text
+  websiteMode               String   @default("dark") // "dark" | "light"
+  maintenanceMode           Boolean  @default(false) // when true, website shows maintenance page
+  maintenanceBg             String? // background image for maintenance page
+  maintenanceText           String? // custom maintenance text
+  notFoundBg                String? // background image for 404 page
+  notFoundText              String? // custom 404 text
   // SEO — Global
-  seoSiteName         String?                    // e.g. "EATRO Restaurant"
-  seoHomeTitle        String?                    // Home page title tag
-  seoHomeDescription  String?                    // Home page meta description
-  seoHomeKeywords     String?                    // comma-separated keywords
-  seoMenuTitle        String?                    // Menu page title
-  seoMenuDescription  String?
-  seoAboutTitle       String?
-  seoAboutDescription String?
-  seoContactTitle     String?
-  seoContactDescription String?
-  seoReservationTitle String?
+  seoSiteName               String? // e.g. "EATRO Restaurant"
+  seoHomeTitle              String? // Home page title tag
+  seoHomeDescription        String? // Home page meta description
+  seoHomeKeywords           String? // comma-separated keywords
+  seoMenuTitle              String? // Menu page title
+  seoMenuDescription        String?
+  seoAboutTitle             String?
+  seoAboutDescription       String?
+  seoContactTitle           String?
+  seoContactDescription     String?
+  seoReservationTitle       String?
   seoReservationDescription String?
-  seoOgImage          String?                    // default Open Graph image
-  seoFavicon          String?                    // favicon URL
-  accentColor         String  @default("#D62B2B")
-  buttonColor         String  @default("#D62B2B")
-  textColor           String?                    // override (null = mode default)
-  bgColor             String?                    // override (null = mode default)
+  seoOgImage                String? // default Open Graph image
+  seoFavicon                String? // favicon URL
+  accentColor               String   @default("#D62B2B")
+  buttonColor               String   @default("#D62B2B")
+  textColor                 String? // override (null = mode default)
+  bgColor                   String? // override (null = mode default)
   // Menu visibility
-  recommendedTag      String  @default("Chef Special")
-  hiddenCategoryIds   String?                    // JSON array of category IDs
-  hiddenItemIds       String?                    // JSON array of item IDs
+  recommendedTag            String   @default("Chef Special")
+  hiddenCategoryIds         String? // JSON array of category IDs
+  hiddenItemIds             String? // JSON array of item IDs
   //
-  updatedAt     DateTime @updatedAt
+  updatedAt                 DateTime @updatedAt
 
   branch Branch @relation(fields: [branchId], references: [id])
 
@@ -334,14 +334,14 @@ model WebsiteContent {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Staff {
-  id           String    @id @default(cuid())
-  branchId     String
-  name         String
-  email        String    @unique
-  passwordHash String
-  phone        String?
-  role         UserRole  @default(CASHIER)
-  isActive     Boolean   @default(true)
+  id            String    @id @default(cuid())
+  branchId      String
+  name          String
+  email         String    @unique
+  passwordHash  String
+  phone         String?
+  role          UserRole  @default(CASHIER)
+  isActive      Boolean   @default(true)
   hireDate      DateTime  @default(now())
   monthlySalary Decimal?  @db.Decimal(14, 2)
   createdAt     DateTime  @default(now())
@@ -349,20 +349,20 @@ model Staff {
   deletedAt     DateTime?
 
   // Relations
-  branch                Branch          @relation(fields: [branchId], references: [id])
-  ordersAsCashier       Order[]         @relation("OrderCashier")
-  voidedOrders          Order[]         @relation("OrderVoidedBy")
-  purchaseOrdersCreated PurchaseOrder[] @relation("POCreatedBy")
-  attendance            Attendance[]
-  payrolls              Payroll[]
-  payrollsApproved      Payroll[]       @relation("PayrollApprover")
-  payrollPayments       PayrollPayment[] @relation("PayrollPaidBy")
-  wasteLogsRecorded     WasteLog[]      @relation("WasteRecorder")
-  expensesRecorded      Expense[]       @relation("ExpenseRecordedBy")
-  expensesApproved      Expense[]       @relation("ExpenseApprover")
-  productionOrdersRequested ProductionOrder[] @relation("ProductionRequester")
-  productionOrdersApproved  ProductionOrder[] @relation("ProductionApprover")
-  supplierPayments          SupplierPayment[] @relation("SupplierPaymentBy")
+  branch                    Branch             @relation(fields: [branchId], references: [id])
+  ordersAsCashier           Order[]            @relation("OrderCashier")
+  voidedOrders              Order[]            @relation("OrderVoidedBy")
+  purchaseOrdersCreated     PurchaseOrder[]    @relation("POCreatedBy")
+  attendance                Attendance[]
+  payrolls                  Payroll[]
+  payrollsApproved          Payroll[]          @relation("PayrollApprover")
+  payrollPayments           PayrollPayment[]   @relation("PayrollPaidBy")
+  wasteLogsRecorded         WasteLog[]         @relation("WasteRecorder")
+  expensesRecorded          Expense[]          @relation("ExpenseRecordedBy")
+  expensesApproved          Expense[]          @relation("ExpenseApprover")
+  productionOrdersRequested ProductionOrder[]  @relation("ProductionRequester")
+  productionOrdersApproved  ProductionOrder[]  @relation("ProductionApprover")
+  supplierPayments          SupplierPayment[]  @relation("SupplierPaymentBy")
   leaveApplications         LeaveApplication[] @relation("LeaveApplicant")
   leaveReviews              LeaveApplication[] @relation("LeaveReviewer")
   workPeriodsStarted        WorkPeriod[]       @relation("WorkPeriodStarter")
@@ -411,15 +411,15 @@ model MenuCategory {
   branchId  String
   parentId  String?
   name      String
-  slug      String?   // SEO-friendly URL slug (auto-generated from name)
-  icon      String?   // emoji or icon name (e.g. "🍗", "🍕", "☕")
+  slug      String? // SEO-friendly URL slug (auto-generated from name)
+  icon      String? // emoji or icon name (e.g. "🍗", "🍕", "☕")
   sortOrder Int       @default(0)
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  websiteVisible Boolean @default(true)  // hide entire category from public website
+  websiteVisible Boolean @default(true) // hide entire category from public website
 
   // Relations
   branch    Branch         @relation(fields: [branchId], references: [id])
@@ -432,43 +432,43 @@ model MenuCategory {
 }
 
 model MenuItem {
-  id          String       @id @default(cuid())
-  branchId    String
-  categoryId  String
-  name        String
-  slug        String?                              // SEO-friendly URL slug
-  seoTitle    String?                              // custom SEO title for this item
-  seoDescription String?                           // custom meta description
-  description String?
-  type        MenuItemType @default(FOOD)
-  price       Decimal      @db.Decimal(14, 2)   // stored in paisa
-  costPrice   Decimal?     @db.Decimal(14, 2)
-  imageUrl    String?
-  tags        String?      // comma-separated: "vegan,spicy,nut-free,chicken"
-  isAvailable Boolean      @default(true)
-  sortOrder   Int          @default(0)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  deletedAt   DateTime?
+  id             String       @id @default(cuid())
+  branchId       String
+  categoryId     String
+  name           String
+  slug           String? // SEO-friendly URL slug
+  seoTitle       String? // custom SEO title for this item
+  seoDescription String? // custom meta description
+  description    String?
+  type           MenuItemType @default(FOOD)
+  price          Decimal      @db.Decimal(14, 2) // stored in paisa
+  costPrice      Decimal?     @db.Decimal(14, 2)
+  imageUrl       String?
+  tags           String? // comma-separated: "vegan,spicy,nut-free,chicken"
+  isAvailable    Boolean      @default(true)
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
 
-  isCombo           Boolean      @default(false)
-  cookingStationId  String?
+  isCombo          Boolean @default(false)
+  cookingStationId String?
   // Website detail fields
-  pieces            String?                        // e.g. "4-6" — null = don't show
-  prepTime          String?                        // e.g. "15 min"
-  spiceLevel        String?                        // e.g. "Mild", "Medium", "Hot"
-  websiteVisible    Boolean      @default(true)    // hide from website without affecting POS
+  pieces           String? // e.g. "4-6" — null = don't show
+  prepTime         String? // e.g. "15 min"
+  spiceLevel       String? // e.g. "Mild", "Medium", "Hot"
+  websiteVisible   Boolean @default(true) // hide from website without affecting POS
 
   // Relations
-  branch           Branch          @relation(fields: [branchId], references: [id])
-  category         MenuCategory    @relation(fields: [categoryId], references: [id])
-  cookingStation   CookingStation? @relation(fields: [cookingStationId], references: [id])
+  branch           Branch             @relation(fields: [branchId], references: [id])
+  category         MenuCategory       @relation(fields: [categoryId], references: [id])
+  cookingStation   CookingStation?    @relation(fields: [cookingStationId], references: [id])
   orderItems       OrderItem[]
   recipe           Recipe?
-  comboItems       ComboItem[]     @relation("ComboMenu")
-  includedInCombos ComboItem[]     @relation("ComboIncluded")
-  linkedItems      LinkedItem[]    @relation("LinkedParent")
-  linkedFrom       LinkedItem[]    @relation("LinkedChild")
+  comboItems       ComboItem[]        @relation("ComboMenu")
+  includedInCombos ComboItem[]        @relation("ComboIncluded")
+  linkedItems      LinkedItem[]       @relation("LinkedParent")
+  linkedFrom       LinkedItem[]       @relation("LinkedChild")
   menuDiscounts    MenuItemDiscount[]
 
   @@index([branchId, categoryId, isAvailable])
@@ -544,16 +544,16 @@ model Customer {
 }
 
 model Review {
-  id             String   @id @default(cuid())
-  branchId       String
-  orderId        String   @unique
-  customerId     String?
-  foodScore      Int      // 1-5
-  serviceScore   Int      // 1-5
-  atmosphereScore Int     // 1-5
-  priceScore     Int      // 1-5
-  notes          String?
-  createdAt      DateTime @default(now())
+  id              String   @id @default(cuid())
+  branchId        String
+  orderId         String   @unique
+  customerId      String?
+  foodScore       Int // 1-5
+  serviceScore    Int // 1-5
+  atmosphereScore Int // 1-5
+  priceScore      Int // 1-5
+  notes           String?
+  createdAt       DateTime @default(now())
 
   branch   Branch    @relation(fields: [branchId], references: [id])
   order    Order     @relation(fields: [orderId], references: [id])
@@ -568,28 +568,28 @@ model Review {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Reservation {
-  id              String            @id @default(cuid())
-  branchId        String
-  customerId      String?
-  customerName    String
-  customerPhone   String
-  date            DateTime          @db.Date
-  timeSlot        String                            // "HH:mm" start time
-  partySize       Int
-  status          ReservationStatus @default(PENDING)
-  tableId         String?
-  tableIds        String?                           // JSON array of table IDs for multi-table bookings
-  notes           String?
-  confirmedById   String?
-  confirmedAt     DateTime?
-  arrivedAt       DateTime?
-  completedAt     DateTime?
-  cancelledAt     DateTime?
-  cancelReason    String?
-  agreedTerms     Boolean           @default(true)
-  reminderSentAt  DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  id             String            @id @default(cuid())
+  branchId       String
+  customerId     String?
+  customerName   String
+  customerPhone  String
+  date           DateTime          @db.Date
+  timeSlot       String // "HH:mm" start time
+  partySize      Int
+  status         ReservationStatus @default(PENDING)
+  tableId        String?
+  tableIds       String? // JSON array of table IDs for multi-table bookings
+  notes          String?
+  confirmedById  String?
+  confirmedAt    DateTime?
+  arrivedAt      DateTime?
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  cancelReason   String?
+  agreedTerms    Boolean           @default(true)
+  reminderSentAt DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   branch      Branch       @relation(fields: [branchId], references: [id])
   customer    Customer?    @relation(fields: [customerId], references: [id])
@@ -607,49 +607,49 @@ model Reservation {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Order {
-  id             String        @id @default(cuid())
-  orderNumber    String        @unique
-  branchId       String
-  cashierId      String
-  tableId        String?
-  tableNumber    String?                         // denormalized — survives table deletion
-  type           OrderType     @default(DINE_IN)
-  status         OrderStatus   @default(PENDING)
-  notes          String?
-  subtotal       Decimal       @db.Decimal(14, 2)
-  taxAmount      Decimal       @default(0) @db.Decimal(14, 2)
-  serviceChargeAmount Decimal  @default(0) @db.Decimal(14, 2) // added before VAT when branch.serviceChargeEnabled
-  discountAmount Decimal       @default(0) @db.Decimal(14, 2)
-  discountId     String?       // applied Discount ID
-  discountName   String?       // denormalized discount/coupon display name
-  couponId       String?       // applied Coupon ID
-  couponCode     String?       // denormalized coupon code
-  totalAmount    Decimal       @db.Decimal(14, 2)
-  paymentMethod  String?
-  paidAt         DateTime?
-  customerId     String?
-  customerName   String?       // denormalized — "Walk-in" or customer name
-  customerPhone  String?       // denormalized
-  waiterId       String?
-  guestCount     Int           @default(0)         // number of guests at the table (printed on bill/receipt)
-  billRequested  Boolean       @default(false)
-  voidReason     String?
-  voidedById     String?
-  voidedAt       DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  deletedAt      DateTime?
+  id                  String      @id @default(cuid())
+  orderNumber         String      @unique
+  branchId            String
+  cashierId           String
+  tableId             String?
+  tableNumber         String? // denormalized — survives table deletion
+  type                OrderType   @default(DINE_IN)
+  status              OrderStatus @default(PENDING)
+  notes               String?
+  subtotal            Decimal     @db.Decimal(14, 2)
+  taxAmount           Decimal     @default(0) @db.Decimal(14, 2)
+  serviceChargeAmount Decimal     @default(0) @db.Decimal(14, 2) // added before VAT when branch.serviceChargeEnabled
+  discountAmount      Decimal     @default(0) @db.Decimal(14, 2)
+  discountId          String? // applied Discount ID
+  discountName        String? // denormalized discount/coupon display name
+  couponId            String? // applied Coupon ID
+  couponCode          String? // denormalized coupon code
+  totalAmount         Decimal     @db.Decimal(14, 2)
+  paymentMethod       String?
+  paidAt              DateTime?
+  customerId          String?
+  customerName        String? // denormalized — "Walk-in" or customer name
+  customerPhone       String? // denormalized
+  waiterId            String?
+  guestCount          Int         @default(0) // number of guests at the table (printed on bill/receipt)
+  billRequested       Boolean     @default(false)
+  voidReason          String?
+  voidedById          String?
+  voidedAt            DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  deletedAt           DateTime?
 
   // Relations
-  branch    Branch      @relation(fields: [branchId], references: [id])
-  cashier   Staff       @relation("OrderCashier", fields: [cashierId], references: [id])
-  table     DiningTable? @relation(fields: [tableId], references: [id])
-  customer  Customer?   @relation(fields: [customerId], references: [id])
-  review    Review?
-  waiter    Staff?      @relation("OrderWaiter", fields: [waiterId], references: [id])
-  voidedBy  Staff?      @relation("OrderVoidedBy", fields: [voidedById], references: [id])
-  items     OrderItem[]
-  payments  OrderPayment[]
+  branch   Branch         @relation(fields: [branchId], references: [id])
+  cashier  Staff          @relation("OrderCashier", fields: [cashierId], references: [id])
+  table    DiningTable?   @relation(fields: [tableId], references: [id])
+  customer Customer?      @relation(fields: [customerId], references: [id])
+  review   Review?
+  waiter   Staff?         @relation("OrderWaiter", fields: [waiterId], references: [id])
+  voidedBy Staff?         @relation("OrderVoidedBy", fields: [voidedById], references: [id])
+  items    OrderItem[]
+  payments OrderPayment[]
 
   @@index([branchId, status])
   @@index([branchId, createdAt])
@@ -661,7 +661,7 @@ model OrderItem {
   id            String              @id @default(cuid())
   orderId       String
   menuItemId    String
-  menuItemName  String              // denormalized — survives menu item deletion
+  menuItemName  String // denormalized — survives menu item deletion
   quantity      Int
   unitPrice     Decimal             @db.Decimal(14, 2)
   totalPrice    Decimal             @db.Decimal(14, 2)
@@ -683,12 +683,12 @@ model OrderItem {
 }
 
 model OrderPayment {
-  id        String        @id @default(cuid())
+  id        String   @id @default(cuid())
   orderId   String
   method    String
-  amount    Decimal       @db.Decimal(14, 2)
-  reference String?       // transaction ref for CARD/MFS
-  createdAt DateTime      @default(now())
+  amount    Decimal  @db.Decimal(14, 2)
+  reference String? // transaction ref for CARD/MFS
+  createdAt DateTime @default(now())
 
   // Relations
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -705,10 +705,10 @@ model Discount {
   id          String        @id @default(cuid())
   branchId    String
   name        String
-  type        DiscountType  // FLAT or PERCENTAGE
+  type        DiscountType // FLAT or PERCENTAGE
   value       Decimal       @db.Decimal(14, 2) // paisa for FLAT, percentage for PERCENTAGE
   scope       DiscountScope @default(ALL_ITEMS)
-  targetItems String?       // JSON array of menuItemIds (for SPECIFIC_ITEMS / ALL_EXCEPT)
+  targetItems String? // JSON array of menuItemIds (for SPECIFIC_ITEMS / ALL_EXCEPT)
   isActive    Boolean       @default(true)
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -749,7 +749,7 @@ model MenuItemDiscount {
   value          Decimal      @db.Decimal(14, 2)
   startDate      DateTime
   endDate        DateTime
-  applicableDays String?      // JSON array like ["FRIDAY","SUNDAY"], null = all days
+  applicableDays String? // JSON array like ["FRIDAY","SUNDAY"], null = all days
   isActive       Boolean      @default(true)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -778,21 +778,21 @@ enum ExpenseCategory {
 }
 
 model Expense {
-  id          String          @id @default(cuid())
-  branchId    String
-  category    ExpenseCategory @default(MISCELLANEOUS)
-  description String
-  amount      Decimal         @db.Decimal(14, 2) // in paisa
-  paymentMethod String        @default("CASH")
-  reference   String?
-  date        DateTime        @db.Date
-  recordedById String
-  approvedById String?
-  approvedAt   DateTime?
-  notes       String?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  deletedAt   DateTime?
+  id            String          @id @default(cuid())
+  branchId      String
+  category      ExpenseCategory @default(MISCELLANEOUS)
+  description   String
+  amount        Decimal         @db.Decimal(14, 2) // in paisa
+  paymentMethod String          @default("CASH")
+  reference     String?
+  date          DateTime        @db.Date
+  recordedById  String
+  approvedById  String?
+  approvedAt    DateTime?
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  deletedAt     DateTime?
 
   // Relations
   branch     Branch @relation(fields: [branchId], references: [id])
@@ -816,19 +816,19 @@ enum AccountType {
 }
 
 model Account {
-  id          String      @id @default(cuid())
-  branchId    String
-  type        AccountType
-  name        String      // e.g. "Main Cash Register", "bKash", "Dutch-Bangla Bank"
+  id                  String      @id @default(cuid())
+  branchId            String
+  type                AccountType
+  name                String // e.g. "Main Cash Register", "bKash", "Dutch-Bangla Bank"
   balance             Decimal     @default(0) @db.Decimal(14, 2)
   isActive            Boolean     @default(true)
-  showInPOS           Boolean     @default(false)  // show in POS opening/closing balance
-  linkedPaymentMethod String?                      // CASH, MFS, CARD — links this account to a payment method
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  showInPOS           Boolean     @default(false) // show in POS opening/closing balance
+  linkedPaymentMethod String? // CASH, MFS, CARD — links this account to a payment method
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
   // Relations
-  branch       Branch              @relation(fields: [branchId], references: [id])
+  branch         Branch               @relation(fields: [branchId], references: [id])
   transactions   AccountTransaction[]
   paymentOptions PaymentOption[]
 
@@ -846,14 +846,14 @@ enum TransactionType {
 }
 
 model AccountTransaction {
-  id           String          @id @default(cuid())
-  branchId     String
-  accountId    String
-  type         TransactionType
-  amount       Decimal         @db.Decimal(14, 2)  // positive = IN, negative = OUT
-  description  String
-  referenceId  String?         // orderId, expenseId, purchaseOrderId
-  createdAt    DateTime        @default(now())
+  id          String          @id @default(cuid())
+  branchId    String
+  accountId   String
+  type        TransactionType
+  amount      Decimal         @db.Decimal(14, 2) // positive = IN, negative = OUT
+  description String
+  referenceId String? // orderId, expenseId, purchaseOrderId
+  createdAt   DateTime        @default(now())
 
   // Relations
   branch  Branch  @relation(fields: [branchId], references: [id])
@@ -869,28 +869,28 @@ model AccountTransaction {
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum ProductionStatus {
-  PENDING       // awaiting manager approval
-  APPROVED      // approved, ready to produce
-  IN_PROGRESS   // kitchen is making it
-  COMPLETED     // done, stock updated
-  WASTED        // produced but result was bad — ingredients deducted, no batch created
+  PENDING // awaiting manager approval
+  APPROVED // approved, ready to produce
+  IN_PROGRESS // kitchen is making it
+  COMPLETED // done, stock updated
+  WASTED // produced but result was bad — ingredients deducted, no batch created
   CANCELLED
 }
 
 model PreReadyItem {
-  id          String    @id @default(cuid())
-  branchId    String
-  name        String
-  unit        StockUnit @default(PCS)
-  currentStock Decimal  @default(0) @db.Decimal(14, 4)
-  minimumStock Decimal  @default(0) @db.Decimal(14, 4)
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  id           String    @id @default(cuid())
+  branchId     String
+  name         String
+  unit         StockUnit @default(PCS)
+  currentStock Decimal   @default(0) @db.Decimal(14, 4)
+  minimumStock Decimal   @default(0) @db.Decimal(14, 4)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
 
   // Relations
-  branch           Branch                @relation(fields: [branchId], references: [id])
+  branch           Branch            @relation(fields: [branchId], references: [id])
   recipe           PreReadyRecipe?
   productionOrders ProductionOrder[]
   batches          PreReadyBatch[]
@@ -900,27 +900,27 @@ model PreReadyItem {
 }
 
 model PreReadyRecipe {
-  id             String   @id @default(cuid())
-  preReadyItemId String   @unique
-  yieldQuantity  Decimal  @db.Decimal(14, 4)  // how much 1 recipe produces (e.g. 1000 for 1L sauce)
+  id             String    @id @default(cuid())
+  preReadyItemId String    @unique
+  yieldQuantity  Decimal   @db.Decimal(14, 4) // how much 1 recipe produces (e.g. 1000 for 1L sauce)
   yieldUnit      StockUnit @default(G)
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   // Relations
-  preReadyItem PreReadyItem          @relation(fields: [preReadyItemId], references: [id])
+  preReadyItem PreReadyItem         @relation(fields: [preReadyItemId], references: [id])
   items        PreReadyRecipeItem[]
 
   @@map("pre_ready_recipes")
 }
 
 model PreReadyRecipeItem {
-  id           String  @id @default(cuid())
+  id           String    @id @default(cuid())
   recipeId     String
   ingredientId String
   quantity     Decimal   @db.Decimal(14, 4) // per 1 full recipe yield
-  unit         StockUnit @default(G)        // unit of the quantity (may differ from ingredient's unit)
+  unit         StockUnit @default(G) // unit of the quantity (may differ from ingredient's unit)
 
   // Relations
   recipe     PreReadyRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
@@ -931,18 +931,18 @@ model PreReadyRecipeItem {
 }
 
 model ProductionOrder {
-  id              String           @id @default(cuid())
-  branchId        String
-  preReadyItemId  String
-  quantity        Decimal          @db.Decimal(14, 4) // how much to produce
-  status          ProductionStatus @default(PENDING)
-  requestedById   String
-  approvedById    String?
-  approvedAt      DateTime?
-  completedAt     DateTime?
-  notes           String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id             String           @id @default(cuid())
+  branchId       String
+  preReadyItemId String
+  quantity       Decimal          @db.Decimal(14, 4) // how much to produce
+  status         ProductionStatus @default(PENDING)
+  requestedById  String
+  approvedById   String?
+  approvedAt     DateTime?
+  completedAt    DateTime?
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   // Relations
   branch       Branch       @relation(fields: [branchId], references: [id])
@@ -955,14 +955,14 @@ model ProductionOrder {
 }
 
 model PreReadyBatch {
-  id              String    @id @default(cuid())
-  branchId        String
-  preReadyItemId  String
-  quantity        Decimal   @db.Decimal(14, 4)
-  remainingQty    Decimal   @db.Decimal(14, 4)
-  makingDate      DateTime  @db.Date
-  expiryDate      DateTime  @db.Date
-  createdAt       DateTime  @default(now())
+  id             String   @id @default(cuid())
+  branchId       String
+  preReadyItemId String
+  quantity       Decimal  @db.Decimal(14, 4)
+  remainingQty   Decimal  @db.Decimal(14, 4)
+  makingDate     DateTime @db.Date
+  expiryDate     DateTime @db.Date
+  createdAt      DateTime @default(now())
 
   // Relations
   branch       Branch       @relation(fields: [branchId], references: [id])
@@ -1000,11 +1000,11 @@ enum IngredientCategory {
 }
 
 enum StockMovementType {
-  PURCHASE      // stock received from supplier
-  SALE          // auto-deducted on order creation
-  VOID_RETURN   // returned when order item is voided
-  ADJUSTMENT    // manual stock correction
-  WASTE         // waste/spoilage write-off
+  PURCHASE // stock received from supplier
+  SALE // auto-deducted on order creation
+  VOID_RETURN // returned when order item is voided
+  ADJUSTMENT // manual stock correction
+  WASTE // waste/spoilage write-off
 }
 
 enum StockUnit {
@@ -1033,8 +1033,8 @@ enum StockUnit {
 model CustomUnit {
   id        String    @id @default(cuid())
   branchId  String
-  code      String    // stored uppercase, must also be present in the StockUnit enum
-  label     String    // display name
+  code      String // stored uppercase, must also be present in the StockUnit enum
+  label     String // display name
   createdAt DateTime  @default(now())
   deletedAt DateTime?
 
@@ -1045,25 +1045,25 @@ model CustomUnit {
 }
 
 model Supplier {
-  id          String    @id @default(cuid())
-  branchId    String
-  name        String
-  contactName String?
-  phone       String?
-  email       String?
-  address     String?
-  notes       String?
-  category       SupplierCategory @default(GENERAL)
-  openingBalance Decimal          @default(0) @db.Decimal(14, 2)
-  totalDue       Decimal          @default(0) @db.Decimal(14, 2)
-  isActive    Boolean   @default(true)
-  visibleToCashier Boolean @default(false)  // Phase 7: show this supplier in POS purchasing
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  id               String           @id @default(cuid())
+  branchId         String
+  name             String
+  contactName      String?
+  phone            String?
+  email            String?
+  address          String?
+  notes            String?
+  category         SupplierCategory @default(GENERAL)
+  openingBalance   Decimal          @default(0) @db.Decimal(14, 2)
+  totalDue         Decimal          @default(0) @db.Decimal(14, 2)
+  isActive         Boolean          @default(true)
+  visibleToCashier Boolean          @default(false) // Phase 7: show this supplier in POS purchasing
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  deletedAt        DateTime?
 
   // Relations
-  branch              Branch              @relation(fields: [branchId], references: [id])
+  branch              Branch               @relation(fields: [branchId], references: [id])
   ingredients         Ingredient[]
   ingredientSuppliers IngredientSupplier[]
   purchaseOrders      PurchaseOrder[]
@@ -1075,16 +1075,16 @@ model Supplier {
 }
 
 model SupplierPayment {
-  id              String        @id @default(cuid())
+  id              String   @id @default(cuid())
   branchId        String
   supplierId      String
   purchaseOrderId String?
-  amount          Decimal       @db.Decimal(14, 2)
-  paymentMethod   String        @default("CASH")
+  amount          Decimal  @db.Decimal(14, 2)
+  paymentMethod   String   @default("CASH")
   reference       String?
   notes           String?
   paidById        String
-  createdAt       DateTime      @default(now())
+  createdAt       DateTime @default(now())
 
   // Relations
   branch        Branch         @relation(fields: [branchId], references: [id])
@@ -1097,47 +1097,47 @@ model SupplierPayment {
 }
 
 model Ingredient {
-  id              String    @id @default(cuid())
-  branchId        String
-  supplierId      String?
-  name            String
-  itemCode        String?              // unique inventory code e.g. RAW-001
-  category        IngredientCategory   @default(RAW)
-  unit            StockUnit @default(G)                      // stock/recipe unit (G, ML, KG, etc.)
-  purchaseUnit    String?                                    // supplier's selling unit (PACK, BOTTLE, BOX, BAG, etc.)
-  purchaseUnitQty Decimal   @default(1) @db.Decimal(14, 4)  // 1 purchaseUnit = X stock units (e.g., 1 PACK = 200 G)
-  currentStock    Decimal   @default(0) @db.Decimal(14, 4)  // in stock unit
-  minimumStock    Decimal   @default(0) @db.Decimal(14, 4)
-  costPerUnit     Decimal   @default(0) @db.Decimal(14, 4)  // cost in paisa per STOCK unit
-  costPerPurchaseUnit Decimal @default(0) @db.Decimal(14, 4) // cost in paisa per PURCHASE unit
-  isActive        Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  id                  String             @id @default(cuid())
+  branchId            String
+  supplierId          String?
+  name                String
+  itemCode            String? // unique inventory code e.g. RAW-001
+  category            IngredientCategory @default(RAW)
+  unit                StockUnit          @default(G) // stock/recipe unit (G, ML, KG, etc.)
+  purchaseUnit        String? // supplier's selling unit (PACK, BOTTLE, BOX, BAG, etc.)
+  purchaseUnitQty     Decimal            @default(1) @db.Decimal(14, 4) // 1 purchaseUnit = X stock units (e.g., 1 PACK = 200 G)
+  currentStock        Decimal            @default(0) @db.Decimal(14, 4) // in stock unit
+  minimumStock        Decimal            @default(0) @db.Decimal(14, 4)
+  costPerUnit         Decimal            @default(0) @db.Decimal(14, 4) // cost in paisa per STOCK unit
+  costPerPurchaseUnit Decimal            @default(0) @db.Decimal(14, 4) // cost in paisa per PURCHASE unit
+  isActive            Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  deletedAt           DateTime?
 
   // ─── Variant Support ───
-  parentId        String?                           // null = top-level (generic or standalone)
-  hasVariants     Boolean   @default(false)         // true = parent with brand variants; stock lives on children
-  brandName       String?                           // e.g. "Milk Butter", "Bread Pit"
-  packSize        String?                           // e.g. "250G", "1L" — display label
-  piecesPerPack   Int?                              // e.g. 10 pcs per pack
-  sku             String?                           // supplier barcode / SKU
+  parentId      String? // null = top-level (generic or standalone)
+  hasVariants   Boolean @default(false) // true = parent with brand variants; stock lives on children
+  brandName     String? // e.g. "Milk Butter", "Bread Pit"
+  packSize      String? // e.g. "250G", "1L" — display label
+  piecesPerPack Int? // e.g. 10 pcs per pack
+  sku           String? // supplier barcode / SKU
   // Website display
-  imageUrl        String?                           // square image for website ingredient display
-  showOnWebsite   Boolean   @default(true)          // show ingredient name on website menu detail pages
+  imageUrl      String? // square image for website ingredient display
+  showOnWebsite Boolean @default(true) // show ingredient name on website menu detail pages
 
   // Relations
-  branch             Branch              @relation(fields: [branchId], references: [id])
-  supplier           Supplier?           @relation(fields: [supplierId], references: [id])
-  suppliers          IngredientSupplier[]
-  recipeItems        RecipeItem[]
-  movements          StockMovement[]
-  purchaseOrderItems PurchaseOrderItem[]
-  wasteLogs          WasteLog[]
+  branch              Branch               @relation(fields: [branchId], references: [id])
+  supplier            Supplier?            @relation(fields: [supplierId], references: [id])
+  suppliers           IngredientSupplier[]
+  recipeItems         RecipeItem[]
+  movements           StockMovement[]
+  purchaseOrderItems  PurchaseOrderItem[]
+  wasteLogs           WasteLog[]
   preReadyRecipeItems PreReadyRecipeItem[]
   returnItems         PurchaseReturnItem[]
-  parent             Ingredient?  @relation("IngredientVariants", fields: [parentId], references: [id])
-  variants           Ingredient[] @relation("IngredientVariants")
+  parent              Ingredient?          @relation("IngredientVariants", fields: [parentId], references: [id])
+  variants            Ingredient[]         @relation("IngredientVariants")
 
   @@index([branchId, isActive])
   @@index([itemCode])
@@ -1166,8 +1166,8 @@ model Recipe {
   updatedAt  DateTime @updatedAt
 
   // Relations
-  menuItem   MenuItem     @relation(fields: [menuItemId], references: [id])
-  items      RecipeItem[]
+  menuItem MenuItem     @relation(fields: [menuItemId], references: [id])
+  items    RecipeItem[]
 
   @@map("recipes")
 }
@@ -1176,8 +1176,8 @@ model RecipeItem {
   id           String    @id @default(cuid())
   recipeId     String
   ingredientId String
-  quantity     Decimal   @db.Decimal(14, 4)  // how much of the ingredient per 1 serving
-  unit         StockUnit @default(G)         // unit of the quantity (may differ from ingredient's unit)
+  quantity     Decimal   @db.Decimal(14, 4) // how much of the ingredient per 1 serving
+  unit         StockUnit @default(G) // unit of the quantity (may differ from ingredient's unit)
 
   // Relations
   recipe     Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
@@ -1188,15 +1188,15 @@ model RecipeItem {
 }
 
 model StockMovement {
-  id           String             @id @default(cuid())
+  id           String            @id @default(cuid())
   branchId     String
   ingredientId String
   type         StockMovementType
-  quantity     Decimal            @db.Decimal(14, 4)  // positive = IN, negative = OUT
+  quantity     Decimal           @db.Decimal(14, 4) // positive = IN, negative = OUT
   notes        String?
-  orderId      String?            // reference for SALE/VOID_RETURN movements
-  staffId      String?            // who performed ADJUSTMENT/WASTE
-  createdAt    DateTime           @default(now())
+  orderId      String? // reference for SALE/VOID_RETURN movements
+  staffId      String? // who performed ADJUSTMENT/WASTE
+  createdAt    DateTime          @default(now())
 
   // Relations
   branch     Branch     @relation(fields: [branchId], references: [id])
@@ -1234,29 +1234,29 @@ model PurchaseOrder {
   deletedAt   DateTime?
 
   // Relations
-  branch     Branch              @relation(fields: [branchId], references: [id])
-  supplier   Supplier            @relation(fields: [supplierId], references: [id])
-  createdBy         Staff               @relation("POCreatedBy", fields: [createdById], references: [id])
-  items             PurchaseOrderItem[]
-  supplierPayments  SupplierPayment[]
-  returns           PurchaseReturn[]
+  branch           Branch              @relation(fields: [branchId], references: [id])
+  supplier         Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy        Staff               @relation("POCreatedBy", fields: [createdById], references: [id])
+  items            PurchaseOrderItem[]
+  supplierPayments SupplierPayment[]
+  returns          PurchaseReturn[]
 
   @@index([branchId, status])
   @@map("purchase_orders")
 }
 
 model PurchaseOrderItem {
-  id                String   @id @default(cuid())
-  purchaseOrderId   String
-  ingredientId      String
-  unit              String?  // ordering unit (KG, PACK, etc.) — if null, use ingredient's purchaseUnit or unit
-  quantityOrdered   Decimal  @db.Decimal(14, 4)
-  quantityReceived  Decimal  @default(0) @db.Decimal(14, 4)
-  unitCost          Decimal  @db.Decimal(14, 4)   // cost in paisa per unit
-  makingDate        DateTime?  @db.Date
-  expiryDate        DateTime?  @db.Date
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id               String    @id @default(cuid())
+  purchaseOrderId  String
+  ingredientId     String
+  unit             String? // ordering unit (KG, PACK, etc.) — if null, use ingredient's purchaseUnit or unit
+  quantityOrdered  Decimal   @db.Decimal(14, 4)
+  quantityReceived Decimal   @default(0) @db.Decimal(14, 4)
+  unitCost         Decimal   @db.Decimal(14, 4) // cost in paisa per unit
+  makingDate       DateTime? @db.Date
+  expiryDate       DateTime? @db.Date
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   // Relations
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
@@ -1307,26 +1307,26 @@ model Attendance {
 }
 
 model Payroll {
-  id            String        @id @default(cuid())
-  branchId      String
-  staffId       String
-  periodStart   DateTime      @db.Date
-  periodEnd     DateTime      @db.Date
-  baseSalary    Decimal       @db.Decimal(14, 2)
-  deductions    Decimal       @default(0) @db.Decimal(14, 2)
-  bonuses       Decimal       @default(0) @db.Decimal(14, 2)
-  netPayable    Decimal       @db.Decimal(14, 2)
-  daysPresent   Int           @default(0)
-  daysAbsent    Int           @default(0)
-  status        PayrollStatus @default(DRAFT)
-  notes         String?
-  approvedById  String?
-  approvedAt    DateTime?
-  paidAt        DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id           String        @id @default(cuid())
+  branchId     String
+  staffId      String
+  periodStart  DateTime      @db.Date
+  periodEnd    DateTime      @db.Date
+  baseSalary   Decimal       @db.Decimal(14, 2)
+  deductions   Decimal       @default(0) @db.Decimal(14, 2)
+  bonuses      Decimal       @default(0) @db.Decimal(14, 2)
+  netPayable   Decimal       @db.Decimal(14, 2)
+  daysPresent  Int           @default(0)
+  daysAbsent   Int           @default(0)
+  status       PayrollStatus @default(DRAFT)
+  notes        String?
+  approvedById String?
+  approvedAt   DateTime?
+  paidAt       DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  paidAmount  Decimal       @default(0) @db.Decimal(14, 2) // total paid so far
+  paidAmount Decimal @default(0) @db.Decimal(14, 2) // total paid so far
 
   // Relations
   branch     Branch           @relation(fields: [branchId], references: [id])
@@ -1340,14 +1340,14 @@ model Payroll {
 }
 
 model PayrollPayment {
-  id            String        @id @default(cuid())
+  id            String   @id @default(cuid())
   payrollId     String
-  amount        Decimal       @db.Decimal(14, 2)
-  paymentMethod String        @default("CASH")
+  amount        Decimal  @db.Decimal(14, 2)
+  paymentMethod String   @default("CASH")
   reference     String?
   notes         String?
   paidById      String
-  createdAt     DateTime      @default(now())
+  createdAt     DateTime @default(now())
 
   // Relations
   payroll Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
@@ -1436,21 +1436,21 @@ model WasteLog {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model WorkPeriod {
-  id          String    @id @default(cuid())
-  branchId    String
-  startedAt   DateTime  @default(now())
-  endedAt     DateTime?
-  startedById String
-  endedById   String?
-  notes       String?
-  openingCash Decimal   @default(0) @db.Decimal(14, 2)
-  openingMFS  Decimal   @default(0) @db.Decimal(14, 2)
-  openingCard Decimal   @default(0) @db.Decimal(14, 2)
-  closingCash Decimal?  @db.Decimal(14, 2)
-  closingMFS  Decimal?  @db.Decimal(14, 2)
-  closingCard Decimal?  @db.Decimal(14, 2)
-  balancesJson String?  // JSON: { opening: {accId: amount}, closing: {accId: amount} }
-  createdAt   DateTime  @default(now())
+  id           String    @id @default(cuid())
+  branchId     String
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  startedById  String
+  endedById    String?
+  notes        String?
+  openingCash  Decimal   @default(0) @db.Decimal(14, 2)
+  openingMFS   Decimal   @default(0) @db.Decimal(14, 2)
+  openingCard  Decimal   @default(0) @db.Decimal(14, 2)
+  closingCash  Decimal?  @db.Decimal(14, 2)
+  closingMFS   Decimal?  @db.Decimal(14, 2)
+  closingCard  Decimal?  @db.Decimal(14, 2)
+  balancesJson String? // JSON: { opening: {accId: amount}, closing: {accId: amount} }
+  createdAt    DateTime  @default(now())
 
   // Relations
   branch    Branch @relation(fields: [branchId], references: [id])
@@ -1471,19 +1471,19 @@ model CookingStation {
   name        String
   // Printer target for this section's KOT. Leaving all three NULL means
   // the section falls back to the desktop's default kitchen slot.
-  printerName String?   // Windows printer name (USB thermal driver) — os-printer mode
-  printerIp   String?   // Network thermal printer host
-  printerPort Int?      // Network thermal printer TCP port (default 9100 at runtime)
+  printerName String? // Windows printer name (USB thermal driver) — os-printer mode
+  printerIp   String? // Network thermal printer host
+  printerPort Int? // Network thermal printer TCP port (default 9100 at runtime)
   // Per-section VAT opt-out. When false, items routed to this station are
   // excluded from the VAT base on new orders — useful for jurisdictions
   // that zero-rate certain categories (e.g. Bangladesh zero-rates some
   // beverages). The branch's master vatEnabled flag still wins: when VAT
   // is off branch-wide, no items are taxed regardless of section flags.
-  vatEnabled  Boolean   @default(true)
-  sortOrder   Int       @default(0)
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  vatEnabled  Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   // Relations
   branch    Branch     @relation(fields: [branchId], references: [id])
@@ -1502,7 +1502,7 @@ model UnitConversion {
   branchId  String
   fromUnit  StockUnit
   toUnit    StockUnit
-  factor    Decimal   @db.Decimal(14, 6)  // 1 fromUnit = factor toUnits
+  factor    Decimal   @db.Decimal(14, 6) // 1 fromUnit = factor toUnits
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -1537,10 +1537,10 @@ model PurchaseReturn {
   updatedAt       DateTime     @updatedAt
 
   // Relations
-  branch        Branch              @relation(fields: [branchId], references: [id])
-  purchaseOrder PurchaseOrder?      @relation(fields: [purchaseOrderId], references: [id])
-  supplier      Supplier            @relation(fields: [supplierId], references: [id])
-  requestedBy   Staff               @relation("ReturnRequester", fields: [requestedById], references: [id])
+  branch        Branch               @relation(fields: [branchId], references: [id])
+  purchaseOrder PurchaseOrder?       @relation(fields: [purchaseOrderId], references: [id])
+  supplier      Supplier             @relation(fields: [supplierId], references: [id])
+  requestedBy   Staff                @relation("ReturnRequester", fields: [requestedById], references: [id])
   items         PurchaseReturnItem[]
 
   @@index([branchId])
@@ -1548,11 +1548,11 @@ model PurchaseReturn {
 }
 
 model PurchaseReturnItem {
-  id                String  @id @default(cuid())
-  purchaseReturnId  String
-  ingredientId      String
-  quantity          Decimal @db.Decimal(14, 4)
-  unitPrice         Decimal @db.Decimal(14, 4)
+  id               String  @id @default(cuid())
+  purchaseReturnId String
+  ingredientId     String
+  quantity         Decimal @db.Decimal(14, 4)
+  unitPrice        Decimal @db.Decimal(14, 4)
 
   // Relations
   purchaseReturn PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
@@ -1566,12 +1566,12 @@ model PurchaseReturnItem {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model BackupRecord {
-  id         String   @id @default(cuid())
-  filename   String
-  fileUrl    String
-  sizeBytes  Int
-  type       String   @default("MANUAL") // MANUAL | AUTO
-  createdAt  DateTime @default(now())
+  id          String   @id @default(cuid())
+  filename    String
+  fileUrl     String
+  sizeBytes   Int
+  type        String   @default("MANUAL") // MANUAL | AUTO
+  createdAt   DateTime @default(now())
   createdById String?
 
   @@index([createdAt])
@@ -1581,8 +1581,8 @@ model BackupRecord {
 model BackupSchedule {
   id        String    @id @default("default")
   frequency String    @default("OFF") // OFF | DAILY | WEEKLY | MONTHLY
-  timeHour  Int       @default(2)     // 0-23, server local time
-  retention Int       @default(10)    // keep N most recent AUTO backups
+  timeHour  Int       @default(2) // 0-23, server local time
+  retention Int       @default(10) // keep N most recent AUTO backups
   lastRunAt DateTime?
   updatedAt DateTime  @updatedAt
 
@@ -1598,15 +1598,15 @@ model BackupSchedule {
 // authenticates subsequent cashier logins by presenting the token.
 
 model Device {
-  id         String    @id @default(cuid())
-  branchId   String
-  name       String    // "Front Counter", "Register 2"
-  tokenHash  String    // bcrypt hash of the device token
-  lastSeenAt DateTime?
-  isActive   Boolean   @default(true)
-  createdAt  DateTime  @default(now())
-  revokedAt  DateTime?
-  createdById String?  // Staff.id of the owner/manager who paired the device
+  id          String    @id @default(cuid())
+  branchId    String
+  name        String // "Front Counter", "Register 2"
+  tokenHash   String // bcrypt hash of the device token
+  lastSeenAt  DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  createdById String? // Staff.id of the owner/manager who paired the device
 
   branch Branch @relation(fields: [branchId], references: [id])
 
@@ -1626,9 +1626,91 @@ model IdempotencyRecord {
   method       String
   path         String
   responseCode Int
-  responseBody String   // JSON-serialized body
+  responseBody String // JSON-serialized body
   createdAt    DateTime @default(now())
 
   @@index([createdAt])
   @@map("idempotency_records")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LICENSE — installed-side cache of this install's license state
+// ─────────────────────────────────────────────────────────────────────────────
+// The CodeCanyon edition gates access to the API behind a verified license
+// from neawaslic.top. This table is the LOCAL CACHE of the verdict — the
+// authoritative state lives on the license server. Keeping a singleton row
+// + an append-only checklog here means:
+//   • the gate can answer in O(1) without hitting the network on every req
+//   • offline grace works even if neawaslic is unreachable
+//   • database-row tampering is detected via verdictHmac (HMAC keyed on
+//     machineId + bundled public key, computed at write time)
+//   • cracker visibility — LicenseCheckLog's append-only breadcrumbs make
+//     "I ripped out the assertions" obvious in support
+//
+// Singleton: enforced at the service layer (we always upsert against the
+// well-known id 'self'). Buyer who deletes the row triggers re-activation;
+// tampering with status/expiresAt invalidates the HMAC and forces a fresh
+// verify against neawaslic.
+
+enum LicenseStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum LicenseCheckAction {
+  ACTIVATE
+  VERIFY
+  DEACTIVATE
+  ASSERT
+  BLOCKED
+}
+
+model LicenseRecord {
+  id               String        @id @default("self")
+  licenseId        String        @unique
+  // Last 8 chars of the purchase code, kept as a humans-readable hint
+  // for support ("which code is this install on?"). Full code is never
+  // persisted — the hmacSecret derived from it is the only stored secret.
+  purchaseCodeTail String
+  activatedDomain  String
+  fingerprint      String
+  hmacSecretEnc    String
+  status           LicenseStatus @default(PENDING)
+
+  // Cached signed proof from the server. Verifies offline using the
+  // bundled ed25519 public key. Re-fetched on every successful verify.
+  signedProof String @db.Text
+
+  // Wall-clock timestamps. graceUntil is COMPUTED from lastVerifiedAt +
+  // (proof.graceUntil - proof.issuedAt) so a clock-rewind can't extend it.
+  lastVerifiedAt DateTime
+  expiresAt      DateTime?
+  graceUntil     DateTime?
+
+  // HMAC of the row's authoritative fields keyed on machineId + bundled
+  // public key. Mismatch on read → treat row as missing and force
+  // re-activation. Defeats trivial DB edits like
+  //   UPDATE license_records SET status='ACTIVE', expiresAt=NULL;
+  verdictHmac String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("license_records")
+}
+
+model LicenseCheckLog {
+  id        String             @id @default(cuid())
+  action    LicenseCheckAction
+  result    String // "active", "grace day 3", "locked: REVOKED", etc
+  ip        String?
+  userAgent String?
+  path      String?
+  at        DateTime           @default(now())
+
+  @@index([at])
+  @@index([action, at])
+  @@map("license_check_logs")
 }

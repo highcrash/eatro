@@ -26,6 +26,7 @@
     "@nestjs/throttler": "^6.3.0",
     "@nestjs/websockets": "^10.4.0",
     "@prisma/client": "^5.22.0",
+    "@restora/license-client": "github:highcrash/neawaslic#main&path:/packages/license-client",
     "@restora/types": "workspace:*",
     "@restora/utils": "workspace:*",
     "bcrypt": "^5.1.1",

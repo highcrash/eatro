@@ -2,10 +2,14 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 
 import type { CreateBranchDto, UpdateBranchDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { LicenseService } from '../license/license.service';
 
 @Injectable()
 export class BranchService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly license: LicenseService,
+  ) {}
 
   findAll() {
     return this.prisma.branch.findMany({ where: { deletedAt: null } });
@@ -18,6 +22,7 @@ export class BranchService {
   }
 
   create(dto: CreateBranchDto) {
+    this.license.assertMutation('branch.create');
     return this.prisma.branch.create({ data: dto });
   }
 

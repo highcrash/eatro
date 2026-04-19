@@ -64,6 +64,7 @@
       "@nestjs/core",
       "@prisma/client",
       "@prisma/engines",
+      "@restora/license-client",
       "bcrypt",
       "better-sqlite3",
       "electron",

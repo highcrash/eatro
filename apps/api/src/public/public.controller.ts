@@ -2,8 +2,15 @@ import { Controller, Get, Param, Query, Res, Header } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { PublicService } from './public.service';
+import { Public } from '../license/public.decorator';
 
 @ApiTags('Public')
+// Public marketing endpoints (Facebook OG, table QR, menu) MUST stay
+// reachable even when the license is locked — they're the only way
+// guests find the restaurant. Mutations under /public still go through
+// other guards (rate limiting, IP allowlist) but the license gate
+// doesn't block them.
+@Public()
 @Controller('public')
 export class PublicController {
   constructor(private readonly publicService: PublicService) {}

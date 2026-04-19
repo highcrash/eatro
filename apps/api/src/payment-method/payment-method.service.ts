@@ -1,9 +1,13 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { LicenseService } from '../license/license.service';
 
 @Injectable()
 export class PaymentMethodService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly license: LicenseService,
+  ) {}
 
   findAll(branchId: string) {
     return this.prisma.paymentMethodConfig.findMany({
@@ -14,6 +18,7 @@ export class PaymentMethodService {
   }
 
   async create(branchId: string, dto: { code: string; name: string; sortOrder?: number }) {
+    this.license.assertMutation('payment-method.create');
     const code = dto.code.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
     const existing = await this.prisma.paymentMethodConfig.findFirst({
       where: { branchId, code },

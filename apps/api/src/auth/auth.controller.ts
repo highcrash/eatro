@@ -7,8 +7,12 @@ import { AuthService } from './auth.service';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { Public } from '../license/public.decorator';
 
 @ApiTags('Auth')
+// Auth has to stay reachable when the license is locked — operators
+// still need to log in to /license/activate or to view the banner.
+@Public()
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
