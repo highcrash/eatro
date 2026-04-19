@@ -801,54 +801,61 @@ pm2 start api/dist/main.js --name pos</pre>
       <div class="wrap">
         <div class="eyebrow">Editions</div>
         <h2>One-time purchase. No SaaS.</h2>
-        <p class="sub">Regular and Extended CodeCanyon licenses available. The Desktop edition is a separate purchase for cashier terminals that need offline tolerance.</p>
+        <p class="sub">Single-restaurant and multi-tenant licenses available. The Desktop edition is a separate purchase for cashier terminals that need offline tolerance.</p>
         <div class="pricing">
           <div class="tier">
-            <h4>Web Edition</h4>
-            <div class="tagline">POS, KDS, QR ordering, admin + public website. Runs in any browser.</div>
-            <div class="price">CodeCanyon<small>pricing</small></div>
+            <h4>Single Restaurant</h4>
+            <div class="tagline">One license, one domain. Unlimited branches under the same owner.</div>
+            <div class="price">$199<small>one-time</small></div>
             <ul>
               <li>Full source code (TypeScript)</li>
               <li>POS, KDS, QR, admin, public website</li>
-              <li>Multi-branch</li>
-              <li>Install wizard + updater</li>
-              <li>Lifetime updates</li>
-              <li class="absent">Desktop app (separate license)</li>
-              <li class="absent">Offline-tolerant local cache</li>
+              <li>Multi-branch (same owner)</li>
+              <li>Install wizard + in-app updater</li>
+              <li>12 months of updates</li>
+              <li>Email support</li>
+              <li class="absent">Desktop app (sold separately)</li>
             </ul>
+            <a href="#contact" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:0.75rem;">Buy now →</a>
           </div>
 
           <div class="tier featured">
             <div class="badge">MOST POPULAR</div>
             <h4>Web + Desktop Bundle</h4>
-            <div class="tagline">Both editions — browser POS plus dedicated Windows terminal. One machine, one backend.</div>
-            <div class="price">Bundle<small>save 20%</small></div>
+            <div class="tagline">Web edition plus the Windows cashier terminal with offline tolerance.</div>
+            <div class="price">$349<small>one-time · save $99</small></div>
             <ul>
-              <li>Everything in Web Edition</li>
+              <li>Everything in Single Restaurant</li>
               <li>Windows cashier app (Electron)</li>
               <li>Offline-tolerant SQLite cache</li>
               <li>Direct USB printer support</li>
               <li>DPAPI-encrypted device tokens</li>
-              <li>Auto-update channel</li>
-              <li>Priority support thread</li>
+              <li>Priority support</li>
+              <li>12 months of updates (both editions)</li>
             </ul>
+            <a href="#contact" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:0.75rem;">Buy bundle →</a>
           </div>
 
           <div class="tier">
-            <h4>Desktop Edition Only</h4>
-            <div class="tagline">Just the Windows cashier terminal. Pairs with any existing Web edition install.</div>
-            <div class="price">CodeCanyon<small>pricing</small></div>
+            <h4>Multi-Tenant / SaaS</h4>
+            <div class="tagline">Run this as a SaaS for multiple independent restaurants. Per-tenant billing.</div>
+            <div class="price">$799<small>annual</small></div>
             <ul>
-              <li>Windows installer (.exe)</li>
-              <li>Local SQLite + outbox retries</li>
-              <li>Direct ESC/POS printing</li>
-              <li>PIN login, staff locks</li>
-              <li>Auto-update from GitHub Releases</li>
-              <li class="absent">Does NOT include Web edition</li>
-              <li class="absent">Requires an existing backend</li>
+              <li>Everything in Single Restaurant</li>
+              <li>Wildcard domain (*.yourservice.com)</li>
+              <li>Unlimited tenant installs</li>
+              <li>White-label branding per tenant</li>
+              <li>Priority support + slack channel</li>
+              <li>Annual source updates</li>
+              <li class="absent">Desktop app (sold separately)</li>
             </ul>
+            <a href="#contact" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:0.75rem;">Contact us →</a>
           </div>
         </div>
+        <p style="margin-top:1.5rem;font-size:0.88rem;color:var(--muted);text-align:center;">
+          Payments processed securely via Lemon Squeezy.
+          License code + download link arrive in your email within 60 seconds of payment.
+        </p>
       </div>
     </section>
 
@@ -908,15 +915,15 @@ pm2 start api/dist/main.js --name pos</pre>
         </details>
         <details>
           <summary>Do I get the source code?</summary>
-          <p>Yes — the full TypeScript source for API, admin, POS, KDS, QR-order, and public website. Not minified, not obfuscated. Modify freely under the CodeCanyon Regular or Extended terms.</p>
+          <p>Yes — the full TypeScript source for API, admin, POS, KDS, QR-order, and public website. Not minified, not obfuscated. Modify freely under your license terms (see LICENSE.txt in the zip).</p>
         </details>
         <details>
           <summary>Can I run this multi-tenant for several restaurants?</summary>
-          <p>Each install is single-tenant. For SaaS with multiple independent restaurants, use an Extended license per tenant. Most buyers use the built-in multi-branch feature instead — one install can support many physical locations under the same owner.</p>
+          <p>Each Single Restaurant install is single-tenant. To run a SaaS with multiple independent restaurants, get the Multi-Tenant license above. Most buyers use the built-in multi-branch feature instead — one install supports many physical locations under the same owner.</p>
         </details>
         <details>
           <summary>How do I get support?</summary>
-          <p>CodeCanyon item comments for quick questions; the support link in the item description for tickets. Custom development isn't included with the regular license but is available on request.</p>
+          <p>Email support (included for 12 months with every purchase). Priority support + a dedicated Slack channel for bundle + multi-tenant customers. Custom development is quoted separately on request.</p>
         </details>
       </div>
     </section>
@@ -935,7 +942,7 @@ pm2 start api/dist/main.js --name pos</pre>
 
     <footer>
       <div class="wrap">
-        <p>© 2026 — Restaurant POS, Self-Hosted Edition. License terms in <code style="color:var(--muted);">LICENSE.txt</code>. Support via CodeCanyon item page.</p>
+        <p>© 2026 — Restaurant POS, Self-Hosted Edition. License terms in <code style="color:var(--muted);">LICENSE.txt</code>. Support via the email address in your purchase receipt.</p>
       </div>
     </footer>
   </body>
