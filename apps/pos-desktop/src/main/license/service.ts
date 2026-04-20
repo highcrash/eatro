@@ -50,7 +50,7 @@ function config(): LicenseClientConfig {
 export async function activate(purchaseCode: string): Promise<Verdict> {
   const fp = machineFingerprint();
   return clientActivate(config(), {
-    code: purchaseCode.trim(),
+    purchaseCode: purchaseCode.trim(),
     domain: fp,        // desktop has no domain — fingerprint doubles as one
     fingerprint: fp,
   });
