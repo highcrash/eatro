@@ -17,7 +17,13 @@ files:
   - '!packages/*/src/**'
 
 # Native modules must be rebuilt against Electron's Node ABI at package time.
-npmRebuild: true
+# We do this ourselves via `electron-rebuild -w better-sqlite3` in the dist
+# script BEFORE electron-builder runs, then disable electron-builder's own
+# rebuild step. Its built-in @electron/rebuild walks the entire pnpm flat
+# tree under node_modules/.pnpm and chokes on broken optional-platform
+# symlinks (e.g. @esbuild/aix-ppc64 on Windows hosts), which kills the
+# build with a misleading ENOENT.
+npmRebuild: false
 
 # Bundle SumatraPDF portable so the silent PDF-print path works on every
 # Windows box out of the box, regardless of which PDF viewer is installed.
