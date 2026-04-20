@@ -313,6 +313,11 @@ model WebsiteContent {
   seoReservationDescription String?
   seoOgImage                String? // default Open Graph image
   seoFavicon                String? // favicon URL
+  // Marketing tags injected into the public website's <head> at runtime.
+  // Admin pastes the raw ID (not the whole snippet) and the web app
+  // injects the standard loader script + noscript fallback.
+  fbPixelId                 String? // Facebook Pixel ID, e.g. "123456789012345"
+  googleAnalyticsId         String? // GA4 Measurement ID ("G-XXXXXXXXXX") or GTM container ("GTM-XXXXXX")
   accentColor               String   @default("#D62B2B")
   buttonColor               String   @default("#D62B2B")
   textColor                 String? // override (null = mode default)

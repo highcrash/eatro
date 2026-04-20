@@ -51,6 +51,82 @@ export default function SiteLayout() {
     if (content?.buttonColor) document.documentElement.style.setProperty('--btn', content.buttonColor);
   }, [content?.accentColor, content?.buttonColor]);
 
+  /* ---------- favicon ---------- */
+  // Swap the page icon to whatever the admin uploaded in Website →
+  // SEO → Favicon. Looks for an existing <link rel="icon">, creates
+  // one if missing. rel="shortcut icon" variants (IE/Edge legacy) are
+  // not touched; modern browsers prefer rel="icon".
+  useEffect(() => {
+    if (!content?.seoFavicon) return;
+    const href = resolveLogoUrl(content.seoFavicon) ?? content.seoFavicon;
+    let link = document.querySelector('link[rel~="icon"]') as HTMLLinkElement | null;
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.href = href;
+  }, [content?.seoFavicon]);
+
+  /* ---------- Facebook Pixel ---------- */
+  // Injects the canonical fbevents.js loader + a single PageView. We
+  // gate on id presence + a window-level idempotency flag so HMR +
+  // React StrictMode re-runs don't duplicate the loader. Admin-level
+  // changes at runtime take the id from the `useEffect` dep so a save
+  // in the admin UI cascades through on next visit.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const id = content?.fbPixelId?.trim();
+    if (!id) return;
+    const w = window as unknown as { __restoraFbPixelLoaded?: string; fbq?: (...args: unknown[]) => void };
+    if (w.__restoraFbPixelLoaded === id) return;
+    w.__restoraFbPixelLoaded = id;
+    // Standard Facebook Pixel base code — copied verbatim from the
+    // Meta docs, minus the <noscript> tracking-pixel fallback (SPA
+    // users all have JS; the <noscript> only matters for crawlers).
+    const s = document.createElement('script');
+    s.id = 'restora-fb-pixel';
+    s.innerHTML =
+      "!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');" +
+      `fbq('init', '${id}'); fbq('track', 'PageView');`;
+    document.head.appendChild(s);
+  }, [content?.fbPixelId]);
+
+  /* ---------- Google Analytics / Tag Manager ---------- */
+  // Accepts either GA4 ("G-XXX…") or GTM ("GTM-XXX…") IDs and picks
+  // the right loader automatically. Same idempotency guard as the FB
+  // pixel above so we don't double-inject on StrictMode remounts.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const id = content?.googleAnalyticsId?.trim();
+    if (!id) return;
+    const w = window as unknown as { __restoraGoogleTagLoaded?: string; dataLayer?: unknown[]; gtag?: (...args: unknown[]) => void };
+    if (w.__restoraGoogleTagLoaded === id) return;
+    w.__restoraGoogleTagLoaded = id;
+
+    if (id.startsWith('GTM-')) {
+      // Tag Manager: a single async <script> + the dataLayer shim.
+      const s = document.createElement('script');
+      s.id = 'restora-gtm';
+      s.innerHTML =
+        "(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start': new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);" +
+        `})(window,document,'script','dataLayer','${id}');`;
+      document.head.appendChild(s);
+      return;
+    }
+    // GA4 (G-XXX) or legacy UA-XXX: gtag.js loader + config call.
+    const loader = document.createElement('script');
+    loader.async = true;
+    loader.src = `https://www.googletagmanager.com/gtag/js?id=${id}`;
+    document.head.appendChild(loader);
+    const init = document.createElement('script');
+    init.id = 'restora-gtag-init';
+    init.innerHTML =
+      "window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());" +
+      `gtag('config', '${id}');`;
+    document.head.appendChild(init);
+  }, [content?.googleAnalyticsId]);
+
   /* ---------- scroll ---------- */
   const [scrolled, setScrolled] = useState(false);
 
