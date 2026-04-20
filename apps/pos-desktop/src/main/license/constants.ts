@@ -16,6 +16,6 @@
 export const DESKTOP_LICENSE_CONSTANTS = {
   serverUrl: 'https://api.neawaslic.top/api/v1',
   productSku: 'restora-pos-desktop-cc',
-  publicKey: 'V3ZYtvqsnCVhGiE7LJog9vPE_VkyiLBz96N3inDO1j4',
-  publicKeyKid: 'gAz2iS5Y',
+  publicKey: 'm40iVQ6ZKU9GpfIzgzlRV1d8MFyOPYQZqscT-gTt1QY',
+  publicKeyKid: 'HfODolgi',
 } as const;
