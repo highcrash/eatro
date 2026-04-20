@@ -15,6 +15,15 @@ files:
   - '!**/*.map'
   - '!**/{tsconfig,tsconfig.*}.json'
   - '!packages/*/src/**'
+  # Brand hygiene: vendored license-client source contains the build-time
+  # path 'restora-pos' that the secret scanner flags. We only need its
+  # compiled dist/ at runtime — exclude src/ + tests.
+  - '!**/node_modules/@restora/license-client/src/**'
+  # better-sqlite3 ships MSBuild .recipe + .tlog artifacts that embed the
+  # absolute compile path (full of brand tokens). The runtime only needs
+  # the compiled .node binary.
+  - '!**/node_modules/better-sqlite3/build/**/*.{recipe,tlog,lastbuildstate,items.tlog}'
+  - '!**/node_modules/better-sqlite3/build/**/obj/**'
 
 # Native modules must be rebuilt against Electron's Node ABI at package time.
 # We do this ourselves via `electron-rebuild -w better-sqlite3` in the dist

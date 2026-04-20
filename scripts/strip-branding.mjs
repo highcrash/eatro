@@ -47,6 +47,10 @@ const EXCLUDE_FILES = new Set([
   // rewritten. Not a user-facing brand leak; the API ID space is
   // deliberately opaque.
   'apps/api/src/license/license.constants.ts',
+  // Same rationale for the desktop SKU + APP_SALT — both are server-
+  // side identifiers, never displayed to the buyer.
+  'apps/pos-desktop/src/main/license/constants.ts',
+  'apps/pos-desktop/src/main/license/fingerprint.ts',
 ]);
 
 // Intentionally targeted — NOT a broad /EATRO/g because the grep

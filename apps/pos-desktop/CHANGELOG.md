@@ -3,6 +3,16 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.0 — first public release (2026-04-20)
+
+- **First codecanyon-style release.** Same binary as 0.9.1 plus tighter packaging excludes (no `.spec.ts`, no MSBuild `.recipe`/`.tlog`, no `obj/` build artefacts) so `app.asar` is brand-clean and ~6 MB smaller.
+- **Buyer docs shipped**: `docs/INSTALL.md`, `docs/LICENSE.md`, `docs/UPDATE.md` covering first-launch flow, recovery scenarios, and re-download upgrade path.
+- License + pairing flow verified end-to-end against `restora-pos-desktop-cc` on `api.neawaslic.top`.
+
+## 0.9.1 — disable github auto-updater (2026-04-20)
+
+- **Auto-updater disabled** for the codecanyon edition. The placeholder `publish.repo` in `electron-builder.yml` was hitting GitHub 404 on every launch and surfacing "Update failed 404" in the toast. Buyers re-download the next release from the seller's checkout.
+
 ## 0.9.0 — license activation (2026-04-20)
 
 - **First-run flow now License → Pairing → Lock.** Fresh installs prompt for a purchase code from the seller's checkout before the device-pairing step. Activations bind to the Windows MachineGuid so a copied install file doesn't dual-activate.
