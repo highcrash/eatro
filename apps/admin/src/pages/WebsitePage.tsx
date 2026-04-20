@@ -80,6 +80,9 @@ interface WebsiteContent {
   seoReservationDescription: string | null;
   seoOgImage: string | null;
   seoFavicon: string | null;
+  // Marketing tags
+  fbPixelId: string | null;
+  googleAnalyticsId: string | null;
   //
   updatedAt: string;
 }
@@ -273,6 +276,8 @@ export default function WebsitePage() {
       seoReservationDescription: content.seoReservationDescription,
       seoOgImage: content.seoOgImage,
       seoFavicon: content.seoFavicon,
+      fbPixelId: content.fbPixelId,
+      googleAnalyticsId: content.googleAnalyticsId,
     });
   };
 
@@ -601,6 +606,34 @@ export default function WebsitePage() {
             <Field label="Meta Description" value={content.seoReservationDescription ?? ''} onChange={(v) => update('seoReservationDescription', v || null)} />
 
             <p className="text-[#555] text-[10px] font-body mt-2">Individual menu item SEO (title, description) can be set per-item in the Menu page editor.</p>
+          </div>
+        </CollapsibleSection>
+
+        {/* 11. Marketing tags */}
+        <CollapsibleSection title="Marketing Tags — Facebook Pixel & Google Analytics">
+          <div className="space-y-4">
+            <p className="text-[#666] font-body text-[10px]">
+              Paste the IDs (not the full snippets). The website injects the standard loader scripts
+              automatically. Leave blank to disable that tag.
+            </p>
+
+            <Field
+              label="Facebook Pixel ID"
+              value={content.fbPixelId ?? ''}
+              onChange={(v) => update('fbPixelId', v.trim() || null)}
+              placeholder="e.g. 123456789012345 (numeric, 15–16 digits)"
+            />
+            <Field
+              label="Google Analytics / Tag Manager ID"
+              value={content.googleAnalyticsId ?? ''}
+              onChange={(v) => update('googleAnalyticsId', v.trim() || null)}
+              placeholder="e.g. G-XXXXXXXXXX (GA4) or GTM-XXXXXXX (Tag Manager)"
+            />
+
+            <p className="text-[#555] text-[10px] font-body mt-2">
+              Find your Pixel ID in Facebook Events Manager → Data Sources. Find the Google ID in
+              Analytics → Admin → Data Streams, or in Tag Manager → Container.
+            </p>
           </div>
         </CollapsibleSection>
 

@@ -38,6 +38,9 @@ export interface WebsiteContent {
   maintenanceText: string | null;
   notFoundBg: string | null;
   notFoundText: string | null;
+  seoFavicon: string | null;
+  fbPixelId: string | null;
+  googleAnalyticsId: string | null;
 }
 
 export interface PublicBranding {
