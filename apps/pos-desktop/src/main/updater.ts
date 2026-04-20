@@ -13,7 +13,16 @@ import log from 'electron-log';
  *
  * During `pnpm dev:desktop` the updater is suppressed — auto-installs
  * during development would be chaos.
+ *
+ * Codecanyon edition: buyers don't have access to the seller's GitHub
+ * releases, and we ship one .exe per sale via Lemon Squeezy. The
+ * placeholder publish URL in electron-builder.yml would 404 on every
+ * launch — the toast surfaced "Update failed 404" and confused buyers.
+ * Set DISABLE_AUTO_UPDATER=true to skip every check; the toast stays
+ * idle, and buyers update by re-downloading the exe from the seller
+ * when a new release ships.
  */
+const DISABLE_AUTO_UPDATER = true;
 
 export type UpdateStatus =
   | { kind: 'idle' }
@@ -40,6 +49,10 @@ function broadcast(status: UpdateStatus): void {
 export function setupAutoUpdater(): void {
   if (!app.isPackaged) {
     log.info('[updater] dev build — auto-update disabled');
+    return;
+  }
+  if (DISABLE_AUTO_UPDATER) {
+    log.info('[updater] codecanyon build — auto-update disabled (buyers re-download)');
     return;
   }
 
@@ -83,7 +96,7 @@ export function setupAutoUpdater(): void {
 }
 
 export async function triggerCheck(): Promise<UpdateStatus> {
-  if (!app.isPackaged) {
+  if (!app.isPackaged || DISABLE_AUTO_UPDATER) {
     broadcast({ kind: 'none', currentVersion: app.getVersion() });
     return lastStatus;
   }
