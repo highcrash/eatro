@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 import type { Expense, ExpenseCategory, CreateExpenseDto } from '@restora/types';
+import { useAuthStore } from '../store/auth.store';
 
 const CATEGORIES: { value: ExpenseCategory; label: string }[] = [
   { value: 'RENT', label: 'Rent' },
@@ -32,6 +33,11 @@ interface Summary {
 
 export default function ExpensesPage() {
   const qc = useQueryClient();
+  // Advisor can log + edit expenses but can't approve (money sign-off)
+  // or delete (audit trail). Mirrors the server-side @Roles gate so
+  // the buttons don't 403 when clicked.
+  const role = useAuthStore((s) => s.user?.role);
+  const canApproveOrDelete = role === 'OWNER' || role === 'MANAGER';
   const now = new Date();
   const { data: paymentOptions = [] } = useQuery<{ code: string; name: string; isActive: boolean; category?: { code: string; name: string } }[]>({
     queryKey: ['payment-options'],
@@ -156,10 +162,13 @@ export default function ExpensesPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 flex gap-2">
-                    {!e.approvedAt && (
+                    {!e.approvedAt && canApproveOrDelete && (
                       <button onClick={() => approveMutation.mutate(e.id)} className="text-[#4CAF50] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Approve</button>
                     )}
-                    <button onClick={() => deleteMutation.mutate(e.id)} className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs tracking-widest uppercase transition-colors">Delete</button>
+                    {canApproveOrDelete && (
+                      <button onClick={() => deleteMutation.mutate(e.id)} className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs tracking-widest uppercase transition-colors">Delete</button>
+                    )}
+                    {!canApproveOrDelete && <span className="text-[#555] font-body text-xs">—</span>}
                   </td>
                 </tr>
               ))}
