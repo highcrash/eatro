@@ -11,6 +11,7 @@ export interface StaffMember extends AuditFields {
   phone: string | null;
   role: UserRole;
   isActive: boolean;
+  canAccessPos: boolean;
   hireDate: Date;
   monthlySalary?: number | null;
 }
@@ -22,8 +23,11 @@ export interface CreateStaffDto {
   phone?: string;
   role: UserRole;
   hireDate?: string;
+  canAccessPos?: boolean;
 }
 
 export interface UpdateStaffDto extends Partial<Omit<CreateStaffDto, 'password'>> {
   isActive?: boolean;
+  password?: string;
+  canAccessPos?: boolean;
 }

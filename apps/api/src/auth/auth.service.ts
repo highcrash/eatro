@@ -32,6 +32,8 @@ export class AuthService {
       include: { branch: { select: { name: true } } },
     });
     if (!staff) throw new UnauthorizedException('Staff not found on this terminal\'s branch');
+    // POS access toggle — admin-flipped via the Staff page.
+    if (!staff.canAccessPos) throw new UnauthorizedException('POS access has been disabled for this account');
 
     return this.login(staff);
   }
@@ -54,6 +56,8 @@ export class AuthService {
     if (staff.branchId !== device.branchId) {
       throw new UnauthorizedException('This staff member does not belong to this terminal\'s branch');
     }
+    const staffFull = await this.prisma.staff.findUnique({ where: { id: staff.id }, select: { canAccessPos: true } });
+    if (!staffFull?.canAccessPos) throw new UnauthorizedException('POS access has been disabled for this account');
     return this.login(staff);
   }
 

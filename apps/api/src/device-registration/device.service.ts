@@ -56,7 +56,9 @@ export class DeviceService {
     const [branch, cashiers] = await Promise.all([
       this.prisma.branch.findUnique({ where: { id: branchId }, select: { id: true, name: true } }),
       this.prisma.staff.findMany({
-        where: { branchId, deletedAt: null, isActive: true },
+        // canAccessPos gates the lock-screen tile grid. Owners flip it
+        // off for staff who shouldn't be operating a register.
+        where: { branchId, deletedAt: null, isActive: true, canAccessPos: true },
         select: { id: true, name: true, email: true, role: true },
         orderBy: { name: 'asc' },
       }),
@@ -127,7 +129,7 @@ export class DeviceService {
     const device = await this.verifyToken(deviceToken);
     if (!device) throw new UnauthorizedException('Terminal is not paired or has been revoked');
     return this.prisma.staff.findMany({
-      where: { branchId: device.branchId, deletedAt: null, isActive: true },
+      where: { branchId: device.branchId, deletedAt: null, isActive: true, canAccessPos: true },
       select: { id: true, name: true, email: true, role: true },
       orderBy: { name: 'asc' },
     });

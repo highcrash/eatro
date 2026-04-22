@@ -17,7 +17,7 @@ export class StaffService {
   findAll(branchId: string) {
     return this.prisma.staff.findMany({
       where: { branchId, deletedAt: null },
-      select: { id: true, name: true, email: true, role: true, phone: true, isActive: true, hireDate: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, createdAt: true },
       orderBy: { name: 'asc' },
     });
   }
@@ -46,8 +46,9 @@ export class StaffService {
         passwordHash,
         branchId,
         hireDate: dto.hireDate ? new Date(dto.hireDate) : new Date(),
+        canAccessPos: dto.canAccessPos ?? true,
       },
-      select: { id: true, name: true, email: true, role: true, phone: true, isActive: true, hireDate: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, createdAt: true },
     });
   }
 
@@ -64,7 +65,7 @@ export class StaffService {
     return this.prisma.staff.update({
       where: { id },
       data,
-      select: { id: true, name: true, email: true, role: true, phone: true, isActive: true, hireDate: true, updatedAt: true },
+      select: { id: true, name: true, email: true, role: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, updatedAt: true },
     });
   }
 
