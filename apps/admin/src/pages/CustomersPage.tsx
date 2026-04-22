@@ -1,9 +1,24 @@
-import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Search, X, Star } from 'lucide-react';
+import { useState, useMemo, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Search, X, Star, Upload, MessageSquare, Download } from 'lucide-react';
 
 import { formatCurrency, formatDateTime } from '@restora/utils';
 import { api } from '../lib/api';
+
+const CUSTOMER_CSV_EXAMPLE = `phone,name,email
+01711000001,Alice,alice@example.com
+01711000002,Bob,
+01711000003,,charlie@example.com`;
+
+function downloadCustomerCsvTemplate() {
+  const blob = new Blob([CUSTOMER_CSV_EXAMPLE], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'customers-template.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 interface Customer {
   id: string; phone: string; name: string; email: string | null;
@@ -28,11 +43,76 @@ function StarRating({ score }: { score: number }) {
   );
 }
 
+interface SmsTemplate { id: string; name: string; body: string }
+
 export default function CustomersPage() {
+  const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortField>('lastVisit');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [smsOpen, setSmsOpen] = useState(false);
+  const [smsBody, setSmsBody] = useState('');
+  const [smsResult, setSmsResult] = useState<{ sent: number; failed: number; skipped: number } | null>(null);
+  const [csvResult, setCsvResult] = useState<{ total: number; created: number; updated: number; skipped: number; results: Array<{ phone: string; status: string; reason?: string }> } | null>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: templates = [] } = useQuery<SmsTemplate[]>({
+    queryKey: ['sms', 'templates'],
+    queryFn: () => api.get('/sms/templates'),
+  });
+
+  const bulkImportMut = useMutation({
+    mutationFn: (items: Array<{ phone: string; name?: string; email?: string }>) =>
+      api.post<{ total: number; created: number; updated: number; skipped: number; results: Array<{ phone: string; status: string; reason?: string }> }>('/customers/bulk', { items }),
+    onSuccess: (data) => {
+      setCsvResult(data);
+      void qc.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+
+  const campaignMut = useMutation({
+    mutationFn: (body: { customerIds: string[]; body: string }) =>
+      api.post<{ sent: number; failed: number; skipped: number }>('/sms/campaigns', body),
+    onSuccess: (data) => {
+      setSmsResult(data);
+      setChecked(new Set());
+      setSmsBody('');
+      setTimeout(() => { setSmsOpen(false); setSmsResult(null); }, 4000);
+    },
+  });
+
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const rows = text.trim().split(/\r?\n/).map((r) => r.split(',').map((c) => c.trim()));
+      if (rows.length < 2) { alert('CSV is empty'); return; }
+      const header = rows[0].map((h) => h.toLowerCase().replace(/[^a-z_]/g, ''));
+      const phoneIdx = header.findIndex((h) => h === 'phone' || h === 'mobile' || h === 'contact');
+      const nameIdx = header.findIndex((h) => h === 'name' || h === 'customer_name');
+      const emailIdx = header.findIndex((h) => h === 'email');
+      if (phoneIdx === -1) { alert('CSV must have a "phone" column'); return; }
+      const items: Array<{ phone: string; name?: string; email?: string }> = [];
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i];
+        const phone = r[phoneIdx]?.trim();
+        if (!phone) continue;
+        items.push({
+          phone,
+          name: nameIdx >= 0 ? r[nameIdx]?.trim() || undefined : undefined,
+          email: emailIdx >= 0 ? r[emailIdx]?.trim() || undefined : undefined,
+        });
+      }
+      if (items.length === 0) { alert('No valid rows'); return; }
+      bulkImportMut.mutate(items);
+    };
+    reader.readAsText(file);
+    if (csvInputRef.current) csvInputRef.current.value = '';
+  };
 
   const { data: customers = [] } = useQuery<Customer[]>({
     queryKey: ['customers'],
@@ -85,22 +165,63 @@ export default function CustomersPage() {
           <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">CRM</p>
           <h1 className="font-display text-4xl text-white tracking-wide">CUSTOMERS</h1>
         </div>
-        <div className="flex items-center gap-6 text-xs font-body text-[#666]">
-          <span>{customers.length} customers</span>
-          <span>Revenue: {formatCurrency(totalRevenue)}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-6 text-xs font-body text-[#666] mr-4">
+            <span>{customers.length} customers</span>
+            <span>Revenue: {formatCurrency(totalRevenue)}</span>
+          </div>
+          <button onClick={() => downloadCustomerCsvTemplate()} className="bg-[#161616] border border-[#2A2A2A] text-[#999] hover:text-white hover:border-[#666] font-body text-xs tracking-widest uppercase px-3 py-2 flex items-center gap-1.5 transition-colors" title="Download CSV template">
+            <Download size={12} />
+          </button>
+          <button onClick={() => csvInputRef.current?.click()} className="bg-[#161616] border border-[#2A2A2A] text-[#999] hover:text-white hover:border-[#D62B2B] font-body text-xs tracking-widest uppercase px-3 py-2 flex items-center gap-1.5 transition-colors">
+            <Upload size={12} /> CSV Import
+          </button>
+          <input ref={csvInputRef} type="file" accept=".csv" onChange={handleCsvUpload} className="hidden" />
         </div>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#555]" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or phone..."
-          className="w-full bg-[#161616] border border-[#2A2A2A] pl-10 pr-4 py-2.5 text-sm font-body text-white outline-none focus:border-[#D62B2B] placeholder:text-[#555]" />
+      {csvResult && (
+        <div className="bg-[#161616] border border-[#2A2A2A] p-3 flex items-center justify-between">
+          <div className="flex gap-4 text-xs font-body">
+            <span className="text-[#4CAF50]">{csvResult.created} created</span>
+            <span className="text-[#C8FF00]">{csvResult.updated} updated</span>
+            <span className="text-[#FFA726]">{csvResult.skipped} skipped</span>
+            <span className="text-[#666]">of {csvResult.total} total</span>
+          </div>
+          <button onClick={() => setCsvResult(null)} className="text-[#666] hover:text-white text-xs">Dismiss</button>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="relative max-w-sm flex-1">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#555]" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or phone..."
+            className="w-full bg-[#161616] border border-[#2A2A2A] pl-10 pr-4 py-2.5 text-sm font-body text-white outline-none focus:border-[#D62B2B] placeholder:text-[#555]" />
+        </div>
+        {checked.size > 0 && (
+          <button onClick={() => setSmsOpen(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-xs tracking-widest uppercase px-4 py-2 flex items-center gap-1.5">
+            <MessageSquare size={12} /> Send SMS to {checked.size}
+          </button>
+        )}
       </div>
 
       <div className="bg-[#161616] border border-[#2A2A2A]">
         <table className="w-full text-sm font-body">
           <thead>
             <tr className="text-left text-xs text-[#999] tracking-widest uppercase border-b border-[#2A2A2A]">
+              <th className="px-3 py-3 w-8">
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && filtered.every((c) => checked.has(c.id))}
+                  onChange={(e) => {
+                    const next = new Set(checked);
+                    if (e.target.checked) filtered.forEach((c) => next.add(c.id));
+                    else filtered.forEach((c) => next.delete(c.id));
+                    setChecked(next);
+                  }}
+                  className="accent-[#D62B2B]"
+                />
+              </th>
               <th className="px-5 py-3 font-medium"><SortBtn field="name" label="Name" /></th>
               <th className="px-5 py-3 font-medium">Phone</th>
               <th className="px-5 py-3 font-medium">Email</th>
@@ -112,11 +233,23 @@ export default function CustomersPage() {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={7} className="px-5 py-8 text-center text-[#999]">No customers found</td></tr>
+              <tr><td colSpan={8} className="px-5 py-8 text-center text-[#999]">No customers found</td></tr>
             ) : filtered.map((c) => (
-              <tr key={c.id} className={`border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F] cursor-pointer ${selectedId === c.id ? 'bg-[#1F1F1F]' : ''}`} onClick={() => setSelectedId(c.id)}>
-                <td className="px-5 py-3 text-[#D62B2B] font-medium">{c.name}</td>
-                <td className="px-5 py-3 text-[#999]">{c.phone}</td>
+              <tr key={c.id} className={`border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F] ${selectedId === c.id ? 'bg-[#1F1F1F]' : ''}`}>
+                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={checked.has(c.id)}
+                    onChange={(e) => {
+                      const next = new Set(checked);
+                      if (e.target.checked) next.add(c.id); else next.delete(c.id);
+                      setChecked(next);
+                    }}
+                    className="accent-[#D62B2B]"
+                  />
+                </td>
+                <td className="px-5 py-3 text-[#D62B2B] font-medium cursor-pointer" onClick={() => setSelectedId(c.id)}>{c.name}</td>
+                <td className="px-5 py-3 text-[#999] cursor-pointer" onClick={() => setSelectedId(c.id)}>{c.phone}</td>
                 <td className="px-5 py-3 text-[#999]">{c.email || '—'}</td>
                 <td className="px-5 py-3 text-right text-white">{c.totalOrders}</td>
                 <td className="px-5 py-3 text-right text-white">{formatCurrency(Number(c.totalSpent))}</td>
@@ -219,6 +352,68 @@ export default function CustomersPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* SMS campaign composer */}
+      {smsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => !campaignMut.isPending && setSmsOpen(false)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
+              <MessageSquare size={16} className="text-[#D62B2B]" />
+              <h3 className="font-display text-xl text-white tracking-widest">SEND SMS TO {checked.size}</h3>
+            </div>
+            <p className="text-[#666] text-xs font-body">
+              Placeholders: <code>{'{{name}}'}</code> (falls back to "Dear Customer"), <code>{'{{phone}}'}</code>
+            </p>
+            {templates.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs tracking-widest uppercase">Use template</label>
+                <select
+                  onChange={(e) => {
+                    const t = templates.find((t) => t.id === e.target.value);
+                    if (t) setSmsBody(t.body);
+                  }}
+                  className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body"
+                  defaultValue=""
+                >
+                  <option value="">— Pick a template —</option>
+                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            )}
+            <div className="flex flex-col gap-1">
+              <label className="text-[#666] text-xs tracking-widest uppercase">Message</label>
+              <textarea
+                rows={6}
+                value={smsBody}
+                onChange={(e) => setSmsBody(e.target.value)}
+                placeholder="Hi {{name}}, check out our new menu!"
+                className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-mono"
+              />
+              <span className="text-[#666] text-[10px]">{smsBody.length} chars</span>
+            </div>
+            {smsResult && (
+              <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 text-xs font-body">
+                <span className="text-[#4CAF50] mr-3">{smsResult.sent} sent</span>
+                <span className="text-[#F03535] mr-3">{smsResult.failed} failed</span>
+                <span className="text-[#FFA726]">{smsResult.skipped} skipped</span>
+              </div>
+            )}
+            {campaignMut.error && (
+              <p className="text-[#F03535] text-xs">{(campaignMut.error as Error).message}</p>
+            )}
+            <div className="flex gap-3">
+              <button onClick={() => setSmsOpen(false)} disabled={campaignMut.isPending} className="flex-1 bg-[#2A2A2A] text-white py-2.5 text-sm">Cancel</button>
+              <button
+                onClick={() => campaignMut.mutate({ customerIds: Array.from(checked), body: smsBody })}
+                disabled={!smsBody.trim() || campaignMut.isPending}
+                className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white py-2.5 text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                <MessageSquare size={12} /> {campaignMut.isPending ? 'Sending…' : `Send to ${checked.size}`}
+              </button>
+            </div>
           </div>
         </div>
       )}

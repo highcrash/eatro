@@ -29,6 +29,7 @@ import {
   Globe,
   Database,
   Monitor,
+  MessageSquare,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -126,6 +127,7 @@ const NAV_GROUPS: Array<{
       { to: '/settings', icon: Settings, label: 'Settings', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/data-cleanup', icon: Trash2, label: 'Data Cleanup', allowedRoles: ['OWNER'] },
       { to: '/backups', icon: Database, label: 'Backups', allowedRoles: ['OWNER'] },
+      { to: '/sms', icon: MessageSquare, label: 'SMS', allowedRoles: ['OWNER', 'MANAGER', 'ADVISOR'] },
       { to: '/devices', icon: Monitor, label: 'Terminals', allowedRoles: ['OWNER', 'MANAGER'] },
     ],
   },

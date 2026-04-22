@@ -394,6 +394,8 @@ interface SmsSettings {
   smsApiKey: string | null;
   smsApiUrl: string;
   notifyVoidOtp: boolean;
+  smsPaymentNotifyEnabled: boolean;
+  smsPaymentTemplate: string | null;
 }
 
 function SmsSettingsSection({ isOwner }: { isOwner: boolean }) {
@@ -511,6 +513,30 @@ function SmsSettingsSection({ isOwner }: { isOwner: boolean }) {
               onChange={(e) => updateMut.mutate({ notifyVoidOtp: e.target.checked })}
               className="accent-[#D62B2B] w-4 h-4" />
           </label>
+
+          <label className="flex items-center justify-between cursor-pointer py-2 border-b border-[#2A2A2A] last:border-0">
+            <div>
+              <p className="text-sm font-body text-white">Payment Thank-You SMS</p>
+              <p className="text-[10px] font-body text-[#666]">Send a thank-you SMS to the customer when an order is paid.</p>
+            </div>
+            <input type="checkbox" checked={settings.smsPaymentNotifyEnabled} disabled={!isOwner}
+              onChange={(e) => updateMut.mutate({ smsPaymentNotifyEnabled: e.target.checked })}
+              className="accent-[#D62B2B] w-4 h-4" />
+          </label>
+
+          {settings.smsPaymentNotifyEnabled && (
+            <div className="py-2">
+              <p className="text-xs font-body text-[#999] mb-2">Template (placeholders: <code>{'{{brand}}'}</code>, <code>{'{{name}}'}</code>, <code>{'{{amount}}'}</code>, <code>{'{{method}}'}</code>)</p>
+              <textarea
+                rows={3}
+                disabled={!isOwner}
+                defaultValue={settings.smsPaymentTemplate ?? 'Thanks for Dining with {{brand}}. Your payment {{amount}} Taka has been received with {{method}}.'}
+                onBlur={(e) => updateMut.mutate({ smsPaymentTemplate: e.target.value })}
+                className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-xs font-mono"
+              />
+              <p className="text-[10px] font-body text-[#555] mt-1">Default fires when template is empty. No order number is included in the SMS.</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

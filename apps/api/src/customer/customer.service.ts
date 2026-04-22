@@ -116,6 +116,51 @@ export class CustomerService {
     });
   }
 
+  /** Admin CSV bulk import. Per-row status so one bad number doesn't abort
+   *  the whole upload. Existing rows (matched by branch + phone) are
+   *  updated in place — name fills in if it was previously "Walk-in",
+   *  email overwrites when provided. */
+  async bulkImport(
+    branchId: string,
+    items: Array<{ phone: string; name?: string; email?: string }>,
+  ): Promise<{ total: number; created: number; updated: number; skipped: number; results: Array<{ phone: string; status: 'created' | 'updated' | 'skipped'; reason?: string }> }> {
+    const results: Array<{ phone: string; status: 'created' | 'updated' | 'skipped'; reason?: string }> = [];
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    for (const row of items) {
+      const phone = (row.phone ?? '').replace(/[^\d+]/g, '').trim();
+      if (!phone || phone.replace(/[^\d]/g, '').length < 8) {
+        results.push({ phone: row.phone ?? '(empty)', status: 'skipped', reason: 'Invalid phone' });
+        skipped++;
+        continue;
+      }
+      const name = (row.name ?? '').trim();
+      const email = (row.email ?? '').trim() || undefined;
+      const existing = await this.prisma.customer.findUnique({ where: { branchId_phone: { branchId, phone } } });
+      if (existing) {
+        const fields: { name?: string; email?: string } = {};
+        if (name && (existing.name === 'Walk-in' || !existing.name)) fields.name = name;
+        if (email) fields.email = email;
+        if (Object.keys(fields).length > 0) {
+          await this.prisma.customer.update({ where: { id: existing.id }, data: fields });
+          results.push({ phone, status: 'updated' });
+          updated++;
+        } else {
+          results.push({ phone, status: 'skipped', reason: 'Already exists with same name/email' });
+          skipped++;
+        }
+        continue;
+      }
+      await this.prisma.customer.create({
+        data: { branchId, phone, name: name || 'Walk-in', email, isActive: true },
+      });
+      results.push({ phone, status: 'created' });
+      created++;
+    }
+    return { total: items.length, created, updated, skipped, results };
+  }
+
   async assignToOrder(orderId: string, branchId: string, customerId: string | null) {
     if (customerId) {
       const customer = await this.findOne(customerId, branchId);

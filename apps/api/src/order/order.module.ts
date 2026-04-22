@@ -6,9 +6,10 @@ import { RecipeModule } from '../recipe/recipe.module';
 import { AccountModule } from '../account/account.module';
 import { BranchSettingsModule } from '../branch-settings/branch-settings.module';
 import { QrGateModule } from '../qr-gate/qr-gate.module';
+import { SmsModule } from '../sms/sms.module';
 
 @Module({
-  imports: [WsGatewayModule, RecipeModule, AccountModule, BranchSettingsModule, QrGateModule],
+  imports: [WsGatewayModule, RecipeModule, AccountModule, BranchSettingsModule, QrGateModule, SmsModule],
   controllers: [OrderController, QrOrderController],
   providers: [OrderService],
   exports: [OrderService],

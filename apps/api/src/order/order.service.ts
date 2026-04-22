@@ -7,6 +7,7 @@ import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
 import { RecipeService } from '../recipe/recipe.service';
 import { AccountService } from '../account/account.service';
 import { BranchSettingsService } from '../branch-settings/branch-settings.service';
+import { SmsService } from '../sms/sms.service';
 
 /**
  * Service charge + VAT calculator used by every place that recomputes an
@@ -50,6 +51,7 @@ export class OrderService {
     private readonly recipeService: RecipeService,
     private readonly accountService: AccountService,
     private readonly branchSettings: BranchSettingsService,
+    private readonly sms: SmsService,
   ) {}
 
   findAll(branchId: string, tableId?: string, status?: string, from?: string, to?: string) {
@@ -326,7 +328,53 @@ export class OrderService {
       }).catch(() => {});
     }
 
+    // Payment-thank-you SMS. Fires only when the branch has it toggled on,
+    // the order was attached to a customer with a phone, and the gateway
+    // is configured. Fire-and-forget so a transient SMS failure never
+    // blocks the checkout flow — the log row records the failure for
+    // admin triage.
+    void this.maybeSendPaymentSms(branchId, order.id).catch((err) => {
+      console.warn(`[order] payment SMS failed for ${order.id}: ${(err as Error).message}`);
+    });
+
     return updated;
+  }
+
+  private async maybeSendPaymentSms(branchId: string, orderId: string): Promise<void> {
+    const settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
+    if (!settings?.smsPaymentNotifyEnabled) return;
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { customer: true, payments: true, branch: { select: { name: true } } },
+    });
+    if (!order?.customerId) return;
+    const phone = order.customer?.phone ?? order.customerPhone;
+    if (!phone) return;
+
+    const amount = Number(order.totalAmount ?? 0).toFixed(2).replace(/\.00$/, '');
+    const method = (order.payments ?? [])
+      .map((p) => (p.method ?? 'cash').toLowerCase())
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .join('/');
+    const defaultTemplate =
+      'Thanks for Dining with {{brand}}. Your payment {{amount}} Taka has been received with {{method}}.';
+    const template = settings.smsPaymentTemplate && settings.smsPaymentTemplate.trim()
+      ? settings.smsPaymentTemplate
+      : defaultTemplate;
+
+    const body = template
+      .replace(/\{\{\s*brand\s*\}\}/gi, order.branch?.name ?? '')
+      .replace(/\{\{\s*name\s*\}\}/gi, order.customer?.name && order.customer.name.trim() && order.customer.name.trim().toLowerCase() !== 'walk-in'
+        ? order.customer.name.trim()
+        : 'Dear Customer')
+      .replace(/\{\{\s*amount\s*\}\}/gi, amount)
+      .replace(/\{\{\s*method\s*\}\}/gi, method || 'payment');
+
+    await this.sms.sendAndLog(branchId, phone, body, {
+      kind: 'PAYMENT',
+      customerId: order.customerId,
+      orderId: order.id,
+    });
   }
 
   async applyDiscount(orderId: string, branchId: string, discountId: string) {
