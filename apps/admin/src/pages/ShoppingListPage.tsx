@@ -75,6 +75,18 @@ export default function ShoppingListPage() {
     select: (d) => d.filter((i) => i.isActive && !i.name.startsWith('[PR]')),
   });
 
+  // One formatter so the row label is consistent everywhere — manual
+  // add, low-stock load, and variant-swap all produce the same shape:
+  //   "Parent → BrandName PackSize"
+  // with a graceful fallback to "Parent → variant XXXXXX" when neither
+  // brandName nor packSize is set (otherwise you'd get an orphan arrow
+  // and couldn't tell variants apart after a swap).
+  const composeVariantLabel = (parentName: string, variant: { brandName: string | null; packSize: string | null; id: string }): string => {
+    const parts = [variant.brandName, variant.packSize].map((s) => (s ?? '').trim()).filter(Boolean);
+    const suffix = parts.length > 0 ? parts.join(' ') : `variant ${variant.id.slice(-6)}`;
+    return `${parentName} → ${suffix}`;
+  };
+
   const addManualItem = (ing: Ingredient, parentName?: string) => {
     if (rows.some((r) => r.ingredientId === ing.id)) return;
     const pu = ing.purchaseUnit;
@@ -82,7 +94,9 @@ export default function ShoppingListPage() {
     setRows((prev) => [...prev, {
       ingredientId: ing.id,
       parentId: ing.parentId ?? null,
-      name: parentName ? `${parentName} → ${ing.brandName ?? ing.name}` : ing.name,
+      name: parentName
+        ? composeVariantLabel(parentName, { brandName: ing.brandName ?? null, packSize: ing.packSize ?? null, id: ing.id })
+        : ing.name,
       unit: pu || ing.unit,
       currentStock: Number(ing.currentStock),
       quantity: '1',
@@ -126,7 +140,7 @@ export default function ShoppingListPage() {
       return {
         ...row,
         ingredientId: variant.id,
-        name: `${parentName} → ${variant.brandName ?? ''} ${variant.packSize ?? ''}`.trim(),
+        name: composeVariantLabel(parentName, { brandName: variant.brandName, packSize: variant.packSize, id: variant.id }),
         supplierId: variant.supplierId ?? row.supplierId,
         unitCost: variant.costPerPurchaseUnit > 0 ? (variant.costPerPurchaseUnit / 100).toFixed(2) : row.unitCost,
         unit: purchaseUnit || row.unit,
