@@ -47,14 +47,18 @@ export class ExpenseController {
     return this.expenseService.update(id, user.branchId, dto);
   }
 
+  // Approve = authorise payment. Keep to OWNER/MANAGER so advisors
+  // can log + edit expense entries but can't sign off on money.
   @Post(':id/approve')
-  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER')
   approve(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.expenseService.approve(id, user.branchId, user.sub);
   }
 
+  // Delete wipes the audit trail. OWNER/MANAGER only to match the
+  // restriction on approve; advisors can edit rows they entered.
   @Delete(':id')
-  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER')
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.expenseService.remove(id, user.branchId);
   }

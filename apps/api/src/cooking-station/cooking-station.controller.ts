@@ -8,16 +8,20 @@ import type { JwtPayload } from '@restora/types';
 
 @Controller('cooking-stations')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER')
 export class CookingStationController {
   constructor(private readonly service: CookingStationService) {}
 
+  // READ — Advisor needs this for menu-item bulk edit (Kitchen Section
+  // dropdown). They can't manage stations, but they need to see them.
   @Get()
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   findAll(@CurrentUser() user: JwtPayload) {
     return this.service.findAll(user.branchId);
   }
 
+  // Mutations stay OWNER/MANAGER — advisors view the list, not edit it.
   @Post()
+  @Roles('OWNER', 'MANAGER')
   create(
     @CurrentUser() user: JwtPayload,
     @Body() body: { name: string; printerName?: string | null; printerIp?: string | null; printerPort?: number | null; sortOrder?: number; vatEnabled?: boolean },
@@ -26,6 +30,7 @@ export class CookingStationController {
   }
 
   @Patch(':id')
+  @Roles('OWNER', 'MANAGER')
   update(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
@@ -35,6 +40,7 @@ export class CookingStationController {
   }
 
   @Delete(':id')
+  @Roles('OWNER', 'MANAGER')
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.remove(id, user.branchId);
   }
