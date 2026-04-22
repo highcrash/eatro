@@ -48,9 +48,17 @@ export class StaffService {
 
   async update(id: string, branchId: string, dto: UpdateStaffDto) {
     await this.findOne(id, branchId);
+    // DTO accepts a plaintext `password` for convenience — the column
+    // is `passwordHash`, so we bcrypt it and swap keys before forwarding
+    // to Prisma. Missing / empty `password` means "don't change it".
+    const { password, ...rest } = dto as { password?: string } & Record<string, unknown>;
+    const data: Record<string, unknown> = { ...rest };
+    if (typeof password === 'string' && password.length > 0) {
+      data.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    }
     return this.prisma.staff.update({
       where: { id },
-      data: dto,
+      data,
       select: { id: true, name: true, email: true, role: true, phone: true, isActive: true, hireDate: true, updatedAt: true },
     });
   }
