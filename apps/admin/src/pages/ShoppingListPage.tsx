@@ -154,15 +154,26 @@ export default function ShoppingListPage() {
   });
 
   const groupedBySupplier = useMemo(() => {
-    const groups: Record<string, { supplierName: string; items: ListRow[] }> = {};
+    // Rows without a supplier land in an "Unassigned" bucket so they
+    // still show on the printed sheet — otherwise the user walks to
+    // the market missing items that never got a supplier set. The
+    // unassigned group sorts last.
+    const UNASSIGNED = '__unassigned__';
+    const groups: Record<string, { supplierName: string; items: ListRow[]; unassigned?: boolean }> = {};
     for (const row of rows) {
-      if (!row.supplierId) continue;
-      const supplier = suppliers.find((s) => s.id === row.supplierId);
-      const name = supplier?.name ?? 'Unknown';
-      if (!groups[row.supplierId]) groups[row.supplierId] = { supplierName: name, items: [] };
-      groups[row.supplierId].items.push(row);
+      if (row.supplierId) {
+        const supplier = suppliers.find((s) => s.id === row.supplierId);
+        const name = supplier?.name ?? 'Unknown';
+        if (!groups[row.supplierId]) groups[row.supplierId] = { supplierName: name, items: [] };
+        groups[row.supplierId].items.push(row);
+      } else {
+        if (!groups[UNASSIGNED]) groups[UNASSIGNED] = { supplierName: 'No supplier assigned', items: [], unassigned: true };
+        groups[UNASSIGNED].items.push(row);
+      }
     }
-    return Object.values(groups);
+    const list = Object.values(groups);
+    list.sort((a, b) => (a.unassigned ? 1 : 0) - (b.unassigned ? 1 : 0));
+    return list;
   }, [rows, suppliers]);
 
   const totalItems = rows.length;
@@ -315,7 +326,10 @@ export default function ShoppingListPage() {
               <p style={{ color: '#666', fontSize: '11px', marginBottom: '20px' }}>{new Date().toLocaleDateString()} — {totalItems} items — Est. {formatCurrency(totalCost)}</p>
               {groupedBySupplier.map((group, gIdx) => (
                 <div key={gIdx} style={{ marginBottom: '24px', pageBreakInside: 'avoid' }}>
-                  <h2 style={{ fontFamily: 'Bebas Neue, sans-serif', fontSize: '18px', letterSpacing: '2px', borderBottom: '2px solid #000', paddingBottom: '4px', marginBottom: '8px' }}>{group.supplierName}</h2>
+                  <h2 style={{ fontFamily: 'Bebas Neue, sans-serif', fontSize: '18px', letterSpacing: '2px', borderBottom: `2px solid ${group.unassigned ? '#b45309' : '#000'}`, color: group.unassigned ? '#b45309' : '#000', paddingBottom: '4px', marginBottom: '8px' }}>
+                    {group.supplierName}
+                    {group.unassigned && <span style={{ fontSize: '10px', letterSpacing: '1px', marginLeft: '8px', color: '#b45309' }}>— assign a supplier before ordering</span>}
+                  </h2>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr>
