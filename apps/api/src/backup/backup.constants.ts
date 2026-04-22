@@ -31,6 +31,7 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'diningTable', table: 'dining_tables' },
   { accessor: 'cookingStation', table: 'cooking_stations' },
   { accessor: 'unitConversion', table: 'unit_conversions' },
+  { accessor: 'customUnit', table: 'custom_units' },
   { accessor: 'account', table: 'accounts' },
   { accessor: 'supplier', table: 'suppliers' },
   { accessor: 'device', table: 'devices' },
