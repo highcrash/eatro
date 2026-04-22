@@ -18,10 +18,15 @@ Cola,BEV0010,BEVERAGE,ML,500,0.15,BOTTLE,500,75,,,,,
 Cola Coca-Cola 500ml,,,,,0.15,,,75,BEV0010,Coca-Cola 500ml,500ml,500,CC500
 Cola Pepsi 500ml,,,,,0.14,,,70,BEV0010,Pepsi 500ml,500ml,500,PP500`;
 
-const STOCK_CSV_EXAMPLE = `item_code,current_stock
-RICE-001,42.5
-FLOUR-002,18
-OIL-003,7.25`;
+// Variants are looked up by `sku`, parents by `item_code`. Either column
+// works — the handler takes whichever is non-empty per row. Owners who
+// haven't assigned SKUs to their variants should set one on the variant
+// edit page before trying to update variant stock via CSV.
+const STOCK_CSV_EXAMPLE = `item_code,sku,current_stock
+RICE-001,,42.5
+FLOUR-002,,18
+,OIL-ABC-1L,7.25
+,OIL-ABC-5L,14`;
 
 function downloadStockUpdateCSV() {
   const blob = new Blob([STOCK_CSV_EXAMPLE], { type: 'text/csv' });
@@ -669,7 +674,7 @@ export default function InventoryPage() {
                     className="w-full text-left px-3 py-2.5 text-sm font-body text-[#999] hover:bg-[#1F1F1F] hover:text-white transition-colors border-b border-[#2A2A2A]"
                   >
                     Stock Update CSV
-                    <span className="block text-[10px] text-[#666] mt-0.5">Set current stock by item_code; logs +/− as ADJUSTMENT</span>
+                    <span className="block text-[10px] text-[#666] mt-0.5">Set current stock by item_code (parents) or sku (variants); logs +/− as ADJUSTMENT</span>
                   </button>
                   <button
                     onClick={() => { setShowCSVUpload(false); downloadCurrentInventory(); }}
