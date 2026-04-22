@@ -690,9 +690,21 @@ export default function InventoryPage() {
                   </button>
                   <button
                     onClick={() => { setShowCSVUpload(false); downloadStockUpdateCSV(); }}
-                    className="w-full text-left px-3 py-2 text-xs font-body text-[#666] hover:bg-[#1F1F1F] hover:text-[#999] transition-colors"
+                    className="w-full text-left px-3 py-2 text-xs font-body text-[#666] hover:bg-[#1F1F1F] hover:text-[#999] transition-colors border-b border-[#2A2A2A]"
                   >
                     ↓ Download stock-update template
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setShowCSVUpload(false);
+                      if (!confirm('Recalculate Cost/Unit for every variant from its pack price?')) return;
+                      const r = await api.post<{ scanned: number; fixed: number; parentsResynced: number }>('/ingredients/repair-variant-costs', {});
+                      alert(`Scanned ${r.scanned} variants, fixed ${r.fixed}, re-synced ${r.parentsResynced} parents.`);
+                      await qc.invalidateQueries({ queryKey: ['ingredients'] });
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs font-body text-[#FFA726] hover:bg-[#1F1F1F] hover:text-white transition-colors"
+                  >
+                    ↻ Repair variant Cost/Unit
                   </button>
                 </div>
               )}
