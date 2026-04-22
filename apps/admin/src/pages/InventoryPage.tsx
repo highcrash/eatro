@@ -18,6 +18,21 @@ Cola,BEV0010,BEVERAGE,ML,500,0.15,BOTTLE,500,75,,,,,
 Cola Coca-Cola 500ml,,,,,0.15,,,75,BEV0010,Coca-Cola 500ml,500ml,500,CC500
 Cola Pepsi 500ml,,,,,0.14,,,70,BEV0010,Pepsi 500ml,500ml,500,PP500`;
 
+const STOCK_CSV_EXAMPLE = `item_code,current_stock
+RICE-001,42.5
+FLOUR-002,18
+OIL-003,7.25`;
+
+function downloadStockUpdateCSV() {
+  const blob = new Blob([STOCK_CSV_EXAMPLE], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'stock-update-template.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function downloadInventoryCSV() {
   const blob = new Blob([INV_CSV_EXAMPLE], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
@@ -215,7 +230,9 @@ export default function InventoryPage() {
   const [filterStock, setFilterStock] = useState('');
   const [showCSVUpload, setShowCSVUpload] = useState(false);
   const [csvResult, setCsvResult] = useState<{ total: number; created: number; updated?: number; skipped: number; results: { name: string; status: string; reason?: string }[] } | null>(null);
+  const [stockCsvResult, setStockCsvResult] = useState<{ total: number; updated: number; skipped: number; results: { itemCode: string; status: string; reason?: string; delta?: number }[] } | null>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
+  const stockCsvFileRef = useRef<HTMLInputElement>(null);
   const [expandedParent, setExpandedParent] = useState<string | null>(null);
   const [variantDialog, setVariantDialog] = useState<{ parent: Ingredient; variant?: Ingredient } | null>(null);
 
@@ -313,6 +330,59 @@ export default function InventoryPage() {
     mutationFn: (id: string) => api.patch(`/ingredients/${id}/convert-to-parent`, {}),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['ingredients'] }),
   });
+
+  const stockBulkMutation = useMutation({
+    mutationFn: (items: Array<{ itemCode?: string; sku?: string; currentStock: number }>) =>
+      api.post<{ total: number; updated: number; skipped: number; results: { itemCode: string; status: string; reason?: string; delta?: number }[] }>(
+        '/ingredients/bulk-stock-update',
+        { items },
+      ),
+    onSuccess: (data) => {
+      setStockCsvResult(data);
+      void qc.invalidateQueries({ queryKey: ['ingredients'] });
+      void qc.invalidateQueries({ queryKey: ['stock-movements'] });
+    },
+  });
+
+  const handleStockCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const rows = text.trim().split('\n').map((r) => r.split(',').map((c) => c.trim()));
+      if (rows.length < 2) { alert('CSV is empty'); return; }
+
+      const header = rows[0].map((h) => h.toLowerCase().replace(/[^a-z_]/g, ''));
+      const codeIdx = header.findIndex((h) => h === 'item_code' || h === 'code');
+      const skuIdx = header.findIndex((h) => h === 'sku');
+      const stockIdx = header.findIndex((h) => h === 'current_stock' || h === 'stock' || h === 'quantity');
+      if (codeIdx === -1 && skuIdx === -1) { alert('CSV must have an "item_code" or "sku" column'); return; }
+      if (stockIdx === -1) { alert('CSV must have a "current_stock" column'); return; }
+
+      const items: Array<{ itemCode?: string; sku?: string; currentStock: number }> = [];
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const itemCode = codeIdx >= 0 ? row[codeIdx]?.trim() : '';
+        const sku = skuIdx >= 0 ? row[skuIdx]?.trim() : '';
+        const stockStr = row[stockIdx]?.trim();
+        if (!itemCode && !sku) continue;
+        if (!stockStr) continue;
+        const stock = parseFloat(stockStr);
+        if (!isFinite(stock) || stock < 0) continue;
+        items.push({
+          itemCode: itemCode || undefined,
+          sku: sku || undefined,
+          currentStock: stock,
+        });
+      }
+      if (items.length === 0) { alert('No valid rows found in CSV'); return; }
+      stockBulkMutation.mutate(items);
+    };
+    reader.readAsText(file);
+    // Reset the input so re-uploading the same file fires change again.
+    if (stockCsvFileRef.current) stockCsvFileRef.current.value = '';
+  };
 
   const bulkMutation = useMutation({
     mutationFn: (items: {
@@ -517,6 +587,13 @@ export default function InventoryPage() {
                     <span className="block text-[10px] text-[#666] mt-0.5">Re-uploading updates existing items</span>
                   </button>
                   <button
+                    onClick={() => { setShowCSVUpload(false); stockCsvFileRef.current?.click(); }}
+                    className="w-full text-left px-3 py-2.5 text-sm font-body text-[#999] hover:bg-[#1F1F1F] hover:text-white transition-colors border-b border-[#2A2A2A]"
+                  >
+                    Stock Update CSV
+                    <span className="block text-[10px] text-[#666] mt-0.5">Set current stock by item_code; logs +/− as ADJUSTMENT</span>
+                  </button>
+                  <button
                     onClick={() => { setShowCSVUpload(false); downloadCurrentInventory(); }}
                     className="w-full text-left px-3 py-2 text-xs font-body text-[#666] hover:bg-[#1F1F1F] hover:text-[#999] transition-colors border-b border-[#2A2A2A]"
                   >
@@ -524,14 +601,21 @@ export default function InventoryPage() {
                   </button>
                   <button
                     onClick={() => { setShowCSVUpload(false); downloadInventoryCSV(); }}
-                    className="w-full text-left px-3 py-2 text-xs font-body text-[#666] hover:bg-[#1F1F1F] hover:text-[#999] transition-colors"
+                    className="w-full text-left px-3 py-2 text-xs font-body text-[#666] hover:bg-[#1F1F1F] hover:text-[#999] transition-colors border-b border-[#2A2A2A]"
                   >
                     ↓ Download CSV template
+                  </button>
+                  <button
+                    onClick={() => { setShowCSVUpload(false); downloadStockUpdateCSV(); }}
+                    className="w-full text-left px-3 py-2 text-xs font-body text-[#666] hover:bg-[#1F1F1F] hover:text-[#999] transition-colors"
+                  >
+                    ↓ Download stock-update template
                   </button>
                 </div>
               )}
             </div>
             <input ref={csvFileRef} type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
+            <input ref={stockCsvFileRef} type="file" accept=".csv" onChange={handleStockCSVUpload} className="hidden" />
             <button onClick={openAddIng} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">
               + ADD INGREDIENT
             </button>
@@ -577,6 +661,34 @@ export default function InventoryPage() {
                   {csvResult.results.filter((r) => r.status === 'skipped').map((r, i) => (
                     <p key={i} className="text-[#FFA726] font-body text-xs">
                       {r.name}: <span className="text-[#666]">{r.reason}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Stock CSV Import Result */}
+          {stockCsvResult && (
+            <div className="bg-[#161616] border border-[#2A2A2A] p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex gap-4">
+                  <span className="text-[#C8FF00] font-body text-sm font-medium">{stockCsvResult.updated} updated</span>
+                  <span className="text-[#FFA726] font-body text-sm">{stockCsvResult.skipped} skipped</span>
+                  <span className="text-[#666] font-body text-sm">of {stockCsvResult.total} total</span>
+                </div>
+                <button onClick={() => setStockCsvResult(null)} className="text-[#666] hover:text-white font-body text-xs transition-colors">Dismiss</button>
+              </div>
+              {stockCsvResult.results.filter((r) => r.status === 'updated' || r.status === 'skipped').length > 0 && (
+                <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5">
+                  {stockCsvResult.results.filter((r) => r.status === 'updated').map((r, i) => (
+                    <p key={`u-${i}`} className="text-[#C8FF00] font-body text-xs">
+                      {r.itemCode}: <span className="text-[#999]">{(r.delta ?? 0) > 0 ? '+' : ''}{(r.delta ?? 0).toFixed(2)}</span>
+                    </p>
+                  ))}
+                  {stockCsvResult.results.filter((r) => r.status === 'skipped').map((r, i) => (
+                    <p key={`s-${i}`} className="text-[#FFA726] font-body text-xs">
+                      {r.itemCode}: <span className="text-[#666]">{r.reason}</span>
                     </p>
                   ))}
                 </div>
