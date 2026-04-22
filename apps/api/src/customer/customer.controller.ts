@@ -61,7 +61,7 @@ export class CustomerPublicController {
 
 @Controller('customers')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+@Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
 export class CustomerController {
   constructor(private readonly customerService: CustomerService) {}
 

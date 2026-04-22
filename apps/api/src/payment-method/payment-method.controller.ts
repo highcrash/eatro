@@ -12,7 +12,7 @@ export class PaymentMethodController {
   constructor(private readonly service: PaymentMethodService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findAll(@CurrentUser() user: JwtPayload) {
     return this.service.findAll(user.branchId);
   }
@@ -26,7 +26,7 @@ export class PaymentMethodController {
   // ── Payment Options (must be before :id) ──────────────────────────────
 
   @Get('options')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findAllOptions(@CurrentUser() user: JwtPayload) {
     return this.service.findAllOptions(user.branchId);
   }
