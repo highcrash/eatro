@@ -3,6 +3,22 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.8 — advisor/waiter POS access + UI polish (2026-04-23)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/utils:
+
+- **ADVISOR + WAITER get cashier-tier POS access** across the POS
+  operations matrix. Start-Day, Create-PO, Receive, Expenses, etc.
+  all run through the same per-action policy cashiers use.
+- **Advisor Start-Day** fixed — `/accounts` read widened so the
+  opening-cash picker populates.
+- **Wider admin purchasing form** (max-w-3xl → max-w-6xl) so the
+  ingredient cell doesn't clip long variant labels.
+- **Add/Edit Ingredient dialog** sticky header + footer, scrollable
+  body — Save button always reachable.
+- **Backup accessor guard** — backups survive a stale Prisma client
+  with a warning instead of crashing.
+
 ## 0.8.7 — embedded POS refresh (2026-04-23)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/utils so
