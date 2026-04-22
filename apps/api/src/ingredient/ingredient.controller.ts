@@ -53,6 +53,15 @@ export class IngredientController {
     return this.ingredientService.bulkCreate(user.branchId, dto.items);
   }
 
+  @Post('bulk-stock-update')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  bulkStockUpdate(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { items: Array<{ itemCode?: string; sku?: string; currentStock: number }> },
+  ) {
+    return this.ingredientService.bulkStockUpdate(user.branchId, user.sub, dto.items);
+  }
+
   @Put(':id/suppliers')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
   setSuppliers(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { supplierIds: string[] }) {

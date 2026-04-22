@@ -520,6 +520,95 @@ export class IngredientService {
     return updated;
   }
 
+  /**
+   * Bulk stock-level setter fed by a CSV upload. Each row specifies the
+   * NEW absolute currentStock for an item looked up by itemCode. We
+   * compute the delta against what's in the DB and log one StockMovement
+   * row per non-zero delta with type=ADJUSTMENT + notes="Through CSV update".
+   *
+   * Parent ingredients with variants are rejected server-side (the same
+   * invariant adjustStock enforces) — CSVs must target the specific
+   * variant row.
+   */
+  async bulkStockUpdate(
+    branchId: string,
+    staffId: string,
+    items: Array<{ itemCode?: string; sku?: string; currentStock: number }>,
+  ): Promise<{ total: number; updated: number; skipped: number; results: Array<{ itemCode: string; status: 'updated' | 'unchanged' | 'skipped'; reason?: string; delta?: number }> }> {
+    const results: Array<{ itemCode: string; status: 'updated' | 'unchanged' | 'skipped'; reason?: string; delta?: number }> = [];
+    let updatedCount = 0;
+    let skippedCount = 0;
+
+    for (const item of items) {
+      const lookupKey = item.itemCode ?? item.sku ?? '';
+      if (!lookupKey) {
+        results.push({ itemCode: lookupKey, status: 'skipped', reason: 'Missing item code / SKU' });
+        skippedCount++;
+        continue;
+      }
+      if (typeof item.currentStock !== 'number' || !isFinite(item.currentStock) || item.currentStock < 0) {
+        results.push({ itemCode: lookupKey, status: 'skipped', reason: 'Invalid stock value' });
+        skippedCount++;
+        continue;
+      }
+
+      const ingredient = await this.prisma.ingredient.findFirst({
+        where: {
+          branchId,
+          deletedAt: null,
+          OR: [
+            item.itemCode ? { itemCode: item.itemCode } : undefined,
+            item.sku ? { sku: item.sku } : undefined,
+          ].filter(Boolean) as object[],
+        },
+      });
+      if (!ingredient) {
+        results.push({ itemCode: lookupKey, status: 'skipped', reason: 'Item not found' });
+        skippedCount++;
+        continue;
+      }
+      if (ingredient.hasVariants) {
+        results.push({ itemCode: lookupKey, status: 'skipped', reason: 'Cannot set stock on a parent with variants — target the specific variant' });
+        skippedCount++;
+        continue;
+      }
+
+      const currentStockNum = ingredient.currentStock.toNumber();
+      const delta = item.currentStock - currentStockNum;
+      const rounded = Math.round(delta * 10_000) / 10_000;
+
+      if (rounded === 0) {
+        results.push({ itemCode: lookupKey, status: 'unchanged', delta: 0 });
+        continue;
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.stockMovement.create({
+          data: {
+            branchId,
+            ingredientId: ingredient.id,
+            type: 'ADJUSTMENT',
+            quantity: rounded,
+            notes: 'Through CSV update',
+            staffId,
+          },
+        });
+        await tx.ingredient.update({
+          where: { id: ingredient.id },
+          data: { currentStock: item.currentStock },
+        });
+        if (ingredient.parentId) {
+          await this.syncParentStock(ingredient.parentId, tx);
+        }
+      });
+
+      results.push({ itemCode: lookupKey, status: 'updated', delta: rounded });
+      updatedCount++;
+    }
+
+    return { total: items.length, updated: updatedCount, skipped: skippedCount, results };
+  }
+
   async getMovements(branchId: string, ingredientId?: string) {
     return this.prisma.stockMovement.findMany({
       where: {
