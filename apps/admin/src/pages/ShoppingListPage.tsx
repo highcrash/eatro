@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, formatVariantLabel } from '@restora/utils';
 import type { Supplier, Ingredient } from '@restora/types';
 import VariantPickerModal from '../components/VariantPickerModal';
 
@@ -75,18 +75,6 @@ export default function ShoppingListPage() {
     select: (d) => d.filter((i) => i.isActive && !i.name.startsWith('[PR]')),
   });
 
-  // One formatter so the row label is consistent everywhere — manual
-  // add, low-stock load, and variant-swap all produce the same shape:
-  //   "Parent → BrandName PackSize"
-  // with a graceful fallback to "Parent → variant XXXXXX" when neither
-  // brandName nor packSize is set (otherwise you'd get an orphan arrow
-  // and couldn't tell variants apart after a swap).
-  const composeVariantLabel = (parentName: string, variant: { brandName: string | null; packSize: string | null; id: string }): string => {
-    const parts = [variant.brandName, variant.packSize].map((s) => (s ?? '').trim()).filter(Boolean);
-    const suffix = parts.length > 0 ? parts.join(' ') : `variant ${variant.id.slice(-6)}`;
-    return `${parentName} → ${suffix}`;
-  };
-
   const addManualItem = (ing: Ingredient, parentName?: string) => {
     if (rows.some((r) => r.ingredientId === ing.id)) return;
     const pu = ing.purchaseUnit;
@@ -95,7 +83,16 @@ export default function ShoppingListPage() {
       ingredientId: ing.id,
       parentId: ing.parentId ?? null,
       name: parentName
-        ? composeVariantLabel(parentName, { brandName: ing.brandName ?? null, packSize: ing.packSize ?? null, id: ing.id })
+        ? formatVariantLabel({
+            parentName,
+            brandName: ing.brandName ?? null,
+            packSize: ing.packSize ?? null,
+            piecesPerPack: ing.piecesPerPack ?? null,
+            purchaseUnit: ing.purchaseUnit ?? null,
+            purchaseUnitQty: Number(ing.purchaseUnitQty) || null,
+            unit: ing.unit ?? null,
+            id: ing.id,
+          })
         : ing.name,
       unit: pu || ing.unit,
       currentStock: Number(ing.currentStock),
@@ -134,13 +131,21 @@ export default function ShoppingListPage() {
 
   const removeRow = (idx: number) => setRows((r) => r.filter((_, i) => i !== idx));
 
-  const changeVariant = (idx: number, variant: ShoppingVariant, parentName: string, purchaseUnit: string | null) => {
+  const changeVariant = (idx: number, variant: ShoppingVariant, parentName: string, purchaseUnit: string | null, parentUnit: string | null) => {
     setRows((r) => r.map((row, i) => {
       if (i !== idx) return row;
       return {
         ...row,
         ingredientId: variant.id,
-        name: composeVariantLabel(parentName, { brandName: variant.brandName, packSize: variant.packSize, id: variant.id }),
+        name: formatVariantLabel({
+          parentName,
+          brandName: variant.brandName,
+          packSize: variant.packSize,
+          piecesPerPack: variant.piecesPerPack,
+          purchaseUnit,
+          unit: parentUnit,
+          id: variant.id,
+        }),
         supplierId: variant.supplierId ?? row.supplierId,
         unitCost: variant.costPerPurchaseUnit > 0 ? (variant.costPerPurchaseUnit / 100).toFixed(2) : row.unitCost,
         unit: purchaseUnit || row.unit,
@@ -401,7 +406,7 @@ export default function ShoppingListPage() {
               costPerPurchaseUnit: Number(variant.costPerPurchaseUnit),
               supplierId: variant.supplierId ?? null,
               supplierName: variant.supplier?.name ?? null,
-            }, parent.name, parent.purchaseUnit ?? null);
+            }, parent.name, parent.purchaseUnit ?? null, parent.unit ?? null);
             setRowVariantPicker(null);
           }}
           onClose={() => setRowVariantPicker(null)}

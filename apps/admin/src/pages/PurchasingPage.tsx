@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { formatVariantLabel } from '@restora/utils';
 import type { PurchaseOrder, Supplier, Ingredient, CreatePurchaseOrderDto, PurchaseReturn } from '@restora/types';
 import VariantPickerModal from '../components/VariantPickerModal';
 
@@ -1391,7 +1392,16 @@ export default function PurchasingPage() {
           onSelect={(variant) => {
             const parent = variantPicker.parent;
             const pu = parent.purchaseUnit || variant.purchaseUnit;
-            const label = `${parent.name} → ${variant.brandName} ${variant.packSize ?? ''} (${pu || variant.unit})`;
+            const label = formatVariantLabel({
+              parentName: parent.name,
+              brandName: variant.brandName,
+              packSize: variant.packSize,
+              piecesPerPack: variant.piecesPerPack ?? null,
+              purchaseUnit: pu ?? null,
+              purchaseUnitQty: Number(variant.purchaseUnitQty) || null,
+              unit: parent.unit ?? variant.unit ?? null,
+              id: variant.id,
+            });
             setVariantLabels((prev) => ({ ...prev, [variant.id]: label }));
 
             if (variantPicker.context === 'po') {

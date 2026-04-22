@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { formatVariantLabel } from '@restora/utils';
 import type { WasteLog, WasteReason, Ingredient, MenuItem } from '@restora/types';
 import VariantPickerModal from '../components/VariantPickerModal';
 
@@ -359,7 +360,16 @@ export default function WastePage() {
           parent={variantPicker}
           onSelect={(variant) => {
             setForm((f) => ({ ...f, ingredientId: variant.id }));
-            setVariantLabel(`${variantPicker.name} → ${variant.brandName} ${variant.packSize ?? ''} (${variant.unit})`);
+            setVariantLabel(formatVariantLabel({
+              parentName: variantPicker.name,
+              brandName: variant.brandName,
+              packSize: variant.packSize,
+              piecesPerPack: variant.piecesPerPack ?? null,
+              purchaseUnit: variantPicker.purchaseUnit ?? variant.purchaseUnit ?? null,
+              purchaseUnitQty: Number(variant.purchaseUnitQty) || null,
+              unit: variantPicker.unit ?? variant.unit ?? null,
+              id: variant.id,
+            }));
             setVariantPicker(null);
           }}
           onClose={() => setVariantPicker(null)}

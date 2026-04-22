@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import type { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, ReceiveGoodsDto } from '@restora/types';
+import { formatVariantLabel } from '@restora/utils';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
 import { IngredientService } from '../ingredient/ingredient.service';
@@ -407,7 +408,16 @@ export class PurchasingService {
           ingredientId: bestVariant.id,
           parentId: ing.id,
           parentName: ing.name,
-          name: `${ing.name} → ${bestVariant.brandName ?? ''} ${bestVariant.packSize ?? ''}`.trim(),
+          name: formatVariantLabel({
+            parentName: ing.name,
+            brandName: bestVariant.brandName,
+            packSize: bestVariant.packSize,
+            piecesPerPack: bestVariant.piecesPerPack,
+            purchaseUnit,
+            purchaseUnitQty: puQty || null,
+            unit: ing.unit,
+            id: bestVariant.id,
+          }),
           unit: ing.unit,
           purchaseUnit,
           purchaseUnitQty: puQty,
