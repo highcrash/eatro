@@ -472,7 +472,12 @@ export default function InventoryPage() {
       if (/[,"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
       return s;
     };
-    const header = 'name,code,category,unit,minimum_stock,cost_per_unit,purchase_unit,purchase_unit_qty,cost_per_purchase_unit,parent_code,brand_name,pack_size,pieces_per_pack,sku';
+    // `current_stock` sits right after `minimum_stock` so the export can
+    // round-trip through the Stock Update CSV flow — edit the number in
+    // place and re-upload via "Stock Update CSV" to log the delta as an
+    // ADJUSTMENT movement. Regular "Upload CSV" (metadata) ignores the
+    // column; only the stock handler reads it.
+    const header = 'name,code,category,unit,minimum_stock,current_stock,cost_per_unit,purchase_unit,purchase_unit_qty,cost_per_purchase_unit,parent_code,brand_name,pack_size,pieces_per_pack,sku';
 
     // ingredients list contains only roots; variants live under each root.
     const rows: string[] = [];
@@ -483,6 +488,7 @@ export default function InventoryPage() {
         esc(ing.category),
         esc(ing.unit),
         esc(Number(ing.minimumStock ?? 0)),
+        esc(Number(ing.currentStock ?? 0)),
         esc((Number(ing.costPerUnit ?? 0) / 100).toFixed(4)),
         esc(ing.purchaseUnit),
         esc(Number(ing.purchaseUnitQty ?? 1)),
@@ -508,6 +514,7 @@ export default function InventoryPage() {
             '', // category inherited
             '', // unit inherited
             '', // minimum_stock (parent-level)
+            esc(Number((v as any).currentStock ?? 0)),
             esc((Number((v as any).costPerUnit ?? 0) / 100).toFixed(4)),
             '', // purchase_unit inherited
             '', // purchase_unit_qty
