@@ -1,34 +1,32 @@
 /**
- * One canonical formatter for ingredient-variant display labels. Used
- * across shopping list, purchasing, receiving, returns, waste, print
- * sheets, and ledger/stock-movement notes so suppliers + users always
- * see the same shape.
+ * Single canonical formatter for ingredient-variant display labels.
  *
- * Canonical format:
- *   "ParentName — BrandName PackSize UNIT (PurchaseUnit) (PiecesPerPack PackSize PurchaseUnitQty unit)"
+ * Format:   "Parent Name — Brand Name (Pack Size)"
+ * Example:  "ABC Sauce — ABC (1 L Bottle)"
  *
- * Example — full fields:
- *   parent="ABC Sauce", brand="ABC", pack="Bottle", unit="ml",
- *   purchaseUnit="PCS", purchaseUnitQty=1, piecesPerPack=1
- *   →  "ABC Sauce — ABC Bottle ML (PCS) (1 Bottle 1 ml)"
+ * Graceful degradation when fields are missing:
+ *   brand + pack          → "Parent — Brand (Pack)"
+ *   brand only            → "Parent — Brand"
+ *   pack only             → "Parent — (Pack)"   (rare — shouldn't happen in practice)
+ *   neither, id given     → "Parent — variant xxxxxx"
+ *   not a variant at all  → "Parent"
  *
- * Graceful degradation — any field that's null/missing gets dropped
- * from the output without leaving an orphan arrow / empty parens:
- *   brand-only         → "Parent — BrandName"
- *   pack-only          → "Parent — PackSize"
- *   brand + pack       → "Parent — BrandName PackSize"
- *   neither + id given → "Parent — variant abc123"
- *   non-variant        → parent name only
+ * Purchase-unit / piecesPerPack / base unit are intentionally NOT in the
+ * label — they're metadata the UI shows in dedicated columns (Unit
+ * column, Cost column etc.), and cramming them into the name made it
+ * unreadable on narrow POS rows. Keep those fields on the type so
+ * callers can still pass them without breaking — they're simply ignored
+ * by the formatter today.
  */
 
 export interface VariantLabelInput {
   parentName: string;
   brandName?: string | null;
   packSize?: string | null;
+  /** Accepted but unused — see header comment. Kept so call sites don't break. */
   piecesPerPack?: number | null;
   purchaseUnit?: string | null;
   purchaseUnitQty?: number | null;
-  /** Base unit (e.g. "kg", "ml", "L"). Shown UPPERCASED in primary descriptor. */
   unit?: string | null;
   /** Optional id used for the "variant xxxxxx" fallback when brand + pack are both missing. */
   id?: string | null;
@@ -40,29 +38,16 @@ function clean(s: string | null | undefined): string {
 
 export function formatVariantLabel(v: VariantLabelInput): string {
   const parent = clean(v.parentName);
+  const brand = clean(v.brandName);
+  const pack = clean(v.packSize);
 
-  // Primary descriptor — Brand + Pack + UPPERCASE(unit). Omit empties.
-  const primaryParts = [clean(v.brandName), clean(v.packSize), clean(v.unit).toUpperCase()].filter(Boolean);
-  let primary = primaryParts.join(' ');
-  if (!primary) {
-    primary = v.id ? `variant ${v.id.slice(-6)}` : '';
-  }
+  // Core variant descriptor.
+  let descriptor: string;
+  if (brand && pack) descriptor = `${brand} (${pack})`;
+  else if (brand) descriptor = brand;
+  else if (pack) descriptor = `(${pack})`;
+  else if (v.id) descriptor = `variant ${v.id.slice(-6)}`;
+  else return parent; // non-variant ingredient — parent name only.
 
-  // Purchase unit — how the item is priced / ordered (e.g. per PCS, per CASE).
-  const pu = clean(v.purchaseUnit);
-  const puSegment = pu ? ` (${pu})` : '';
-
-  // Extended description — PiecesPerPack PackSize PurchaseUnitQty unit.
-  // Helps a supplier who knows "case of 24 × 500 ml bottles" more than
-  // "ABC Bottle ML (CASE)". Only emit when at least two fields are
-  // present — one-field output looks lopsided.
-  const extended: string[] = [];
-  if (v.piecesPerPack != null && v.piecesPerPack > 0) extended.push(String(v.piecesPerPack));
-  if (clean(v.packSize)) extended.push(clean(v.packSize));
-  if (v.purchaseUnitQty != null && v.purchaseUnitQty > 0) extended.push(String(v.purchaseUnitQty));
-  if (clean(v.unit)) extended.push(clean(v.unit));
-  const extSegment = extended.length >= 2 ? ` (${extended.join(' ')})` : '';
-
-  if (!primary) return parent; // non-variant ingredient — just return parent name.
-  return `${parent} — ${primary}${puSegment}${extSegment}`;
+  return `${parent} — ${descriptor}`;
 }
