@@ -471,7 +471,7 @@ export default function PurchasingPage() {
 
       {/* Create View */}
       {view === 'create' && (
-        <div className="max-w-3xl space-y-6">
+        <div className="max-w-6xl space-y-6">
           <div className="bg-[#161616] border border-[#2A2A2A] p-6 space-y-4">
             <h2 className="font-display text-xl text-white tracking-widest mb-4">NEW PURCHASE ORDER</h2>
             <div className="grid grid-cols-2 gap-4">
@@ -673,7 +673,7 @@ export default function PurchasingPage() {
 
       {/* Detail View */}
       {view === 'detail' && selectedPO && (
-        <div className="max-w-3xl space-y-6">
+        <div className="max-w-6xl space-y-6">
           {/* PO Header */}
           <div className="bg-[#161616] border border-[#2A2A2A] p-6">
             <div className="flex items-start justify-between mb-4">
@@ -1199,7 +1199,7 @@ export default function PurchasingPage() {
       )}
       {/* Independent Return to Supplier */}
       {view === 'return-create' && (
-        <div className="max-w-3xl space-y-6">
+        <div className="max-w-6xl space-y-6">
           <div className="bg-[#161616] border border-[#2A2A2A] p-6 space-y-4">
             <h2 className="font-display text-xl text-white tracking-widest mb-4">RETURN INGREDIENTS TO SUPPLIER</h2>
             <p className="text-[#666] font-body text-xs">Return inventory items to a supplier without a linked purchase order.</p>
