@@ -3,6 +3,29 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.6 — embedded POS refresh (2026-04-22)
+
+No Electron-shell changes. This release rebundles the embedded web POS
+(`apps/pos`) + shared utilities so terminals pick up everything that's
+landed on main since the 0.8.5 tag:
+
+- **Per-user `canAccessPos` gate.** Staff members flipped off in admin
+  no longer appear on the lock screen (server-side filter). Existing
+  PINs rejected with "POS access has been disabled for this account"
+  on both pin-login and password-login paths.
+- **Canonical variant label** everywhere that shows an ingredient:
+  purchasing receive rows, shopping list, stock adjustments. Format
+  is `Parent — Brand Pack UNIT (PurchaseUnit) (extended)` via the new
+  `formatVariantLabel` helper in `@restora/utils`.
+- **Wider ingredient column** on POS purchasing receive list (matches
+  the admin-side widening). Tooltip on hover for any label that still
+  clips.
+- **Auto-generated SKU / itemCode** when the admin leaves them blank
+  — every variant becomes targetable in the Stock Update CSV.
+- Misc carry-alongs from main: ADVISOR role support in the session
+  bridge, shopping-list print coverage for unassigned suppliers,
+  staff-password update fix (no more raw-password Prisma crash).
+
 ## 0.6.0 — installer + auto-update (2026-04-15)
 
 - **`pnpm dist` now produces a working Windows installer.** `release/RestoraPOS-Setup-{version}.exe` (~90 MB NSIS), along with `latest.yml` and `.blockmap` for auto-update.
