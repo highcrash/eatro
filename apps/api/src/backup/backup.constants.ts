@@ -7,8 +7,19 @@
  *
  * backup_records and backup_schedule are intentionally excluded so a restore
  * never wipes the admin's backup history or schedule config.
+ *
+ * license_records and update_records are ALSO excluded on purpose —
+ * license proof is tied to this install's machine/domain, so restoring
+ * it into a different install would refuse to verify. Update history is
+ * local per-install too. These survive the restore untouched.
+ *
+ * idempotency_records is a transient cache (24h TTL); never worth
+ * backing up.
  */
 export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfRef?: boolean }[] = [
+  // Tier 0 — system singletons
+  { accessor: 'systemConfig', table: 'system_config' },
+
   // Tier 1 — root
   { accessor: 'branch', table: 'branches' },
 
@@ -22,6 +33,7 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'unitConversion', table: 'unit_conversions' },
   { accessor: 'account', table: 'accounts' },
   { accessor: 'supplier', table: 'suppliers' },
+  { accessor: 'device', table: 'devices' },
 
   // Tier 3 — payment config (depends on branch + account)
   { accessor: 'paymentMethodConfig', table: 'payment_method_configs' },
