@@ -3,6 +3,28 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.1 — embedded POS refresh (2026-04-23)
+
+No Electron-shell changes. Rebundles `apps/pos` + `@restora/utils` so
+terminals pick up the server-side improvements since 1.0.0:
+
+- **Canonical variant labels** on the Create-PO search + receive rows.
+  Format is `Parent — Brand Pack UNIT (PurchaseUnit) (extended)` via
+  the shared `formatVariantLabel` helper.
+- **Auto-SKU / itemCode** generation when admin leaves them blank, so
+  every variant is targetable by the Stock Update CSV.
+- **Stock Update CSV** round-trip works for variants too — the `sku`
+  column is now in the export + the import template.
+- **Per-user `canAccessPos` gate** propagates to the desktop lock
+  screen (users flipped off in admin disappear from the tile grid).
+- **Parent unit cascade** — flipping a parent's unit (e.g. G → PCS)
+  updates every variant in one DB call so the unit shown on the POS
+  line matches the parent.
+- **Variant delete** when stock = 0, with parent-stock resync.
+- **ADVISOR role** in the session bridge.
+- **Shopping-list supplier grouping** on print.
+- **Staff-password update fix** (no more raw-password Prisma crash).
+
 ## 1.0.0 — first public release (2026-04-20)
 
 - **First codecanyon-style release.** Same binary as 0.9.1 plus tighter packaging excludes (no `.spec.ts`, no MSBuild `.recipe`/`.tlog`, no `obj/` build artefacts) so `app.asar` is brand-clean and ~6 MB smaller.
