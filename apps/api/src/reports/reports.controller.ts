@@ -8,7 +8,7 @@ import type { JwtPayload } from '@restora/types';
 
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER', 'CASHIER')
+@Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
@@ -86,7 +86,7 @@ export class ReportsController {
   }
 
   @Get('voids')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   getVoidReport(
     @CurrentUser() user: JwtPayload,
     @Query('from') from?: string,

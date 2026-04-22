@@ -12,55 +12,55 @@ export class IngredientController {
   constructor(private readonly ingredientService: IngredientService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   findAll(@CurrentUser() user: JwtPayload) {
     return this.ingredientService.findAll(user.branchId);
   }
 
   @Get('movements')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   getMovements(@CurrentUser() user: JwtPayload, @Query('ingredientId') ingredientId?: string) {
     return this.ingredientService.getMovements(user.branchId, ingredientId);
   }
 
   @Get(':id')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.ingredientService.findOne(id, user.branchId);
   }
 
   @Post()
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateIngredientDto) {
     return this.ingredientService.create(user.branchId, dto);
   }
 
   @Patch(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpdateIngredientDto) {
     return this.ingredientService.update(id, user.branchId, dto);
   }
 
   @Delete(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.ingredientService.remove(id, user.branchId);
   }
 
   @Post('bulk')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   bulkCreate(@CurrentUser() user: JwtPayload, @Body() dto: { items: { name: string; unit?: string; category?: string; itemCode?: string; minimumStock?: number; costPerUnit?: number; purchaseUnit?: string; purchaseUnitQty?: number; costPerPurchaseUnit?: number }[] }) {
     return this.ingredientService.bulkCreate(user.branchId, dto.items);
   }
 
   @Put(':id/suppliers')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   setSuppliers(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { supplierIds: string[] }) {
     return this.ingredientService.setSuppliers(id, user.branchId, dto.supplierIds);
   }
 
   @Post(':id/adjust')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   adjustStock(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: AdjustStockDto) {
     return this.ingredientService.adjustStock(id, user.branchId, user.sub, dto);
   }
@@ -68,19 +68,19 @@ export class IngredientController {
   // ─── Variants ─────────────────────────────────────────────────────────────
 
   @Get(':id/variants')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   getVariants(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.ingredientService.getVariants(id, user.branchId);
   }
 
   @Post(':id/variants')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   createVariant(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: CreateVariantDto) {
     return this.ingredientService.createVariant(id, user.branchId, dto);
   }
 
   @Patch(':id/convert-to-parent')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   convertToParent(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.ingredientService.convertToParent(id, user.branchId);
   }

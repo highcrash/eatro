@@ -21,7 +21,7 @@ export class TableController {
   }
 
   @Post()
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   create(@Body() body: { tableNumber: string; capacity: number; floorPlanX?: number; floorPlanY?: number }, @CurrentUser() user: JwtPayload) {
     return this.tableService.create(user.branchId, body);
   }
@@ -32,7 +32,7 @@ export class TableController {
   }
 
   @Delete(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.tableService.remove(id, user.branchId);
   }

@@ -8,12 +8,12 @@ import type { JwtPayload, CreateSupplierDto, UpdateSupplierDto } from '@restora/
 
 @Controller('suppliers')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER')
+@Roles('OWNER', 'MANAGER', 'ADVISOR')
 export class SupplierController {
   constructor(private readonly supplierService: SupplierService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   findAll(@CurrentUser() user: JwtPayload) {
     // Cashiers only see suppliers explicitly enabled for POS purchasing.
     const cashierVisibleOnly = user.role === 'CASHIER';

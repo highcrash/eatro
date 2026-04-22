@@ -26,13 +26,13 @@ export class MenuController {
   }
 
   @Post()
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   create(@Body(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false })) dto: CreateMenuItemDto, @CurrentUser() user: JwtPayload) {
     return this.menuService.create(user.branchId, dto as any);
   }
 
   @Post('bulk')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   bulkCreate(
     @CurrentUser() user: JwtPayload,
     @Body() dto: { rows: { categoryName: string; name: string; price: number; description?: string; tags?: string; kitchenSection?: string }[] },
@@ -41,19 +41,19 @@ export class MenuController {
   }
 
   @Patch(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   update(@Param('id') id: string, @Body(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false })) dto: UpdateMenuItemDto, @CurrentUser() user: JwtPayload) {
     return this.menuService.update(id, user.branchId, dto);
   }
 
   @Delete(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.menuService.remove(id, user.branchId);
   }
 
   @Put(':id/combo-items')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   setComboItems(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
@@ -63,7 +63,7 @@ export class MenuController {
   }
 
   @Put(':id/linked-items')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   setLinkedItems(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,

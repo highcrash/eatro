@@ -1,6 +1,6 @@
 // ─── Roles ────────────────────────────────────────────────────────────────────
 
-export type UserRole = 'OWNER' | 'MANAGER' | 'CASHIER' | 'KITCHEN' | 'WAITER';
+export type UserRole = 'OWNER' | 'MANAGER' | 'CASHIER' | 'KITCHEN' | 'WAITER' | 'ADVISOR';
 
 // ─── Auth DTOs ────────────────────────────────────────────────────────────────
 

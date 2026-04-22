@@ -12,19 +12,19 @@ export class CustomUnitController {
   constructor(private readonly svc: CustomUnitService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'KITCHEN')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'KITCHEN', 'ADVISOR')
   list(@CurrentUser() user: JwtPayload) {
     return this.svc.list(user.branchId);
   }
 
   @Post()
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   create(@CurrentUser() user: JwtPayload, @Body() dto: { code: string; label: string }) {
     return this.svc.create(user.branchId, dto);
   }
 
   @Delete(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.svc.remove(id, user.branchId);
   }

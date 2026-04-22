@@ -8,7 +8,7 @@ import type { JwtPayload, CreatePurchaseOrderDto, UpdatePurchaseOrderDto, Receiv
 
 @Controller('purchasing')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER')
+@Roles('OWNER', 'MANAGER', 'ADVISOR')
 export class PurchasingController {
   constructor(private readonly purchasingService: PurchasingService) {}
 
@@ -86,7 +86,7 @@ export class PurchasingController {
   }
 
   @Post(':id/receive')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   receiveGoods(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: ReceiveGoodsDto) {
     return this.purchasingService.receiveGoods(id, user.branchId, user.sub, dto);
   }

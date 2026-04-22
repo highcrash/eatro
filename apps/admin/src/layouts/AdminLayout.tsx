@@ -37,7 +37,29 @@ import { api } from '../lib/api';
 
 import { useAuthStore } from '../store/auth.store';
 
-const NAV_GROUPS = [
+// Nav visibility by role.
+//
+// `allowedRoles` is the allow-list; undefined means "all roles". Users
+// whose role isn't in the list don't see that nav item and — the backend
+// is the authoritative check — can't PATCH/POST the endpoint either
+// (controller-level @Roles() 403s them).
+//
+// ADVISOR is an operational-read/write role for consultants: they manage
+// menu, inventory, purchasing, reports etc, but can't touch money
+// (Accounts, Payroll), system (Settings, Backups, Data Cleanup, Terminals,
+// License, Updates), structure (Staff, Branches, Cashier Perms), or
+// customer-facing surfaces (Website, Kitchen Sections).
+const OPERATIONAL_ROLES = ['OWNER', 'MANAGER', 'ADVISOR'] as const;
+
+const NAV_GROUPS: Array<{
+  label: string | null;
+  items: Array<{
+    to: string;
+    icon: typeof LayoutDashboard;
+    label: string;
+    allowedRoles?: readonly string[];
+  }>;
+}> = [
   {
     label: null,
     items: [
@@ -47,58 +69,64 @@ const NAV_GROUPS = [
   {
     label: 'RESTAURANT',
     items: [
-      { to: '/menu', icon: UtensilsCrossed, label: 'Menu' },
-      { to: '/tables', icon: Grid3X3, label: 'Tables' },
+      { to: '/menu', icon: UtensilsCrossed, label: 'Menu', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/tables', icon: Grid3X3, label: 'Tables', allowedRoles: OPERATIONAL_ROLES },
       { to: '/orders', icon: ClipboardList, label: 'Orders' },
-      { to: '/recipes', icon: BookOpen, label: 'Recipes' },
-      { to: '/pre-ready', icon: ChefHat, label: 'Pre-Ready' },
-      { to: '/reservations', icon: CalendarDays, label: 'Reservations' },
-      { to: '/qr-codes', icon: QrCode, label: 'QR Codes' },
+      { to: '/recipes', icon: BookOpen, label: 'Recipes', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/pre-ready', icon: ChefHat, label: 'Pre-Ready', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/reservations', icon: CalendarDays, label: 'Reservations', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/qr-codes', icon: QrCode, label: 'QR Codes', allowedRoles: OPERATIONAL_ROLES },
     ],
   },
   {
     label: 'INVENTORY',
     items: [
-      { to: '/inventory', icon: Package, label: 'Inventory' },
-      { to: '/suppliers', icon: Truck, label: 'Suppliers' },
-      { to: '/purchasing', icon: ShoppingCart, label: 'Purchasing' },
-      { to: '/shopping-list', icon: ListChecks, label: 'Shopping List' },
-      { to: '/waste', icon: Trash2, label: 'Waste' },
+      { to: '/inventory', icon: Package, label: 'Inventory', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/suppliers', icon: Truck, label: 'Suppliers', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/purchasing', icon: ShoppingCart, label: 'Purchasing', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/shopping-list', icon: ListChecks, label: 'Shopping List', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/waste', icon: Trash2, label: 'Waste', allowedRoles: OPERATIONAL_ROLES },
     ],
   },
   {
     label: 'FINANCE',
     items: [
-      { to: '/reports', icon: BarChart2, label: 'Reports' },
-      { to: '/reports/sales', icon: BarChart2, label: 'Sales Report' },
-      { to: '/reports/daily', icon: BarChart2, label: 'Daily Reports' },
-      { to: '/reports/voids', icon: BarChart2, label: 'Void Audit' },
-      { to: '/discounts', icon: BarChart2, label: 'Discounts & Coupons' },
-      { to: '/expenses', icon: Receipt, label: 'Expenses' },
-      { to: '/accounts', icon: Landmark, label: 'Accounts' },
+      { to: '/reports', icon: BarChart2, label: 'Reports', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/reports/sales', icon: BarChart2, label: 'Sales Report', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/reports/daily', icon: BarChart2, label: 'Daily Reports', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/reports/voids', icon: BarChart2, label: 'Void Audit', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/discounts', icon: BarChart2, label: 'Discounts & Coupons', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/expenses', icon: Receipt, label: 'Expenses', allowedRoles: OPERATIONAL_ROLES },
+      // Accounts = money + ledger. Owner/Manager only.
+      { to: '/accounts', icon: Landmark, label: 'Accounts', allowedRoles: ['OWNER', 'MANAGER'] },
     ],
   },
   {
     label: 'PEOPLE',
     items: [
-      { to: '/customers', icon: Users, label: 'Customers' },
-      { to: '/staff', icon: Users, label: 'Staff' },
-      { to: '/attendance', icon: Clock, label: 'Attendance' },
-      { to: '/payroll', icon: Wallet, label: 'Payroll' },
-      { to: '/leave', icon: CalendarDays, label: 'Leave' },
+      { to: '/customers', icon: Users, label: 'Customers', allowedRoles: OPERATIONAL_ROLES },
+      // Staff management edits passwords + roles — owner/manager only.
+      { to: '/staff', icon: Users, label: 'Staff', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/attendance', icon: Clock, label: 'Attendance', allowedRoles: OPERATIONAL_ROLES },
+      // Payroll pays staff — money, owner/manager only.
+      { to: '/payroll', icon: Wallet, label: 'Payroll', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/leave', icon: CalendarDays, label: 'Leave', allowedRoles: OPERATIONAL_ROLES },
     ],
   },
   {
     label: null,
     items: [
-      { to: '/cooking-stations', icon: Printer, label: 'Kitchen Sections' },
-      { to: '/branches', icon: Building2, label: 'Branches' },
-      { to: '/cashier-permissions', icon: ShieldCheck, label: 'Cashier Perms' },
-      { to: '/website', icon: Globe, label: 'Website' },
-      { to: '/settings', icon: Settings, label: 'Settings' },
-      { to: '/data-cleanup', icon: Trash2, label: 'Data Cleanup' },
-      { to: '/backups', icon: Database, label: 'Backups' },
-      { to: '/devices', icon: Monitor, label: 'Terminals' },
+      // Everything below is infrastructure / system config. Advisor is
+      // intentionally blocked here — these routes change how the system
+      // itself runs, not the operational data a consultant reviews.
+      { to: '/cooking-stations', icon: Printer, label: 'Kitchen Sections', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/branches', icon: Building2, label: 'Branches', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/cashier-permissions', icon: ShieldCheck, label: 'Cashier Perms', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/website', icon: Globe, label: 'Website', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/settings', icon: Settings, label: 'Settings', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/data-cleanup', icon: Trash2, label: 'Data Cleanup', allowedRoles: ['OWNER'] },
+      { to: '/backups', icon: Database, label: 'Backups', allowedRoles: ['OWNER'] },
+      { to: '/devices', icon: Monitor, label: 'Terminals', allowedRoles: ['OWNER', 'MANAGER'] },
     ],
   },
 ];
@@ -153,25 +181,34 @@ export default function AdminLayout() {
         {/* Nav — scrollable, hidden scrollbar */}
         <nav className="flex-1 py-2 px-2 overflow-y-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           <style>{`nav::-webkit-scrollbar { display: none; }`}</style>
-          {NAV_GROUPS.map((group, gIdx) => (
-            <div key={gIdx} className={gIdx > 0 ? 'mt-3' : ''}>
-              {group.label && (
-                <p className="px-2.5 mb-1 text-[9px] font-body font-medium tracking-[0.2em] text-[#444] uppercase">{group.label}</p>
-              )}
-              <div className="space-y-px">
-                {group.items.map(({ to, icon: Icon, label }) => (
-                  <NavLink key={to} to={to} className={({ isActive }) =>
-                    `flex items-center gap-2.5 px-2.5 py-1.5 text-[12px] font-body transition-colors ${
-                      isActive ? 'bg-[#D62B2B] text-white font-medium' : 'text-[#777] hover:bg-[#1A1A1A] hover:text-white'
-                    }`
-                  }>
-                    <Icon size={14} />
-                    {label}
-                  </NavLink>
-                ))}
+          {NAV_GROUPS.map((group, gIdx) => {
+            // Filter first, then skip empty groups so ADVISOR / narrower
+            // roles don't see orphaned category headers above nothing.
+            const role = user?.role ?? '';
+            const visibleItems = group.items.filter(
+              (item) => !item.allowedRoles || item.allowedRoles.includes(role),
+            );
+            if (visibleItems.length === 0) return null;
+            return (
+              <div key={gIdx} className={gIdx > 0 ? 'mt-3' : ''}>
+                {group.label && (
+                  <p className="px-2.5 mb-1 text-[9px] font-body font-medium tracking-[0.2em] text-[#444] uppercase">{group.label}</p>
+                )}
+                <div className="space-y-px">
+                  {visibleItems.map(({ to, icon: Icon, label }) => (
+                    <NavLink key={to} to={to} className={({ isActive }) =>
+                      `flex items-center gap-2.5 px-2.5 py-1.5 text-[12px] font-body transition-colors ${
+                        isActive ? 'bg-[#D62B2B] text-white font-medium' : 'text-[#777] hover:bg-[#1A1A1A] hover:text-white'
+                      }`
+                    }>
+                      <Icon size={14} />
+                      {label}
+                    </NavLink>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
 
         {/* Branch switcher (OWNER only) + User + Logout — pinned bottom */}

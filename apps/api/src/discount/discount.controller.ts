@@ -10,7 +10,7 @@ import { DiscountService } from './discount.service';
 
 @Controller('discounts')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER')
+@Roles('OWNER', 'MANAGER', 'ADVISOR')
 export class DiscountController {
   constructor(private readonly svc: DiscountService) {}
 
@@ -85,7 +85,7 @@ export class DiscountController {
 
 @Controller('discounts')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER', 'CASHIER')
+@Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
 export class DiscountPosController {
   constructor(private readonly svc: DiscountService) {}
 
