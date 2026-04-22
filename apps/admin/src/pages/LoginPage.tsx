@@ -17,8 +17,11 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await api.post<LoginResponse>('/auth/login', { email, password });
-      if (res.user.role !== 'OWNER' && res.user.role !== 'MANAGER') {
-        setError('Owner or Manager credentials required');
+      // Admin panel is for management roles — cashier / kitchen / waiter
+      // sign in through the POS app or desktop terminal, not here.
+      const ADMIN_ROLES = ['OWNER', 'MANAGER', 'ADVISOR'];
+      if (!ADMIN_ROLES.includes(res.user.role)) {
+        setError('Admin access requires an Owner, Manager, or Advisor account');
         return;
       }
       setAuth(res.user, res.accessToken, res.refreshToken);
