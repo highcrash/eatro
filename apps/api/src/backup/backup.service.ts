@@ -71,8 +71,19 @@ export class BackupService {
 
     const data: Record<string, unknown[]> = {};
     for (const m of BACKUP_MODELS) {
-      const rows = await (this.prisma as any)[m.accessor].findMany();
-      data[m.accessor] = rows;
+      // The generated Prisma client might be older than the BACKUP_MODELS
+      // list (e.g. after a schema add without re-running `prisma generate`
+      // on the deployed server). Skip missing accessors with a warning
+      // rather than crashing the entire backup — the other models still
+      // get saved. On the next server redeploy + client regen the missing
+      // model joins the backup automatically.
+      const delegate = (this.prisma as any)[m.accessor];
+      if (!delegate || typeof delegate.findMany !== 'function') {
+        this.logger.warn(`Skipping ${m.accessor} — accessor not on this Prisma client. Run \`prisma generate\` to include it in future backups.`);
+        data[m.accessor] = [];
+        continue;
+      }
+      data[m.accessor] = await delegate.findMany();
     }
 
     const payload = {
@@ -222,7 +233,15 @@ export class BackupService {
   }
 
   private async applyRestore(data: Record<string, any[]>) {
-    const tables = BACKUP_MODELS.map((m) => `"${m.table}"`).join(', ');
+    // TRUNCATE only the tables the deployed Prisma client knows about —
+    // otherwise a stale client trying to truncate a table it doesn't
+    // recognise would surface as a confusing error when the real fix
+    // is a `prisma generate` re-run.
+    const truncatable = BACKUP_MODELS.filter((m) => {
+      const delegate = (this.prisma as any)[m.accessor];
+      return delegate && typeof delegate.createMany === 'function';
+    });
+    const tables = truncatable.map((m) => `"${m.table}"`).join(', ');
     try {
       await this.prisma.$executeRawUnsafe(`TRUNCATE TABLE ${tables} RESTART IDENTITY CASCADE`);
     } catch (e) {
@@ -232,17 +251,22 @@ export class BackupService {
     for (const m of BACKUP_MODELS) {
       const rows = data[m.accessor];
       if (!rows || rows.length === 0) continue;
+      const delegate = (this.prisma as any)[m.accessor];
+      if (!delegate || typeof delegate.createMany !== 'function') {
+        this.logger.warn(`Skipping restore of ${m.accessor} — accessor not on this Prisma client.`);
+        continue;
+      }
       const prepared = this.prepareRows(rows);
       try {
         if (m.hasSelfRef) {
           const roots = prepared.filter((r: any) => r.parentId == null);
           const kids = prepared.filter((r: any) => r.parentId != null);
-          if (roots.length) await (this.prisma as any)[m.accessor].createMany({ data: roots, skipDuplicates: true });
-          if (kids.length) await (this.prisma as any)[m.accessor].createMany({ data: kids, skipDuplicates: true });
+          if (roots.length) await delegate.createMany({ data: roots, skipDuplicates: true });
+          if (kids.length) await delegate.createMany({ data: kids, skipDuplicates: true });
         } else {
           const CHUNK = 1000;
           for (let i = 0; i < prepared.length; i += CHUNK) {
-            await (this.prisma as any)[m.accessor].createMany({
+            await delegate.createMany({
               data: prepared.slice(i, i + CHUNK),
               skipDuplicates: true,
             });
