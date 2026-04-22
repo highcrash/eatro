@@ -12,8 +12,12 @@ import type { JwtPayload, CreateAccountDto, AdjustBalanceDto } from '@restora/ty
 export class AccountController {
   constructor(private readonly accountService: AccountService) {}
 
+  // POS Start-Day dialog fetches /accounts to show the opening-cash
+  // picker — advisors + waiters running the register need this read
+  // too (same cashier-tier POS access). Write endpoints below stay
+  // OWNER/MANAGER.
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findAll(@CurrentUser() user: JwtPayload) {
     return this.accountService.findAll(user.branchId);
   }
