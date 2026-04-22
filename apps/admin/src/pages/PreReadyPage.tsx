@@ -84,6 +84,16 @@ export default function PreReadyPage() {
   const csvInputRefPR = useRef<HTMLInputElement>(null);
   const [ingSearch, setIngSearch] = useState<Record<number, string>>({});
   const [ingredientFilter, setIngredientFilter] = useState('');
+  const [itemSearch, setItemSearch] = useState('');
+  type PrItemSortKey = 'name' | 'unit' | 'currentStock' | 'minimumStock' | 'costPerUnit';
+  const [itemSort, setItemSort] = useState<{ key: PrItemSortKey; dir: 'asc' | 'desc' } | null>(null);
+  const toggleItemSort = (key: PrItemSortKey) => {
+    setItemSort((cur) => {
+      if (!cur || cur.key !== key) return { key, dir: 'asc' };
+      if (cur.dir === 'asc') return { key, dir: 'desc' };
+      return null;
+    });
+  };
   const [editingItem, setEditingItem] = useState<PreReadyItem | null>(null);
   const [editForm, setEditForm] = useState({ name: '', minimumStock: '0' });
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -121,6 +131,41 @@ export default function PreReadyPage() {
     queryFn: () => api.get('/menu'),
     enabled: showCopyFromPR,
   });
+
+  const filteredSortedItems = (() => {
+    const q = itemSearch.trim().toLowerCase();
+    const matchIng = ingredientFilter
+      ? ingredients.find((i) => i.name.toLowerCase() === ingredientFilter.toLowerCase())
+      : null;
+    const filtered = items.filter((item) => {
+      if (q && !item.name.toLowerCase().includes(q)) return false;
+      if (matchIng) {
+        return item.recipe?.items?.some((ri) => ri.ingredientId === matchIng.id) ?? false;
+      }
+      return true;
+    });
+    if (!itemSort) return filtered;
+    const val = (item: PreReadyItem): string | number => {
+      switch (itemSort.key) {
+        case 'name': return item.name.toLowerCase();
+        case 'unit': return (item.unit ?? '').toLowerCase();
+        case 'currentStock': return Number(item.currentStock) || 0;
+        case 'minimumStock': return Number(item.minimumStock) || 0;
+        case 'costPerUnit': {
+          const c = calcPreReadyCost(item, ingredients);
+          return c?.costPerUnit ?? 0;
+        }
+      }
+    };
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      const av = val(a); const bv = val(b);
+      if (av === bv) return 0;
+      const cmp = av < bv ? -1 : 1;
+      return itemSort.dir === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  })();
 
   // Sources for copy-from: other pre-ready items + menu items with recipes
   const allCopySources = [
@@ -435,9 +480,20 @@ Fried Onion,500,G,Oil,100,ML`;
       {/* Items Tab */}
       {tab === 'items' && (
         <div className="bg-[#161616] border border-[#2A2A2A]">
-          {/* Ingredient filter */}
-          <div className="px-4 pt-4 pb-2 border-b border-[#2A2A2A]">
-            <div className="relative max-w-xs">
+          {/* Filters — name search + ingredient filter */}
+          <div className="px-4 pt-4 pb-2 border-b border-[#2A2A2A] flex gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <input
+                placeholder="🔍 Search by name…"
+                value={itemSearch}
+                onChange={(e) => setItemSearch(e.target.value)}
+                className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-xs font-body focus:outline-none focus:border-[#D62B2B] transition-colors placeholder:text-[#555]"
+              />
+              {itemSearch && (
+                <button onClick={() => setItemSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#666] hover:text-white text-xs">{'✕'}</button>
+              )}
+            </div>
+            <div className="relative flex-1 min-w-[200px]">
               <input
                 list="pr-ing-filter"
                 placeholder="🔍 Filter by ingredient…"
@@ -449,7 +505,7 @@ Fried Onion,500,G,Oil,100,ML`;
                 {ingredients.map((i) => <option key={i.id} value={i.name} />)}
               </datalist>
               {ingredientFilter && (
-                <button onClick={() => setIngredientFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#666] hover:text-white text-xs">✕</button>
+                <button onClick={() => setIngredientFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#666] hover:text-white text-xs">{'✕'}</button>
               )}
             </div>
           </div>
@@ -461,17 +517,30 @@ Fried Onion,500,G,Oil,100,ML`;
           )}
           <table className="w-full">
             <thead><tr className="border-b border-[#2A2A2A]">
-              {['Name', 'Unit', 'Stock', 'Min', 'Recipe Cost / Yield', 'Cost/Unit', 'Actions'].map((h) => (
-                <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
-              ))}
+              {([
+                { label: 'Name', key: 'name' as const },
+                { label: 'Unit', key: 'unit' as const },
+                { label: 'Stock', key: 'currentStock' as const },
+                { label: 'Min', key: 'minimumStock' as const },
+                { label: 'Recipe Cost / Yield', key: null },
+                { label: 'Cost/Unit', key: 'costPerUnit' as const },
+                { label: 'Actions', key: null },
+              ]).map((h) => {
+                const active = h.key && itemSort?.key === h.key;
+                const arrow = active ? (itemSort!.dir === 'asc' ? ' ↑' : ' ↓') : '';
+                return (
+                  <th
+                    key={h.label}
+                    onClick={h.key ? () => toggleItemSort(h.key as PrItemSortKey) : undefined}
+                    className={`text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase ${h.key ? 'cursor-pointer hover:text-white transition-colors select-none' : ''} ${active ? 'text-white' : ''}`}
+                  >
+                    {h.label}{arrow}
+                  </th>
+                );
+              })}
             </tr></thead>
             <tbody>
-              {items.filter((item) => {
-                if (!ingredientFilter) return true;
-                const matchIng = ingredients.find((i) => i.name.toLowerCase() === ingredientFilter.toLowerCase());
-                if (!matchIng) return true;
-                return item.recipe?.items?.some((ri) => ri.ingredientId === matchIng.id) ?? false;
-              }).map((item) => {
+              {filteredSortedItems.map((item) => {
                 const isLow = Number(item.minimumStock) > 0 && Number(item.currentStock) <= Number(item.minimumStock);
                 const cost = calcPreReadyCost(item, ingredients);
                 return (

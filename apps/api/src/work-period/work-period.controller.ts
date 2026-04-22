@@ -53,13 +53,13 @@ export class WorkPeriodController {
   }
 
   @Get(':id/summary')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   getSummary(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.getSummary(user.branchId, id);
   }
 
   @Get()
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   findAll(
     @CurrentUser() user: JwtPayload,
     @Query('from') from?: string,

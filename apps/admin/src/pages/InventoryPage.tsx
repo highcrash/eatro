@@ -218,6 +218,9 @@ export default function InventoryPage() {
   const csvFileRef = useRef<HTMLInputElement>(null);
   const [expandedParent, setExpandedParent] = useState<string | null>(null);
   const [variantDialog, setVariantDialog] = useState<{ parent: Ingredient; variant?: Ingredient } | null>(null);
+  const [movSearch, setMovSearch] = useState('');
+  const [movFrom, setMovFrom] = useState('');
+  const [movTo, setMovTo] = useState('');
 
   const { data: ingredients = [], isLoading } = useQuery<Ingredient[]>({
     queryKey: ['ingredients'],
@@ -227,7 +230,21 @@ export default function InventoryPage() {
 
   const searchLower = searchText.trim().toLowerCase();
   const filteredIngredients = ingredients.filter((ing) => {
-    if (searchLower && !ing.name.toLowerCase().includes(searchLower) && !(ing.itemCode ?? '').toLowerCase().includes(searchLower)) return false;
+    if (searchLower) {
+      // Match against the parent's own name + code first, then any variant's
+      // brandName / packSize / name / sku so owners can find "Oil → ABC 1L"
+      // by typing "ABC" even though the parent row is just called "Oil".
+      const variantMatch = (ing.variants ?? []).some((v) =>
+        v.name?.toLowerCase().includes(searchLower) ||
+        (v.brandName ?? '').toLowerCase().includes(searchLower) ||
+        (v.packSize ?? '').toLowerCase().includes(searchLower) ||
+        (v.sku ?? '').toLowerCase().includes(searchLower),
+      );
+      const parentMatch =
+        ing.name.toLowerCase().includes(searchLower) ||
+        (ing.itemCode ?? '').toLowerCase().includes(searchLower);
+      if (!parentMatch && !variantMatch) return false;
+    }
     if (filterCategory && ing.category !== filterCategory) return false;
     if (filterSupplier) {
       const hasSupplier = ing.suppliers?.some((s) => s.supplierId === filterSupplier) || ing.supplierId === filterSupplier;
@@ -242,6 +259,45 @@ export default function InventoryPage() {
     return true;
   });
 
+  // Table sort — click column header to sort asc/desc. Click again to flip,
+  // third click clears back to default (as-fetched) order.
+  type SortKey = 'name' | 'itemCode' | 'category' | 'unit' | 'currentStock' | 'minimumStock' | 'costPerUnit' | 'supplier';
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(null);
+  const toggleSort = (key: SortKey) => {
+    setSort((cur) => {
+      if (!cur || cur.key !== key) return { key, dir: 'asc' };
+      if (cur.dir === 'asc') return { key, dir: 'desc' };
+      return null;
+    });
+  };
+  const sortedIngredients = (() => {
+    if (!sort) return filteredIngredients;
+    const supplierNameOf = (ing: Ingredient): string => {
+      const first = ing.suppliers?.[0]?.supplier?.name ?? ing.supplier?.name ?? '';
+      return first.toLowerCase();
+    };
+    const val = (ing: Ingredient): string | number => {
+      switch (sort.key) {
+        case 'name': return ing.name.toLowerCase();
+        case 'itemCode': return (ing.itemCode ?? '').toLowerCase();
+        case 'category': return (ing.category ?? '').toLowerCase();
+        case 'unit': return (ing.unit ?? '').toLowerCase();
+        case 'currentStock': return Number(ing.currentStock) || 0;
+        case 'minimumStock': return Number(ing.minimumStock) || 0;
+        case 'costPerUnit': return Number(ing.costPerUnit) || 0;
+        case 'supplier': return supplierNameOf(ing);
+      }
+    };
+    const arr = [...filteredIngredients];
+    arr.sort((a, b) => {
+      const av = val(a); const bv = val(b);
+      if (av === bv) return 0;
+      const cmp = av < bv ? -1 : 1;
+      return sort.dir === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  })();
+
   const { data: suppliers = [] } = useQuery<Supplier[]>({
     queryKey: ['suppliers'],
     queryFn: () => api.get('/suppliers'),
@@ -252,6 +308,21 @@ export default function InventoryPage() {
     queryFn: () => api.get('/ingredients/movements'),
     enabled: tab === 'movements',
   });
+
+  const filteredMovements = (() => {
+    const q = movSearch.trim().toLowerCase();
+    const fromMs = movFrom ? new Date(movFrom + 'T00:00:00').getTime() : null;
+    // "to" is inclusive — bump to end-of-day so a user typing today's
+    // date still sees today's movements without having to enter tomorrow.
+    const toMs = movTo ? new Date(movTo + 'T23:59:59.999').getTime() : null;
+    return movements.filter((m) => {
+      if (q && !(m.ingredient?.name?.toLowerCase().includes(q) || m.ingredientId.toLowerCase().includes(q))) return false;
+      const t = new Date(m.createdAt).getTime();
+      if (fromMs && t < fromMs) return false;
+      if (toMs && t > toMs) return false;
+      return true;
+    });
+  })();
 
   const saveIngMutation = useMutation({
     mutationFn: async (data: IngredientForm) => {
@@ -635,13 +706,33 @@ export default function InventoryPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[#2A2A2A]">
-                  {['Ingredient', 'Code', 'Category', 'Unit', 'Stock', 'Min', 'Cost/Unit', 'Supplier', 'Actions'].map((h) => (
-                    <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
-                  ))}
+                  {([
+                    { label: 'Ingredient', key: 'name' },
+                    { label: 'Code', key: 'itemCode' },
+                    { label: 'Category', key: 'category' },
+                    { label: 'Unit', key: 'unit' },
+                    { label: 'Stock', key: 'currentStock' },
+                    { label: 'Min', key: 'minimumStock' },
+                    { label: 'Cost/Unit', key: 'costPerUnit' },
+                    { label: 'Supplier', key: 'supplier' },
+                    { label: 'Actions', key: null },
+                  ] as const).map((h) => {
+                    const active = h.key && sort?.key === h.key;
+                    const arrow = active ? (sort!.dir === 'asc' ? ' ↑' : ' ↓') : '';
+                    return (
+                      <th
+                        key={h.label}
+                        onClick={h.key ? () => toggleSort(h.key as SortKey) : undefined}
+                        className={`text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase ${h.key ? 'cursor-pointer hover:text-white transition-colors select-none' : ''} ${active ? 'text-white' : ''}`}
+                      >
+                        {h.label}{arrow}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
-                {filteredIngredients.map((ing) => {
+                {sortedIngredients.map((ing) => {
                   const isLow = Number(ing.minimumStock) > 0 && Number(ing.currentStock) <= Number(ing.minimumStock);
                   const hasVars = ing.hasVariants && (ing.variants?.length ?? 0) > 0;
                   const isExpanded = expandedParent === ing.id;
@@ -746,36 +837,77 @@ export default function InventoryPage() {
       {/* Movements Tab */}
       {tab === 'movements' && (
         movLoading ? <p className="text-[#666] font-body text-sm">Loading…</p> : (
-          <div className="bg-[#161616] border border-[#2A2A2A]">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[#2A2A2A]">
-                  {['Date', 'Ingredient', 'Type', 'Qty', 'Notes'].map((h) => (
-                    <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {movements.map((m) => (
-                  <tr key={m.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
-                    <td className="px-4 py-3 text-[#999] font-body text-xs">{new Date(m.createdAt).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-white font-body text-sm">{m.ingredient?.name ?? m.ingredientId}</td>
-                    <td className="px-4 py-3">
-                      <span className={`font-body text-xs tracking-widest uppercase ${movTypeColor[m.type] ?? 'text-white'}`}>{m.type}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`font-body text-sm font-medium ${Number(m.quantity) >= 0 ? 'text-[#4CAF50]' : 'text-[#D62B2B]'}`}>
-                        {Number(m.quantity) >= 0 ? '+' : ''}{Number(m.quantity).toFixed(4)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[#666] font-body text-xs">{m.notes ?? '—'}</td>
+          <div className="space-y-3">
+            {/* Filters */}
+            <div className="flex gap-3 items-end flex-wrap">
+              <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
+                <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Search ingredient</label>
+                <input
+                  type="text" placeholder="Type ingredient name…"
+                  value={movSearch} onChange={(e) => setMovSearch(e.target.value)}
+                  className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">From</label>
+                <input
+                  type="date" value={movFrom} onChange={(e) => setMovFrom(e.target.value)}
+                  className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">To</label>
+                <input
+                  type="date" value={movTo} onChange={(e) => setMovTo(e.target.value)}
+                  className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                />
+              </div>
+              {(movSearch || movFrom || movTo) && (
+                <button
+                  onClick={() => { setMovSearch(''); setMovFrom(''); setMovTo(''); }}
+                  className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-[#999] hover:text-white font-body text-xs tracking-widest uppercase px-3 py-2 transition-colors"
+                >
+                  Clear
+                </button>
+              )}
+              <div className="flex items-center text-[#666] font-body text-xs ml-auto">
+                {filteredMovements.length} of {movements.length} movements
+              </div>
+            </div>
+
+            <div className="bg-[#161616] border border-[#2A2A2A]">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[#2A2A2A]">
+                    {['Date', 'Ingredient', 'Type', 'Qty', 'Notes'].map((h) => (
+                      <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
+                    ))}
                   </tr>
-                ))}
-                {movements.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-[#666] font-body text-sm">No movements yet.</td></tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredMovements.map((m) => (
+                    <tr key={m.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
+                      <td className="px-4 py-3 text-[#999] font-body text-xs">{new Date(m.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-white font-body text-sm">{m.ingredient?.name ?? m.ingredientId}</td>
+                      <td className="px-4 py-3">
+                        <span className={`font-body text-xs tracking-widest uppercase ${movTypeColor[m.type] ?? 'text-white'}`}>{m.type}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`font-body text-sm font-medium ${Number(m.quantity) >= 0 ? 'text-[#4CAF50]' : 'text-[#D62B2B]'}`}>
+                          {Number(m.quantity) >= 0 ? '+' : ''}{Number(m.quantity).toFixed(4)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-[#666] font-body text-xs">{m.notes ?? '—'}</td>
+                    </tr>
+                  ))}
+                  {filteredMovements.length === 0 && (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-[#666] font-body text-sm">
+                      {movements.length === 0 ? 'No movements yet.' : 'No movements match the filters.'}
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )
       )}
