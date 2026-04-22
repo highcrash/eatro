@@ -931,6 +931,21 @@ export default function InventoryPage() {
                           <td className="px-4 py-2 flex gap-2">
                             <button onClick={() => openAdjust(v as Ingredient)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Adjust</button>
                             <button onClick={() => setVariantDialog({ parent: ing, variant: v as Ingredient })} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Edit</button>
+                            {/* Delete allowed only when variant has zero stock — matches the
+                                backend invariant in ingredient.service.remove(). */}
+                            {Number(v.currentStock) === 0 && (
+                              <button
+                                onClick={() => {
+                                  setDeleteError('');
+                                  if (confirm(`Delete variant "${v.brandName ?? v.name}"? This cannot be undone.`)) {
+                                    deleteMutation.mutate(v.id);
+                                  }
+                                }}
+                                className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs tracking-widest uppercase transition-colors"
+                              >
+                                Delete
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );

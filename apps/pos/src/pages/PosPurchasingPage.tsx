@@ -47,7 +47,25 @@ function convertibleUnits(unit: string): string[] {
   return CONVERSION_MAP[unit] ?? [unit];
 }
 
-function ingredientLabel(i: Ingredient) {
+function ingredientLabel(i: Ingredient, parent?: Ingredient): string {
+  // Variants use the canonical formatVariantLabel so the PO create/receive
+  // lines read "Parent — Brand Pack UNIT (PU) (extended)" end-to-end.
+  // parentId presence + brandName / packSize = a variant; everything else
+  // is a standalone ingredient.
+  const looksLikeVariant = !!i.parentId || !!i.brandName || !!i.packSize;
+  if (looksLikeVariant) {
+    const inferredParentName = parent?.name ?? i.name.split(' — ')[0] ?? i.name;
+    return formatVariantLabel({
+      parentName: inferredParentName,
+      brandName: i.brandName ?? null,
+      packSize: i.packSize ?? null,
+      piecesPerPack: i.piecesPerPack ?? null,
+      purchaseUnit: parent?.purchaseUnit ?? i.purchaseUnit ?? null,
+      purchaseUnitQty: Number(parent?.purchaseUnitQty ?? i.purchaseUnitQty) || null,
+      unit: parent?.unit ?? i.unit ?? null,
+      id: i.id,
+    });
+  }
   const u = i.purchaseUnit || i.unit;
   return `${i.itemCode ? `[${i.itemCode}] ` : ''}${i.name} (${u})`;
 }

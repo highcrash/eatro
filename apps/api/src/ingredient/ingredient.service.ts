@@ -244,11 +244,33 @@ export class IngredientService {
       ...((dto as any).imageUrl !== undefined ? { imageUrl: (dto as any).imageUrl } : {}),
       ...((dto as any).showOnWebsite !== undefined ? { showOnWebsite: (dto as any).showOnWebsite } : {}),
     };
-    return this.prisma.ingredient.update({
+    const updated = await this.prisma.ingredient.update({
       where: { id },
       data,
       include: this.ingredientInclude,
     });
+
+    // Cascade unit + purchaseUnit + category to every variant when the
+    // parent changes them. Variants are constrained to inherit these
+    // from their parent (see createVariant), so an unchanged parent
+    // leaves its old values stuck on variants otherwise — the owner
+    // sees stale G when they flipped the parent to PCS.
+    if (
+      !updated.parentId &&
+      updated.hasVariants &&
+      (dto.unit !== undefined || dto.purchaseUnit !== undefined || dto.category !== undefined)
+    ) {
+      await this.prisma.ingredient.updateMany({
+        where: { parentId: id, deletedAt: null },
+        data: {
+          ...(dto.unit !== undefined ? { unit: dto.unit as any } : {}),
+          ...(dto.purchaseUnit !== undefined ? { purchaseUnit: dto.purchaseUnit || null } : {}),
+          ...(dto.category !== undefined ? { category: dto.category as any } : {}),
+        },
+      });
+    }
+
+    return updated;
   }
 
   async bulkCreate(
@@ -499,10 +521,19 @@ export class IngredientService {
       );
     }
 
-    return this.prisma.ingredient.update({
+    const result = await this.prisma.ingredient.update({
       where: { id },
       data: { deletedAt: new Date(), isActive: false },
     });
+
+    // If this was a variant, recompute the parent's aggregate stock so
+    // the parent row reflects the removal — otherwise the parent keeps
+    // showing the pre-delete total + avg cost.
+    if (ingredient.parentId) {
+      await this.syncParentStock(ingredient.parentId);
+    }
+
+    return result;
   }
 
   async adjustStock(id: string, branchId: string, staffId: string, dto: AdjustStockDto) {
