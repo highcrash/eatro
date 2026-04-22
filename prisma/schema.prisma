@@ -219,6 +219,8 @@ model BranchSetting {
   smsApiUrl                       String  @default("https://api.sms.net.bd/sendsms")
   // Notification toggles
   notifyVoidOtp                   Boolean @default(true) // Send OTP to manager for void approval
+  smsPaymentNotifyEnabled         Boolean @default(false) // Auto-send thank-you SMS to customer on order payment
+  smsPaymentTemplate              String? // Payment SMS body; supports {{name}} + {{amount}} + {{method}} placeholders
   // Theming
   posTheme                        String  @default("sunrise") // built-in slug or custom slug
   websiteTheme                    String  @default("sunrise")
@@ -1813,4 +1815,67 @@ model UpdateRecord {
   @@index([uploadedAt])
   @@index([status, uploadedAt])
   @@map("update_records")
+}
+
+// ─── SMS ──────────────────────────────────────────────────────────────────────
+// Log of every SMS attempt — outbound campaigns, payment receipts, OTPs that
+// the admin cares about seeing. request_id comes from api.sms.net.bd and is
+// used later to poll the status endpoint. `status` starts as QUEUED, flips to
+// SENT when the gateway accepts, then DELIVERED / FAILED / EXPIRED based on
+// the periodic poll. Retry support: set status back to QUEUED + clear
+// requestId + bump attempts.
+enum SmsStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  EXPIRED
+}
+
+enum SmsKind {
+  CAMPAIGN
+  PAYMENT
+  RESERVATION
+  OTP
+  OTHER
+}
+
+model SmsLog {
+  id          String    @id @default(cuid())
+  branchId    String
+  toPhone     String
+  body        String    @db.Text
+  kind        SmsKind   @default(OTHER)
+  status      SmsStatus @default(QUEUED)
+  requestId   String?   // api.sms.net.bd request_id — poll key
+  errorText   String?   // last error from gateway, if any
+  attempts    Int       @default(1)
+  // Optional joins — which customer / order / campaign prompted this send.
+  customerId  String?
+  orderId     String?
+  campaignId  String?   // free-form — groups rows sent by one bulk action
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastChecked DateTime? // last time we polled the status endpoint
+
+  @@index([branchId, createdAt])
+  @@index([branchId, status])
+  @@index([campaignId])
+  @@map("sms_logs")
+}
+
+// Reusable SMS bodies for the admin campaign composer. Uses {{name}} and
+// {{phone}} placeholders — {{name}} falls back to "Dear Customer" when the
+// customer record has no name.
+model SmsTemplate {
+  id        String   @id @default(cuid())
+  branchId  String
+  name      String   // display name in the admin picker
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([branchId, name])
+  @@index([branchId])
+  @@map("sms_templates")
 }

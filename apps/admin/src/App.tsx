@@ -37,6 +37,7 @@ import DiscountsPage from './pages/DiscountsPage';
 import CustomersPage from './pages/CustomersPage';
 import DataCleanupPage from './pages/DataCleanupPage';
 import BackupPage from './pages/BackupPage';
+import SmsPage from './pages/SmsPage';
 import LicensePage from './pages/LicensePage';
 import UpdatesPage from './pages/UpdatesPage';
 import DevicesPage from './pages/DevicesPage';
@@ -109,6 +110,7 @@ export default function AdminApp() {
         <Route path="/reservations" element={<ReservationsPage />} />
         <Route path="/data-cleanup" element={<DataCleanupPage />} />
         <Route path="/backups" element={<BackupPage />} />
+        <Route path="/sms" element={<SmsPage />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/license" element={<LicensePage />} />
         <Route path="/updates" element={<UpdatesPage />} />

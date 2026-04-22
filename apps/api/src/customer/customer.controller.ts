@@ -85,6 +85,16 @@ export class CustomerController {
     return this.customerService.createFromPos(user.branchId, dto);
   }
 
+  @Post('bulk')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  bulkImport(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { items: Array<{ phone: string; name?: string; email?: string }> },
+  ) {
+    if (!Array.isArray(dto.items)) throw new BadRequestException('items array required');
+    return this.customerService.bulkImport(user.branchId, dto.items);
+  }
+
   @Get(':id/detail')
   getDetail(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.customerService.getDetail(id, user.branchId);
