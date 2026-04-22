@@ -348,6 +348,11 @@ model Staff {
   phone        String?
   role         UserRole  @default(CASHIER)
   isActive     Boolean   @default(true)
+  // Whether this user can sign into a POS terminal (desktop lock-screen
+  // tile + web POS login). Admin can flip off for roles that shouldn't
+  // be operating a register (e.g. an ADVISOR who only needs admin).
+  // OWNER/MANAGER are treated as always-allowed at the gate regardless.
+  canAccessPos Boolean   @default(true)
   hireDate      DateTime  @default(now())
   monthlySalary Decimal?  @db.Decimal(14, 2)
   createdAt     DateTime  @default(now())

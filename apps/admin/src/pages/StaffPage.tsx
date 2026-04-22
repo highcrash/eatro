@@ -11,6 +11,7 @@ interface Staff {
   phone: string | null;
   role: string;
   isActive: boolean;
+  canAccessPos: boolean;
   hireDate: string;
 }
 
@@ -25,6 +26,7 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
     role: initial?.role ?? 'CASHIER',
     password: '',
     isActive: initial?.isActive ?? true,
+    canAccessPos: initial?.canAccessPos ?? true,
   });
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -37,6 +39,7 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
         role: form.role,
       };
       if (form.password) dto.password = form.password;
+      dto.canAccessPos = form.canAccessPos;
       if (initial) {
         dto.isActive = form.isActive;
         return api.patch(`/staff/${initial.id}`, dto);
@@ -97,6 +100,20 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
               Active
             </label>
           )}
+          <label className="flex items-start gap-2 text-sm font-body text-[#999]">
+            <input
+              type="checkbox"
+              checked={form.canAccessPos}
+              onChange={(e) => set('canAccessPos', e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Can access POS
+              <span className="block text-[10px] text-[#666] mt-0.5">
+                Un-check to hide this user from the desktop lock screen + block web POS login. Owner/Manager are always allowed regardless.
+              </span>
+            </span>
+          </label>
         </div>
 
         {mutation.isError && <p className="text-xs text-[#D62B2B]">{(mutation.error as Error).message}</p>}
