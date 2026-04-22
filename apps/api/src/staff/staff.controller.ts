@@ -16,7 +16,11 @@ export class StaffController {
   constructor(private readonly staffService: StaffService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  // List-only: needed by ADVISOR too (Leave / Attendance staff pickers).
+  // No passwords, salary, or audit fields are returned — see
+  // staffService.findAll's select clause. Write endpoints below stay
+  // OWNER/MANAGER so advisors can't edit staff records themselves.
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   findAll(@CurrentUser() user: JwtPayload) {
     return this.staffService.findAll(user.branchId);
   }
