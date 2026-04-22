@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Truck, Package, Undo2, Wallet, ClipboardList } from 'lucide-react';
 
 import type { CashierAction, ApprovalMode, PurchaseOrder } from '@restora/types';
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, formatVariantLabel } from '@restora/utils';
 import { api } from '../lib/api';
 import { useIsOnline } from '../lib/online';
 import { OfflineBanner } from '../components/OfflineHint';
@@ -582,11 +582,21 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
             const override = rcvVariantOverrides[item.id];
             const origIng = findIngredient(ingredients, item.ingredientId);
             const parentIng = origIng?.parentId ? ingredients.find((i) => i.variants?.some((v) => v.id === origIng.id)) : origIng?.hasVariants ? origIng : null;
+            const overrideLabel = override
+              ? formatVariantLabel({
+                  parentName: parentIng?.name ?? item.ingredient?.name ?? '',
+                  brandName: override.brandName,
+                  packSize: override.packSize ?? null,
+                  purchaseUnit: parentIng?.purchaseUnit ?? null,
+                  unit: parentIng?.unit ?? null,
+                  id: override.id,
+                })
+              : (item.ingredient?.name ?? '—');
             return (
               <div key={item.id} className="grid grid-cols-[3fr_120px_120px_110px_70px] gap-3 items-center bg-theme-bg rounded-theme p-3">
                 <div>
-                  <p className="text-sm font-semibold text-theme-text">
-                    {override ? <><span className="text-theme-accent">{override.brandName}</span> {override.packSize && <span className="text-theme-text-muted">{override.packSize}</span>}</> : (item.ingredient?.name ?? '—')}
+                  <p className="text-sm font-semibold text-theme-text" title={overrideLabel}>
+                    {overrideLabel}
                   </p>
                   <p className="text-[11px] text-theme-text-muted">
                     Ordered {Number(item.quantityOrdered).toFixed(3)} · Received {Number(item.quantityReceived).toFixed(3)} · Remaining {remaining.toFixed(3)}

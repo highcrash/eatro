@@ -539,11 +539,11 @@ export default function PurchasingPage() {
           <div className="bg-[#161616] border border-[#2A2A2A] p-6">
             <h3 className="font-display text-lg text-white tracking-widest mb-4">ORDER ITEMS</h3>
             <div className="grid grid-cols-12 gap-2 mb-2">
-              <div className="col-span-3 text-[#666] text-xs font-body tracking-widest uppercase">Ingredient (search)</div>
+              <div className="col-span-5 text-[#666] text-xs font-body tracking-widest uppercase">Ingredient (search)</div>
               <div className="col-span-1 text-[#666] text-xs font-body tracking-widest uppercase text-right">Stock</div>
-              <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Qty</div>
+              <div className="col-span-1 text-[#666] text-xs font-body tracking-widest uppercase">Qty</div>
               <div className="col-span-1 text-[#666] text-xs font-body tracking-widest uppercase">Unit</div>
-              <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Cost (৳)</div>
+              <div className="col-span-1 text-[#666] text-xs font-body tracking-widest uppercase">Cost (৳)</div>
               <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase text-right">Total</div>
               <div className="col-span-1"></div>
             </div>
@@ -559,9 +559,10 @@ export default function PurchasingPage() {
 
               return (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-center mb-2">
-                  <div className="col-span-3">
+                  <div className="col-span-5">
                     <input
                       list={`po-ing-${idx}`}
+                      title={ingSearchPO[idx] !== undefined ? ingSearchPO[idx] : (selIng ? (variantLabels[selIng.id] ?? `${selIng.name} (${selIng.purchaseUnit || selIng.unit})`) : '')}
                       value={ingSearchPO[idx] !== undefined ? ingSearchPO[idx] : (selIng ? (variantLabels[selIng.id] ?? `${selIng.name} (${selIng.purchaseUnit || selIng.unit})`) : '')}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -604,7 +605,7 @@ export default function PurchasingPage() {
                       </span>
                     )}
                   </div>
-                  <div className="col-span-2">
+                  <div className="col-span-1">
                     <input
                       type="number" step="0.001" min="0"
                       value={line.quantityOrdered}
@@ -621,12 +622,12 @@ export default function PurchasingPage() {
                       {convertible.map((u) => <option key={u} value={u}>{u}</option>)}
                     </select>
                   </div>
-                  <div className="col-span-2">
+                  <div className="col-span-1">
                     <input
                       type="number" step="0.01" min="0"
                       value={line.unitCost}
                       onChange={(e) => updateLine(idx, 'unitCost', e.target.value)}
-                      placeholder="৳ per unit"
+                      placeholder="৳"
                       className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
                     />
                   </div>
@@ -886,11 +887,11 @@ export default function PurchasingPage() {
               <h3 className="font-display text-lg text-white tracking-widest mb-4 sticky top-0 bg-[#161616] pb-2 z-10">RECEIVE GOODS</h3>
               <div className="space-y-3">
                 <div className="grid grid-cols-12 gap-3 items-center mb-2">
-                  <div className="col-span-4 text-[#666] text-xs font-body tracking-widest uppercase">Item</div>
-                  <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Qty Receiving</div>
+                  <div className="col-span-6 text-[#666] text-xs font-body tracking-widest uppercase">Item</div>
+                  <div className="col-span-1 text-[#666] text-xs font-body tracking-widest uppercase">Qty</div>
                   <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Unit Price (৳)</div>
                   <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase text-right">Line Total</div>
-                  <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Unit</div>
+                  <div className="col-span-1 text-[#666] text-xs font-body tracking-widest uppercase">Unit</div>
                 </div>
                 {selectedPO.items.map((item) => {
                   const rqty = parseFloat(receiveQtys[item.id] ?? '0') || 0;
@@ -900,11 +901,21 @@ export default function PurchasingPage() {
                   // Find the parent to check if this item has variants
                   const origIng = findIngredient(item.ingredientId);
                   const parentIng = origIng?.parentId ? ingredients.find((i) => i.variants?.some((v) => v.id === origIng.id)) : origIng?.hasVariants ? origIng : null;
+                  const overrideLabel = override
+                    ? formatVariantLabel({
+                        parentName: parentIng?.name ?? item.ingredient?.name ?? '',
+                        brandName: override.brandName,
+                        packSize: override.packSize ?? null,
+                        purchaseUnit: parentIng?.purchaseUnit ?? null,
+                        unit: parentIng?.unit ?? null,
+                        id: override.id,
+                      })
+                    : (item.ingredient?.name ?? '');
                   return (
                     <div key={item.id} className="grid grid-cols-12 gap-3 items-center">
-                      <div className="col-span-4">
-                        <p className="text-white font-body text-sm">
-                          {override ? <><span className="text-[#FFA726]">{override.brandName}</span> {override.packSize && <span className="text-[#666]">{override.packSize}</span>}</> : item.ingredient?.name}
+                      <div className="col-span-6">
+                        <p className="text-white font-body text-sm" title={overrideLabel}>
+                          {overrideLabel}
                         </p>
                         <p className="text-[#666] font-body text-xs">
                           Ordered: {Number(item.quantityOrdered).toFixed(3)} | Received: {Number(item.quantityReceived).toFixed(3)}
@@ -919,7 +930,7 @@ export default function PurchasingPage() {
                           </button>
                         )}
                       </div>
-                      <div className="col-span-2">
+                      <div className="col-span-1">
                         <input
                           type="number" step="0.001" min="0"
                           placeholder="Qty"
@@ -940,7 +951,7 @@ export default function PurchasingPage() {
                       <div className="col-span-2 text-right">
                         <span className="text-white font-body text-sm">{rqty > 0 ? `৳${lineTotal.toFixed(2)}` : '—'}</span>
                       </div>
-                      <div className="col-span-2 text-[#666] font-body text-xs">{poUnit(item.ingredient, (item as any).unit)}</div>
+                      <div className="col-span-1 text-[#666] font-body text-xs">{poUnit(item.ingredient, (item as any).unit)}</div>
                     </div>
                   );
                 })}
@@ -1059,21 +1070,21 @@ export default function PurchasingPage() {
               <h3 className="font-display text-lg text-white tracking-widest mb-4 sticky top-0 bg-[#161616] pb-2 z-10">RETURN GOODS</h3>
               <div className="space-y-3">
                 <div className="grid grid-cols-12 gap-3 items-center mb-2">
-                  <div className="col-span-4 text-[#666] text-xs font-body tracking-widest uppercase">Item</div>
-                  <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Qty</div>
+                  <div className="col-span-6 text-[#666] text-xs font-body tracking-widest uppercase">Item</div>
+                  <div className="col-span-1 text-[#666] text-xs font-body tracking-widest uppercase">Qty</div>
                   <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Unit Price (৳)</div>
                   <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase text-right">Total</div>
-                  <div className="col-span-2 text-[#666] text-xs font-body tracking-widest uppercase">Unit</div>
+                  <div className="col-span-1 text-[#666] text-xs font-body tracking-widest uppercase">Unit</div>
                 </div>
                 {returnLines.map((line, idx) => {
                   const qty = parseFloat(line.quantity) || 0;
                   const price = parseFloat(line.unitPrice) || 0;
                   return (
                     <div key={idx} className="grid grid-cols-12 gap-3 items-center">
-                      <div className="col-span-4">
-                        <p className="text-white font-body text-sm">{line.name}</p>
+                      <div className="col-span-6">
+                        <p className="text-white font-body text-sm" title={line.name}>{line.name}</p>
                       </div>
-                      <div className="col-span-2">
+                      <div className="col-span-1">
                         <input
                           type="number" step="0.001" min="0"
                           value={line.quantity}
@@ -1092,7 +1103,7 @@ export default function PurchasingPage() {
                       <div className="col-span-2 text-right">
                         <span className="text-white font-body text-sm">{qty > 0 ? `৳${(qty * price).toFixed(2)}` : '—'}</span>
                       </div>
-                      <div className="col-span-2 text-[#666] font-body text-xs">{line.unit}</div>
+                      <div className="col-span-1 text-[#666] font-body text-xs">{line.unit}</div>
                     </div>
                   );
                 })}
