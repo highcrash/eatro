@@ -93,4 +93,13 @@ export class IngredientController {
   convertToParent(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.ingredientService.convertToParent(id, user.branchId);
   }
+
+  // One-shot fix for installs seeded before variant cost-per-unit was
+  // derived automatically. Rewrites every variant's costPerUnit from its
+  // costPerPurchaseUnit / purchaseUnitQty and re-syncs parent aggregates.
+  @Post('repair-variant-costs')
+  @Roles('OWNER')
+  repairVariantCosts(@CurrentUser() user: JwtPayload) {
+    return this.ingredientService.repairVariantCosts(user.branchId);
+  }
 }

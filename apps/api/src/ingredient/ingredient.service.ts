@@ -76,6 +76,13 @@ export class IngredientService {
     // variant a stable lookup key for the Stock Update CSV flow.
     const sku = dto.sku?.trim() || await generateUniqueCode(this.prisma, branchId, 'sku');
 
+    const purchaseUnitQty = dto.piecesPerPack ?? (parent.purchaseUnitQty?.toNumber() ?? 1);
+    const costPerPurchaseUnit = dto.costPerPurchaseUnit ?? 0;
+    // Derive cost-per-stock-unit so the inventory UI + consumption value
+    // calculations don't default to 0. The dialog only collects the
+    // per-purchase-unit price, so we infer the per-stock-unit rate here.
+    const costPerUnit = purchaseUnitQty > 0 ? costPerPurchaseUnit / purchaseUnitQty : 0;
+
     return this.prisma.ingredient.create({
       data: {
         branchId,
@@ -89,8 +96,9 @@ export class IngredientService {
         unit: parent.unit,
         category: parent.category,
         purchaseUnit: parent.purchaseUnit,
-        purchaseUnitQty: dto.piecesPerPack ?? (parent.purchaseUnitQty?.toNumber() ?? 1),
-        costPerPurchaseUnit: dto.costPerPurchaseUnit ?? 0,
+        purchaseUnitQty,
+        costPerPurchaseUnit,
+        costPerUnit,
         supplierId: dto.supplierId ?? null,
       },
       include: { supplier: true },
@@ -135,6 +143,34 @@ export class IngredientService {
 
       return this.findOne(id, branchId);
     });
+  }
+
+  // One-shot backfill: re-derive every variant's costPerUnit from its
+  // costPerPurchaseUnit / purchaseUnitQty pair. Fixes installs where
+  // variants were created before createVariant started setting costPerUnit,
+  // which would otherwise show the per-pack price in the Cost/Unit column
+  // and blow up consumption-value rollups.
+  async repairVariantCosts(branchId: string) {
+    const variants = await this.prisma.ingredient.findMany({
+      where: { branchId, parentId: { not: null }, deletedAt: null },
+      select: { id: true, parentId: true, costPerPurchaseUnit: true, purchaseUnitQty: true },
+    });
+    let fixed = 0;
+    const parentIds = new Set<string>();
+    for (const v of variants) {
+      const qty = Number(v.purchaseUnitQty);
+      const cpu = Number(v.costPerPurchaseUnit);
+      if (qty > 0 && cpu > 0) {
+        await this.prisma.ingredient.update({
+          where: { id: v.id },
+          data: { costPerUnit: cpu / qty },
+        });
+        fixed += 1;
+        if (v.parentId) parentIds.add(v.parentId);
+      }
+    }
+    for (const pid of parentIds) await this.syncParentStock(pid);
+    return { scanned: variants.length, fixed, parentsResynced: parentIds.size };
   }
 
   async getVariants(id: string, branchId: string) {
@@ -220,7 +256,7 @@ export class IngredientService {
   }
 
   async update(id: string, branchId: string, dto: UpdateIngredientDto & { brandName?: string; packSize?: string | null; piecesPerPack?: number | null; sku?: string | null }) {
-    await this.findOne(id, branchId);
+    const existing = await this.findOne(id, branchId);
     // Cast the data object wholesale so Prisma picks the unchecked-update
     // overload. Broadening StockUnit to accept custom strings narrowed
     // inference the other way and made Prisma pick the checked-relation
@@ -244,6 +280,17 @@ export class IngredientService {
       ...((dto as any).imageUrl !== undefined ? { imageUrl: (dto as any).imageUrl } : {}),
       ...((dto as any).showOnWebsite !== undefined ? { showOnWebsite: (dto as any).showOnWebsite } : {}),
     };
+
+    // When the admin changes the per-purchase-unit price (or the number of
+    // stock units per purchase unit) and didn't also pass an explicit
+    // costPerUnit, derive it. Without this, variants created through the
+    // dialog — which only collects costPerPurchaseUnit — stay at 0 per
+    // stock unit, breaking parent aggregates + consumption valuations.
+    if (dto.costPerUnit === undefined && (dto.costPerPurchaseUnit !== undefined || dto.piecesPerPack !== undefined || dto.purchaseUnitQty !== undefined)) {
+      const newCostPerPU = dto.costPerPurchaseUnit ?? Number(existing.costPerPurchaseUnit);
+      const newQty = dto.piecesPerPack ?? dto.purchaseUnitQty ?? Number(existing.purchaseUnitQty);
+      if (newQty > 0) data.costPerUnit = newCostPerPU / newQty;
+    }
     const updated = await this.prisma.ingredient.update({
       where: { id },
       data,
@@ -268,6 +315,13 @@ export class IngredientService {
           ...(dto.category !== undefined ? { category: dto.category as any } : {}),
         },
       });
+    }
+
+    // Variant cost changed → recompute the parent's weighted-average
+    // costPerUnit so the parent row's Cost/Unit + Stock Report line up
+    // with the variant's new rate.
+    if (updated.parentId && data.costPerUnit !== undefined) {
+      await this.syncParentStock(updated.parentId);
     }
 
     return updated;
@@ -440,6 +494,13 @@ export class IngredientService {
       const dup = await this.prisma.ingredient.findFirst({
         where: { branchId, name: displayName, parentId: parent.id, deletedAt: null },
       });
+      // Derive cost-per-stock-unit when the CSV only gives the pack rate
+      // — same reasoning as createVariant: rows without costPerUnit would
+      // otherwise be pinned at 0 and skew parent aggregates.
+      const variantQty = item.piecesPerPack ?? (parent.purchaseUnitQty?.toNumber() ?? 1);
+      const variantCostPU = item.costPerPurchaseUnit ?? 0;
+      const variantDerivedCPU = item.costPerUnit ?? (variantQty > 0 ? variantCostPU / variantQty : 0);
+
       if (dup) {
         await this.prisma.ingredient.update({
           where: { id: dup.id },
@@ -450,9 +511,14 @@ export class IngredientService {
             ...(item.sku !== undefined ? { sku: item.sku || null } : {}),
             ...(item.piecesPerPack !== undefined ? { purchaseUnitQty: item.piecesPerPack } : {}),
             ...(item.costPerPurchaseUnit !== undefined ? { costPerPurchaseUnit: item.costPerPurchaseUnit } : {}),
-            ...(item.costPerUnit !== undefined ? { costPerUnit: item.costPerUnit } : {}),
+            ...(item.costPerUnit !== undefined
+              ? { costPerUnit: item.costPerUnit }
+              : (item.costPerPurchaseUnit !== undefined || item.piecesPerPack !== undefined)
+                ? { costPerUnit: variantDerivedCPU }
+                : {}),
           },
         });
+        await this.syncParentStock(parent.id);
         results.push({ name: item.name, status: 'updated' });
         continue;
       }
@@ -470,11 +536,12 @@ export class IngredientService {
           unit: parent.unit,
           category: parent.category,
           purchaseUnit: parent.purchaseUnit,
-          purchaseUnitQty: item.piecesPerPack ?? (parent.purchaseUnitQty?.toNumber() ?? 1),
-          costPerPurchaseUnit: item.costPerPurchaseUnit ?? 0,
-          costPerUnit: item.costPerUnit ?? 0,
+          purchaseUnitQty: variantQty,
+          costPerPurchaseUnit: variantCostPU,
+          costPerUnit: variantDerivedCPU,
         },
       });
+      await this.syncParentStock(parent.id);
       results.push({ name: item.name, status: 'created' });
     }
 
