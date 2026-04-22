@@ -3,6 +3,22 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.7 — embedded POS refresh (2026-04-23)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/utils so
+terminals pick up the latest fixes from main:
+
+- **Canonical variant label** on the POS Create-PO search + datalist
+  now reads `Parent — Brand Pack UNIT (PurchaseUnit) (extended)` via
+  `formatVariantLabel` — variants stop rendering as short "Name (Unit)"
+  strings and are uniquely identifiable end-to-end.
+- **Parent-unit cascade** — flipping a parent ingredient's unit
+  (G → PCS etc.) now updates every variant in one DB call so the
+  line on the POS receive/purchasing screen matches the parent.
+- **Variant delete** at the admin inventory row when the variant's
+  stock is 0; parent's aggregate stock is resynced after the delete.
+- **Wider ingredient column** on POS receive-goods list.
+
 ## 0.8.6 — embedded POS refresh (2026-04-22)
 
 No Electron-shell changes. This release rebundles the embedded web POS
