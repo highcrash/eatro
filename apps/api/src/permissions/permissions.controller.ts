@@ -18,7 +18,7 @@ export class PermissionsController {
   constructor(private readonly service: PermissionsService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   get(@CurrentUser() user: JwtPayload) {
     return this.service.getPermissions(user.branchId);
   }

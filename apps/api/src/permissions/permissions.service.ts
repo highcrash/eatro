@@ -41,7 +41,15 @@ export class PermissionsService {
   /**
    * Enforce a cashier permission gate.
    * - Owners and Managers always pass (admin-equivalent).
-   * - For cashiers, the action's approval mode determines the flow:
+   * - CASHIER, ADVISOR, and WAITER all run through the configurable
+   *   cashier-permission matrix on the POS side. Advisors + waiters
+   *   get the same approval flow cashiers have for these operational
+   *   actions (create PO, receive goods, return, pay supplier, log
+   *   expense, etc.) — the owner configures one policy and it
+   *   applies to anyone who isn't OWNER/MANAGER. Advisor's broader
+   *   admin powers are orthogonal and come from @Roles() decorators
+   *   on the admin-side endpoints.
+   * - For gated roles the action's approval mode determines the flow:
    *   - NONE  → throw 403 (button is hidden in POS but defend the API)
    *   - AUTO  → pass with no challenge
    *   - OTP   → require a verified action OTP (passed in dto.actionOtp), else throw 401
@@ -52,8 +60,8 @@ export class PermissionsService {
     action: CashierAction,
     actionOtp?: string,
   ): Promise<void> {
-    if (role === 'OWNER' || role === 'MANAGER' || role === 'ADVISOR') return;
-    if (role !== 'CASHIER') {
+    if (role === 'OWNER' || role === 'MANAGER') return;
+    if (role !== 'CASHIER' && role !== 'ADVISOR' && role !== 'WAITER') {
       throw new ForbiddenException('Role not allowed');
     }
 

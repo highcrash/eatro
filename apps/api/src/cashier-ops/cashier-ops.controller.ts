@@ -17,7 +17,9 @@ import { SmsService } from '../sms/sms.service';
  *
  * Each endpoint is gated by PermissionsService.requirePermission, which:
  *  - Always passes for OWNER/MANAGER (admin-equivalent)
- *  - For CASHIER, enforces the per-action permission mode (NONE/AUTO/OTP)
+ *  - For CASHIER, ADVISOR, and WAITER, enforces the per-action permission
+ *    mode (NONE/AUTO/OTP) — advisors and waiters share the same POS policy
+ *    as cashiers, configured once in admin → Cashier Permissions
  *  - For OTP mode, requires `actionOtp` in the body (verified once and consumed)
  *
  * The four actions delegate to the existing admin services so logic stays in
@@ -25,7 +27,7 @@ import { SmsService } from '../sms/sms.service';
  */
 @Controller('cashier-ops')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER', 'CASHIER')
+@Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
 export class CashierOpsController {
   constructor(
     private readonly purchasing: PurchasingService,

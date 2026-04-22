@@ -85,7 +85,7 @@ export class DiscountController {
 
 @Controller('discounts')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+@Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
 export class DiscountPosController {
   constructor(private readonly svc: DiscountService) {}
 

@@ -36,13 +36,13 @@ export class ReservationController {
   constructor(private readonly svc: ReservationService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findAll(@CurrentUser() user: JwtPayload, @Query('date') date?: string, @Query('status') status?: string) {
     return this.svc.findAll(user.branchId, date, status);
   }
 
   @Get('today')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findToday(@CurrentUser() user: JwtPayload) {
     return this.svc.findToday(user.branchId);
   }
@@ -60,43 +60,43 @@ export class ReservationController {
   }
 
   @Get(':id')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.svc.findOne(id, user.branchId);
   }
 
   @Patch(':id/confirm')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   confirm(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: ConfirmReservationDto) {
     return this.svc.confirm(id, user.branchId, user.sub, dto);
   }
 
   @Patch(':id/reject')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   reject(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { reason?: string }) {
     return this.svc.reject(id, user.branchId, dto.reason);
   }
 
   @Patch(':id/arrived')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   markArrived(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.svc.markArrived(id, user.branchId);
   }
 
   @Patch(':id/completed')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   markCompleted(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.svc.markCompleted(id, user.branchId);
   }
 
   @Patch(':id/no-show')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   markNoShow(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.svc.markNoShow(id, user.branchId);
   }
 
   @Patch(':id/cancel')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   cancel(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { reason?: string }) {
     return this.svc.cancel(id, user.branchId, dto.reason);
   }

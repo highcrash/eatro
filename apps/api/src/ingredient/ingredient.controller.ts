@@ -12,7 +12,7 @@ export class IngredientController {
   constructor(private readonly ingredientService: IngredientService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findAll(@CurrentUser() user: JwtPayload) {
     return this.ingredientService.findAll(user.branchId);
   }
@@ -24,7 +24,7 @@ export class IngredientController {
   }
 
   @Get(':id')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.ingredientService.findOne(id, user.branchId);
   }
@@ -77,13 +77,13 @@ export class IngredientController {
   // ─── Variants ─────────────────────────────────────────────────────────────
 
   @Get(':id/variants')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   getVariants(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.ingredientService.getVariants(id, user.branchId);
   }
 
   @Post(':id/variants')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   createVariant(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: CreateVariantDto) {
     return this.ingredientService.createVariant(id, user.branchId, dto);
   }

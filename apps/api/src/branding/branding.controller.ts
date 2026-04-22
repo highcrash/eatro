@@ -28,7 +28,7 @@ export class BrandingController {
   constructor(private readonly svc: BrandingService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   getMine(@CurrentUser() user: JwtPayload) {
     return this.svc.getBrandingForUser(user.branchId);
   }

@@ -12,7 +12,7 @@ export class ExpenseController {
   constructor(private readonly expenseService: ExpenseService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findAll(
     @CurrentUser() user: JwtPayload,
     @Query('from') from?: string,
@@ -23,7 +23,7 @@ export class ExpenseController {
   }
 
   @Get('summary')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   getSummary(
     @CurrentUser() user: JwtPayload,
     @Query('from') from?: string,
@@ -36,7 +36,7 @@ export class ExpenseController {
   }
 
   @Post()
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateExpenseDto) {
     return this.expenseService.create(user.branchId, user.sub, dto);
   }
