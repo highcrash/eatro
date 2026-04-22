@@ -1,7 +1,34 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import type { CreateIngredientDto, UpdateIngredientDto, AdjustStockDto, CreateVariantDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../ws-gateway/realtime.gateway';
+
+/**
+ * Auto-generate a unique short code for use as an itemCode or sku when
+ * the admin hasn't provided one. Ensures every ingredient + variant has
+ * a stable lookup key so the Stock Update CSV can target every row.
+ *
+ * Format: "AUTO-XXXXXX" — 6 hex chars, case-insensitive unique enough
+ * for a single branch's catalogue. We verify uniqueness against the
+ * chosen column before returning; 4 retries in the rare collision case,
+ * then give up and surface the collision upstream.
+ */
+async function generateUniqueCode(
+  prisma: PrismaService,
+  branchId: string,
+  field: 'itemCode' | 'sku',
+): Promise<string> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const candidate = `AUTO-${randomBytes(3).toString('hex').toUpperCase()}`;
+    const existing = await prisma.ingredient.findFirst({
+      where: { branchId, [field]: candidate, deletedAt: null },
+      select: { id: true },
+    });
+    if (!existing) return candidate;
+  }
+  throw new BadRequestException(`Could not generate a unique ${field} after 4 attempts; retry manually.`);
+}
 
 @Injectable()
 export class IngredientService {
@@ -45,6 +72,10 @@ export class IngredientService {
       throw new BadRequestException('Ingredient is not marked as having variants. Convert to parent first.');
     }
 
+    // Auto-generate an SKU when the admin didn't set one — gives every
+    // variant a stable lookup key for the Stock Update CSV flow.
+    const sku = dto.sku?.trim() || await generateUniqueCode(this.prisma, branchId, 'sku');
+
     return this.prisma.ingredient.create({
       data: {
         branchId,
@@ -53,7 +84,7 @@ export class IngredientService {
         brandName: dto.brandName,
         packSize: dto.packSize ?? null,
         piecesPerPack: dto.piecesPerPack ?? null,
-        sku: dto.sku ?? null,
+        sku,
         // Always inherit unit + purchaseUnit from parent
         unit: parent.unit,
         category: parent.category,
@@ -162,6 +193,10 @@ export class IngredientService {
       throw new BadRequestException(`Ingredient "${dto.name}" already exists`);
     }
 
+    // Every row needs a stable lookup key so the Stock Update CSV can
+    // target it. If the admin left itemCode blank, mint a unique one.
+    const itemCode = dto.itemCode?.trim() || await generateUniqueCode(this.prisma, branchId, 'itemCode');
+
     return this.prisma.ingredient.create({
       data: {
         branchId,
@@ -177,7 +212,7 @@ export class IngredientService {
         costPerUnit: dto.costPerUnit ?? 0,
         costPerPurchaseUnit: dto.costPerPurchaseUnit ?? 0,
         supplierId: dto.supplierId ?? null,
-        itemCode: dto.itemCode ?? null,
+        itemCode,
         category: (dto.category ?? 'RAW') as any,
       },
       include: this.ingredientInclude,
@@ -318,13 +353,14 @@ export class IngredientService {
         continue;
       }
 
+      const itemCode = item.itemCode?.trim() || await generateUniqueCode(this.prisma, branchId, 'itemCode');
       const created = await this.prisma.ingredient.create({
         data: {
           branchId,
           name: item.name.trim(),
           unit: (item.unit ?? 'PCS') as any,
           category: (item.category ?? 'RAW') as any,
-          itemCode: item.itemCode ?? null,
+          itemCode,
           minimumStock: item.minimumStock ?? 0,
           costPerUnit: item.costPerUnit ?? 0,
           purchaseUnit: item.purchaseUnit ?? null,
@@ -399,6 +435,7 @@ export class IngredientService {
         continue;
       }
 
+      const sku = item.sku?.trim() || await generateUniqueCode(this.prisma, branchId, 'sku');
       await this.prisma.ingredient.create({
         data: {
           branchId,
@@ -407,7 +444,7 @@ export class IngredientService {
           brandName,
           packSize: item.packSize ?? null,
           piecesPerPack: item.piecesPerPack ?? null,
-          sku: item.sku ?? null,
+          sku,
           unit: parent.unit,
           category: parent.category,
           purchaseUnit: parent.purchaseUnit,
