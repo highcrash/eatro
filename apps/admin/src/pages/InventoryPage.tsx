@@ -1056,12 +1056,12 @@ export default function InventoryPage() {
 
       {/* Add/Edit Ingredient Dialog */}
       {showIngDialog && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={closeIngDialog}>
-          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="font-display text-xl text-white tracking-widest mb-6">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={closeIngDialog}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-xl text-white tracking-widest px-6 pt-6 pb-4 border-b border-[#2A2A2A] shrink-0">
               {editingIng ? 'EDIT INGREDIENT' : 'ADD INGREDIENT'}
             </h2>
-            <div className="space-y-4">
+            <div className="space-y-4 overflow-y-auto px-6 py-4 flex-1">
               <div className="flex flex-col gap-1">
                 <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Name *</label>
                 <input
@@ -1231,11 +1231,12 @@ export default function InventoryPage() {
                   )}
                 </div>
               </div>
-            </div>
             {saveIngMutation.error && (
               <p className="text-[#F03535] text-xs font-body mt-3">{(saveIngMutation.error as Error).message}</p>
             )}
-            <div className="flex gap-3 mt-6">
+            </div>{/* /scrollable body */}
+            {/* Footer pinned — always visible even on tall forms that overflow. */}
+            <div className="flex gap-3 px-6 py-4 border-t border-[#2A2A2A] bg-[#161616] shrink-0">
               <button onClick={closeIngDialog} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
               <button
                 onClick={() => saveIngMutation.mutate(ingForm)}
