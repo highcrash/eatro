@@ -12,7 +12,7 @@ export class LeaveController {
   constructor(private readonly leaveService: LeaveService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   findAll(@CurrentUser() user: JwtPayload, @Query('staffId') staffId?: string) {
     return this.leaveService.findAll(user.branchId, staffId);
   }
@@ -24,13 +24,13 @@ export class LeaveController {
   }
 
   @Post(':id/approve')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   approve(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.leaveService.approve(id, user.branchId, user.sub);
   }
 
   @Post(':id/reject')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   reject(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.leaveService.reject(id, user.branchId, user.sub);
   }

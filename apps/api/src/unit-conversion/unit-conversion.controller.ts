@@ -12,13 +12,13 @@ export class UnitConversionController {
   constructor(private readonly service: UnitConversionService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'KITCHEN')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'KITCHEN', 'ADVISOR')
   findAll(@CurrentUser() user: JwtPayload) {
     return this.service.findAll(user.branchId);
   }
 
   @Post()
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   upsert(
     @CurrentUser() user: JwtPayload,
     @Body() dto: { fromUnit: string; toUnit: string; factor: number },
@@ -27,7 +27,7 @@ export class UnitConversionController {
   }
 
   @Delete()
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   remove(
     @CurrentUser() user: JwtPayload,
     @Query('from') from: string,
@@ -37,7 +37,7 @@ export class UnitConversionController {
   }
 
   @Get('convertible')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'KITCHEN')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'KITCHEN', 'ADVISOR')
   getConvertible(
     @CurrentUser() user: JwtPayload,
     @Query('unit') unit: string,

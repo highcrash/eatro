@@ -8,7 +8,7 @@ import type { JwtPayload, CreateWasteLogDto } from '@restora/types';
 
 @Controller('waste')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER', 'KITCHEN')
+@Roles('OWNER', 'MANAGER', 'KITCHEN', 'ADVISOR')
 export class WasteController {
   constructor(private readonly wasteService: WasteService) {}
 

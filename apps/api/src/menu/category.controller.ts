@@ -21,19 +21,19 @@ export class CategoryController {
   }
 
   @Post()
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   create(@Body() body: { name: string; sortOrder?: number; parentId?: string; icon?: string }, @CurrentUser() user: JwtPayload) {
     return this.categoryService.create(user.branchId, body.name, body.sortOrder, body.parentId, body.icon);
   }
 
   @Patch(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   update(@Param('id') id: string, @Body() body: { name?: string; sortOrder?: number; isActive?: boolean; parentId?: string | null; icon?: string | null }, @CurrentUser() user: JwtPayload) {
     return this.categoryService.update(id, user.branchId, body);
   }
 
   @Delete(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.categoryService.remove(id, user.branchId);
   }

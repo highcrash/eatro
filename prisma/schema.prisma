@@ -24,6 +24,7 @@ enum UserRole {
   CASHIER
   KITCHEN
   WAITER
+  ADVISOR
 }
 
 enum OrderType {

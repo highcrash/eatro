@@ -12,7 +12,7 @@ export class ExpenseController {
   constructor(private readonly expenseService: ExpenseService) {}
 
   @Get()
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   findAll(
     @CurrentUser() user: JwtPayload,
     @Query('from') from?: string,
@@ -23,7 +23,7 @@ export class ExpenseController {
   }
 
   @Get('summary')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   getSummary(
     @CurrentUser() user: JwtPayload,
     @Query('from') from?: string,
@@ -36,25 +36,25 @@ export class ExpenseController {
   }
 
   @Post()
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateExpenseDto) {
     return this.expenseService.create(user.branchId, user.sub, dto);
   }
 
   @Patch(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpdateExpenseDto) {
     return this.expenseService.update(id, user.branchId, dto);
   }
 
   @Post(':id/approve')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   approve(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.expenseService.approve(id, user.branchId, user.sub);
   }
 
   @Delete(':id')
-  @Roles('OWNER', 'MANAGER')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.expenseService.remove(id, user.branchId);
   }

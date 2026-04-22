@@ -90,7 +90,7 @@ export class OrderController {
   }
 
   @Post(':id/items/:itemId/move-table')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   moveItemToTable(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
@@ -101,55 +101,55 @@ export class OrderController {
   }
 
   @Patch(':id/items/:itemId/notes')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   updateItemNotes(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: JwtPayload, @Body() dto: { notes: string }) {
     return this.orderService.updateItemNotes(id, itemId, user.branchId, dto.notes);
   }
 
   @Post(':id/void')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   voidOrder(@Param('id') id: string, @Body() dto: VoidOrderDto, @CurrentUser() user: JwtPayload) {
     return this.orderService.voidOrder(id, user.branchId, dto);
   }
 
   @Post(':id/approve-items')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   approveNewItems(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.orderService.approveNewItems(id, user.branchId);
   }
 
   @Post(':id/reject-items')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   rejectNewItems(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.orderService.rejectNewItems(id, user.branchId);
   }
 
   @Post(':id/apply-discount')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   applyDiscount(@Param('id') id: string, @Body() dto: { discountId: string }, @CurrentUser() user: JwtPayload) {
     return this.orderService.applyDiscount(id, user.branchId, dto.discountId);
   }
 
   @Post(':id/remove-discount')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   removeDiscount(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.orderService.removeDiscount(id, user.branchId);
   }
 
   @Post(':id/apply-coupon')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   applyCouponFromPos(@Param('id') id: string, @Body() dto: { code: string }, @CurrentUser() user: JwtPayload) {
     return this.orderService.applyCoupon(id, user.branchId, dto.code);
   }
 
   @Post(':id/items/:itemId/approve')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   approveItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: JwtPayload) {
     return this.orderService.approveItem(id, itemId, user.branchId);
   }
 
   @Post(':id/items/:itemId/reject')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
   rejectItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: JwtPayload) {
     return this.orderService.rejectItem(id, itemId, user.branchId);
   }

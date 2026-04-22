@@ -14,7 +14,7 @@ interface Staff {
   hireDate: string;
 }
 
-const ROLES = ['OWNER', 'MANAGER', 'CASHIER', 'KITCHEN', 'WAITER'] as const;
+const ROLES = ['OWNER', 'MANAGER', 'ADVISOR', 'CASHIER', 'KITCHEN', 'WAITER'] as const;
 
 function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => void }) {
   const qc = useQueryClient();

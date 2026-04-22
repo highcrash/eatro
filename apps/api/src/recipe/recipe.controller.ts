@@ -8,7 +8,7 @@ import type { JwtPayload, UpsertRecipeDto } from '@restora/types';
 
 @Controller('recipes')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER')
+@Roles('OWNER', 'MANAGER', 'ADVISOR')
 export class RecipeController {
   constructor(private readonly recipeService: RecipeService) {}
 

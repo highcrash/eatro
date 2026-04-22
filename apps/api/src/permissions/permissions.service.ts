@@ -52,7 +52,7 @@ export class PermissionsService {
     action: CashierAction,
     actionOtp?: string,
   ): Promise<void> {
-    if (role === 'OWNER' || role === 'MANAGER') return;
+    if (role === 'OWNER' || role === 'MANAGER' || role === 'ADVISOR') return;
     if (role !== 'CASHIER') {
       throw new ForbiddenException('Role not allowed');
     }

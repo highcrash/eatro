@@ -8,7 +8,7 @@ import type { JwtPayload, MarkAttendanceDto } from '@restora/types';
 
 @Controller('attendance')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER')
+@Roles('OWNER', 'MANAGER', 'ADVISOR')
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
