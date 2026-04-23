@@ -11,6 +11,11 @@ export interface PurchaseOrderItem {
     id: string;
     name: string;
     unit: string;
+    purchaseUnit?: string | null;
+    purchaseUnitQty?: number | null;
+    currentStock?: number | null;
+    packSize?: string | null;
+    brandName?: string | null;
   };
 }
 
@@ -85,7 +90,14 @@ export interface PurchaseReturnItem {
   ingredientId: string;
   quantity: number;
   unitPrice: number;
-  ingredient?: { id: string; name: string; unit: string };
+  ingredient?: {
+    id: string;
+    name: string;
+    unit: string;
+    purchaseUnit?: string | null;
+    packSize?: string | null;
+    brandName?: string | null;
+  };
 }
 
 export interface PurchaseReturn {

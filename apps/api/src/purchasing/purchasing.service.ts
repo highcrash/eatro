@@ -23,7 +23,7 @@ export class PurchasingService {
       include: {
         supplier: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
-        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
       orderBy: { createdAt: 'desc' },
       take: 100,
@@ -36,7 +36,7 @@ export class PurchasingService {
       include: {
         supplier: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
-        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
     });
     if (!po) throw new NotFoundException(`Purchase order ${id} not found`);
@@ -63,7 +63,7 @@ export class PurchasingService {
       include: {
         supplier: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
-        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
     });
     await this.linkSupplierToIngredients(dto.items.map((i) => i.ingredientId), dto.supplierId);
@@ -109,7 +109,7 @@ export class PurchasingService {
       include: {
         supplier: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
-        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
     });
   }
@@ -125,7 +125,7 @@ export class PurchasingService {
       include: {
         supplier: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
-        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
     });
   }
@@ -141,7 +141,7 @@ export class PurchasingService {
       include: {
         supplier: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
-        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
     });
   }
@@ -380,7 +380,7 @@ export class PurchasingService {
         include: {
           supplier: { select: { id: true, name: true } },
           createdBy: { select: { id: true, name: true } },
-          items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+          items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
         },
       });
     });
@@ -554,7 +554,7 @@ export class PurchasingService {
         },
         include: {
           supplier: { select: { id: true, name: true } },
-          items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+          items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
         },
       });
       await this.linkSupplierToIngredients(supplierItems.map((si) => si.ingredientId), supplierId);
@@ -573,7 +573,7 @@ export class PurchasingService {
       include: {
         supplier: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
-        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
     });
   }
@@ -664,7 +664,7 @@ export class PurchasingService {
         },
       },
       include: {
-        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
         supplier: { select: { id: true, name: true } },
         requestedBy: { select: { id: true, name: true } },
       },
@@ -708,7 +708,7 @@ export class PurchasingService {
         where: { id },
         data: { status: 'COMPLETED', completedAt: new Date() },
         include: {
-          items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+          items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
           supplier: { select: { id: true, name: true } },
           requestedBy: { select: { id: true, name: true } },
         },
@@ -723,7 +723,7 @@ export class PurchasingService {
     return this.prisma.purchaseReturn.update({
       where: { id },
       data: { status: 'REJECTED' },
-      include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } }, supplier: { select: { id: true, name: true } }, requestedBy: { select: { id: true, name: true } } },
+      include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } }, supplier: { select: { id: true, name: true } }, requestedBy: { select: { id: true, name: true } } },
     });
   }
 
@@ -734,7 +734,7 @@ export class PurchasingService {
     return this.prisma.purchaseReturn.update({
       where: { id },
       data: { status: 'REJECTED' },
-      include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } }, supplier: { select: { id: true, name: true } }, requestedBy: { select: { id: true, name: true } } },
+      include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } }, supplier: { select: { id: true, name: true } }, requestedBy: { select: { id: true, name: true } } },
     });
   }
 
@@ -742,7 +742,7 @@ export class PurchasingService {
     return this.prisma.purchaseReturn.findMany({
       where: { branchId, ...(purchaseOrderId ? { purchaseOrderId } : {}) },
       include: {
-        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
         supplier: { select: { id: true, name: true } },
         requestedBy: { select: { id: true, name: true } },
       },
