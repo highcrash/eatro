@@ -779,7 +779,7 @@ export default function PurchasingPage() {
                       <td className="px-3 py-3 text-[#999] font-body text-sm">{Number(item.quantityOrdered).toFixed(3)} {poUnit(item.ingredient, (item as any).unit)}</td>
                       <td className="px-3 py-3 text-[#999] font-body text-sm">{Number(item.quantityReceived).toFixed(3)}</td>
                       <td className="px-3 py-3 text-[#999] font-body text-sm">৳{(Number(item.unitCost) / 100).toFixed(2)}</td>
-                      <td className="px-3 py-3 text-white font-body text-sm">৳{((Number(item.unitCost) / 100) * Number(item.quantityOrdered)).toFixed(2)}</td>
+                      <td className="px-3 py-3 text-white font-body text-sm">৳{((Number(item.unitCost) / 100) * Number(item.quantityReceived || item.quantityOrdered)).toFixed(2)}</td>
                       <td className="px-3 py-3">
                         <span className={`text-xs font-body ${pct >= 100 ? 'text-[#4CAF50]' : pct > 0 ? 'text-[#FFA726]' : 'text-[#666]'}`}>
                           {pct}%
@@ -793,7 +793,7 @@ export default function PurchasingPage() {
             {/* PO Total */}
             <div className="mt-4 pt-4 border-t border-[#2A2A2A] flex justify-end">
               <span className="font-display text-lg text-[#D62B2B]">
-                Total: ৳{selectedPO.items.reduce((s, i) => s + (Number(i.unitCost) / 100) * Number(i.quantityOrdered), 0).toFixed(2)}
+                Total: ৳{selectedPO.items.reduce((s, i) => s + (Number(i.unitCost) / 100) * Number(i.quantityReceived || i.quantityOrdered), 0).toFixed(2)}
               </span>
             </div>
           </div>
