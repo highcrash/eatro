@@ -3,6 +3,20 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.4 — KOT rework + waiter pool opened (2026-04-23)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/utils:
+
+- **Any non-kitchen staff can be set as waiter on an order.** The
+  POS waiter dropdown + Tables-page "Set Waiter" modal now include
+  every active staff member except `role=KITCHEN`. Covers the
+  common case where a cashier or manager serves a table directly.
+- **Kitchen ticket (KOT) print rebuilt for legibility.** Table
+  destination at 2x (32px HTML / double-size ESC/POS), every item
+  row at ~2x bold with a double-line separator between rows, so
+  cooks can read the ticket across the pass. Section label +
+  "New Order" + date/time stay at normal size at the top.
+
 ## 1.0.3 — purchasing accuracy + SMS backup coverage (2026-04-23)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/utils:
