@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.6 — NBR Mushak (Bangladesh VAT) (2026-04-23)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/utils:
+
+- **Mushak-6.3 invoices on every paid order** when the branch toggles
+  NBR mode on. Atomic per-branch, per-fiscal-year serials in the form
+  `2526/DHK/000147`. A frozen JSON snapshot is archived so re-prints
+  stay legally stable even after menu prices / VAT rates change.
+- **Mushak-6.8 credit notes on refund.** A new Refund button on
+  paid orders in the POS opens a full / per-item refund dialog with
+  reason codes and approver password. The 6.8 slip auto-prints after
+  issuance, the account balance is reversed, and stock is restored.
+- **Admin Mushak Register** (9.1 equivalent): month picker, CSV
+  export, HTML print, filter invoices vs credit notes.
+- **Admin Print-6.3** button on every paid row in the Sales Report.
+- Branch form now has a dedicated "NBR / Mushak Compliance" block
+  with nbrEnabled toggle + BIN + branchCode + seller legal/trading.
+- Non-Bangladesh deployments unaffected — everything is gated on
+  `branch.nbrEnabled=false` by default.
+
 ## 1.0.5 — desktop KDS socket fix (2026-04-23)
 
 No Electron-shell changes. Rebundles apps/pos:
