@@ -3,6 +3,37 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.9 — purchasing accuracy + SMS backup coverage (2026-04-23)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/utils:
+
+- **Variant pack size in PO + receive + ledger rows.** Variants now
+  render as `Parent — Brand (PackSize)` across purchasing, receive,
+  return, and supplier-ledger screens via the new shared
+  `ingredientDisplayName` helper.
+- **PO line + grand total use received qty on over-delivery.** When
+  a supplier ships more than the PO ordered, totals now multiply
+  unitCost × received instead of × ordered — matching the print
+  export and supplier ledger.
+- **Variant cost/unit auto-derivation.** createVariant + update +
+  bulk CSV import derive `costPerUnit` from `costPerPurchaseUnit /
+  purchaseUnitQty`, so the inventory Cost/Unit column and daily
+  consumption value are correct for variants. One-shot repair
+  endpoint + UI button backfills existing rows.
+- **Reconciliation double-count fix.** Supplier + payroll payouts
+  auto-create mirror Expense rows; the balance builder now filters
+  them so the admin Daily Report Expected column matches the POS
+  close-day live balance.
+- **Auto-link supplier on PO + receive.** Pairing an ingredient with
+  a supplier upserts the IngredientSupplier row and, if the ingredient
+  had no primary supplier, promotes this one — shopping list
+  pre-fills the supplier next order.
+- **Backup + cleanup cover sms_logs + sms_templates.** SMS history +
+  template catalog now round-trip through backup/restore; a dedicated
+  "Delete all SMS logs" cleanup scope keeps templates intact.
+
+No Electron main-process changes.
+
 ## 0.8.8 — advisor/waiter POS access + UI polish (2026-04-23)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/utils:
