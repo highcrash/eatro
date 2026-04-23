@@ -3,6 +3,17 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.11 — desktop KDS socket fix (2026-04-23)
+
+No Electron-shell changes. Rebundles apps/pos:
+
+- **KDS Start / Done now work inside the desktop POS.** The embedded
+  KitchenPage used to open a socket with a relative '/ws' path that
+  resolved against the Electron renderer origin (not the paired API
+  server), so Start and Done clicks emitted to nowhere. The socket
+  now asks the main process for the paired serverUrl at connect
+  time and targets the API host directly.
+
 ## 0.8.10 — KOT rework + waiter pool opened (2026-04-23)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/utils:
