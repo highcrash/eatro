@@ -24,6 +24,7 @@ type Scope =
   | 'customers'
   | 'attendance'
   | 'payroll'
+  | 'sms-logs'
   | 'reset-all';
 
 interface Action {
@@ -130,9 +131,15 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'Communications',
+    actions: [
+      { scope: 'sms-logs', label: 'Delete all SMS logs', desc: 'Clears the outbound SMS history (campaigns, payment receipts, OTPs). Templates are kept.' },
+    ],
+  },
+  {
     title: 'DANGER ZONE',
     actions: [
-      { scope: 'reset-all', label: 'Reset everything (transactional)', desc: 'Wipes orders, purchases, returns, expenses, accounts (zeroed), stock movements, pre-ready, attendance, payroll, waste. Keeps users, branch, settings, menu, ingredients, suppliers.', danger: true },
+      { scope: 'reset-all', label: 'Reset everything (transactional)', desc: 'Wipes orders, purchases, returns, expenses, accounts (zeroed), stock movements, pre-ready, attendance, payroll, waste, SMS logs. Keeps users, branch, settings, menu, ingredients, suppliers, SMS templates.', danger: true },
     ],
   },
 ];

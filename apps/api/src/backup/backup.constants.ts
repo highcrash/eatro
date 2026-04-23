@@ -88,6 +88,13 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   // Tier 10 — accounting (depend on accounts + staff)
   { accessor: 'accountTransaction', table: 'account_transactions' },
   { accessor: 'expense', table: 'expenses' },
+
+  // Tier 11 — communications. sms_templates is branch-scoped catalog,
+  // sms_logs is the outbound history (campaigns, payment receipts,
+  // OTPs). Both survive round-trips so restoring on a new install
+  // re-creates the admin's saved templates + full send history.
+  { accessor: 'smsTemplate', table: 'sms_templates' },
+  { accessor: 'smsLog', table: 'sms_logs' },
 ];
 
 export const BACKUP_FILE_VERSION = 1;
