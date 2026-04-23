@@ -607,7 +607,7 @@ function ActiveOrderView({
   const { data: orderWaiters = [] } = useQuery<{ id: string; name: string; role: string; isActive: boolean }[]>({
     queryKey: ['waiters'],
     queryFn: () => api.get('/staff'),
-    select: (d: any[]) => d.filter((s) => s.role === 'WAITER' && s.isActive),
+    select: (d: any[]) => d.filter((s) => s.isActive && s.role !== 'KITCHEN'),
   });
 
   const setWaiterMut = useMutation({
@@ -1705,7 +1705,7 @@ function NewOrderView({
   const { data: waiters = [] } = useQuery<{ id: string; name: string; role: string; isActive: boolean }[]>({
     queryKey: ['waiters'],
     queryFn: () => api.get('/staff'),
-    select: (d: any[]) => d.filter((s) => s.role === 'WAITER' && s.isActive),
+    select: (d: any[]) => d.filter((s) => s.isActive && s.role !== 'KITCHEN'),
   });
 
   // Fetch categories for proper hierarchy
