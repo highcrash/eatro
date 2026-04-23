@@ -24,6 +24,7 @@ export type CleanupScope =
   | 'customers'
   | 'attendance'
   | 'payroll'
+  | 'sms-logs'
   | 'reset-all';
 
 @Injectable()
@@ -205,6 +206,12 @@ export class CleanupService {
         break;
       }
 
+      case 'sms-logs': {
+        // Templates stay — they're the admin's saved message bodies, not history.
+        deleted.smsLogs = (await p.smsLog.deleteMany({ where })).count;
+        break;
+      }
+
       case 'reset-all': {
         // Wipe all transactional data, keep: branch, settings, staff, payment methods, branding
         deleted.reviews = (await p.review.deleteMany({ where })).count;
@@ -225,6 +232,7 @@ export class CleanupService {
         deleted.payrollPayments = (await p.payrollPayment.deleteMany({ where: { payroll: { branchId } } })).count;
         deleted.payrolls = (await p.payroll.deleteMany({ where })).count;
         deleted.wasteLogs = (await p.wasteLog.deleteMany({ where })).count;
+        deleted.smsLogs = (await p.smsLog.deleteMany({ where })).count;
         await p.ingredient.updateMany({ where, data: { currentStock: 0 } });
         break;
       }
