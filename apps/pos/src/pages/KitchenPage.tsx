@@ -8,9 +8,24 @@ import { api } from '../lib/api';
 
 let socket: Socket | null = null;
 
+// Resolve the WS target against VITE_API_BASE_URL so the socket connects to
+// the API origin, not the page's own host. Fixes cross-origin deployments
+// where io('/ws') would target the POS domain instead of api.*.
+function wsUrl(): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const base = ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined) ?? '/api/v1';
+  if (!base.startsWith('http')) return '/ws';
+  try {
+    const u = new URL(base);
+    return `${u.protocol}//${u.host}/ws`;
+  } catch {
+    return '/ws';
+  }
+}
+
 function getSocket(): Socket {
   if (!socket) {
-    socket = io('/ws', { transports: ['websocket'] });
+    socket = io(wsUrl(), { transports: ['websocket'] });
   }
   return socket;
 }

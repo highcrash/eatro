@@ -8,9 +8,25 @@ import { api } from './lib/api';
 
 let socket: Socket | null = null;
 
+// Pull the API origin off VITE_API_BASE_URL (e.g. "https://api.eatrobd.com/api/v1")
+// so the WebSocket connects to the same host as the REST API, not the KDS's
+// own origin. Without this the socket targets pos.eatrobd.com/ws which
+// doesn't exist, so Start/Done clicks silently emit to nowhere.
+function wsUrl(): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const base = ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined) ?? '/api/v1';
+  if (!base.startsWith('http')) return '/ws'; // same-origin dev / proxied prod
+  try {
+    const u = new URL(base);
+    return `${u.protocol}//${u.host}/ws`;
+  } catch {
+    return '/ws';
+  }
+}
+
 function getSocket(): Socket {
   if (!socket) {
-    socket = io('/ws', { transports: ['websocket'] });
+    socket = io(wsUrl(), { transports: ['websocket'] });
   }
   return socket;
 }
