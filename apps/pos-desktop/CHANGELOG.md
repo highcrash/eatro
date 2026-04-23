@@ -3,6 +3,20 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.7 — auto round-to-taka + Mushak display fix (2026-04-23)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/utils:
+
+- **Bills auto-round to the nearest taka.** ৳973.70 → ৳974.00 with
+  an "Auto Roundup (+0.30)" line printed above the grand total.
+  ৳973.20 → ৳973.00 with "-0.20". Works across thermal ESC/POS,
+  HTML print fallback, POS Receipt + Bill modals, and Mushak 6.3
+  slips. Stored as Order.roundAdjustment (signed paisa).
+- **Mushak register + slip no longer show ×100 amounts.** A ৳6184.50
+  bill printed as 618450.00 because the slip / register rendered
+  paisa directly; now divides by 100 at the display layer. CSV
+  export converts to taka so accountants' sums match the receipt.
+
 ## 1.0.6 — NBR Mushak (Bangladesh VAT) (2026-04-23)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/utils:
