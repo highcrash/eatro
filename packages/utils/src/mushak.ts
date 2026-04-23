@@ -104,6 +104,8 @@ export interface MushakSnapshot {
   subtotalExclVat: number;
   sdAmount: number;
   vatAmount: number;
+  /** Signed paisa rounding delta applied to the total. Zero when no rounding. */
+  roundAdjustment?: number;
   totalInclVat: number;
   // Payment method(s) for 6.3; refund method for 6.8.
   paymentSummary?: Array<{ method: string; amount: number }>;
@@ -136,7 +138,10 @@ export function renderMushakSlipHtml(snapshot: MushakSnapshot): string {
   const headerColor = isNote ? '#B71C1C' : '#000';
   const dateStr = new Date(snapshot.issuedAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
   const currency = snapshot.currency || 'BDT';
-  const money = (n: number) => `${currency} ${n.toFixed(2)}`;
+  // All money fields on the snapshot come from Order columns which store
+  // paisa (smallest unit). Divide by 100 for display so ৳6184.50 doesn't
+  // print as "BDT 618450.00".
+  const money = (n: number) => `${currency} ${(n / 100).toFixed(2)}`;
 
   const itemRows = snapshot.items
     .map(
@@ -198,6 +203,7 @@ export function renderMushakSlipHtml(snapshot: MushakSnapshot): string {
       <div class="row"><span>Subtotal (excl VAT)</span><span>${money(snapshot.subtotalExclVat)}</span></div>
       ${snapshot.sdAmount ? `<div class="row"><span>Supplementary Duty</span><span>${money(snapshot.sdAmount)}</span></div>` : ''}
       <div class="row"><span>VAT</span><span>${money(snapshot.vatAmount)}</span></div>
+      ${snapshot.roundAdjustment && Math.abs(snapshot.roundAdjustment) > 0 ? `<div class="row"><span>Auto Roundup</span><span>${snapshot.roundAdjustment >= 0 ? '+' : '-'}${money(Math.abs(snapshot.roundAdjustment))}</span></div>` : ''}
       <div class="row grand"><span>${isNote ? 'Refund' : 'Total'}</span><span>${money(snapshot.totalInclVat)}</span></div>
     </div>
     ${isNote && snapshot.refund

@@ -153,6 +153,11 @@ export function orderToReceiptInput(
     serviceChargeRatePct: serviceChargeRatePct != null && Number.isFinite(serviceChargeRatePct) && serviceChargeRatePct > 0 ? serviceChargeRatePct : undefined,
     taxAmount: order.taxAmount ? Number(order.taxAmount) : undefined,
     taxRatePct: Number.isFinite(taxRatePct) ? taxRatePct : undefined,
+    // Auto round-to-taka delta (signed paisa). Receipt templates show
+    // "Auto Roundup (+X.XX)" / "(-X.XX)" when non-zero.
+    roundAdjustment: (order as { roundAdjustment?: number | string }).roundAdjustment
+      ? Number((order as { roundAdjustment?: number | string }).roundAdjustment)
+      : undefined,
     totalAmount: Number(order.totalAmount),
     payments,
     changeReturned: isPaid ? change : undefined,

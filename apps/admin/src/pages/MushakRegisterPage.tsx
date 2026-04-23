@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Printer, FileDown } from 'lucide-react';
 import type { MushakRegisterRow } from '@restora/types';
+import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
 
 type Filter = 'all' | 'invoice' | 'note';
@@ -58,7 +59,8 @@ export default function MushakRegisterPage() {
     if (!w) return;
     const escape = (s: string | number | null | undefined) =>
       String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const money = (n: number) => `৳${n.toFixed(2)}`;
+    // Totals come in paisa (Order table stores smallest unit); convert for display.
+    const money = (n: number) => formatCurrency(n);
     const rowsHtml = rows.map((r) => `<tr>
       <td>${escape(r.kind)}</td>
       <td style="font-family:monospace">${escape(r.serial)}</td>
@@ -180,10 +182,10 @@ export default function MushakRegisterPage() {
                   <td className="px-3 py-2 font-body text-xs text-[#999]">{r.buyerName ?? 'Walk-in'}</td>
                   <td className="px-3 py-2 font-mono text-[11px] text-[#666]">{r.linkedInvoiceSerial ?? ''}</td>
                   <td className="px-3 py-2 font-body text-xs text-[#666]">{r.reasonCode ?? ''}</td>
-                  <td className={`px-3 py-2 font-body text-xs text-right ${tone}`}>৳{Number(r.subtotalExclVat).toFixed(2)}</td>
-                  <td className={`px-3 py-2 font-body text-xs text-right ${tone}`}>৳{Number(r.sdAmount).toFixed(2)}</td>
-                  <td className={`px-3 py-2 font-body text-xs text-right ${tone}`}>৳{Number(r.vatAmount).toFixed(2)}</td>
-                  <td className={`px-3 py-2 font-body text-sm text-right font-bold ${tone}`}>৳{Number(r.totalInclVat).toFixed(2)}</td>
+                  <td className={`px-3 py-2 font-body text-xs text-right ${tone}`}>{formatCurrency(Number(r.subtotalExclVat))}</td>
+                  <td className={`px-3 py-2 font-body text-xs text-right ${tone}`}>{formatCurrency(Number(r.sdAmount))}</td>
+                  <td className={`px-3 py-2 font-body text-xs text-right ${tone}`}>{formatCurrency(Number(r.vatAmount))}</td>
+                  <td className={`px-3 py-2 font-body text-sm text-right font-bold ${tone}`}>{formatCurrency(Number(r.totalInclVat))}</td>
                 </tr>
               );
             })}
@@ -192,10 +194,10 @@ export default function MushakRegisterPage() {
             <tfoot>
               <tr className="bg-[#0D0D0D] border-t-2 border-[#2A2A2A]">
                 <td colSpan={6} className="px-3 py-3 text-right text-[#666] font-body text-xs tracking-widest uppercase">Totals</td>
-                <td className="px-3 py-3 text-right text-white font-body text-sm font-bold">৳{totals.subtotal.toFixed(2)}</td>
-                <td className="px-3 py-3 text-right text-white font-body text-sm font-bold">৳{totals.sd.toFixed(2)}</td>
-                <td className="px-3 py-3 text-right text-white font-body text-sm font-bold">৳{totals.vat.toFixed(2)}</td>
-                <td className="px-3 py-3 text-right text-[#D62B2B] font-display text-base">৳{totals.total.toFixed(2)}</td>
+                <td className="px-3 py-3 text-right text-white font-body text-sm font-bold">{formatCurrency(totals.subtotal)}</td>
+                <td className="px-3 py-3 text-right text-white font-body text-sm font-bold">{formatCurrency(totals.sd)}</td>
+                <td className="px-3 py-3 text-right text-white font-body text-sm font-bold">{formatCurrency(totals.vat)}</td>
+                <td className="px-3 py-3 text-right text-[#D62B2B] font-display text-base">{formatCurrency(totals.total)}</td>
               </tr>
             </tfoot>
           )}
