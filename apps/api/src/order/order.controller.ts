@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Headers, B
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Request } from 'express';
 
-import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, JwtPayload } from '@restora/types';
+import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, JwtPayload } from '@restora/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -110,6 +110,12 @@ export class OrderController {
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   voidOrder(@Param('id') id: string, @Body() dto: VoidOrderDto, @CurrentUser() user: JwtPayload) {
     return this.orderService.voidOrder(id, user.branchId, dto);
+  }
+
+  @Post(':id/refund')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  refundOrder(@Param('id') id: string, @Body() dto: RefundOrderDto, @CurrentUser() user: JwtPayload) {
+    return this.orderService.refundOrder(id, user.branchId, user.sub, dto);
   }
 
   @Post(':id/approve-items')

@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 
-import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto } from '@restora/types';
-import { generateOrderNumber } from '@restora/utils';
+import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason } from '@restora/types';
+import { generateOrderNumber, type MushakLineItem, type MushakBuyerBlock } from '@restora/utils';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../ws-gateway/realtime.gateway';
 import { RecipeService } from '../recipe/recipe.service';
@@ -9,6 +10,7 @@ import { AccountService } from '../account/account.service';
 import { BranchSettingsService } from '../branch-settings/branch-settings.service';
 import { LicenseService } from '../license/license.service';
 import { SmsService } from '../sms/sms.service';
+import { MushakService } from '../mushak/mushak.service';
 
 /**
  * Service charge + VAT calculator used by every place that recomputes an
@@ -56,6 +58,7 @@ export class OrderService {
     // out the global APP_GUARD still trips on this in the hot path.
     private readonly license: LicenseService,
     private readonly sms: SmsService,
+    private readonly mushak: MushakService,
   ) {}
 
   findAll(branchId: string, tableId?: string, status?: string, from?: string, to?: string) {
@@ -268,6 +271,11 @@ export class OrderService {
       }
     }
 
+    // Fetch branch up front so we can issue a Mushak-6.3 inside the same
+    // transaction when nbrEnabled=true. Keeping this read outside the
+    // transaction is fine — branch settings don't race with order payment.
+    const branchForMushak = await this.prisma.branch.findUniqueOrThrow({ where: { id: branchId } });
+
     const updated = await this.prisma.$transaction(async (tx) => {
       // Create payment records
       if (dto.method === 'SPLIT' && dto.splits) {
@@ -289,7 +297,7 @@ export class OrderService {
         });
       }
 
-      return tx.order.update({
+      const paidOrder = await tx.order.update({
         where: { id },
         data: {
           status: 'PAID',
@@ -298,6 +306,18 @@ export class OrderService {
         },
         include: { items: true, payments: true },
       });
+
+      // NBR Mushak-6.3: issue the tax invoice inside the same transaction
+      // so serial allocation + order paid-state either both commit or both
+      // roll back. No-op when the branch toggle is off.
+      if (branchForMushak.nbrEnabled) {
+        await this.mushak.issueInvoiceForOrder(tx, {
+          order: paidOrder as never,
+          branch: branchForMushak as never,
+        });
+      }
+
+      return paidOrder;
     });
 
     // Update linked account balances (best-effort, non-blocking)
@@ -1163,5 +1183,150 @@ export class OrderService {
     }
 
     return updated;
+  }
+
+  /**
+   * Refund a paid order (full or per-item). Issues a Mushak-6.8 credit note
+   * linked to the original 6.3, restores stock, and reverses the account
+   * balance for the refunded portion. Requires an approver staff member
+   * (OWNER/MANAGER) verified via their password hash — reuses the same
+   * bcrypt-compare pattern the void-approval flow already uses.
+   */
+  async refundOrder(id: string, branchId: string, staffId: string, dto: RefundOrderDto) {
+    this.license.assertMutation('order.refund');
+
+    const order = await this.prisma.order.findFirst({
+      where: { id, branchId, deletedAt: null },
+      include: { items: true, payments: true },
+    });
+    if (!order) throw new NotFoundException(`Order ${id} not found`);
+    if (order.status !== 'PAID' && order.status !== 'PARTIALLY_REFUNDED') {
+      throw new BadRequestException('Only paid orders can be refunded');
+    }
+
+    const branch = await this.prisma.branch.findUniqueOrThrow({ where: { id: branchId } });
+    if (!branch.nbrEnabled) {
+      throw new BadRequestException('Refunds require NBR mode to be enabled on the branch');
+    }
+    const invoice = await this.prisma.mushakInvoice.findUnique({ where: { orderId: id } });
+    if (!invoice) {
+      throw new BadRequestException('Original Mushak-6.3 invoice not found for this order');
+    }
+
+    // Approver check — a staff member with PIN / password must confirm.
+    const approverId = dto.approverId ?? staffId;
+    const approver = await this.prisma.staff.findFirst({
+      where: { id: approverId, branchId, isActive: true, deletedAt: null },
+    });
+    if (!approver || (approver.role !== 'OWNER' && approver.role !== 'MANAGER')) {
+      throw new BadRequestException('Refund requires OWNER or MANAGER approval');
+    }
+    if (dto.approverPin) {
+      const ok = await bcrypt.compare(dto.approverPin, approver.passwordHash);
+      if (!ok) throw new BadRequestException('Approver PIN is incorrect');
+    }
+
+    // Determine the items being refunded. Omitted/empty itemIds = whole order.
+    const alreadyRefunded = await this.prisma.mushakNote.findMany({
+      where: { orderId: id },
+      select: { refundedItemIds: true },
+    });
+    const priorRefundedIds = new Set(
+      alreadyRefunded.flatMap((n) => (Array.isArray(n.refundedItemIds) ? (n.refundedItemIds as string[]) : [])),
+    );
+
+    const refundingSpecific = !!(dto.itemIds && dto.itemIds.length > 0);
+    const candidateItems = order.items.filter((i) => !i.voidedAt);
+    const refundTargets = refundingSpecific
+      ? candidateItems.filter((i) => dto.itemIds!.includes(i.id) && !priorRefundedIds.has(i.id))
+      : candidateItems.filter((i) => !priorRefundedIds.has(i.id));
+
+    if (refundTargets.length === 0) {
+      throw new BadRequestException('No eligible items remain to refund');
+    }
+
+    // Reuse the same math the invoice used. VAT is distributed proportional
+    // to line totals so the refunded VAT exactly mirrors what was collected.
+    const refundSubtotal = refundTargets.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
+    const orderNet = Math.max(1, order.subtotal.toNumber() - order.discountAmount.toNumber());
+    const refundVat = Math.round((refundSubtotal / orderNet) * order.taxAmount.toNumber() * 100) / 100;
+    const refundTotal = refundSubtotal + refundVat;
+
+    const refundedItems: MushakLineItem[] = refundTargets.map((i) => {
+      const share = Math.round((i.totalPrice.toNumber() / Math.max(1, refundSubtotal)) * refundVat * 100) / 100;
+      return {
+        id: i.id,
+        name: i.menuItemName,
+        quantity: -Number(i.quantity),
+        unitPrice: i.unitPrice.toNumber(),
+        subtotalExclVat: -i.totalPrice.toNumber(),
+        sdAmount: 0,
+        vatAmount: -share,
+        totalInclVat: -(i.totalPrice.toNumber() + share),
+      };
+    });
+
+    const buyer: MushakBuyerBlock | null = (order.customerName || order.customerPhone)
+      ? { name: order.customerName, phone: order.customerPhone }
+      : null;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const note = await this.mushak.issueNoteForRefund(tx, {
+        invoice: { id: invoice.id, serial: invoice.serial, branchId: invoice.branchId, branchCode: invoice.branchCode },
+        order: { id: order.id },
+        branch: branch as never,
+        issuedByStaff: { id: approver.id, name: approver.name },
+        reasonCode: dto.reason as RefundReason,
+        reasonText: dto.reasonText ?? null,
+        noteType: 'CREDIT',
+        refundedItems,
+        refundedItemIds: refundTargets.map((i) => i.id),
+        totals: {
+          subtotalExclVat: -refundSubtotal,
+          sdAmount: 0,
+          vatAmount: -refundVat,
+          totalInclVat: -refundTotal,
+        },
+        buyer,
+      });
+
+      // Status transition: full set refunded → REFUNDED, otherwise PARTIALLY.
+      const totalRefundedSoFar = priorRefundedIds.size + refundTargets.length;
+      const totalCandidates = candidateItems.length;
+      const newStatus = totalRefundedSoFar >= totalCandidates ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+      const updatedOrder = await tx.order.update({
+        where: { id },
+        data: { status: newStatus as never },
+        include: { items: true, payments: true },
+      });
+      return { note, order: updatedOrder };
+    });
+
+    // Reverse account balances proportionally across the order's payments
+    // (best-effort, non-blocking — same pattern as processPayment).
+    const paymentTotal = order.payments.reduce((s, p) => s + p.amount.toNumber(), 0) || 1;
+    for (const p of order.payments) {
+      const share = Math.round((p.amount.toNumber() / paymentTotal) * refundTotal * 100) / 100;
+      if (share > 0) {
+        void this.accountService.updateAccountForPayment(
+          branchId,
+          p.method,
+          -share,
+          'REFUND' as never,
+          `Refund for order #${order.orderNumber} (${result.note.serial})`,
+        );
+      }
+    }
+
+    // Restore stock for the refunded items.
+    void this.recipeService.restoreStockForItems(
+      branchId,
+      id,
+      refundTargets.map((i) => ({ menuItemId: i.menuItemId, quantity: Number(i.quantity) })),
+    );
+
+    this.ws.emitToBranch(branchId, 'order:updated' as never, { orderId: id, noteId: result.note.id, status: result.order.status });
+
+    return { order: result.order, note: result.note };
   }
 }

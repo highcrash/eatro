@@ -14,6 +14,13 @@ interface BranchForm {
   currency: string;
   timezone: string;
   taxRate: string;
+  // NBR Mushak compliance (Bangladesh VAT)
+  nbrEnabled: boolean;
+  bin: string;
+  branchCode: string;
+  sellerLegalName: string;
+  sellerTradingName: string;
+  mushakVersion: string;
 }
 
 const EMPTY_FORM: BranchForm = {
@@ -24,6 +31,12 @@ const EMPTY_FORM: BranchForm = {
   currency: 'BDT',
   timezone: 'Asia/Dhaka',
   taxRate: '0',
+  nbrEnabled: false,
+  bin: '',
+  branchCode: '',
+  sellerLegalName: '',
+  sellerTradingName: '',
+  mushakVersion: 'Mushak-6.3',
 };
 
 export default function BranchesPage() {
@@ -50,6 +63,12 @@ export default function BranchesPage() {
         currency: editing.currency,
         timezone: editing.timezone,
         taxRate: String(editing.taxRate),
+        nbrEnabled: Boolean(editing.nbrEnabled),
+        bin: editing.bin ?? '',
+        branchCode: editing.branchCode ?? '',
+        sellerLegalName: editing.sellerLegalName ?? '',
+        sellerTradingName: editing.sellerTradingName ?? '',
+        mushakVersion: editing.mushakVersion ?? 'Mushak-6.3',
       });
     } else {
       setForm(EMPTY_FORM);
@@ -90,7 +109,12 @@ export default function BranchesPage() {
       setError('Name, address, and phone are required');
       return;
     }
-    const dto: CreateBranchDto = {
+    if (form.nbrEnabled) {
+      if (!form.bin.trim()) { setError('BIN is required when NBR mode is on'); return; }
+      if (!form.branchCode.trim()) { setError('Branch code is required when NBR mode is on'); return; }
+      if (form.branchCode.trim().length > 6) { setError('Branch code should be 2-6 characters (e.g. DHK)'); return; }
+    }
+    const baseDto = {
       name: form.name.trim(),
       address: form.address.trim(),
       phone: form.phone.trim(),
@@ -99,8 +123,19 @@ export default function BranchesPage() {
       timezone: form.timezone,
       taxRate: parseFloat(form.taxRate || '0'),
     };
-    if (editing) updateMut.mutate(dto);
-    else createMut.mutate(dto);
+    if (editing) {
+      updateMut.mutate({
+        ...baseDto,
+        nbrEnabled: form.nbrEnabled,
+        bin: form.bin.trim() || null,
+        branchCode: form.branchCode.trim().toUpperCase() || null,
+        sellerLegalName: form.sellerLegalName.trim() || null,
+        sellerTradingName: form.sellerTradingName.trim() || null,
+        mushakVersion: form.mushakVersion.trim() || null,
+      });
+    } else {
+      createMut.mutate(baseDto);
+    }
   };
 
   const isOwner = currentUser?.role === 'OWNER';
@@ -244,6 +279,58 @@ export default function BranchesPage() {
                 <Field label="Timezone" value={form.timezone} onChange={(v) => setForm({ ...form, timezone: v })} />
               </div>
               <Field label="Tax Rate (%)" value={form.taxRate} onChange={(v) => setForm({ ...form, taxRate: v })} type="number" />
+
+              {/* NBR / Mushak compliance (Bangladesh VAT). Collapsed below the core
+                  fields; admins who don't sell under NBR can ignore it — the
+                  toggle defaults off and all downstream behaviour (6.3 issue +
+                  refund → 6.8) is gated on nbrEnabled. */}
+              {editing && (
+                <div className="border-t border-[#2A2A2A] pt-4 mt-4 space-y-3">
+                  <p className="text-[11px] tracking-widest uppercase text-[#D62B2B] font-body font-medium">
+                    NBR / Mushak compliance (Bangladesh)
+                  </p>
+                  <label className="flex items-center gap-2 text-sm text-white font-body cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.nbrEnabled}
+                      onChange={(e) => setForm({ ...form, nbrEnabled: e.target.checked })}
+                      className="w-4 h-4 accent-[#D62B2B]"
+                    />
+                    <span>Enable Mushak-6.3 invoices on payment + 6.8 credit notes on refund</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field
+                      label={form.nbrEnabled ? 'BIN *' : 'BIN'}
+                      value={form.bin}
+                      onChange={(v) => setForm({ ...form, bin: v })}
+                    />
+                    <Field
+                      label={form.nbrEnabled ? 'Branch Code *' : 'Branch Code'}
+                      value={form.branchCode}
+                      onChange={(v) => setForm({ ...form, branchCode: v.toUpperCase() })}
+                    />
+                  </div>
+                  <Field
+                    label="Seller legal name"
+                    value={form.sellerLegalName}
+                    onChange={(v) => setForm({ ...form, sellerLegalName: v })}
+                  />
+                  <Field
+                    label="Seller trading name"
+                    value={form.sellerTradingName}
+                    onChange={(v) => setForm({ ...form, sellerTradingName: v })}
+                  />
+                  <Field
+                    label="Mushak form version"
+                    value={form.mushakVersion}
+                    onChange={(v) => setForm({ ...form, mushakVersion: v })}
+                  />
+                  <p className="text-[11px] text-[#666] font-body leading-relaxed">
+                    Branch code becomes part of the invoice serial, e.g. <code className="text-white">2526/{form.branchCode || 'XXX'}/000001</code>.
+                    Serial is per-fiscal-year (BD FY = Jul–Jun) and atomic — no skips, no duplicates.
+                  </p>
+                </div>
+              )}
 
               {error && <p className="text-xs text-[#D62B2B] font-body">{error}</p>}
             </div>

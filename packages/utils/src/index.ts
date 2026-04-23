@@ -5,3 +5,4 @@ export * from './order';
 export * from './units';
 export * from './kitchen-ticket';
 export * from './variant-label';
+export * from './mushak';

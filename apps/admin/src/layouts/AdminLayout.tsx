@@ -98,6 +98,7 @@ const NAV_GROUPS: Array<{
       { to: '/reports/sales', icon: BarChart2, label: 'Sales Report', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/daily', icon: BarChart2, label: 'Daily Reports', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/voids', icon: BarChart2, label: 'Void Audit', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/reports/mushak', icon: Receipt, label: 'Mushak Register', allowedRoles: OPERATIONAL_ROLES },
       { to: '/discounts', icon: BarChart2, label: 'Discounts & Coupons', allowedRoles: OPERATIONAL_ROLES },
       { to: '/expenses', icon: Receipt, label: 'Expenses', allowedRoles: OPERATIONAL_ROLES },
       // Accounts = money + ledger. Owner/Manager only.

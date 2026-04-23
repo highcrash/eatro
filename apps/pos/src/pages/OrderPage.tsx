@@ -6,6 +6,7 @@ import { Plus, Minus, ArrowLeft, ShoppingBag, X, Printer, Search } from 'lucide-
 import type { MenuItem, Order, OrderItem, CreateOrderDto, VoidOrderItemDto, WasteReason } from '@restora/types';
 import { formatCurrency, printKitchenTicket as printKitchenTicketUtil } from '@restora/utils';
 import { useBranchSettings } from '../hooks/useBranchSettings';
+import { useBranding } from '../lib/branding';
 import { isPlainCharKey } from '../lib/keyboard';
 import { useIsOnline } from '../lib/online';
 import { OfflineInlineHint } from '../components/OfflineHint';
@@ -14,6 +15,7 @@ import { api } from '../lib/api';
 import PaymentModal from '../components/PaymentModal';
 import ReceiptModal from '../components/ReceiptModal';
 import BillModal from '../components/BillModal';
+import RefundOrderDialog from '../components/RefundOrderDialog';
 
 interface CartItem {
   menuItem: MenuItem;
@@ -586,6 +588,7 @@ function ActiveOrderView({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: branchSettings } = useBranchSettings();
+  const { data: branding } = useBranding();
   const online = useIsOnline();
   const isCashier = user?.role === 'CASHIER' || user?.role === 'KITCHEN' || user?.role === 'WAITER';
 
@@ -598,6 +601,7 @@ function ActiveOrderView({
 
   const [showPayment, setShowPayment] = useState(false);
   const [showBill, setShowBill] = useState(false);
+  const [showRefund, setShowRefund] = useState(false);
   const [paidOrder, setPaidOrder] = useState<Order | null>(null);
   const [cashReceived, setCashReceived] = useState(0);
   const [voidingItem, setVoidingItem] = useState<OrderItem | null>(null);
@@ -924,10 +928,28 @@ function ActiveOrderView({
           </span>
         </div>
         <div className="flex-1" />
+        {/* Refund button — surfaces only for paid / partially-refunded orders
+            on NBR-enabled branches. Issuing emits a Mushak-6.8 credit note
+            linked to the original 6.3 invoice. */}
+        {branding?.nbrEnabled && (order.status === 'PAID' || order.status === 'PARTIALLY_REFUNDED') && (
+          <button
+            onClick={() => setShowRefund(true)}
+            className="text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-theme border border-theme-danger text-theme-danger hover:bg-theme-danger hover:text-white transition-colors mr-2"
+          >
+            Refund
+          </button>
+        )}
         <span className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full ${STATUS_PILL[order.status] ?? 'text-theme-text-muted bg-theme-bg'}`}>
           {STATUS_LABEL[order.status] ?? order.status}
         </span>
       </header>
+      {showRefund && (
+        <RefundOrderDialog
+          order={order}
+          onClose={() => setShowRefund(false)}
+          onRefunded={() => void queryClient.invalidateQueries({ queryKey: ['orders'] })}
+        />
+      )}
 
       {/* Bill requested banner */}
       {(order as any).billRequested && order.status !== 'PAID' && (
