@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateSupplierDto, UpdateSupplierDto } from '@restora/types';
+import { ingredientDisplayName } from '@restora/utils';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountService } from '../account/account.service';
 
@@ -80,14 +81,14 @@ export class SupplierService {
     const supplier = await this.findOne(id, branchId);
     const purchaseOrders = await this.prisma.purchaseOrder.findMany({
       where: { branchId, supplierId: id, deletedAt: null, status: { in: ['RECEIVED', 'PARTIAL'] } },
-      include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true } } } } },
+      include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, packSize: true } } } } },
       orderBy: { createdAt: 'desc' },
     });
 
     // Fetch returns for this supplier
     const returns = await this.prisma.purchaseReturn.findMany({
       where: { branchId, supplierId: id, status: 'COMPLETED' },
-      include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true } } } } },
+      include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, packSize: true } } } } },
       orderBy: { createdAt: 'desc' },
     });
     const payments = await this.prisma.supplierPayment.findMany({
@@ -122,7 +123,7 @@ export class SupplierService {
         receivedAt: po.receivedAt,
         items: po.items.map((item) => ({
           id: item.id,
-          ingredientName: item.ingredient?.name ?? '—',
+          ingredientName: ingredientDisplayName(item.ingredient),
           unit: item.unit || item.ingredient?.purchaseUnit || item.ingredient?.unit || '',
           quantityOrdered: item.quantityOrdered.toNumber(),
           quantityReceived: item.quantityReceived.toNumber(),
@@ -135,7 +136,7 @@ export class SupplierService {
         id: r.id,
         completedAt: r.completedAt,
         items: r.items.map((i) => ({
-          ingredientName: i.ingredient?.name ?? '—',
+          ingredientName: ingredientDisplayName(i.ingredient),
           unit: i.ingredient?.purchaseUnit || i.ingredient?.unit || '',
           quantity: i.quantity.toNumber(),
           unitPrice: i.unitPrice.toNumber(),

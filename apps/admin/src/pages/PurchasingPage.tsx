@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { formatVariantLabel } from '@restora/utils';
+import { formatVariantLabel, ingredientDisplayName } from '@restora/utils';
 import type { PurchaseOrder, Supplier, Ingredient, CreatePurchaseOrderDto, PurchaseReturn } from '@restora/types';
 import VariantPickerModal from '../components/VariantPickerModal';
 
@@ -56,7 +56,7 @@ function printPO(po: PurchaseOrder, includePrice: boolean) {
     const price = includePrice ? `৳${(Number(item.unitCost) / 100).toFixed(2)}` : '';
     const total = includePrice ? `৳${((Number(item.unitCost) / 100) * Number(item.quantityReceived || item.quantityOrdered)).toFixed(2)}` : '';
     return `<tr>
-      <td style="${td}">${item.ingredient?.name ?? ''}</td>
+      <td style="${td}">${ingredientDisplayName(item.ingredient)}</td>
       <td style="text-align:right;${td}">${ordered}</td>
       ${hasReceived ? `<td style="text-align:right;${td}">${received}</td>` : ''}
       ${includePrice ? `<td style="text-align:right;${td}">${price}</td><td style="text-align:right;${td}">${total}</td>` : ''}
@@ -92,7 +92,7 @@ function printReturn(ret: PurchaseReturn) {
     const qty = `${Number(item.quantity).toFixed(2)} ${stockUnit}`;
     const price = `৳${(Number(item.unitPrice) / 100).toFixed(2)}`;
     const total = `৳${((Number(item.unitPrice) / 100) * Number(item.quantity)).toFixed(2)}`;
-    return `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">${item.ingredient?.name ?? ''}</td><td style="text-align:right;padding:4px 8px;border-bottom:1px solid #eee">${qty}</td><td style="text-align:right;padding:4px 8px;border-bottom:1px solid #eee">${price}</td><td style="text-align:right;padding:4px 8px;border-bottom:1px solid #eee">${total}</td></tr>`;
+    return `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">${ingredientDisplayName(item.ingredient)}</td><td style="text-align:right;padding:4px 8px;border-bottom:1px solid #eee">${qty}</td><td style="text-align:right;padding:4px 8px;border-bottom:1px solid #eee">${price}</td><td style="text-align:right;padding:4px 8px;border-bottom:1px solid #eee">${total}</td></tr>`;
   }).join('');
 
   const grandTotal = ret.items.reduce((s, i) => s + (Number(i.unitPrice) / 100) * Number(i.quantity), 0);
@@ -363,7 +363,7 @@ export default function PurchasingPage() {
     if (!selectedPO) return;
     setReturnLines(selectedPO.items.map((item) => ({
       ingredientId: item.ingredientId,
-      name: item.ingredient?.name ?? '',
+      name: ingredientDisplayName(item.ingredient),
       unit: poUnit(item.ingredient, (item as any).unit),
       quantity: '0',
       unitPrice: String((Number(item.unitCost) / 100).toFixed(2)),
@@ -775,7 +775,7 @@ export default function PurchasingPage() {
                   const pct = Math.round((item.quantityReceived / item.quantityOrdered) * 100);
                   return (
                     <tr key={item.id} className="border-b border-[#2A2A2A] last:border-0">
-                      <td className="px-3 py-3 text-white font-body text-sm">{item.ingredient?.name}</td>
+                      <td className="px-3 py-3 text-white font-body text-sm">{ingredientDisplayName(item.ingredient)}</td>
                       <td className="px-3 py-3 text-[#999] font-body text-sm">{Number(item.quantityOrdered).toFixed(3)} {poUnit(item.ingredient, (item as any).unit)}</td>
                       <td className="px-3 py-3 text-[#999] font-body text-sm">{Number(item.quantityReceived).toFixed(3)}</td>
                       <td className="px-3 py-3 text-[#999] font-body text-sm">৳{(Number(item.unitCost) / 100).toFixed(2)}</td>
@@ -861,7 +861,7 @@ export default function PurchasingPage() {
                         <tbody>
                           {ret.items.map((item) => (
                             <tr key={item.id} className="border-b border-[#2A2A2A] last:border-0">
-                              <td className="px-2 py-2 text-white font-body text-xs">{item.ingredient?.name}</td>
+                              <td className="px-2 py-2 text-white font-body text-xs">{ingredientDisplayName(item.ingredient)}</td>
                               <td className="px-2 py-2 text-[#999] font-body text-xs">{Number(item.quantity).toFixed(3)} {item.ingredient?.unit ?? ''}</td>
                               <td className="px-2 py-2 text-[#999] font-body text-xs">৳{(Number(item.unitPrice) / 100).toFixed(2)}</td>
                               <td className="px-2 py-2 text-[#D62B2B] font-body text-xs">৳{((Number(item.unitPrice) / 100) * Number(item.quantity)).toFixed(2)}</td>
@@ -910,7 +910,7 @@ export default function PurchasingPage() {
                         unit: parentIng?.unit ?? null,
                         id: override.id,
                       })
-                    : (item.ingredient?.name ?? '');
+                    : ingredientDisplayName(item.ingredient);
                   return (
                     <div key={item.id} className="grid grid-cols-12 gap-3 items-center">
                       <div className="col-span-6">

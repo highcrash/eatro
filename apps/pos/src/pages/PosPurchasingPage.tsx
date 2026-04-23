@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Truck, Package, Undo2, Wallet, ClipboardList } from 'lucide-react';
 
 import type { CashierAction, ApprovalMode, PurchaseOrder } from '@restora/types';
-import { formatCurrency, formatVariantLabel } from '@restora/utils';
+import { formatCurrency, formatVariantLabel, ingredientDisplayName } from '@restora/utils';
 import { api } from '../lib/api';
 import { useIsOnline } from '../lib/online';
 import { OfflineBanner } from '../components/OfflineHint';
@@ -609,7 +609,7 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
                   unit: parentIng?.unit ?? null,
                   id: override.id,
                 })
-              : (item.ingredient?.name ?? '—');
+              : ingredientDisplayName(item.ingredient);
             return (
               <div key={item.id} className="grid grid-cols-[3fr_120px_120px_110px_70px] gap-3 items-center bg-theme-bg rounded-theme p-3">
                 <div>
@@ -1334,7 +1334,7 @@ function PoDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                     <div key={it.id} className="grid grid-cols-[auto_1fr_90px_90px_110px_110px] gap-3 py-2 border-b border-theme-border text-theme-text items-center">
                       <span className="text-theme-text-muted">{idx + 1}</span>
                       <div>
-                        <p>{it.ingredient?.name ?? '—'}</p>
+                        <p>{ingredientDisplayName(it.ingredient)}</p>
                         {unit && <p className="text-[11px] text-theme-text-muted">{unit}</p>}
                       </div>
                       <span className="text-right">{ordered.toFixed(3)}</span>

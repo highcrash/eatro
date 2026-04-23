@@ -51,3 +51,17 @@ export function formatVariantLabel(v: VariantLabelInput): string {
 
   return `${parent} — ${descriptor}`;
 }
+
+/**
+ * Display helper for joined ingredient rows coming back from purchasing,
+ * supplier-ledger, receive, and return queries. The variant's stored
+ * `name` already embeds the parent prefix ("Parent — Brand"), so the
+ * only piece missing from the ledger display is the pack size. This
+ * wraps that one line of logic so callers don't reinvent it.
+ */
+export function ingredientDisplayName(ing: { name?: string | null; packSize?: string | null } | null | undefined): string {
+  const name = clean(ing?.name);
+  const pack = clean(ing?.packSize);
+  if (!name) return '—';
+  return pack ? `${name} (${pack})` : name;
+}
