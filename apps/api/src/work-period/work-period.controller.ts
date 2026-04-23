@@ -12,19 +12,19 @@ export class WorkPeriodController {
   constructor(private readonly service: WorkPeriodService) {}
 
   @Get('current')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   getCurrent(@CurrentUser() user: JwtPayload) {
     return this.service.getCurrent(user.branchId);
   }
 
   @Get('last-closing')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   getLastClosing(@CurrentUser() user: JwtPayload) {
     return this.service.getLastClosing(user.branchId);
   }
 
   @Post('start')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   start(
     @CurrentUser() user: JwtPayload,
     @Body() body: {
@@ -39,7 +39,7 @@ export class WorkPeriodController {
   }
 
   @Post('end')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   end(
     @CurrentUser() user: JwtPayload,
     @Body() body: {
@@ -53,7 +53,7 @@ export class WorkPeriodController {
   }
 
   @Get(':id/summary')
-  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   getSummary(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.getSummary(user.branchId, id);
   }
