@@ -62,6 +62,11 @@ export class CleanupService {
     switch (scope) {
       case 'orders': {
         deleted.reviews = (await p.review.deleteMany({ where })).count;
+        // Mushak notes/invoices reference Order via restrict FKs — drop
+        // them before the orders they point at. Sequence counter is
+        // branch-scoped, not order-scoped, so it stays put.
+        deleted.mushakNotes = (await p.mushakNote.deleteMany({ where })).count;
+        deleted.mushakInvoices = (await p.mushakInvoice.deleteMany({ where })).count;
         // OrderItem & OrderPayment cascade on Order delete
         deleted.orders = (await p.order.deleteMany({ where })).count;
         break;
@@ -215,6 +220,11 @@ export class CleanupService {
       case 'reset-all': {
         // Wipe all transactional data, keep: branch, settings, staff, payment methods, branding
         deleted.reviews = (await p.review.deleteMany({ where })).count;
+        // Mushak rows depend on Order — drop them first so order.deleteMany
+        // doesn't fail on a restrict FK.
+        deleted.mushakNotes = (await p.mushakNote.deleteMany({ where })).count;
+        deleted.mushakInvoices = (await p.mushakInvoice.deleteMany({ where })).count;
+        deleted.mushakSequences = (await p.mushakSequence.deleteMany({ where })).count;
         deleted.orders = (await p.order.deleteMany({ where })).count;
 
         deleted.purchaseReturnItems = (await p.purchaseReturnItem.deleteMany({ where: { purchaseReturn: { branchId } } })).count;

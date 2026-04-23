@@ -95,6 +95,14 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   // re-creates the admin's saved templates + full send history.
   { accessor: 'smsTemplate', table: 'sms_templates' },
   { accessor: 'smsLog', table: 'sms_logs' },
+
+  // Tier 12 — NBR Mushak compliance (Bangladesh VAT). Sequence + 6.3
+  // invoices + 6.8 credit/debit notes. Back up AFTER orders (FK) and
+  // AFTER staff (MushakNote.issuedById). These rows are legally archival
+  // and must round-trip faithfully on restore.
+  { accessor: 'mushakSequence', table: 'mushak_sequences' },
+  { accessor: 'mushakInvoice', table: 'mushak_invoices' },
+  { accessor: 'mushakNote', table: 'mushak_notes' },
 ];
 
 export const BACKUP_FILE_VERSION = 1;

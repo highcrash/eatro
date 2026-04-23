@@ -43,7 +43,7 @@ const SECTIONS: Section[] = [
   {
     title: 'Orders & Sales',
     actions: [
-      { scope: 'orders', label: 'Delete all orders', desc: 'Removes all orders, items, payments, and reviews.' },
+      { scope: 'orders', label: 'Delete all orders', desc: 'Removes all orders, items, payments, reviews, and any Mushak 6.3 invoices / 6.8 credit notes linked to them.' },
     ],
   },
   {
@@ -139,7 +139,7 @@ const SECTIONS: Section[] = [
   {
     title: 'DANGER ZONE',
     actions: [
-      { scope: 'reset-all', label: 'Reset everything (transactional)', desc: 'Wipes orders, purchases, returns, expenses, accounts (zeroed), stock movements, pre-ready, attendance, payroll, waste, SMS logs. Keeps users, branch, settings, menu, ingredients, suppliers, SMS templates.', danger: true },
+      { scope: 'reset-all', label: 'Reset everything (transactional)', desc: 'Wipes orders, purchases, returns, expenses, accounts (zeroed), stock movements, pre-ready, attendance, payroll, waste, SMS logs, Mushak invoices + credit notes. Keeps users, branch, settings, menu, ingredients, suppliers, SMS templates.', danger: true },
     ],
   },
 ];

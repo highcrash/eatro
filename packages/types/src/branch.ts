@@ -25,6 +25,10 @@ export interface Branch extends AuditFields {
   billFooterText: string | null;
   bin: string | null;
   mushakVersion: string | null;
+  nbrEnabled: boolean;
+  branchCode: string | null;
+  sellerLegalName: string | null;
+  sellerTradingName: string | null;
   wifiPass: string | null;
   wifiSsid: string | null;
   qrGateEnabled: boolean;
@@ -59,6 +63,10 @@ export interface UpdateBranchDto extends Partial<CreateBranchDto> {
   billFooterText?: string | null;
   bin?: string | null;
   mushakVersion?: string | null;
+  nbrEnabled?: boolean;
+  branchCode?: string | null;
+  sellerLegalName?: string | null;
+  sellerTradingName?: string | null;
   wifiPass?: string | null;
   wifiSsid?: string | null;
   qrGateEnabled?: boolean;
@@ -120,6 +128,10 @@ export interface Branding {
   billFooterText: string | null;
   bin: string | null;
   mushakVersion: string | null;
+  nbrEnabled?: boolean;
+  branchCode?: string | null;
+  sellerLegalName?: string | null;
+  sellerTradingName?: string | null;
   wifiPass: string | null;
   wifiSsid: string | null;
   qrGateEnabled: boolean;

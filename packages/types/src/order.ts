@@ -10,7 +10,9 @@ export type OrderStatus =
   | 'READY'
   | 'SERVED'
   | 'PAID'
-  | 'VOID';
+  | 'VOID'
+  | 'REFUNDED'
+  | 'PARTIALLY_REFUNDED';
 export type PaymentMethod = string; // Dynamic — configured per branch via PaymentMethodConfig
 export type KitchenTicketStatus = 'NEW' | 'PENDING_APPROVAL' | 'ACKNOWLEDGED' | 'PREPARING' | 'DONE' | 'RECALLED';
 
@@ -107,4 +109,87 @@ export interface VoidOrderItemDto {
   approverId: string;
   logAsWaste?: boolean;
   wasteReason?: string; // WasteReason enum value
+}
+
+// ─── NBR Mushak (Bangladesh VAT) ─────────────────────────────────────────────
+
+export type RefundReason =
+  | 'CUSTOMER_RETURN'
+  | 'PRICING_ERROR'
+  | 'DUPLICATE'
+  | 'DAMAGED'
+  | 'OTHER';
+
+export type MushakNoteType = 'CREDIT' | 'DEBIT';
+
+export interface RefundOrderDto {
+  /** When omitted/empty, refunds the entire remaining paid order. */
+  itemIds?: string[];
+  reason: RefundReason;
+  reasonText?: string;
+  /** Approver PIN (reused from the existing void-approval pattern). */
+  approverPin?: string;
+  /** Approver staff id; if absent the server looks up by PIN on branch. */
+  approverId?: string;
+}
+
+export interface MushakInvoice {
+  id: string;
+  branchId: string;
+  orderId: string;
+  serial: string;
+  fiscalYear: string;
+  branchCode: string;
+  seq: number;
+  formVersion: '6.3';
+  issuedAt: Date | string;
+  buyerName: string | null;
+  buyerPhone: string | null;
+  buyerAddress: string | null;
+  buyerBin: string | null;
+  subtotalExclVat: MoneyAmount;
+  sdAmount: MoneyAmount;
+  vatAmount: MoneyAmount;
+  totalInclVat: MoneyAmount;
+  /** Frozen snapshot JSON — shape matches MushakSnapshot in @restora/utils. */
+  snapshot: unknown;
+}
+
+export interface MushakNote {
+  id: string;
+  branchId: string;
+  invoiceId: string;
+  orderId: string;
+  serial: string;
+  fiscalYear: string;
+  branchCode: string;
+  seq: number;
+  formVersion: '6.8';
+  noteType: MushakNoteType;
+  reasonCode: RefundReason;
+  reasonText: string | null;
+  issuedAt: Date | string;
+  issuedById: string;
+  subtotalExclVat: MoneyAmount;
+  sdAmount: MoneyAmount;
+  vatAmount: MoneyAmount;
+  totalInclVat: MoneyAmount;
+  refundedItemIds: string[];
+  snapshot: unknown;
+}
+
+/** Row rendered in the admin Mushak register — interleaved 6.3 + 6.8. */
+export interface MushakRegisterRow {
+  kind: 'INVOICE' | 'NOTE';
+  id: string;
+  serial: string;
+  issuedAt: Date | string;
+  buyerName: string | null;
+  subtotalExclVat: MoneyAmount;
+  sdAmount: MoneyAmount;
+  vatAmount: MoneyAmount;
+  totalInclVat: MoneyAmount;
+  /** Only set for NOTE rows. */
+  reasonCode?: RefundReason | null;
+  linkedInvoiceSerial?: string | null;
 }

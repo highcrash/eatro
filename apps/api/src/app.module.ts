@@ -33,6 +33,7 @@ import { PaymentMethodModule } from './payment-method/payment-method.module';
 import { UploadModule } from './upload/upload.module';
 import { DiscountModule } from './discount/discount.module';
 import { SmsModule } from './sms/sms.module';
+import { MushakModule } from './mushak/mushak.module';
 import { CustomerModule } from './customer/customer.module';
 import { BrandingModule } from './branding/branding.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -123,6 +124,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // SMS & Notifications
     SmsModule,
+
+    // NBR Mushak (Bangladesh VAT) compliance
+    MushakModule,
 
     // Customer Management
     CustomerModule,

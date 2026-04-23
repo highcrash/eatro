@@ -41,6 +41,25 @@ enum OrderStatus {
   SERVED
   PAID
   VOID
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NBR (Bangladesh) MUSHAK VAT COMPLIANCE
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MushakNoteType {
+  CREDIT // refund / return — negative totals, reverses a 6.3
+  DEBIT  // supplementary charge — positive totals, adds to a 6.3
+}
+
+enum RefundReason {
+  CUSTOMER_RETURN
+  PRICING_ERROR
+  DUPLICATE
+  DAMAGED
+  OTHER
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -149,62 +168,70 @@ model Branch {
   serviceChargeRate    Decimal @default(0) @db.Decimal(5, 2) // percentage e.g. 10.00
   stockPricingMethod String @default("LAST_PURCHASE") // LAST_PURCHASE or WEIGHTED_AVERAGE
   // ── Branding ──
-  logoUrl         String?    // main brand logo (used in admin, web, and as POS fallback)
-  posLogoUrl      String?    // optional override for POS sidebar
-  websiteTagline  String?    // hero tagline for the public website
-  billHeaderText  String?    // optional header text rendered above items on bill/receipt
-  billFooterText  String?    // free text shown at bottom of bills/receipts (multi-line)
-  bin             String?    // Bangladesh Business Identification Number, shown under phone
-  mushakVersion   String?    // e.g. "Mushak-6.3" — printed below BIN on paper bills
-  wifiPass        String?    // guest Wi-Fi password, optionally printed on the bill
-  wifiSsid        String?    // guest Wi-Fi network name (SSID) — shown on QR gate page
-  qrGateEnabled   Boolean  @default(false)   // when true, QR ordering requires the client IP to match qrAllowedIps
-  qrAllowedIps    String?    // comma-separated IPs and CIDR blocks (e.g. "192.168.1.0/24,203.0.113.42")
-  qrGateMessage   String?    // optional instructions shown under Wi-Fi details on the gate page
-  billLogoWidthPct Int       @default(80) // how wide the logo prints on the receipt (% of 80mm paper)
-  facebookUrl     String?
-  instagramUrl    String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
+  logoUrl              String? // main brand logo (used in admin, web, and as POS fallback)
+  posLogoUrl           String? // optional override for POS sidebar
+  websiteTagline       String? // hero tagline for the public website
+  billHeaderText       String? // optional header text rendered above items on bill/receipt
+  billFooterText       String? // free text shown at bottom of bills/receipts (multi-line)
+  bin                  String? // Bangladesh Business Identification Number, shown under phone
+  mushakVersion        String? // e.g. "Mushak-6.3" — printed below BIN on paper bills
+  // ── NBR / Mushak compliance ──
+  nbrEnabled           Boolean   @default(false)
+  branchCode           String? // e.g. "DHK"; required when nbrEnabled=true
+  sellerLegalName      String? // legal business name; falls back to `name`
+  sellerTradingName    String? // trading / brand name; falls back to `name`
+  wifiPass             String? // guest Wi-Fi password, optionally printed on the bill
+  wifiSsid             String? // guest Wi-Fi network name (SSID) — shown on QR gate page
+  qrGateEnabled        Boolean   @default(false) // when true, QR ordering requires the client IP to match qrAllowedIps
+  qrAllowedIps         String? // comma-separated IPs and CIDR blocks (e.g. "192.168.1.0/24,203.0.113.42")
+  qrGateMessage        String? // optional instructions shown under Wi-Fi details on the gate page
+  billLogoWidthPct     Int       @default(80) // how wide the logo prints on the receipt (% of 80mm paper)
+  facebookUrl          String?
+  instagramUrl         String?
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
 
   // Relations
-  staff          Staff[]
-  tables         DiningTable[]
-  categories     MenuCategory[]
-  menuItems      MenuItem[]
-  orders         Order[]
-  suppliers      Supplier[]
-  ingredients    Ingredient[]
-  stockMovements StockMovement[]
-  purchaseOrders PurchaseOrder[]
-  attendance     Attendance[]
-  payrolls       Payroll[]
-  wasteLogs      WasteLog[]
-  expenses       Expense[]
-  accounts              Account[]
-  accountTransactions   AccountTransaction[]
-  preReadyItems         PreReadyItem[]
-  productionOrders      ProductionOrder[]
-  preReadyBatches       PreReadyBatch[]
-  supplierPayments      SupplierPayment[]
-  leaveApplications     LeaveApplication[]
-  workPeriods           WorkPeriod[]
-  cookingStations       CookingStation[]
-  unitConversions       UnitConversion[]
-  customUnits           CustomUnit[]
-  paymentMethods        PaymentMethodConfig[]
-  paymentOptions        PaymentOption[]
-  purchaseReturns       PurchaseReturn[]
-  discounts             Discount[]
-  coupons               Coupon[]
-  customers             Customer[]
-  reviews               Review[]
-  reservations          Reservation[]
-  settings              BranchSetting?
-  websiteContent        WebsiteContent?
-  devices               Device[]
+  staff               Staff[]
+  tables              DiningTable[]
+  categories          MenuCategory[]
+  menuItems           MenuItem[]
+  orders              Order[]
+  suppliers           Supplier[]
+  ingredients         Ingredient[]
+  stockMovements      StockMovement[]
+  purchaseOrders      PurchaseOrder[]
+  attendance          Attendance[]
+  payrolls            Payroll[]
+  wasteLogs           WasteLog[]
+  expenses            Expense[]
+  accounts            Account[]
+  accountTransactions AccountTransaction[]
+  preReadyItems       PreReadyItem[]
+  productionOrders    ProductionOrder[]
+  preReadyBatches     PreReadyBatch[]
+  supplierPayments    SupplierPayment[]
+  leaveApplications   LeaveApplication[]
+  workPeriods         WorkPeriod[]
+  cookingStations     CookingStation[]
+  unitConversions     UnitConversion[]
+  customUnits         CustomUnit[]
+  paymentMethods      PaymentMethodConfig[]
+  paymentOptions      PaymentOption[]
+  purchaseReturns     PurchaseReturn[]
+  discounts           Discount[]
+  coupons             Coupon[]
+  customers           Customer[]
+  reviews             Review[]
+  reservations        Reservation[]
+  settings            BranchSetting?
+  websiteContent      WebsiteContent?
+  devices             Device[]
+  mushakSequences     MushakSequence[]
+  mushakInvoices      MushakInvoice[]
+  mushakNotes         MushakNote[]
 
   @@index([isActive])
   @@map("branches")
@@ -383,6 +410,7 @@ model Staff {
   ordersAsWaiter            Order[]            @relation("OrderWaiter")
   returnsRequested          PurchaseReturn[]   @relation("ReturnRequester")
   reservationsConfirmed     Reservation[]      @relation("ReservationConfirmer")
+  mushakNotesIssued         MushakNote[]       @relation("MushakNoteIssuer")
 
   @@index([branchId, isActive])
   @@index([email])
@@ -654,15 +682,17 @@ model Order {
   deletedAt      DateTime?
 
   // Relations
-  branch    Branch      @relation(fields: [branchId], references: [id])
-  cashier   Staff       @relation("OrderCashier", fields: [cashierId], references: [id])
-  table     DiningTable? @relation(fields: [tableId], references: [id])
-  customer  Customer?   @relation(fields: [customerId], references: [id])
-  review    Review?
-  waiter    Staff?      @relation("OrderWaiter", fields: [waiterId], references: [id])
-  voidedBy  Staff?      @relation("OrderVoidedBy", fields: [voidedById], references: [id])
-  items     OrderItem[]
-  payments  OrderPayment[]
+  branch   Branch         @relation(fields: [branchId], references: [id])
+  cashier  Staff          @relation("OrderCashier", fields: [cashierId], references: [id])
+  table    DiningTable?   @relation(fields: [tableId], references: [id])
+  customer Customer?      @relation(fields: [customerId], references: [id])
+  review   Review?
+  waiter   Staff?         @relation("OrderWaiter", fields: [waiterId], references: [id])
+  voidedBy Staff?         @relation("OrderVoidedBy", fields: [voidedById], references: [id])
+  items    OrderItem[]
+  payments OrderPayment[]
+  mushakInvoice MushakInvoice?
+  mushakNotes   MushakNote[]
 
   @@index([branchId, status])
   @@index([branchId, createdAt])
@@ -1646,6 +1676,107 @@ model IdempotencyRecord {
   @@map("idempotency_records")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MUSHAK — Bangladesh NBR VAT compliance (6.3 invoices + 6.8 credit/debit notes)
+// ─────────────────────────────────────────────────────────────────────────────
+// Every paid order on a branch with `nbrEnabled=true` gets a MushakInvoice
+// (form 6.3) with a per-branch, per-fiscal-year sequential serial. Refunds
+// emit a MushakNote (form 6.8) linked to the original invoice. Both carry a
+// frozen `snapshot` JSON so re-prints stay legally stable even after menu
+// prices or VAT rates change later. The sequence table is upserted atomically
+// inside the same transaction that writes the invoice/note, so concurrent
+// terminals can't reuse or skip a seq.
+
+model MushakSequence {
+  id          String   @id @default(cuid())
+  branchId    String
+  fiscalYear  String // "2526" for BD FY Jul-2025 → Jun-2026
+  docKind     String // "INVOICE" (6.3) or "NOTE" (6.8) — separate counters
+  lastSeq     Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@unique([branchId, fiscalYear, docKind])
+  @@map("mushak_sequences")
+}
+
+model MushakInvoice {
+  id               String   @id @default(cuid())
+  branchId         String
+  orderId          String   @unique
+  serial           String   @unique // e.g. "2526/DHK/000147"
+  fiscalYear       String
+  branchCode       String
+  seq              Int
+  formVersion      String   @default("6.3")
+  issuedAt         DateTime @default(now())
+  // Buyer block — denormalised from Customer at issue time so later edits
+  // to the customer record don't mutate the invoice.
+  buyerName        String?
+  buyerPhone       String?
+  buyerAddress     String?
+  buyerBin         String?
+  // Frozen totals (decimals mirror Order). All values are post-discount,
+  // pre-VAT subtotal + VAT breakdown so the PDF can be rebuilt verbatim.
+  subtotalExclVat  Decimal  @db.Decimal(14, 2)
+  sdAmount         Decimal  @default(0) @db.Decimal(14, 2)
+  vatAmount        Decimal  @db.Decimal(14, 2)
+  totalInclVat     Decimal  @db.Decimal(14, 2)
+  // Full frozen JSON: seller block, buyer, every line with qty/rate/VAT/SD,
+  // totals, timestamps, cashier name. Used by the reprint template — never
+  // re-computed from live order data.
+  snapshot         Json
+  createdAt        DateTime @default(now())
+
+  branch Branch      @relation(fields: [branchId], references: [id])
+  order  Order       @relation(fields: [orderId], references: [id])
+  notes  MushakNote[]
+
+  @@unique([branchId, fiscalYear, seq])
+  @@index([branchId, issuedAt])
+  @@map("mushak_invoices")
+}
+
+model MushakNote {
+  id               String          @id @default(cuid())
+  branchId         String
+  invoiceId        String
+  orderId          String
+  serial           String          @unique // e.g. "2526/DHK/NOTE/000023"
+  fiscalYear       String
+  branchCode       String
+  seq              Int
+  formVersion      String          @default("6.8")
+  noteType         MushakNoteType
+  reasonCode       RefundReason
+  reasonText       String?
+  issuedAt         DateTime        @default(now())
+  issuedById       String
+  // Refund totals — negative for CREDIT notes (refund), positive for DEBIT.
+  subtotalExclVat  Decimal         @db.Decimal(14, 2)
+  sdAmount         Decimal         @default(0) @db.Decimal(14, 2)
+  vatAmount        Decimal         @db.Decimal(14, 2)
+  totalInclVat     Decimal         @db.Decimal(14, 2)
+  // JSON array of OrderItem ids actually refunded (empty when full-order).
+  refundedItemIds  Json
+  // Frozen JSON mirroring MushakInvoice.snapshot — used for slip reprint.
+  snapshot         Json
+  createdAt        DateTime        @default(now())
+
+  branch   Branch        @relation(fields: [branchId], references: [id])
+  invoice  MushakInvoice @relation(fields: [invoiceId], references: [id])
+  order    Order         @relation(fields: [orderId], references: [id])
+  issuedBy Staff         @relation("MushakNoteIssuer", fields: [issuedById], references: [id])
+
+  @@unique([branchId, fiscalYear, seq])
+  @@index([branchId, issuedAt])
+  @@index([invoiceId])
+  @@map("mushak_notes")
+}
+
+// (License / SystemConfig / UpdateRecord models are codecanyon-only and
+// intentionally stripped on main.)
 // ─── SMS ──────────────────────────────────────────────────────────────────────
 // Log of every SMS attempt — outbound campaigns, payment receipts, OTPs that
 // the admin cares about seeing. request_id comes from api.sms.net.bd and is

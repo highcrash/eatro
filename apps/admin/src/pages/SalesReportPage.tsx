@@ -2,9 +2,43 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Printer, Search, X } from 'lucide-react';
 
-import type { Order } from '@restora/types';
-import { formatCurrency, formatDateTime } from '@restora/utils';
+import type { Order, MushakInvoice } from '@restora/types';
+import { formatCurrency, formatDateTime, renderMushakSlipHtml, type MushakSnapshot } from '@restora/utils';
 import { api } from '../lib/api';
+
+/**
+ * Renders the Mushak-6.3 column cell. Fetches-on-demand (enabled only for
+ * PAID / refunded rows) so the list isn't blocked by N+1 lookups on orders
+ * that can't have an invoice anyway (PENDING, VOID, etc.).
+ */
+function MushakPrintCell({ orderId, status }: { orderId: string; status: string }) {
+  const canHaveInvoice = status === 'PAID' || status === 'REFUNDED' || status === 'PARTIALLY_REFUNDED';
+  const { data } = useQuery<MushakInvoice | null>({
+    queryKey: ['mushak-invoice-by-order', orderId],
+    queryFn: async () => {
+      try {
+        return await api.get<MushakInvoice | null>(`/mushak/invoices/by-order/${orderId}`);
+      } catch {
+        return null;
+      }
+    },
+    enabled: canHaveInvoice,
+    staleTime: 60_000,
+  });
+  if (!canHaveInvoice) return <span className="text-[#555] text-xs">—</span>;
+  if (!data) return <span className="text-[#666] text-xs">—</span>;
+  const print = () => {
+    const w = window.open('', '_blank', 'width=360,height=700');
+    if (!w) return;
+    w.document.write(renderMushakSlipHtml(data.snapshot as MushakSnapshot));
+    w.document.close();
+  };
+  return (
+    <button onClick={print} className="text-[#FFA726] hover:text-white text-xs font-mono tracking-tight transition-colors">
+      {data.serial}
+    </button>
+  );
+}
 
 const STATUS_OPTIONS = ['ALL', 'PAID', 'CONFIRMED', 'PREPARING', 'READY', 'SERVED', 'VOID'] as const;
 const TYPE_OPTIONS = ['ALL', 'DINE_IN', 'TAKEAWAY', 'DELIVERY'] as const;
@@ -242,13 +276,14 @@ export default function SalesReportPage() {
               <th className="px-4 py-3 font-medium text-right">Subtotal</th><th className="px-4 py-3 font-medium text-right">Discount</th><th className="px-4 py-3 font-medium text-right">VAT</th>
               <th className="px-4 py-3 font-medium text-right">Total</th><th className="px-4 py-3 font-medium">Payment</th>
               <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Mushak</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={12} className="px-4 py-8 text-center text-[#999]">Loading...</td></tr>
+              <tr><td colSpan={13} className="px-4 py-8 text-center text-[#999]">Loading...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={12} className="px-4 py-8 text-center text-[#999]">No orders found</td></tr>
+              <tr><td colSpan={13} className="px-4 py-8 text-center text-[#999]">No orders found</td></tr>
             ) : (
               <>
                 {filtered.map((o, idx) => (
@@ -265,6 +300,9 @@ export default function SalesReportPage() {
                     <td className="px-4 py-2.5 text-right text-white font-medium text-xs">{formatCurrency(Number(o.totalAmount))}</td>
                     <td className="px-4 py-2.5 text-[#999] text-xs uppercase">{o.paymentMethod ?? '—'}</td>
                     <td className="px-4 py-2.5"><span className={`text-[10px] font-medium tracking-widest uppercase ${o.status === 'PAID' ? 'text-green-600' : o.status === 'VOID' ? 'text-[#D62B2B]' : 'text-[#999]'}`}>{o.status}</span></td>
+                    <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <MushakPrintCell orderId={o.id} status={o.status} />
+                    </td>
                   </tr>
                 ))}
                 <tr className="bg-[#0D0D0D]">
@@ -273,7 +311,7 @@ export default function SalesReportPage() {
                   <td className="px-4 py-3 text-right text-xs font-medium text-green-500">{grandDiscount > 0 ? `-${formatCurrency(grandDiscount)}` : '—'}</td>
                   <td className="px-4 py-3 text-right text-xs font-medium text-white">{formatCurrency(grandTax)}</td>
                   <td className="px-4 py-3 text-right text-xs font-medium text-[#D62B2B] font-display text-base tracking-wide">{formatCurrency(grandTotal)}</td>
-                  <td colSpan={2}></td>
+                  <td colSpan={3}></td>
                 </tr>
               </>
             )}
