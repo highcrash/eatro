@@ -1242,7 +1242,10 @@ function PurchaseOrdersTab() {
           {filtered.map((po) => {
             // unitCost is stored in paisa (smallest unit); totals stay in paisa
             // and feed straight into formatCurrency().
-            const totalPaisa = po.items.reduce((s, it) => s + Number(it.quantityOrdered) * Number(it.unitCost), 0);
+            // Received-quantity wins when the PO has been received, so
+            // supplier-delivered extras are billed correctly; falls back
+            // to ordered for DRAFT / SENT rows where received = 0.
+            const totalPaisa = po.items.reduce((s, it) => s + Number(Number(it.quantityReceived) || Number(it.quantityOrdered)) * Number(it.unitCost), 0);
             return (
               <button
                 key={po.id}
