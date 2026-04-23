@@ -29,6 +29,14 @@ export class TableService {
     return this.prisma.diningTable.update({ where: { id }, data: { status } });
   }
 
+  async update(id: string, branchId: string, data: { tableNumber?: string; capacity?: number }) {
+    await this.findOne(id, branchId);
+    const patch: { tableNumber?: string; capacity?: number } = {};
+    if (data.tableNumber !== undefined) patch.tableNumber = data.tableNumber;
+    if (data.capacity !== undefined) patch.capacity = data.capacity;
+    return this.prisma.diningTable.update({ where: { id }, data: patch });
+  }
+
   async remove(id: string, branchId: string) {
     await this.findOne(id, branchId);
     return this.prisma.diningTable.update({ where: { id }, data: { deletedAt: new Date() } });

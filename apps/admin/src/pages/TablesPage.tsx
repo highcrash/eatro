@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, X } from 'lucide-react';
 
 import type { DiningTable } from '@restora/types';
 import { api } from '../lib/api';
@@ -57,9 +57,58 @@ function AddTableDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function EditTableDialog({ table, onClose }: { table: DiningTable; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [tableNumber, setTableNumber] = useState(table.tableNumber);
+  const [capacity, setCapacity] = useState(String(table.capacity));
+
+  const mutation = useMutation({
+    mutationFn: () => api.patch(`/tables/${table.id}`, { tableNumber, capacity: parseInt(capacity, 10) }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['tables'] });
+      onClose();
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="bg-[#161616] w-[360px] p-6  space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-xl tracking-wide">EDIT TABLE</h3>
+          <button onClick={onClose} className="text-[#999] hover:text-white"><X size={16} /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Table Number *</label>
+            <input value={tableNumber} onChange={(e) => setTableNumber(e.target.value)}
+              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" autoFocus />
+          </div>
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Seats / Capacity</label>
+            <input type="number" min="1" max="20" value={capacity} onChange={(e) => setCapacity(e.target.value)}
+              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
+          </div>
+        </div>
+        {mutation.isError && <p className="text-xs text-[#D62B2B]">{(mutation.error as Error).message}</p>}
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={!tableNumber.trim() || !capacity || mutation.isPending}
+            className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40"
+          >
+            {mutation.isPending ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TablesPage() {
   const qc = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
+  const [editTable, setEditTable] = useState<DiningTable | null>(null);
 
   const { data: tables = [] } = useQuery<DiningTable[]>({
     queryKey: ['tables'],
@@ -122,18 +171,29 @@ export default function TablesPage() {
                 <option value="RESERVED">Reserved</option>
                 <option value="CLEANING">Cleaning</option>
               </select>
-              <button
-                onClick={() => { if (confirm(`Delete table "${t.tableNumber}"?`)) deleteTable.mutate(t.id); }}
-                className="text-[#555] hover:text-[#D62B2B] opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Trash2 size={14} />
-              </button>
+              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => setEditTable(t)}
+                  className="text-[#555] hover:text-white"
+                  title="Edit table"
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  onClick={() => { if (confirm(`Delete table "${t.tableNumber}"?`)) deleteTable.mutate(t.id); }}
+                  className="text-[#555] hover:text-[#D62B2B]"
+                  title="Delete table"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
           </div>
         ))}
       </div>
 
       {showAdd && <AddTableDialog onClose={() => setShowAdd(false)} />}
+      {editTable && <EditTableDialog table={editTable} onClose={() => setEditTable(null)} />}
     </div>
   );
 }
