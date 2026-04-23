@@ -31,6 +31,16 @@ export class TableController {
     return this.tableService.updateStatus(id, user.branchId, body.status);
   }
 
+  @Patch(':id')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  update(
+    @Param('id') id: string,
+    @Body() body: { tableNumber?: string; capacity?: number },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tableService.update(id, user.branchId, body);
+  }
+
   @Delete(':id')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
