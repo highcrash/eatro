@@ -43,8 +43,8 @@ export class PurchasingService {
     return po;
   }
 
-  create(branchId: string, createdById: string, dto: CreatePurchaseOrderDto) {
-    return this.prisma.purchaseOrder.create({
+  async create(branchId: string, createdById: string, dto: CreatePurchaseOrderDto) {
+    const po = await this.prisma.purchaseOrder.create({
       data: {
         branchId,
         supplierId: dto.supplierId,
@@ -66,6 +66,33 @@ export class PurchasingService {
         items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
       },
     });
+    await this.linkSupplierToIngredients(dto.items.map((i) => i.ingredientId), dto.supplierId);
+    return po;
+  }
+
+  /**
+   * Upsert IngredientSupplier for each (ingredient, supplier) pair and,
+   * when the ingredient has no primary supplier yet, promote this one to
+   * primary. Called whenever the admin explicitly pairs an ingredient
+   * with a supplier on a PO — so next time that ingredient appears on
+   * the shopping list / PO form, the supplier dropdown is pre-filled.
+   * Idempotent: the unique (ingredientId, supplierId) constraint short-
+   * circuits repeat calls.
+   */
+  private async linkSupplierToIngredients(ingredientIds: string[], supplierId: string) {
+    const uniqueIds = Array.from(new Set(ingredientIds.filter(Boolean)));
+    if (uniqueIds.length === 0 || !supplierId) return;
+    for (const ingredientId of uniqueIds) {
+      await this.prisma.ingredientSupplier.upsert({
+        where: { ingredientId_supplierId: { ingredientId, supplierId } },
+        create: { ingredientId, supplierId },
+        update: {},
+      });
+      await this.prisma.ingredient.updateMany({
+        where: { id: ingredientId, supplierId: null },
+        data: { supplierId },
+      });
+    }
   }
 
   async update(id: string, branchId: string, dto: UpdatePurchaseOrderDto) {
@@ -363,6 +390,17 @@ export class PurchasingService {
       await this.ingredientService.syncParentStock(parentId);
     }
 
+    // Record the supplier against every ingredient that actually showed
+    // up in this receipt (PO items + additional items tacked on at
+    // delivery time). Covers the case where an admin creates a PO
+    // manually without a supplier column but then receives it — the
+    // supplier link should still stick to the ingredient afterward.
+    const receivedIngredientIds = [
+      ...po.items.map((i) => i.ingredientId),
+      ...(dto.additionalItems ?? []).map((x) => x.ingredientId).filter((x): x is string => !!x),
+    ];
+    await this.linkSupplierToIngredients(receivedIngredientIds, po.supplierId);
+
     return result;
   }
 
@@ -519,6 +557,7 @@ export class PurchasingService {
           items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true } } } },
         },
       });
+      await this.linkSupplierToIngredients(supplierItems.map((si) => si.ingredientId), supplierId);
       purchaseOrders.push(po);
     }
 
