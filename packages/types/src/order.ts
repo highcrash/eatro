@@ -55,6 +55,8 @@ export interface Order extends AuditFields {
   taxAmount: MoneyAmount;
   discountAmount: MoneyAmount;
   totalAmount: MoneyAmount;
+  /** Signed paisa delta applied by the auto-round-to-taka pass. */
+  roundAdjustment?: MoneyAmount;
   notes: string | null;
   cashierId: string;
   cashierName: string;

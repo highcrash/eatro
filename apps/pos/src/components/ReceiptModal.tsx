@@ -113,6 +113,15 @@ export default function ReceiptModal({ order, cashReceived, onDone }: ReceiptMod
               <span>VAT</span>
               <span>{formatCurrency(tax)}</span>
             </div>
+            {Number((order as { roundAdjustment?: number }).roundAdjustment ?? 0) !== 0 && (
+              <div className="flex justify-between text-[#666] text-xs italic">
+                <span>Auto Roundup</span>
+                <span>
+                  {Number((order as { roundAdjustment?: number }).roundAdjustment ?? 0) > 0 ? '+' : '-'}
+                  {formatCurrency(Math.abs(Number((order as { roundAdjustment?: number }).roundAdjustment ?? 0)))}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between font-display text-xl tracking-wide text-[#111] pt-1">
               <span>TOTAL</span>
               <span>{formatCurrency(total)}</span>

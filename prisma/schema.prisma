@@ -670,6 +670,11 @@ model Order {
   couponId            String? // applied Coupon ID
   couponCode          String? // denormalized coupon code
   totalAmount         Decimal     @db.Decimal(14, 2)
+  // Auto rounding to the nearest taka (100 paisa). Signed delta in paisa;
+  // positive when the bill was rounded UP, negative when rounded DOWN.
+  // totalAmount already includes this adjustment — receipts print an
+  // "Auto Roundup (+0.30)" line below VAT to make the delta visible.
+  roundAdjustment     Decimal     @default(0) @db.Decimal(14, 2)
   paymentMethod       String?
   paidAt              DateTime?
   customerId          String?

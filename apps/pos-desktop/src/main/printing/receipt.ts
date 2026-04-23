@@ -374,10 +374,11 @@ function renderReceiptHtml(r: ReceiptInput): string {
     <table>${itemsHtml}</table>
     <div class="divider"></div>
     <table>
-      <tr><td>Subtotal</td><td class="right">${currency}${r.subtotal.toFixed(2)}</td></tr>
-      ${r.discountAmount ? `<tr><td>Discount</td><td class="right">-${currency}${r.discountAmount.toFixed(2)}</td></tr>` : ''}
-      ${r.taxAmount ? `<tr><td>Tax</td><td class="right">${currency}${r.taxAmount.toFixed(2)}</td></tr>` : ''}
-      <tr class="total"><td>TOTAL</td><td class="right">${currency}${r.totalAmount.toFixed(2)}</td></tr>
+      <tr><td>Subtotal</td><td class="right">${money(currency, r.subtotal)}</td></tr>
+      ${r.discountAmount ? `<tr><td>Discount</td><td class="right">-${money(currency, r.discountAmount)}</td></tr>` : ''}
+      ${r.taxAmount ? `<tr><td>Tax</td><td class="right">${money(currency, r.taxAmount)}</td></tr>` : ''}
+      ${r.roundAdjustment && Math.abs(r.roundAdjustment) > 0 ? `<tr><td>Auto Roundup</td><td class="right">${r.roundAdjustment >= 0 ? '+' : '-'}${money(currency, Math.abs(r.roundAdjustment))}</td></tr>` : ''}
+      <tr class="total"><td>TOTAL</td><td class="right">${money(currency, r.totalAmount)}</td></tr>
     </table>
     ${r.paymentMethod ? `<p>Paid via: ${esc(r.paymentMethod)}</p>` : ''}
     <div class="divider"></div>

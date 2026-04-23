@@ -42,8 +42,14 @@ function computeTotals(branch: TaxableBranch, subtotal: number, discountAmount =
   const taxAmount = branch.vatEnabled && branch.taxRate.toNumber() > 0
     ? Math.round((taxableNet + serviceChargeAmount) * (branch.taxRate.toNumber() / 100))
     : 0;
-  const totalAmount = net + serviceChargeAmount + taxAmount;
-  return { serviceChargeAmount, taxAmount, totalAmount };
+  const rawTotal = net + serviceChargeAmount + taxAmount;
+  // Auto-round to the nearest taka (= 100 paisa). Cash practice in BD
+  // restaurants — coins under a taka are rare, so a 973.70 BDT bill is
+  // rounded to 974.00 with +0.30 printed on the receipt as "Auto Roundup".
+  // Math.round is half-up: 973.70 → 974, 973.20 → 973. Delta is signed.
+  const totalAmount = Math.round(rawTotal / 100) * 100;
+  const roundAdjustment = totalAmount - rawTotal;
+  return { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment };
 }
 
 @Injectable()
@@ -189,7 +195,7 @@ export class OrderService {
       if (m?.cookingStationId && vatOptOut.has(m.cookingStationId)) return s;
       return s + i.totalPrice;
     }, 0);
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, 0, taxableSubtotal);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0, taxableSubtotal);
 
     // Update table status to OCCUPIED if dine-in
     let tableNumber: string | null = null;
@@ -232,6 +238,7 @@ export class OrderService {
         serviceChargeAmount,
         discountAmount: 0,
         totalAmount,
+        roundAdjustment,
         items: { create: itemsData },
       },
       include: { items: true },
@@ -433,11 +440,11 @@ export class OrderService {
 
     const subtotal = activeItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, discountAmount);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { discountAmount, discountId, discountName: discount.name, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount },
+      data: { discountAmount, discountId, discountName: discount.name, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -457,11 +464,11 @@ export class OrderService {
     const activeItems = order.items.filter((i) => !i.voidedAt);
     const subtotal = activeItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, 0);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { discountAmount: 0, discountId: null, discountName: null, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount },
+      data: { discountAmount: 0, discountId: null, discountName: null, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -507,13 +514,13 @@ export class OrderService {
 
     const subtotal = activeItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, discountAmount);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
     await this.prisma.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { discountAmount, couponId: coupon.id, couponCode: coupon.code, discountName: coupon.name, discountId: null, totalAmount, taxAmount, serviceChargeAmount },
+      data: { discountAmount, couponId: coupon.id, couponCode: coupon.code, discountName: coupon.name, discountId: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -539,13 +546,13 @@ export class OrderService {
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const remaining = order.items.filter((i) => i.id !== itemId && !i.voidedAt);
     const subtotal = remaining.reduce((s, i) => s + Number(i.totalPrice), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, 0);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
 
     // If ALL items are now voided, auto-void the entire order and free the table
     if (remaining.length === 0) {
       const voidedOrder = await this.prisma.order.update({
         where: { id: orderId },
-        data: { subtotal: 0, taxAmount: 0, serviceChargeAmount: 0, totalAmount: 0, status: 'VOID', voidReason: 'All items voided', voidedById: dto.approverId, voidedAt: new Date() },
+        data: { subtotal: 0, taxAmount: 0, serviceChargeAmount: 0, totalAmount: 0, roundAdjustment: 0, status: 'VOID', voidReason: 'All items voided', voidedById: dto.approverId, voidedAt: new Date() },
         include: { items: true, payments: true },
       });
 
@@ -592,7 +599,7 @@ export class OrderService {
 
     const updatedOrder = await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount },
+      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true },
     });
 
@@ -758,11 +765,11 @@ export class OrderService {
     // Recalculate totals (only count approved + non-voided items)
     const allItems = await this.prisma.orderItem.findMany({ where: { orderId: id, voidedAt: null } });
     const subtotal = allItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, 0);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
 
     const updated = await this.prisma.order.update({
       where: { id },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount },
+      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -822,11 +829,11 @@ export class OrderService {
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const remaining = await this.prisma.orderItem.findMany({ where: { orderId: id, voidedAt: null } });
     const subtotal = remaining.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, 0);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
 
     const updated = await this.prisma.order.update({
       where: { id },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount },
+      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -878,11 +885,11 @@ export class OrderService {
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const remaining = await this.prisma.orderItem.findMany({ where: { orderId, voidedAt: null } });
     const subtotal = remaining.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, 0);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount },
+      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -912,11 +919,11 @@ export class OrderService {
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const remaining = order.items.filter((i) => i.id !== itemId && !i.voidedAt);
     const subtotal = remaining.reduce((s, i) => s + Number(i.totalPrice), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount } = computeTotals(branch, subtotal, 0);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount },
+      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -1025,6 +1032,7 @@ export class OrderService {
           subtotal: 0,
           taxAmount: 0,
           totalAmount: 0,
+          roundAdjustment: 0,
           cashierId: order.cashierId,
         },
       });
@@ -1053,7 +1061,7 @@ export class OrderService {
     const tTotals = computeTotals(branch, tSubtotal, 0);
     await this.prisma.order.update({
       where: { id: targetOrderId },
-      data: { subtotal: tSubtotal, taxAmount: tTotals.taxAmount, serviceChargeAmount: tTotals.serviceChargeAmount, totalAmount: tTotals.totalAmount },
+      data: { subtotal: tSubtotal, taxAmount: tTotals.taxAmount, serviceChargeAmount: tTotals.serviceChargeAmount, totalAmount: tTotals.totalAmount, roundAdjustment: tTotals.roundAdjustment },
     });
 
     // Recalculate source order totals
@@ -1064,7 +1072,7 @@ export class OrderService {
     const sTotals = computeTotals(branch, sSubtotal, 0);
     const updatedSource = await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal: sSubtotal, taxAmount: sTotals.taxAmount, serviceChargeAmount: sTotals.serviceChargeAmount, totalAmount: sTotals.totalAmount },
+      data: { subtotal: sSubtotal, taxAmount: sTotals.taxAmount, serviceChargeAmount: sTotals.serviceChargeAmount, totalAmount: sTotals.totalAmount, roundAdjustment: sTotals.roundAdjustment },
       include: { items: true, payments: true },
     });
 

@@ -33,6 +33,7 @@ interface IssueInvoiceInput {
     taxAmount: { toNumber(): number };
     discountAmount: { toNumber(): number };
     totalAmount: { toNumber(): number };
+    roundAdjustment?: { toNumber(): number };
     customerName: string | null;
     customerPhone: string | null;
     paymentMethod: string | null;
@@ -161,6 +162,7 @@ export class MushakService {
       subtotalExclVat: subtotal,
       sdAmount: 0,
       vatAmount,
+      roundAdjustment: order.roundAdjustment ? order.roundAdjustment.toNumber() : 0,
       totalInclVat,
       paymentSummary: order.payments?.map((p) => ({ method: p.method, amount: p.amount.toNumber() }))
         ?? (order.paymentMethod ? [{ method: order.paymentMethod, amount: totalInclVat }] : []),
@@ -346,6 +348,9 @@ export class MushakService {
       const s = String(v ?? '');
       return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
     };
+    // Money columns are stored in paisa (smallest unit); export in taka so
+    // the accountant's spreadsheet can sum directly without dividing.
+    const toTaka = (n: number) => (n / 100).toFixed(2);
     const lines = rows.map((r) =>
       [
         r.kind,
@@ -354,10 +359,10 @@ export class MushakService {
         r.buyerName ?? '',
         r.linkedInvoiceSerial ?? '',
         r.reasonCode ?? '',
-        r.subtotalExclVat.toFixed(2),
-        r.sdAmount.toFixed(2),
-        r.vatAmount.toFixed(2),
-        r.totalInclVat.toFixed(2),
+        toTaka(r.subtotalExclVat),
+        toTaka(r.sdAmount),
+        toTaka(r.vatAmount),
+        toTaka(r.totalInclVat),
       ].map(escape).join(','),
     );
     return [header, ...lines].join('\n');
