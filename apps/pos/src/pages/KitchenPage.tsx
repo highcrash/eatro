@@ -7,11 +7,29 @@ import { useAuthStore } from '../store/auth.store';
 import { api } from '../lib/api';
 
 let socket: Socket | null = null;
+let socketInit: Promise<Socket> | null = null;
 
-// Resolve the WS target against VITE_API_BASE_URL so the socket connects to
-// the API origin, not the page's own host. Fixes cross-origin deployments
-// where io('/ws') would target the POS domain instead of api.*.
-function wsUrl(): string {
+// Resolve the WS target. Three paths:
+//   1. Electron desktop — asks the main process for the paired serverUrl
+//      (per-install, dynamic) via window.desktop.config.get().
+//   2. Web with VITE_API_BASE_URL absolute — pin to that host (covers the
+//      pos.eatrobd.com → api.eatrobd.com cross-origin deploy).
+//   3. Web same-origin / dev proxy — relative '/ws' still works.
+async function resolveWsUrl(): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const desktop = (typeof window !== 'undefined' ? (window as any).desktop : undefined) as
+    | { config?: { get: () => Promise<{ serverUrl: string } | null> } }
+    | undefined;
+  if (desktop?.config?.get) {
+    try {
+      const cfg = await desktop.config.get();
+      if (cfg?.serverUrl) {
+        const u = new URL(cfg.serverUrl);
+        return `${u.protocol}//${u.host}/ws`;
+      }
+    } catch { /* fall through to web fallback */ }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const base = ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined) ?? '/api/v1';
   if (!base.startsWith('http')) return '/ws';
@@ -23,11 +41,14 @@ function wsUrl(): string {
   }
 }
 
-function getSocket(): Socket {
-  if (!socket) {
-    socket = io(wsUrl(), { transports: ['websocket'] });
-  }
-  return socket;
+function getSocket(): Promise<Socket> {
+  if (socket) return Promise.resolve(socket);
+  if (socketInit) return socketInit;
+  socketInit = resolveWsUrl().then((url) => {
+    socket = io(url, { transports: ['websocket'] });
+    return socket;
+  });
+  return socketInit;
 }
 
 export default function KitchenPage() {
@@ -51,29 +72,37 @@ export default function KitchenPage() {
 
   // Socket.io: join KDS room and listen for events
   useEffect(() => {
-    const s = getSocket();
-    s.emit('join:kds', branchId);
+    let disposed = false;
+    let cleanup: (() => void) | null = null;
+    void getSocket().then((s) => {
+      if (disposed) return;
+      s.emit('join:kds', branchId);
 
-    const onNew = (order: Order) =>
-      setTickets((prev) => {
-        if (prev.some((t) => t.id === order.id)) return prev;
-        return [...prev, order];
-      });
+      const onNew = (order: Order) =>
+        setTickets((prev) => {
+          if (prev.some((t) => t.id === order.id)) return prev;
+          return [...prev, order];
+        });
 
-    const onDone = (orderId: string) =>
-      setTickets((prev) => prev.filter((t) => t.id !== orderId));
+      const onDone = (orderId: string) =>
+        setTickets((prev) => prev.filter((t) => t.id !== orderId));
 
-    const onPreparing = (orderId: string) =>
-      setPreparingIds((prev) => new Set(prev).add(orderId));
+      const onPreparing = (orderId: string) =>
+        setPreparingIds((prev) => new Set(prev).add(orderId));
 
-    s.on('kds:ticket:new', onNew);
-    s.on('kds:ticket:done', onDone);
-    s.on('kds:ticket:preparing', onPreparing);
+      s.on('kds:ticket:new', onNew);
+      s.on('kds:ticket:done', onDone);
+      s.on('kds:ticket:preparing', onPreparing);
 
+      cleanup = () => {
+        s.off('kds:ticket:new', onNew);
+        s.off('kds:ticket:done', onDone);
+        s.off('kds:ticket:preparing', onPreparing);
+      };
+    });
     return () => {
-      s.off('kds:ticket:new', onNew);
-      s.off('kds:ticket:done', onDone);
-      s.off('kds:ticket:preparing', onPreparing);
+      disposed = true;
+      cleanup?.();
     };
   }, [branchId]);
 
@@ -90,12 +119,12 @@ export default function KitchenPage() {
       next.delete(orderId);
       return next;
     });
-    getSocket().emit('kds:ticket:done', orderId);
+    void getSocket().then((s) => s.emit('kds:ticket:done', orderId));
   }, []);
 
   const startTicket = useCallback((orderId: string) => {
     setPreparingIds((prev) => new Set(prev).add(orderId));
-    getSocket().emit('kds:ticket:preparing', orderId);
+    void getSocket().then((s) => s.emit('kds:ticket:preparing', orderId));
   }, []);
 
   return (
