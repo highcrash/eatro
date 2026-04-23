@@ -6,6 +6,15 @@ interface BalancesData {
   closing?: Record<string, number>;
 }
 
+// Supplier + salary payments auto-create mirror Expense rows so they show
+// up in expense reports. Summing Expense AND SupplierPayment/PayrollPayment
+// would double-count them in reconciliation — filter the mirrors out here.
+// Matches the descriptions written in supplier.service.makePayment +
+// payroll.service.addPayment.
+const AUTO_EXPENSE_PREFIXES = ['Supplier payment', 'Salary paid', 'Salary partial'];
+const isAutoMirrorExpense = (description: string | null | undefined) =>
+  !!description && AUTO_EXPENSE_PREFIXES.some((p) => description.startsWith(p));
+
 @Injectable()
 export class WorkPeriodService {
   constructor(private readonly prisma: PrismaService) {}
@@ -240,13 +249,17 @@ export class WorkPeriodService {
       }
     }
 
-    // Expenses by payment method
+    // Expenses by payment method. Mirror rows auto-created for supplier
+    // payments + salary payouts are filtered out — the SupplierPayment
+    // and PayrollPayment queries below already account for them, so
+    // including them here would double-deduct from the expected balance.
     const expenses = await this.prisma.expense.findMany({
       where: { branchId, deletedAt: null, createdAt: { gte: from, lte: to } },
     });
     const expensesByMethod: Record<string, number> = {};
     const expensesByAccount: Record<string, number> = {};
     for (const e of expenses) {
+      if (isAutoMirrorExpense(e.description)) continue;
       expensesByMethod[e.paymentMethod] = (expensesByMethod[e.paymentMethod] ?? 0) + e.amount.toNumber();
       const accId = methodToAccount[e.paymentMethod];
       if (accId) {
@@ -377,9 +390,13 @@ export class WorkPeriodService {
       include: { payments: true },
     });
 
-    const expenses = await this.prisma.expense.findMany({
+    // Drop the mirror Expense rows auto-created by supplier + salary
+    // payouts so totals + category charts in the Z-report don't inflate
+    // the "Expenses" line by the same amount that already shows under
+    // "Supplier payments" and "Salary payments".
+    const expenses = (await this.prisma.expense.findMany({
       where: { branchId, deletedAt: null, createdAt: { gte: from, lte: to } },
-    });
+    })).filter((e) => !isAutoMirrorExpense(e.description));
 
     // Breakdown by payment method
     const byPaymentMethod: Record<string, number> = {};
