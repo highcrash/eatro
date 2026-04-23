@@ -40,7 +40,9 @@ interface IssueInvoiceInput {
     items: Array<{
       id: string;
       menuItemName: string;
-      quantity: { toNumber(): number };
+      // OrderItem.quantity is Prisma Int, not Decimal — comes through as a
+      // plain number. The other money fields ARE Decimal.
+      quantity: number;
       unitPrice: { toNumber(): number };
       totalPrice: { toNumber(): number };
       voidedAt: Date | null;
@@ -136,7 +138,7 @@ export class MushakService {
       lineItems.push({
         id: i.id,
         name: i.menuItemName,
-        quantity: i.quantity.toNumber(),
+        quantity: Number(i.quantity),
         unitPrice: i.unitPrice.toNumber(),
         subtotalExclVat: lineTotal,
         sdAmount: 0,
