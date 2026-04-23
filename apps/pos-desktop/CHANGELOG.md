@@ -3,6 +3,38 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.3 — purchasing accuracy + SMS backup coverage (2026-04-23)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/utils:
+
+- **Variant pack size in PO + receive + ledger rows.** Variant
+  ingredients now render as `Parent — Brand (PackSize)` across the
+  purchasing list, receive screen, return list, and supplier ledger
+  (via the new shared `ingredientDisplayName` helper). Previously a
+  1L bottle and a 5L bottle of the same brand looked identical.
+- **PO line + grand total use received qty on over-delivery.** When
+  a supplier ships more than the PO ordered, the on-screen line total
+  and PO grand total now multiply unitCost × received instead of
+  × ordered, matching what the print export and supplier ledger
+  already do.
+- **Variant cost/unit derivation.** `createVariant`, update, and
+  bulk CSV import now auto-derive `costPerUnit` from
+  `costPerPurchaseUnit / purchaseUnitQty` so the inventory Cost/Unit
+  column and daily consumption valuation stop showing 0 or the
+  pack-level price for variants. One-shot Owner-only repair endpoint
+  `POST /ingredients/repair-variant-costs` fixes existing rows.
+- **Reconciliation double-count fix.** Supplier + payroll payouts
+  auto-create mirror Expense rows; the work-period balance builder
+  now filters these out so the admin Daily Report's Expected column
+  matches the POS close-day live balance (previously off by the sum
+  of supplier + salary payments).
+- **Auto-link supplier on PO + receive.** Pairing an ingredient with
+  a supplier on a PO upserts the IngredientSupplier row and, if the
+  ingredient had no primary supplier, promotes this one — so the
+  shopping list pre-fills the supplier on the next order.
+
+No Electron main-process changes; dev-build-sig updater path unchanged.
+
 ## 1.0.2 — advisor/waiter POS access + UI polish (2026-04-23)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/utils:
