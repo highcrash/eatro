@@ -45,33 +45,47 @@ export interface KitchenTicketInput {
 
 export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {
   const activeItems = (ticket.items ?? []).filter((i) => !i.voidedAt);
+  // Each item gets a heavy double-line separator underneath — mirrors the
+  // kitchen-POS reference layout where cooks scan the ticket from a
+  // distance and need the item rows to stand out at a glance.
   const itemsHtml = activeItems
     .map(
       (i) =>
-        `<tr><td style="padding:4px 0;font-size:16px;font-weight:bold">${i.quantity}\u00d7</td><td style="padding:4px 8px;font-size:16px">${escapeHtml(i.menuItemName)}</td></tr>${i.notes ? `<tr><td></td><td style="font-size:12px;color:#666;padding-bottom:4px">&nbsp;&rarr; ${escapeHtml(i.notes)}</td></tr>` : ''}`,
+        `<div class="item"><div class="item-line">${i.quantity}-:${escapeHtml(i.menuItemName)}</div>${i.notes ? `<div class="item-note">&rarr; ${escapeHtml(i.notes)}</div>` : ''}<div class="item-sep"></div></div>`,
     )
     .join('');
 
   const createdAt = new Date(ticket.createdAt);
+  const dateStr = createdAt.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: '2-digit' });
+  const timeStr = createdAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
   const destination = ticket.tableNumber ? `Table ${escapeHtml(String(ticket.tableNumber))}` : escapeHtml(ticket.type);
+  const sectionHeader = ticket.sectionName ? escapeHtml(ticket.sectionName) : 'Kitchen Order';
 
+  // Font sizes: item rows at 28px (was 16px) and the Table heading at 32px
+  // (was 12px) — roughly 2-3x the original so the kitchen can read the
+  // ticket from across the station.
   return `<html><head><style>
     @page { size: 80mm 297mm; margin: 2mm; }
     html, body { margin: 0; padding: 0; color: #000; }
     body { font-family: monospace; width: 76mm; padding: 0; }
-    h1 { font-size: 22px; margin: 0; text-align: center; }
-    .meta { font-size: 12px; text-align: center; color: #666; margin: 4px 0 12px; }
-    table { width: 100%; border-collapse: collapse; }
+    .section { font-size: 14px; text-align: center; letter-spacing: 2px; margin: 0 0 4px; }
+    .new-order { font-size: 14px; text-align: center; margin: 2px 0 6px; }
+    .datetime { display: flex; justify-content: space-between; font-size: 12px; color: #333; margin: 0 0 6px; }
+    .destination { font-size: 32px; font-weight: 900; text-align: center; margin: 4px 0 0; line-height: 1.1; }
     .divider { border-top: 1px dashed #000; margin: 8px 0; }
-    .notes { font-size: 12px; font-style: italic; margin-top: 8px; }
+    .item { margin: 4px 0 0; }
+    .item-line { font-size: 28px; font-weight: 900; line-height: 1.15; }
+    .item-note { font-size: 16px; font-style: italic; margin-top: 2px; margin-left: 16px; }
+    .item-sep { border-top: 2px double #000; margin-top: 6px; }
+    .notes { font-size: 14px; font-style: italic; margin-top: 10px; }
   </style></head><body>
-    <h1>KITCHEN ORDER</h1>
-    <div class="meta">#${escapeHtml(ticket.orderNumber)} &mdash; ${destination}</div>
-    <div class="meta">${createdAt.toLocaleTimeString()}</div>
+    <div class="section">${sectionHeader}</div>
+    <div class="new-order">New Order</div>
+    <div class="datetime"><span>Date:${escapeHtml(dateStr)}</span><span>Time:${escapeHtml(timeStr)}</span></div>
+    <div class="destination">${destination}</div>
     <div class="divider"></div>
-    <table>${itemsHtml}</table>
-    <div class="divider"></div>
-    ${ticket.notes ? `<div class="notes">Note: ${escapeHtml(ticket.notes)}</div>` : ''}
+    ${itemsHtml}
+    <div class="notes">Notes: ${ticket.notes ? escapeHtml(ticket.notes) : ''}</div>
     <script>window.onload=function(){window.print();window.close();}<\/script>
   </body></html>`;
 }

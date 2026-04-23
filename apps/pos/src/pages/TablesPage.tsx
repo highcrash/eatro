@@ -328,7 +328,7 @@ export default function TablesPage() {
   const { data: waiters = [] } = useQuery<{ id: string; name: string; role: string; isActive: boolean }[]>({
     queryKey: ['waiters'],
     queryFn: () => api.get('/staff'),
-    select: (d) => d.filter((s: { role: string; isActive: boolean }) => s.role === 'WAITER' && s.isActive),
+    select: (d) => d.filter((s: { role: string; isActive: boolean }) => s.isActive && s.role !== 'KITCHEN'),
   });
 
   // ─── Feature 3: Change table status ──────────────────────────────────────────

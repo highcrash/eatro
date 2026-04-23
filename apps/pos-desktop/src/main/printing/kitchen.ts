@@ -81,25 +81,28 @@ function buildKitchenJob(ticket: KitchenTicketInput): ThermalJob {
   const createdAt = new Date(ticket.createdAt);
   const destination = ticket.tableNumber ? `Table ${ticket.tableNumber}` : ticket.type;
   const activeItems = (ticket.items ?? []).filter((i) => !i.voidedAt);
+  const sectionHeader = ticket.sectionName ?? 'Kitchen Order';
 
+  // Section + "New Order" + date/time stay at normal size; the destination
+  // (Table N) and every item line go double-width/double-height so the
+  // kitchen can read the ticket across the pass. Mirrors the HTML
+  // template's 28-32px item / destination bump.
   job.lines.push({ kind: 'align-center' });
-  job.lines.push({ kind: 'text', text: 'KITCHEN ORDER', bold: true, size: 'large' });
-  if (ticket.sectionName) {
-    job.lines.push({ kind: 'text', text: `-- ${ticket.sectionName.toUpperCase()} --`, bold: true });
-  }
-  job.lines.push({ kind: 'text', text: `#${ticket.orderNumber} - ${destination}` });
-  job.lines.push({ kind: 'text', text: createdAt.toLocaleTimeString() });
+  job.lines.push({ kind: 'text', text: sectionHeader, bold: true });
+  job.lines.push({ kind: 'text', text: 'New Order' });
+  job.lines.push({ kind: 'text', text: `${createdAt.toLocaleDateString()}  ${createdAt.toLocaleTimeString()}` });
+  job.lines.push({ kind: 'text', text: destination, bold: true, size: 'large' });
   job.lines.push({ kind: 'divider' });
 
   job.lines.push({ kind: 'align-left' });
   for (const it of activeItems) {
-    job.lines.push({ kind: 'text', text: `${it.quantity}x  ${it.menuItemName}`, bold: true });
+    job.lines.push({ kind: 'text', text: `${it.quantity}-: ${it.menuItemName}`, bold: true, size: 'large' });
     if (it.notes) job.lines.push({ kind: 'text', text: `   -> ${it.notes}` });
+    job.lines.push({ kind: 'divider' });
   }
 
-  job.lines.push({ kind: 'divider' });
   if (ticket.notes) {
-    job.lines.push({ kind: 'text', text: `Note: ${ticket.notes}` });
+    job.lines.push({ kind: 'text', text: `Notes: ${ticket.notes}` });
   }
   job.lines.push({ kind: 'newline' });
   job.lines.push({ kind: 'cut' });
