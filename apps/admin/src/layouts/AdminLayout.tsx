@@ -126,6 +126,7 @@ const NAV_GROUPS: Array<{
       { to: '/cooking-stations', icon: Printer, label: 'Kitchen Sections', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/branches', icon: Building2, label: 'Branches', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/cashier-permissions', icon: ShieldCheck, label: 'Cashier Perms', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/roles', icon: ShieldCheck, label: 'Custom Roles', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/website', icon: Globe, label: 'Website', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/settings', icon: Settings, label: 'Settings', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/data-cleanup', icon: Trash2, label: 'Data Cleanup', allowedRoles: ['OWNER'] },
@@ -154,6 +155,22 @@ export default function AdminLayout() {
     queryFn: () => api.get('/branches'),
     enabled: isOwner,
   });
+
+  // Fetch custom-role definitions so we can apply this user's
+  // adminNavOverrides to the sidebar. If the user has no customRoleId or
+  // no matching role is found, the overrides map is empty and nothing
+  // changes — pure additive layering on top of baseRole allowedRoles.
+  const userCustomRoleId = (user as { customRoleId?: string | null } | null)?.customRoleId ?? null;
+  const { data: customRoles = [] } = useQuery<Array<{ id: string; adminNavOverrides: Record<string, boolean> | null }>>({
+    queryKey: ['custom-roles'],
+    queryFn: () => api.get('/custom-roles'),
+    enabled: !!userCustomRoleId,
+  });
+  const navOverrides: Record<string, boolean> = (() => {
+    if (!userCustomRoleId) return {};
+    const found = customRoles.find((r) => r.id === userCustomRoleId);
+    return found?.adminNavOverrides ?? {};
+  })();
 
   const handleSwitchBranch = async (branchId: string) => {
     if (branchId === user?.branchId) { setSwitching(false); return; }
@@ -192,9 +209,13 @@ export default function AdminLayout() {
             // Filter first, then skip empty groups so ADVISOR / narrower
             // roles don't see orphaned category headers above nothing.
             const role = user?.role ?? '';
-            const visibleItems = group.items.filter(
-              (item) => !item.allowedRoles || item.allowedRoles.includes(role),
-            );
+            const visibleItems = group.items.filter((item) => {
+              // First: base-role gate. Custom role can only tighten from here.
+              if (item.allowedRoles && !item.allowedRoles.includes(role)) return false;
+              // Then: custom-role override. Explicit `false` hides the item.
+              if (navOverrides[item.to] === false) return false;
+              return true;
+            });
             if (visibleItems.length === 0) return null;
             return (
               <div key={gIdx} className={gIdx > 0 ? 'mt-3' : ''}>

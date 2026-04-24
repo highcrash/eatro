@@ -78,7 +78,7 @@ export class CashierOpsController {
     @Body() dto: CreatePurchaseOrderDto & { actionOtp?: string },
   ) {
     if (!dto.supplierId || !dto.items?.length) throw new BadRequestException('Supplier and items required');
-    await this.permissions.requirePermission(user.branchId, user.role, 'createPurchaseOrder', dto.actionOtp);
+    await this.permissions.requirePermission(user.branchId, user.role, 'createPurchaseOrder', dto.actionOtp, user.customRoleId ?? null);
     const { actionOtp: _otp, ...createDto } = dto;
     const created = await this.purchasing.create(user.branchId, user.sub, createDto);
     // Auto-advance to SENT so the cashier doesn't have to do a separate "send" step.
@@ -91,7 +91,7 @@ export class CashierOpsController {
     @Body() dto: ReceiveGoodsDto & { purchaseOrderId: string; actionOtp?: string },
   ) {
     if (!dto.purchaseOrderId) throw new BadRequestException('purchaseOrderId required');
-    await this.permissions.requirePermission(user.branchId, user.role, 'receivePurchaseOrder', dto.actionOtp);
+    await this.permissions.requirePermission(user.branchId, user.role, 'receivePurchaseOrder', dto.actionOtp, user.customRoleId ?? null);
     const { actionOtp: _otp, purchaseOrderId, ...receiveDto } = dto;
     return this.purchasing.receiveGoods(purchaseOrderId, user.branchId, user.sub, receiveDto);
   }
@@ -102,7 +102,7 @@ export class CashierOpsController {
     @Body() dto: { supplierId: string; purchaseOrderId?: string; items: { ingredientId: string; quantity: number; unitPrice: number }[]; notes?: string; actionOtp?: string },
   ) {
     if (!dto.supplierId || !dto.items?.length) throw new BadRequestException('Supplier and items required');
-    await this.permissions.requirePermission(user.branchId, user.role, 'returnPurchaseOrder', dto.actionOtp);
+    await this.permissions.requirePermission(user.branchId, user.role, 'returnPurchaseOrder', dto.actionOtp, user.customRoleId ?? null);
     const { actionOtp: _otp, ...returnDto } = dto;
     const created = await this.purchasing.createReturn(user.branchId, user.sub, returnDto as CreateReturnDto & { supplierId: string });
     // Auto-complete the return so stock + supplier due are updated immediately
@@ -116,7 +116,7 @@ export class CashierOpsController {
     @Body() dto: { supplierId: string; purchaseOrderId?: string; amount: number; paymentMethod?: string; reference?: string; notes?: string; actionOtp?: string },
   ) {
     if (!dto.supplierId || !dto.amount) throw new BadRequestException('Supplier and amount required');
-    await this.permissions.requirePermission(user.branchId, user.role, 'paySupplier', dto.actionOtp);
+    await this.permissions.requirePermission(user.branchId, user.role, 'paySupplier', dto.actionOtp, user.customRoleId ?? null);
     const { actionOtp: _otp, ...payDto } = dto;
     return this.suppliers.makePayment(user.branchId, user.sub, payDto);
   }
@@ -163,7 +163,7 @@ export class CashierOpsController {
     @Body() dto: { preReadyItemId: string; quantity: number; notes?: string; actionOtp?: string },
   ) {
     if (!dto.preReadyItemId || !dto.quantity) throw new BadRequestException('Item and quantity required');
-    await this.permissions.requirePermission(user.branchId, user.role, 'createPreReadyKT', dto.actionOtp);
+    await this.permissions.requirePermission(user.branchId, user.role, 'createPreReadyKT', dto.actionOtp, user.customRoleId ?? null);
     const created = await this.preReady.createProduction(user.branchId, user.sub, {
       preReadyItemId: dto.preReadyItemId,
       quantity: dto.quantity,
@@ -180,7 +180,7 @@ export class CashierOpsController {
     @Body() dto: { payrollId: string; amount: number; paymentMethod?: string; reference?: string; notes?: string; actionOtp?: string },
   ) {
     if (!dto.payrollId || !dto.amount) throw new BadRequestException('Payroll and amount required');
-    await this.permissions.requirePermission(user.branchId, user.role, 'payPayroll', dto.actionOtp);
+    await this.permissions.requirePermission(user.branchId, user.role, 'payPayroll', dto.actionOtp, user.customRoleId ?? null);
     const { payrollId, actionOtp: _otp, ...payDto } = dto;
     return this.payroll.makePayment(payrollId, user.branchId, user.sub, payDto);
   }

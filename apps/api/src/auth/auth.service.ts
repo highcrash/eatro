@@ -61,7 +61,7 @@ export class AuthService {
     return this.login(staff);
   }
 
-  async validateUser(email: string, password: string): Promise<{ id: string; email: string; role: string; branchId: string; name: string; branch: { name: string } } | null> {
+  async validateUser(email: string, password: string): Promise<{ id: string; email: string; role: string; branchId: string; name: string; customRoleId: string | null; branch: { name: string } } | null> {
     const staff = await this.prisma.staff.findFirst({
       where: { email, deletedAt: null, isActive: true },
       include: { branch: { select: { name: true } } },
@@ -74,11 +74,12 @@ export class AuthService {
     return staff;
   }
 
-  async login(staff: { id: string; email: string; role: string; branchId: string; name: string; branch: { name: string } }): Promise<LoginResponse> {
+  async login(staff: { id: string; email: string; role: string; branchId: string; name: string; customRoleId?: string | null; branch: { name: string } }): Promise<LoginResponse> {
     const payload: JwtPayload = {
       sub: staff.id,
       email: staff.email,
       role: staff.role as JwtPayload['role'],
+      customRoleId: staff.customRoleId ?? null,
       branchId: staff.branchId,
     };
 
@@ -96,6 +97,7 @@ export class AuthService {
         name: staff.name,
         email: staff.email,
         role: staff.role as JwtPayload['role'],
+        customRoleId: staff.customRoleId ?? null,
         branchId: staff.branchId,
         branchName: staff.branch.name,
       },
@@ -136,6 +138,7 @@ export class AuthService {
       sub: staff.id,
       email: staff.email,
       role: staff.role as JwtPayload['role'],
+      customRoleId: staff.customRoleId ?? null,
       branchId: targetBranchId,
     };
     const accessToken = this.jwt.sign(payload);
@@ -152,6 +155,7 @@ export class AuthService {
         name: staff.name,
         email: staff.email,
         role: staff.role as JwtPayload['role'],
+        customRoleId: staff.customRoleId ?? null,
         branchId: targetBranchId,
         branchName: branch.name,
       },
@@ -168,6 +172,7 @@ export class AuthService {
         sub: payload.sub,
         email: payload.email,
         role: payload.role,
+        customRoleId: payload.customRoleId ?? null,
         branchId: payload.branchId,
       };
 

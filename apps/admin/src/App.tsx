@@ -34,6 +34,7 @@ import MushakRegisterPage from './pages/MushakRegisterPage';
 import MushakInvoiceView from './pages/MushakInvoiceView';
 import BranchesPage from './pages/BranchesPage';
 import CashierPermissionsPage from './pages/CashierPermissionsPage';
+import RolesPage from './pages/RolesPage';
 import WebsitePage from './pages/WebsitePage';
 import DiscountsPage from './pages/DiscountsPage';
 import CustomersPage from './pages/CustomersPage';
@@ -110,6 +111,7 @@ export default function AdminApp() {
         <Route path="/cooking-stations" element={<CookingStationsPage />} />
         <Route path="/branches" element={<BranchesPage />} />
         <Route path="/cashier-permissions" element={<CashierPermissionsPage />} />
+        <Route path="/roles" element={<RolesPage />} />
         <Route path="/website" element={<WebsitePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/reservations" element={<ReservationsPage />} />
