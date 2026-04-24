@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Printer, Search, X } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Printer, Search, X, Wrench } from 'lucide-react';
 
-import type { Order, MushakInvoice } from '@restora/types';
+import type { Order, MushakInvoice, CorrectPaymentDto } from '@restora/types';
 import { formatCurrency, formatDateTime, renderMushakSlipHtml, type MushakSnapshot } from '@restora/utils';
 import { api } from '../lib/api';
+import { useAuthStore } from '../store/auth.store';
 
 /**
  * Renders the Mushak-6.3 column cell. Fetches-on-demand (enabled only for
@@ -144,6 +145,176 @@ function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => voi
   );
 }
 
+// ─── Correct Payment Dialog ──────────────────────────────────────────────────
+
+interface PaymentOption { code: string; name: string; isActive: boolean; category?: { code: string; name: string } }
+
+/**
+ * Owner / manager-only dialog to fix a wrong payment method on a PAID
+ * order. Posts to /orders/:id/correct-payment which reverses the old
+ * account postings, rewrites the OrderPayment rows, refreshes the
+ * Mushak-6.3 snapshot, and credits the new account.
+ */
+function CorrectPaymentDialog({ order, onClose }: { order: Order; onClose: () => void }) {
+  const qc = useQueryClient();
+  const total = Number(order.totalAmount);
+
+  const { data: paymentOpts = [] } = useQuery<PaymentOption[]>({
+    queryKey: ['payment-options'],
+    queryFn: () => api.get('/payment-methods/options'),
+  });
+  const activeOpts = paymentOpts.filter((o) => o.isActive);
+
+  const [mode, setMode] = useState<'single' | 'split'>('single');
+  const [method, setMethod] = useState<string>(order.paymentMethod ?? '');
+  const [splits, setSplits] = useState<{ method: string; amount: number; reference?: string }[]>([
+    { method: '', amount: Math.round(total / 2) },
+    { method: '', amount: total - Math.round(total / 2) },
+  ]);
+  const [approverPin, setApproverPin] = useState('');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const splitTotal = splits.reduce((s, sp) => s + (Number(sp.amount) || 0), 0);
+  const splitDelta = splitTotal - total;
+
+  const mutation = useMutation({
+    mutationFn: (dto: CorrectPaymentDto) => api.post(`/orders/${order.id}/correct-payment`, dto),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['orders'] });
+      void qc.invalidateQueries({ queryKey: ['mushak-invoice-by-order', order.id] });
+      onClose();
+    },
+    onError: (e: unknown) => setError(e instanceof Error ? e.message : 'Correction failed'),
+  });
+
+  const submit = () => {
+    setError(null);
+    if (mode === 'single') {
+      if (!method) { setError('Pick a payment method'); return; }
+      const dto: CorrectPaymentDto = {
+        method,
+        approverPin: approverPin || undefined,
+        reason: reason || undefined,
+      };
+      mutation.mutate(dto);
+    } else {
+      if (splits.some((s) => !s.method) || splits.length < 2) { setError('Each split needs a method'); return; }
+      if (Math.abs(splitDelta) > 1) { setError(`Split sum must equal ${formatCurrency(total)}`); return; }
+      const dto: CorrectPaymentDto = {
+        method: 'SPLIT',
+        splits: splits.map((sp) => ({ method: sp.method, amount: sp.amount, reference: sp.reference })),
+        approverPin: approverPin || undefined,
+        reason: reason || undefined,
+      };
+      mutation.mutate(dto);
+    }
+  };
+
+  const oldSummary = order.payments && order.payments.length > 0
+    ? order.payments.map((p) => `${p.method} ${formatCurrency(Number(p.amount))}`).join(' + ')
+    : (order.paymentMethod ?? '—');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
+      <div className="bg-[#161616] w-[520px] max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-[#2A2A2A] flex items-center justify-between">
+          <div>
+            <h3 className="font-display text-2xl text-white tracking-wide">CORRECT PAYMENT</h3>
+            <p className="text-xs font-body text-[#666] mt-0.5">Order #{order.orderNumber} • {formatCurrency(total)}</p>
+          </div>
+          <button onClick={onClose} className="text-[#999] hover:text-white p-1.5"><X size={16} /></button>
+        </div>
+
+        <div className="px-6 py-4 space-y-4">
+          <div className="bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2">
+            <p className="text-[10px] font-body text-[#666] tracking-widest uppercase">Currently recorded as</p>
+            <p className="text-sm font-body text-white mt-0.5">{oldSummary}</p>
+          </div>
+
+          <div className="flex gap-0 border-b border-[#2A2A2A]">
+            {(['single', 'split'] as const).map((m) => (
+              <button key={m} onClick={() => setMode(m)} type="button"
+                className={`px-3 py-2 text-[10px] font-body font-medium tracking-widest uppercase border-b-2 transition-colors ${
+                  mode === m ? 'border-[#D62B2B] text-[#D62B2B]' : 'border-transparent text-[#666]'
+                }`}
+              >{m === 'single' ? 'Single Method' : 'Split'}</button>
+            ))}
+          </div>
+
+          {mode === 'single' ? (
+            <div>
+              <label className="text-[10px] font-body text-[#666] tracking-widest uppercase block mb-1.5">New Method</label>
+              <select value={method} onChange={(e) => setMethod(e.target.value)}
+                className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]">
+                <option value="">Select payment method…</option>
+                {activeOpts.map((o) => (
+                  <option key={o.code} value={o.code}>{o.name}{o.category ? ` (${o.category.name})` : ''}</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="text-[10px] font-body text-[#666] tracking-widest uppercase block">Splits</label>
+              {splits.map((sp, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <select value={sp.method}
+                    onChange={(e) => setSplits(splits.map((x, i) => i === idx ? { ...x, method: e.target.value } : x))}
+                    className="flex-1 bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]">
+                    <option value="">Method…</option>
+                    {activeOpts.filter((o) => o.code !== 'SPLIT').map((o) => (
+                      <option key={o.code} value={o.code}>{o.name}</option>
+                    ))}
+                  </select>
+                  <input type="number" step="0.01" value={(sp.amount / 100).toFixed(2)}
+                    onChange={(e) => setSplits(splits.map((x, i) => i === idx ? { ...x, amount: Math.round((Number(e.target.value) || 0) * 100) } : x))}
+                    className="w-32 bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B] text-right" />
+                  {splits.length > 2 && (
+                    <button onClick={() => setSplits(splits.filter((_, i) => i !== idx))} type="button"
+                      className="text-[#D62B2B] hover:text-white p-1"><X size={14} /></button>
+                  )}
+                </div>
+              ))}
+              <div className="flex justify-between items-center pt-1">
+                <button onClick={() => setSplits([...splits, { method: '', amount: 0 }])} type="button"
+                  className="text-[10px] font-body text-[#FFA726] hover:text-white tracking-widest uppercase">+ Add split</button>
+                <span className={`text-xs font-body ${Math.abs(splitDelta) > 1 ? 'text-[#D62B2B]' : 'text-green-500'}`}>
+                  {splitTotal === total ? 'Balanced' : `${splitDelta > 0 ? '+' : ''}${formatCurrency(splitDelta)}`}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="text-[10px] font-body text-[#666] tracking-widest uppercase block mb-1.5">Reason (optional)</label>
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Cashier tapped CASH instead of bKash"
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]" />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-body text-[#666] tracking-widest uppercase block mb-1.5">Approver PIN (optional)</label>
+            <input type="password" value={approverPin} onChange={(e) => setApproverPin(e.target.value)}
+              placeholder="Your password to confirm"
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]" />
+            <p className="text-[10px] font-body text-[#555] mt-1">Owner / Manager only. PIN is verified when provided.</p>
+          </div>
+
+          {error && <div className="bg-[#D62B2B]/10 border border-[#D62B2B]/30 px-3 py-2 text-xs font-body text-[#D62B2B]">{error}</div>}
+
+          <div className="flex gap-2 pt-2 border-t border-[#2A2A2A]">
+            <button onClick={onClose} type="button" disabled={mutation.isPending}
+              className="flex-1 border border-[#2A2A2A] px-3 py-2 text-xs font-body text-[#999] hover:border-[#666] hover:text-white tracking-widest uppercase transition-colors">Cancel</button>
+            <button onClick={submit} type="button" disabled={mutation.isPending}
+              className="flex-1 bg-[#D62B2B] hover:bg-[#B71C1C] px-3 py-2 text-xs font-body text-white tracking-widest uppercase transition-colors disabled:opacity-50">
+              {mutation.isPending ? 'Correcting…' : 'Correct Payment'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Sales Report Page ───────────────────────────────────────────────────────
 
 export default function SalesReportPage() {
@@ -155,6 +326,9 @@ export default function SalesReportPage() {
   const [dateTo, setDateTo] = useState(today);
   const [itemSearch, setItemSearch] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [correctingOrder, setCorrectingOrder] = useState<Order | null>(null);
+  const role = useAuthStore((s) => s.user?.role);
+  const canCorrectPayment = role === 'OWNER' || role === 'MANAGER';
 
   const { data: orders = [], isLoading } = useQuery<Order[]>({
     queryKey: ['orders', dateFrom, dateTo],
@@ -277,13 +451,14 @@ export default function SalesReportPage() {
               <th className="px-4 py-3 font-medium text-right">Total</th><th className="px-4 py-3 font-medium">Payment</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Mushak</th>
+              <th className="px-4 py-3 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={13} className="px-4 py-8 text-center text-[#999]">Loading...</td></tr>
+              <tr><td colSpan={14} className="px-4 py-8 text-center text-[#999]">Loading...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={13} className="px-4 py-8 text-center text-[#999]">No orders found</td></tr>
+              <tr><td colSpan={14} className="px-4 py-8 text-center text-[#999]">No orders found</td></tr>
             ) : (
               <>
                 {filtered.map((o, idx) => (
@@ -303,6 +478,14 @@ export default function SalesReportPage() {
                     <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                       <MushakPrintCell orderId={o.id} status={o.status} />
                     </td>
+                    <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      {canCorrectPayment && (o.status === 'PAID' || o.status === 'PARTIALLY_REFUNDED' || o.status === 'REFUNDED') ? (
+                        <button onClick={() => setCorrectingOrder(o)} title="Correct payment method"
+                          className="text-[#FFA726] hover:text-white inline-flex items-center gap-1 text-xs">
+                          <Wrench size={12} /> Fix
+                        </button>
+                      ) : <span className="text-[#555] text-xs">—</span>}
+                    </td>
                   </tr>
                 ))}
                 <tr className="bg-[#0D0D0D]">
@@ -311,7 +494,7 @@ export default function SalesReportPage() {
                   <td className="px-4 py-3 text-right text-xs font-medium text-green-500">{grandDiscount > 0 ? `-${formatCurrency(grandDiscount)}` : '—'}</td>
                   <td className="px-4 py-3 text-right text-xs font-medium text-white">{formatCurrency(grandTax)}</td>
                   <td className="px-4 py-3 text-right text-xs font-medium text-[#D62B2B] font-display text-base tracking-wide">{formatCurrency(grandTotal)}</td>
-                  <td colSpan={3}></td>
+                  <td colSpan={4}></td>
                 </tr>
               </>
             )}
@@ -320,6 +503,7 @@ export default function SalesReportPage() {
       </div>
 
       {selectedOrder && <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />}
+      {correctingOrder && <CorrectPaymentDialog order={correctingOrder} onClose={() => setCorrectingOrder(null)} />}
     </div>
   );
 }

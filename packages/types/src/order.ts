@@ -101,6 +101,29 @@ export interface ProcessPaymentDto {
   }>;
 }
 
+/**
+ * Replace the payment method on an already-PAID order. Used when a cashier
+ * mistakenly tapped CASH instead of bKash, or POS card instead of cash.
+ * The server reverses the existing OrderPayment account effects, deletes
+ * those rows, creates new rows for the corrected method, and re-applies
+ * the SALE deltas to the linked accounts. Total amount is preserved —
+ * only the method (or split breakdown) changes.
+ */
+export interface CorrectPaymentDto {
+  method: PaymentMethod;
+  splits?: Array<{
+    method: Exclude<PaymentMethod, 'SPLIT'>;
+    amount: MoneyAmount;
+    reference?: string;
+  }>;
+  /** Approver PIN (reused from void / refund approval pattern). */
+  approverPin?: string;
+  /** Approver staff id; falls back to current user when omitted. */
+  approverId?: string;
+  /** Optional note saved on the new OrderPayment.reference for audit. */
+  reason?: string;
+}
+
 export interface VoidOrderDto {
   reason: string;
   approverId: string;
@@ -178,6 +201,33 @@ export interface MushakNote {
   totalInclVat: MoneyAmount;
   refundedItemIds: string[];
   snapshot: unknown;
+}
+
+// ─── Items-Sold report ───────────────────────────────────────────────────────
+
+/**
+ * One line in the Items-Sold report — items with the same name AND unit price
+ * are aggregated into a single row. Different unit prices (discounted line
+ * vs full price) get their own rows so the print "qty × name × unit = total"
+ * is unambiguous.
+ */
+export interface ItemsSoldRow {
+  menuItemId: string;
+  name: string;
+  unitPrice: MoneyAmount;
+  quantity: number;
+  totalRevenue: MoneyAmount;
+}
+
+export interface ItemsSoldReport {
+  from: string;
+  to: string;
+  rows: ItemsSoldRow[];
+  /** Grand totals across all rows in the period. */
+  totals: {
+    quantity: number;
+    revenue: MoneyAmount;
+  };
 }
 
 /** Row rendered in the admin Mushak register — interleaved 6.3 + 6.8. */

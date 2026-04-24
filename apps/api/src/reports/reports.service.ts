@@ -171,6 +171,62 @@ export class ReportsService {
     }));
   }
 
+  /**
+   * Items-Sold report — every paid line in the period, aggregated by
+   * (menuItemId, unitPrice). Distinct unit prices stay in their own
+   * row so a discounted line and a full-price line of the same item
+   * print as two rows on the receipt-style report ("qty × name × unit
+   * = total"). Defaults to today when from/to are both omitted.
+   */
+  async getItemsSold(branchId: string, from?: string, to?: string) {
+    const now = new Date();
+    let dateFrom: Date;
+    let dateTo: Date;
+
+    if (!from && !to) {
+      dateFrom = new Date(now); dateFrom.setHours(0, 0, 0, 0);
+      dateTo = new Date(now); dateTo.setHours(23, 59, 59, 999);
+    } else {
+      dateFrom = new Date(from || now.toISOString().split('T')[0]);
+      dateFrom.setHours(0, 0, 0, 0);
+      dateTo = new Date(to || now.toISOString().split('T')[0]);
+      dateTo.setHours(23, 59, 59, 999);
+    }
+
+    const items = await this.prisma.orderItem.groupBy({
+      by: ['menuItemId', 'menuItemName', 'unitPrice'],
+      where: {
+        order: {
+          branchId,
+          status: 'PAID',
+          paidAt: { gte: dateFrom, lte: dateTo },
+          deletedAt: null,
+        },
+        voidedAt: null,
+      },
+      _sum: { quantity: true, totalPrice: true },
+      orderBy: { _sum: { totalPrice: 'desc' } },
+    });
+
+    const rows = items.map((it) => ({
+      menuItemId: it.menuItemId,
+      name: it.menuItemName,
+      unitPrice: Number(it.unitPrice),
+      quantity: Number(it._sum.quantity ?? 0),
+      totalRevenue: Number(it._sum.totalPrice ?? 0),
+    }));
+
+    const totalQty = rows.reduce((s, r) => s + r.quantity, 0);
+    const totalRevenue = rows.reduce((s, r) => s + r.totalRevenue, 0);
+
+    return {
+      from: dateFrom.toISOString(),
+      to: dateTo.toISOString(),
+      rows,
+      totals: { quantity: totalQty, revenue: totalRevenue },
+    };
+  }
+
   async getRevenueByCategory(branchId: string, period: string) {
     const { from, to } = this.getDateRange(period);
 
