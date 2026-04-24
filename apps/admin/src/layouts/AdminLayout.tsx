@@ -96,6 +96,7 @@ const NAV_GROUPS: Array<{
     items: [
       { to: '/reports', icon: BarChart2, label: 'Reports', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/sales', icon: BarChart2, label: 'Sales Report', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/reports/items', icon: BarChart2, label: 'Items Sold', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/daily', icon: BarChart2, label: 'Daily Reports', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/voids', icon: BarChart2, label: 'Void Audit', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/mushak', icon: Receipt, label: 'Mushak Register', allowedRoles: OPERATIONAL_ROLES },

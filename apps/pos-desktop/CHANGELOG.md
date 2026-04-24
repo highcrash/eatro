@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.10 — payment correction + items-sold report (2026-04-25)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/types:
+
+- **Correct payment method on a paid order.** When a cashier taps the
+  wrong tender (e.g. CASH instead of bKash, or POS Card instead of
+  Cash), Owner / Manager can fix it from the Sales Report. The fix
+  reverses the original SALE postings against the linked accounts
+  (recorded as ADJUSTMENT in the ledger), rewrites the OrderPayment
+  rows, refreshes the Mushak-6.3 paymentSummary in-place (totals and
+  items remain frozen), and re-credits the corrected method. Work-
+  period reconciliation auto-corrects because it reads OrderPayment
+  rows live. Single + split layouts both supported; approver PIN is
+  optional but verified when supplied.
+- **Items Sold report.** New POS tab on the Sales Report (today
+  only) listing every paid line aggregated by item + unit price as
+  "qty × name × unit = total" with a grand total. Admin gets the
+  same view at /reports/items with a date-range filter and Print /
+  PDF export.
+
 ## 1.0.9 — receive: discount + extra fees (2026-04-25)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/types:

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 
-import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason } from '@restora/types';
+import type { Prisma } from '@prisma/client';
+import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason, CorrectPaymentDto } from '@restora/types';
 import { generateOrderNumber, type MushakLineItem, type MushakBuyerBlock } from '@restora/utils';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -1336,5 +1337,155 @@ export class OrderService {
     this.ws.emitToBranch(branchId, 'order:updated' as never, { orderId: id, noteId: result.note.id, status: result.order.status });
 
     return { order: result.order, note: result.note };
+  }
+
+  /**
+   * Correct the payment method on an already-PAID order. Used when a
+   * cashier mistakenly tapped the wrong tender (e.g. CASH instead of
+   * bKash, or POS Card instead of Cash). The order total stays
+   * identical — only the OrderPayment rows + linked accounts change.
+   *
+   * Coverage:
+   *  - OrderPayment rows: deleted + recreated for the corrected method
+   *    (single or split). work-period reconciliation reads OrderPayment
+   *    live, so it auto-corrects.
+   *  - Account ledger: each existing payment is reversed against its
+   *    linked account (ADJUSTMENT row), then the new method's account
+   *    is credited (SALE row). Balances net to zero on the old account
+   *    and gain the full amount on the new one.
+   *  - Mushak-6.3 snapshot: paymentSummary updated in-place (legal
+   *    metadata only — totals/items remain frozen).
+   *  - Order.paymentMethod display field flipped to the new method.
+   *
+   * Approver gate mirrors void/refund: OWNER or MANAGER, optionally PIN-
+   * verified.
+   */
+  async correctOrderPayment(id: string, branchId: string, staffId: string, dto: CorrectPaymentDto) {
+    this.license.assertMutation('order.correctPayment');
+
+    const order = await this.prisma.order.findFirst({
+      where: { id, branchId, deletedAt: null },
+      include: { items: true, payments: true },
+    });
+    if (!order) throw new NotFoundException(`Order ${id} not found`);
+    if (order.status !== 'PAID' && order.status !== 'PARTIALLY_REFUNDED' && order.status !== 'REFUNDED') {
+      throw new BadRequestException('Only paid orders can have their payment method corrected');
+    }
+
+    // Approver check — OWNER or MANAGER, PIN optional.
+    const approverId = dto.approverId ?? staffId;
+    const approver = await this.prisma.staff.findFirst({
+      where: { id: approverId, branchId, isActive: true, deletedAt: null },
+    });
+    if (!approver || (approver.role !== 'OWNER' && approver.role !== 'MANAGER')) {
+      throw new BadRequestException('Payment correction requires OWNER or MANAGER approval');
+    }
+    if (dto.approverPin) {
+      const ok = await bcrypt.compare(dto.approverPin, approver.passwordHash);
+      if (!ok) throw new BadRequestException('Approver PIN is incorrect');
+    }
+
+    const total = order.totalAmount.toNumber();
+
+    // Validate split sum matches total exactly (allowing 1 paisa drift).
+    if (dto.method === 'SPLIT') {
+      if (!dto.splits || dto.splits.length < 2) {
+        throw new BadRequestException('Split payment requires at least 2 payment methods');
+      }
+      const splitTotal = dto.splits.reduce((s, sp) => s + sp.amount, 0);
+      if (Math.abs(splitTotal - total) > 1) {
+        throw new BadRequestException('Split amounts must equal order total');
+      }
+    }
+
+    // Snapshot existing payments before we wipe them — needed for the
+    // ledger reversal step that runs after the transaction commits.
+    const oldPayments = order.payments.map((p) => ({ method: p.method, amount: p.amount.toNumber() }));
+
+    const referenceNote = dto.reason ? `Correction: ${dto.reason}` : 'Payment method corrected';
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderPayment.deleteMany({ where: { orderId: id } });
+
+      if (dto.method === 'SPLIT' && dto.splits) {
+        await tx.orderPayment.createMany({
+          data: dto.splits.map((sp) => ({
+            orderId: id,
+            method: sp.method,
+            amount: sp.amount,
+            reference: sp.reference ?? referenceNote,
+          })),
+        });
+      } else {
+        await tx.orderPayment.create({
+          data: {
+            orderId: id,
+            method: dto.method as never,
+            amount: total,
+            reference: referenceNote,
+          },
+        });
+      }
+
+      const o = await tx.order.update({
+        where: { id },
+        data: { paymentMethod: dto.method },
+        include: { items: true, payments: true },
+      });
+
+      // Mushak-6.3 paymentSummary is a display-only field; legal totals
+      // and item lines remain frozen. Refreshing it here keeps reprints
+      // consistent with the corrected ledger.
+      const invoice = await tx.mushakInvoice.findUnique({ where: { orderId: id } });
+      if (invoice) {
+        const snap = (invoice.snapshot ?? {}) as Record<string, unknown>;
+        snap.paymentSummary = (o.payments ?? []).map((p) => ({
+          method: p.method,
+          amount: p.amount.toNumber(),
+        }));
+        await tx.mushakInvoice.update({
+          where: { id: invoice.id },
+          data: { snapshot: snap as Prisma.InputJsonValue },
+        });
+      }
+
+      return o;
+    });
+
+    // Reverse old payments against their original accounts, then credit
+    // the new accounts. Best-effort — same fire-and-forget pattern as
+    // processPayment so a transient account update never rolls back the
+    // payment correction itself.
+    for (const op of oldPayments) {
+      void this.accountService.reverseSalePosting(
+        branchId,
+        op.method,
+        op.amount,
+        `Payment correction — reverse ${op.method} for order #${order.orderNumber}`,
+      );
+    }
+    if (dto.method === 'SPLIT' && dto.splits) {
+      for (const sp of dto.splits) {
+        void this.accountService.updateAccountForPayment(
+          branchId,
+          sp.method,
+          sp.amount,
+          'SALE',
+          `Payment correction — Order #${order.orderNumber}`,
+        );
+      }
+    } else {
+      void this.accountService.updateAccountForPayment(
+        branchId,
+        dto.method,
+        total,
+        'SALE',
+        `Payment correction — Order #${order.orderNumber}`,
+      );
+    }
+
+    this.ws.emitToBranch(branchId, 'order:updated', updated);
+
+    return updated;
   }
 }

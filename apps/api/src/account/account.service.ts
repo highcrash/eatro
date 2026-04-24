@@ -204,6 +204,66 @@ export class AccountService {
     });
   }
 
+  /**
+   * Undo a prior SALE posting against the account linked to a payment
+   * method. Used by the payment-correction flow when the cashier picked
+   * the wrong tender and we need to subtract the amount back out before
+   * crediting the corrected method. Same lookup chain as
+   * updateAccountForPayment so we land on the same account row that was
+   * originally credited. Recorded as ADJUSTMENT (the existing
+   * TransactionType enum has no REFUND value) with a clear description
+   * pointing at the order.
+   */
+  async reverseSalePosting(
+    branchId: string,
+    paymentOptionCode: string,
+    amount: number,
+    description: string,
+  ) {
+    const option = await this.prisma.paymentOption.findFirst({
+      where: { branchId, code: paymentOptionCode, isActive: true },
+      select: { accountId: true },
+    });
+
+    let account;
+    if (option?.accountId) {
+      account = await this.prisma.account.findFirst({ where: { id: option.accountId, isActive: true } });
+    }
+
+    if (!account) {
+      account = await this.prisma.account.findFirst({
+        where: { branchId, linkedPaymentMethod: paymentOptionCode, isActive: true },
+      });
+    }
+
+    if (!account) {
+      const cat = await this.prisma.paymentMethodConfig.findFirst({
+        where: { branchId, code: paymentOptionCode },
+        include: { options: { where: { isDefault: true, isActive: true }, select: { accountId: true } } },
+      });
+      if (cat?.options[0]?.accountId) {
+        account = await this.prisma.account.findFirst({ where: { id: cat.options[0].accountId, isActive: true } });
+      }
+    }
+
+    if (!account) return;
+
+    await this.prisma.account.update({
+      where: { id: account.id },
+      data: { balance: { decrement: amount } },
+    });
+
+    await this.prisma.accountTransaction.create({
+      data: {
+        branchId,
+        accountId: account.id,
+        type: 'ADJUSTMENT',
+        amount: -amount,
+        description,
+      },
+    });
+  }
+
   async getPnl(branchId: string, from: string, to: string) {
     const fromDate = new Date(from);
     const toDate = new Date(to);

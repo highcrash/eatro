@@ -1,10 +1,12 @@
 import { useState, useRef, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Printer } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Printer, Wrench, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+import type { CorrectPaymentDto, ItemsSoldReport } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
+import { useAuthStore } from '../store/auth.store';
 
 interface SalesItem {
   name: string;
@@ -84,6 +86,158 @@ function formatDateTime(dateStr: string): string {
   return `${formatDate(dateStr)} ${formatTime(dateStr)}`;
 }
 
+// ─── Correct Payment Dialog (POS) ────────────────────────────────────────────
+
+interface PMOption { id: string; code: string; name: string; isActive: boolean; isDefault: boolean }
+interface PMCategory { id: string; code: string; name: string; isActive: boolean; options: PMOption[] }
+
+function PosCorrectPaymentDialog({ orderId, orderNumber, total, currentMethod, onClose }: {
+  orderId: string;
+  orderNumber: string;
+  total: number;
+  currentMethod: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+
+  const { data: categories = [] } = useQuery<PMCategory[]>({
+    queryKey: ['payment-methods'],
+    queryFn: () => api.get('/payment-methods'),
+    select: (d) => d.filter((c) => c.isActive && c.options.some((o) => o.isActive)),
+  });
+  const allOptions = categories.flatMap((c) => c.options.filter((o) => o.isActive).map((o) => ({ code: o.code, name: o.name, catCode: c.code })));
+
+  const [mode, setMode] = useState<'single' | 'split'>('single');
+  const [method, setMethod] = useState<string>(currentMethod || '');
+  const [splits, setSplits] = useState<{ method: string; amount: number; reference?: string }[]>([
+    { method: 'CASH', amount: Math.round(total / 2) },
+    { method: 'CASH', amount: total - Math.round(total / 2) },
+  ]);
+  const [approverPin, setApproverPin] = useState('');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const splitTotal = splits.reduce((s, sp) => s + (Number(sp.amount) || 0), 0);
+  const splitDelta = splitTotal - total;
+
+  const mutation = useMutation({
+    mutationFn: (dto: CorrectPaymentDto) => api.post(`/orders/${orderId}/correct-payment`, dto),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['sales-detail'] });
+      onClose();
+    },
+    onError: (e: unknown) => setError(e instanceof Error ? e.message : 'Correction failed'),
+  });
+
+  const submit = () => {
+    setError(null);
+    if (mode === 'single') {
+      if (!method) { setError('Pick a payment method'); return; }
+      mutation.mutate({ method, approverPin: approverPin || undefined, reason: reason || undefined });
+    } else {
+      if (splits.some((s) => !s.method) || splits.length < 2) { setError('Each split needs a method'); return; }
+      if (Math.abs(splitDelta) > 1) { setError(`Split sum must equal ${formatCurrency(total)}`); return; }
+      mutation.mutate({ method: 'SPLIT', splits, approverPin: approverPin || undefined, reason: reason || undefined });
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div className="bg-theme-surface rounded-theme shadow-2xl w-full max-w-md max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <header className="px-5 py-4 border-b border-theme-border flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-theme-text-muted">Correct Payment</p>
+            <p className="text-sm text-theme-text mt-0.5">Order #{orderNumber} • {formatCurrency(total)}</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-theme hover:bg-theme-bg flex items-center justify-center text-theme-text-muted">
+            <X size={14} />
+          </button>
+        </header>
+        <div className="p-5 space-y-4">
+          <div className="bg-theme-bg rounded-theme px-3 py-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Currently recorded as</p>
+            <p className="text-sm text-theme-text mt-0.5">{currentMethod || '—'}</p>
+          </div>
+
+          <div className="flex gap-1 bg-theme-bg rounded-theme p-1">
+            {(['single', 'split'] as const).map((m) => (
+              <button key={m} onClick={() => setMode(m)} type="button"
+                className={`flex-1 py-1.5 text-xs rounded-theme transition-colors ${
+                  mode === m ? 'bg-theme-surface text-theme-text font-bold shadow-sm' : 'text-theme-text-muted font-semibold hover:text-theme-text'
+                }`}
+              >{m === 'single' ? 'Single Method' : 'Split'}</button>
+            ))}
+          </div>
+
+          {mode === 'single' ? (
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-1">New Method</label>
+              <select value={method} onChange={(e) => setMethod(e.target.value)}
+                className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent">
+                <option value="">Select payment method…</option>
+                {allOptions.map((o) => (
+                  <option key={o.code} value={o.code}>{o.name} ({o.catCode})</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Splits</label>
+              {splits.map((sp, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <select value={sp.method}
+                    onChange={(e) => setSplits(splits.map((x, i) => i === idx ? { ...x, method: e.target.value } : x))}
+                    className="flex-1 bg-theme-bg border border-theme-border rounded-theme px-2 py-2 text-sm text-theme-text outline-none focus:border-theme-accent">
+                    <option value="">Method…</option>
+                    {allOptions.map((o) => <option key={o.code} value={o.code}>{o.name}</option>)}
+                  </select>
+                  <input type="number" step="0.01" value={(sp.amount / 100).toFixed(2)}
+                    onChange={(e) => setSplits(splits.map((x, i) => i === idx ? { ...x, amount: Math.round((Number(e.target.value) || 0) * 100) } : x))}
+                    className="w-28 bg-theme-bg border border-theme-border rounded-theme px-2 py-2 text-sm text-theme-text outline-none focus:border-theme-accent text-right" />
+                  {splits.length > 2 && (
+                    <button onClick={() => setSplits(splits.filter((_, i) => i !== idx))} type="button" className="text-theme-danger p-1"><X size={14} /></button>
+                  )}
+                </div>
+              ))}
+              <div className="flex justify-between items-center pt-1">
+                <button onClick={() => setSplits([...splits, { method: '', amount: 0 }])} type="button" className="text-[10px] font-bold uppercase tracking-wider text-theme-accent">+ Add split</button>
+                <span className={`text-xs ${Math.abs(splitDelta) > 1 ? 'text-theme-danger' : 'text-green-600'}`}>
+                  {splitTotal === total ? 'Balanced' : `${splitDelta > 0 ? '+' : ''}${formatCurrency(splitDelta)}`}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-1">Reason (optional)</label>
+            <input value={reason} onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Tapped CASH instead of bKash"
+              className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent" />
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-1">Approver PIN (optional)</label>
+            <input type="password" value={approverPin} onChange={(e) => setApproverPin(e.target.value)}
+              placeholder="Owner / Manager password"
+              className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent" />
+          </div>
+
+          {error && <div className="bg-theme-danger/10 border border-theme-danger/30 rounded-theme px-3 py-2 text-xs text-theme-danger">{error}</div>}
+
+          <div className="flex gap-2">
+            <button onClick={onClose} type="button" disabled={mutation.isPending}
+              className="flex-1 bg-theme-bg hover:bg-theme-surface-alt text-theme-text font-semibold px-4 py-2.5 rounded-theme text-sm">Cancel</button>
+            <button onClick={submit} type="button" disabled={mutation.isPending}
+              className="flex-1 bg-theme-accent hover:opacity-90 text-white font-bold px-4 py-2.5 rounded-theme text-sm disabled:opacity-50">
+              {mutation.isPending ? 'Correcting…' : 'Correct Payment'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SalesReportPage() {
   const navigate = useNavigate();
   const printRef = useRef<HTMLDivElement>(null);
@@ -109,8 +263,18 @@ export default function SalesReportPage() {
     },
   });
 
-  // Sales / Expense tab selector
-  const [tab, setTab] = useState<'sales' | 'expense'>('sales');
+  // Sales / Items / Expense tab selector
+  const [tab, setTab] = useState<'sales' | 'items' | 'expense'>('sales');
+  const [correcting, setCorrecting] = useState<SalesOrder | null>(null);
+  const role = useAuthStore((s) => s.user?.role);
+  const canCorrectPayment = role === 'OWNER' || role === 'MANAGER';
+
+  // Items-Sold report — POS limits to today only.
+  const { data: itemsSold, isLoading: itemsLoading } = useQuery<ItemsSoldReport>({
+    queryKey: ['items-sold', 'today'],
+    queryFn: () => api.get<ItemsSoldReport>(`/reports/items-sold?from=${today}&to=${today}`),
+    enabled: tab === 'items',
+  });
 
   // Expense list — pinned to TODAY only for now (date range disabled).
   const expFrom = today;
@@ -205,6 +369,14 @@ export default function SalesReportPage() {
             Sales
           </button>
           <button
+            onClick={() => setTab('items')}
+            className={`px-4 py-1.5 text-xs rounded-theme transition-colors ${
+              tab === 'items' ? 'bg-theme-surface text-theme-text font-bold shadow-sm' : 'text-theme-text-muted font-semibold hover:text-theme-text'
+            }`}
+          >
+            Items Sold
+          </button>
+          <button
             onClick={() => setTab('expense')}
             className={`px-4 py-1.5 text-xs rounded-theme transition-colors ${
               tab === 'expense' ? 'bg-theme-surface text-theme-text font-bold shadow-sm' : 'text-theme-text-muted font-semibold hover:text-theme-text'
@@ -271,6 +443,59 @@ export default function SalesReportPage() {
             <span className="px-5 py-2 text-sm rounded-theme font-semibold text-theme-accent border-2 border-theme-accent">
               Today
             </span>
+          </div>
+          {tab === 'items' && itemsSold && (
+            <span className="text-xs text-theme-text-muted ml-auto font-semibold">
+              {itemsSold.rows.length} item{itemsSold.rows.length !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Items-Sold table — today only (POS) */}
+      {tab === 'items' && (
+        <div className="flex-1 overflow-auto px-6 pb-6">
+          <div className="bg-theme-surface rounded-theme border border-theme-border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-theme-bg">
+                <tr className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">
+                  <th className="px-4 py-3 text-left">#</th>
+                  <th className="px-4 py-3 text-left">Item</th>
+                  <th className="px-4 py-3 text-right">Qty</th>
+                  <th className="px-4 py-3 text-right">Unit Price</th>
+                  <th className="px-4 py-3 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {itemsLoading ? (
+                  <tr><td colSpan={5} className="px-4 py-12 text-center text-theme-text-muted text-sm">Loading…</td></tr>
+                ) : !itemsSold || itemsSold.rows.length === 0 ? (
+                  <tr><td colSpan={5} className="px-4 py-12 text-center text-theme-text-muted text-sm">No items sold today yet.</td></tr>
+                ) : (
+                  <>
+                    {itemsSold.rows.map((r, idx) => (
+                      <tr key={`${r.menuItemId}-${r.unitPrice}`} className="border-t border-theme-border hover:bg-theme-bg/40">
+                        <td className="px-4 py-3 text-theme-text-muted text-xs">{idx + 1}</td>
+                        <td className="px-4 py-3 text-theme-text">{r.name}</td>
+                        <td className="px-4 py-3 text-right text-theme-text-muted">{r.quantity}×</td>
+                        <td className="px-4 py-3 text-right text-theme-text-muted">{formatCurrency(Number(r.unitPrice))}</td>
+                        <td className="px-4 py-3 text-right font-bold text-theme-text">{formatCurrency(Number(r.totalRevenue))}</td>
+                      </tr>
+                    ))}
+                  </>
+                )}
+              </tbody>
+              {itemsSold && itemsSold.rows.length > 0 && (
+                <tfoot className="bg-theme-bg">
+                  <tr className="text-sm font-bold border-t-2 border-theme-border">
+                    <td className="px-4 py-3 text-theme-text-muted uppercase tracking-wider text-[11px]" colSpan={2}>Grand Total</td>
+                    <td className="px-4 py-3 text-right">{itemsSold.totals.quantity}×</td>
+                    <td></td>
+                    <td className="px-4 py-3 text-right text-theme-accent text-base">{formatCurrency(Number(itemsSold.totals.revenue))}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
           </div>
         </div>
       )}
@@ -366,6 +591,9 @@ export default function SalesReportPage() {
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600, textAlign: 'right' }}>VAT</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600, textAlign: 'right' }}>Total</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Payment</th>
+                  {canCorrectPayment && isToday && (
+                    <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Fix</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -400,6 +628,14 @@ export default function SalesReportPage() {
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10 }}>
                       {order.paymentMethod}
                     </td>
+                    {canCorrectPayment && isToday && (
+                      <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10 }}>
+                        <button onClick={() => setCorrecting(order)} title="Correct payment method"
+                          className="text-theme-accent hover:underline inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider">
+                          <Wrench size={11} /> Fix
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {/* Grand total row */}
@@ -421,6 +657,9 @@ export default function SalesReportPage() {
                       {formatCurrency(grandTotal)}
                     </td>
                     <td style={{ borderTop: '2px solid #111', padding: '8px 4px' }}></td>
+                    {canCorrectPayment && isToday && (
+                      <td style={{ borderTop: '2px solid #111', padding: '8px 4px' }}></td>
+                    )}
                   </tr>
                 )}
               </tbody>
@@ -432,6 +671,16 @@ export default function SalesReportPage() {
           </div>
         )}
       </div>
+      )}
+
+      {correcting && (
+        <PosCorrectPaymentDialog
+          orderId={correcting.id}
+          orderNumber={correcting.orderNumber}
+          total={correcting.totalAmount}
+          currentMethod={correcting.paymentMethod}
+          onClose={() => setCorrecting(null)}
+        />
       )}
     </div>
   );
