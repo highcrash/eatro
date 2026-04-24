@@ -3,6 +3,20 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.9 — receive: discount + extra fees (2026-04-25)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/types:
+
+- **Receipt-level adjustments at delivery.** Cashier can now record
+  a flat supplier-offered discount (with optional reason) and any
+  number of extra fees (delivery, labour, packaging) when receiving
+  goods. The supplier ledger settles to items + extra fees − discount
+  so the running balance reflects the actual billed amount.
+- **POS receive form** gets a Receipt Adjustments block with a
+  Discount field, optional reason, and a dynamic Add Fee list.
+  Grand-total breakdown shows items + extras / + extra fees /
+  − discount / Net.
+
 ## 1.0.8 — admin-configurable custom roles (2026-04-25)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/types:
