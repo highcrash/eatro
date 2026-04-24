@@ -357,12 +357,28 @@ export class PurchasingService {
         }
       }
 
-      if (receiptTotal > 0) {
+      // Receipt-level adjustments. Discount is subtracted, extra fees are
+      // added. Net is what the supplier ledger should change by — never
+      // less than zero (a discount bigger than the bill becomes a no-op
+      // ledger move; the over-discount is purely a display artefact).
+      const discountPaisa = Math.max(0, dto.receiptDiscount ?? 0);
+      const cleanedFees: { label: string; amount: number }[] = (dto.receiptExtraFees ?? [])
+        .filter((f) => f && typeof f.label === 'string' && f.label.trim().length > 0 && Number(f.amount) > 0)
+        .map((f) => ({ label: f.label.trim(), amount: Math.round(Number(f.amount)) }));
+      const extraFeesTotal = cleanedFees.reduce((s, f) => s + f.amount, 0);
+      const netDelta = Math.max(0, receiptTotal + extraFeesTotal - discountPaisa);
+
+      if (netDelta > 0) {
         await tx.supplier.update({
           where: { id: po.supplierId },
-          data: { totalDue: { increment: receiptTotal } },
+          data: { totalDue: { increment: netDelta } },
         });
       }
+
+      // Persist the adjustment block on the PO so the supplier ledger,
+      // PO detail page, and printed receipt can show what was billed.
+      // Stored as paisa to stay consistent with item.unitCost.
+      const persistAdjustments = discountPaisa > 0 || cleanedFees.length > 0;
 
       // `closePartial` lets the cashier mark the PO complete even when some
       // items weren't fully received (supplier finalised the delivery at a
@@ -376,6 +392,13 @@ export class PurchasingService {
         data: {
           status: newStatus,
           receivedAt: finalReceived ? new Date() : undefined,
+          ...(persistAdjustments
+            ? {
+                receiptDiscount: discountPaisa,
+                receiptDiscountReason: (dto.receiptDiscountReason ?? '').trim() || null,
+                receiptExtraFees: cleanedFees as unknown as object,
+              }
+            : {}),
         },
         include: {
           supplier: { select: { id: true, name: true } },

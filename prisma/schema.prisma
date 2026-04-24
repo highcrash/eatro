@@ -1329,6 +1329,14 @@ model PurchaseOrder {
   orderedAt   DateTime?
   expectedAt  DateTime?
   receivedAt  DateTime?
+  // Receipt-level adjustments captured on receive: a flat discount the
+  // supplier offered on the whole shipment, plus any extra fees (delivery,
+  // labour, packaging) tacked on at delivery. All amounts in paisa.
+  // The supplier ledger settles: items_total + extra_fees - discount.
+  receiptDiscount        Decimal  @default(0) @db.Decimal(14, 2)
+  receiptDiscountReason  String?
+  /// JSON array of { label: string; amount: number } in paisa.
+  receiptExtraFees       Json?
   createdById String
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt

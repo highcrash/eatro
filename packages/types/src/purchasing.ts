@@ -32,6 +32,10 @@ export interface PurchaseOrder {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  /** Receipt-level adjustments captured at delivery time. */
+  receiptDiscount?: number;
+  receiptDiscountReason?: string | null;
+  receiptExtraFees?: ReceiptExtraFee[] | null;
   supplier?: { id: string; name: string };
   createdBy?: { id: string; name: string };
   items: PurchaseOrderItem[];
@@ -53,6 +57,13 @@ export interface UpdatePurchaseOrderDto {
   supplierId?: string;
   notes?: string;
   expectedAt?: string;
+}
+
+/** A receipt-level extra fee captured at delivery (delivery charge,
+ *  labour cost, packaging, etc.). Amount is in paisa. */
+export interface ReceiptExtraFee {
+  label: string;
+  amount: number;
 }
 
 export interface ReceiveGoodsDto {
@@ -78,6 +89,14 @@ export interface ReceiveGoodsDto {
   /** Close the PO to RECEIVED even when some items are only partially
    *  received. Useful when the supplier won't deliver the rest. */
   closePartial?: boolean;
+  /** Flat discount the supplier offered on the whole shipment, in paisa.
+   *  Subtracted from the supplier ledger total. */
+  receiptDiscount?: number;
+  /** Optional reason / note for the discount. Displayed in the ledger. */
+  receiptDiscountReason?: string;
+  /** Extra fees added at delivery (delivery, labour, etc.). Each fee is
+   *  ADDED to the supplier ledger total. */
+  receiptExtraFees?: ReceiptExtraFee[];
 }
 
 // ─── Purchase Returns ────────────────────────────────────────────────────────
