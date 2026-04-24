@@ -20,7 +20,11 @@ export class PermissionsController {
   @Get()
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   get(@CurrentUser() user: JwtPayload) {
-    return this.service.getPermissions(user.branchId);
+    // Merge branch default with the caller's custom-role overrides so the
+    // POS UI sees the effective matrix. OWNER/MANAGER always bypass the
+    // matrix on the write path but still see the raw branch default here
+    // (custom-role overrides apply only to CASHIER/ADVISOR/WAITER).
+    return this.service.getPermissionsForStaff(user.branchId, user.customRoleId ?? null);
   }
 
   @Patch()

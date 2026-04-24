@@ -24,6 +24,9 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'branch', table: 'branches' },
 
   // Tier 2 — branch-owned singletons and people
+  // CustomRole must be inserted before Staff so the FK (staff.customRoleId
+  // → custom_roles.id) resolves on restore when staff rows reference it.
+  { accessor: 'customRole', table: 'custom_roles' },
   { accessor: 'staff', table: 'staff' },
   { accessor: 'branchSetting', table: 'branch_settings' },
   { accessor: 'websiteContent', table: 'website_content' },

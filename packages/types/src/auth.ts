@@ -21,6 +21,8 @@ export interface AuthUser {
   name: string;
   email: string;
   role: UserRole;
+  /** Optional custom-role overlay (labelling + navigation / POS tightening). */
+  customRoleId?: string | null;
   branchId: string;
   branchName: string;
 }
@@ -29,6 +31,7 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: UserRole;
+  customRoleId?: string | null;
   branchId: string;
   iat?: number;
   exp?: number;

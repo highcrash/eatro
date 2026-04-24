@@ -25,6 +25,29 @@ export class PermissionsService {
     return parseCashierPermissions(raw);
   }
 
+  /**
+   * Read the effective matrix for a specific staff member — branch default
+   * merged with the staff's custom-role overrides (if any). The UI uses
+   * this so cashiers see the buttons their role actually allows. The
+   * server still re-runs requirePermission() on each mutation as the
+   * authoritative check; this getter is purely the display-layer merge.
+   */
+  async getPermissionsForStaff(branchId: string, customRoleId: string | null | undefined): Promise<CashierPermissions> {
+    const base = await this.getPermissions(branchId);
+    if (!customRoleId) return base;
+    const customRole = await this.prisma.customRole.findFirst({
+      where: { id: customRoleId, branchId, deletedAt: null, isActive: true },
+      select: { posPermissions: true },
+    });
+    const overrides = (customRole?.posPermissions ?? null) as Partial<CashierPermissions> | null;
+    if (!overrides) return base;
+    // Shallow merge per-action. Each ActionPermission is replaced wholesale
+    // when overridden — granular merge isn't needed for v1 and avoids
+    // surprising behaviour where only some fields (enabled vs approval)
+    // come from different sources.
+    return { ...base, ...overrides } as CashierPermissions;
+  }
+
   async updatePermissions(branchId: string, perms: CashierPermissions): Promise<CashierPermissions> {
     let settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
     if (!settings) settings = await this.prisma.branchSetting.create({ data: { branchId } });
@@ -59,13 +82,16 @@ export class PermissionsService {
     role: string,
     action: CashierAction,
     actionOtp?: string,
+    customRoleId?: string | null,
   ): Promise<void> {
     if (role === 'OWNER' || role === 'MANAGER') return;
     if (role !== 'CASHIER' && role !== 'ADVISOR' && role !== 'WAITER') {
       throw new ForbiddenException('Role not allowed');
     }
 
-    const perms = await this.getPermissions(branchId);
+    // Custom role may tighten the per-branch matrix for this staff member.
+    // If no customRoleId is passed, behaviour is identical to before.
+    const perms = await this.getPermissionsForStaff(branchId, customRoleId);
     const cfg = perms[action];
     if (!cfg.enabled) throw new ForbiddenException(`Action "${action}" is disabled for cashier`);
 

@@ -10,9 +10,17 @@ interface Staff {
   email: string;
   phone: string | null;
   role: string;
+  customRoleId?: string | null;
   isActive: boolean;
   canAccessPos: boolean;
   hireDate: string;
+}
+
+interface CustomRoleLite {
+  id: string;
+  name: string;
+  baseRole: string;
+  description?: string | null;
 }
 
 const ROLES = ['OWNER', 'MANAGER', 'ADVISOR', 'CASHIER', 'KITCHEN', 'WAITER'] as const;
@@ -24,11 +32,21 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
     email: initial?.email ?? '',
     phone: initial?.phone ?? '',
     role: initial?.role ?? 'CASHIER',
+    customRoleId: initial?.customRoleId ?? '',
     password: '',
     isActive: initial?.isActive ?? true,
     canAccessPos: initial?.canAccessPos ?? true,
   });
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
+
+  // Custom roles the admin may assign. Filter to ones whose baseRole
+  // matches the selected role — a "Head Chef" (base=KITCHEN) shouldn't
+  // be assignable to a staff currently on role=CASHIER.
+  const { data: customRoles = [] } = useQuery<CustomRoleLite[]>({
+    queryKey: ['custom-roles'],
+    queryFn: () => api.get<CustomRoleLite[]>('/custom-roles'),
+  });
+  const filteredCustomRoles = customRoles.filter((c) => c.baseRole === form.role);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -37,6 +55,7 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
         email: form.email,
         phone: form.phone || undefined,
         role: form.role,
+        customRoleId: form.customRoleId || null,
       };
       if (form.password) dto.password = form.password;
       dto.canAccessPos = form.canAccessPos;
@@ -80,11 +99,29 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
             </div>
             <div className="flex-1">
               <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Role</label>
-              <select value={form.role} onChange={(e) => set('role', e.target.value)}
+              <select value={form.role} onChange={(e) => { set('role', e.target.value); set('customRoleId', ''); }}
                 className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white">
                 {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
+          </div>
+          {/* Custom role overlay — optional. Only custom roles whose
+              baseRole matches the selected security role appear here. */}
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">
+              Custom Role <span className="text-[#555] normal-case tracking-normal">(optional overlay)</span>
+            </label>
+            <select value={form.customRoleId ?? ''} onChange={(e) => set('customRoleId', e.target.value)}
+              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white disabled:opacity-50"
+              disabled={filteredCustomRoles.length === 0}>
+              <option value="">— None ({form.role} default) —</option>
+              {filteredCustomRoles.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            {filteredCustomRoles.length === 0 && (
+              <p className="text-[10px] text-[#555] mt-1">No custom roles defined for {form.role}. Create one in Roles.</p>
+            )}
           </div>
           <div>
             <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">

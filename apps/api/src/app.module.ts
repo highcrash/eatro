@@ -34,6 +34,7 @@ import { UploadModule } from './upload/upload.module';
 import { DiscountModule } from './discount/discount.module';
 import { SmsModule } from './sms/sms.module';
 import { MushakModule } from './mushak/mushak.module';
+import { CustomRoleModule } from './custom-role/custom-role.module';
 import { CustomerModule } from './customer/customer.module';
 import { BrandingModule } from './branding/branding.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -127,6 +128,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // NBR Mushak (Bangladesh VAT) compliance
     MushakModule,
+
+    // Custom roles — admin-configurable permission presets
+    CustomRoleModule,
 
     // Customer Management
     CustomerModule,

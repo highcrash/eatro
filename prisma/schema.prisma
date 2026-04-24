@@ -232,6 +232,7 @@ model Branch {
   mushakSequences     MushakSequence[]
   mushakInvoices      MushakInvoice[]
   mushakNotes         MushakNote[]
+  customRoles         CustomRole[]
 
   @@index([isActive])
   @@map("branches")
@@ -369,14 +370,20 @@ model WebsiteContent {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Staff {
-  id           String    @id @default(cuid())
-  branchId     String
-  name         String
-  email        String    @unique
-  passwordHash String
-  phone        String?
-  role         UserRole  @default(CASHIER)
-  isActive     Boolean   @default(true)
+  id            String    @id @default(cuid())
+  branchId      String
+  name          String
+  email         String    @unique
+  passwordHash  String
+  phone         String?
+  role          UserRole  @default(CASHIER)
+  // Optional per-branch custom role overlay. The `role` column above is the
+  // SECURITY anchor — all @Roles() guards + JWT checks run against it. The
+  // custom role (if set) is a labelling + navigation-override layer on top;
+  // it can only HIDE admin pages the base role would otherwise see and /
+  // or tighten the POS cashier-ops matrix per role. It never elevates.
+  customRoleId  String?
+  isActive      Boolean   @default(true)
   // Whether this user can sign into a POS terminal (desktop lock-screen
   // tile + web POS login). Admin can flip off for roles that shouldn't
   // be operating a register (e.g. an ADVISOR who only needs admin).
@@ -411,10 +418,56 @@ model Staff {
   returnsRequested          PurchaseReturn[]   @relation("ReturnRequester")
   reservationsConfirmed     Reservation[]      @relation("ReservationConfirmer")
   mushakNotesIssued         MushakNote[]       @relation("MushakNoteIssuer")
+  customRole                CustomRole?        @relation(fields: [customRoleId], references: [id])
 
   @@index([branchId, isActive])
   @@index([email])
   @@map("staff")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CUSTOM ROLES — admin-configurable permission presets
+// ─────────────────────────────────────────────────────────────────────────────
+// A custom role is a labelled permission preset attached on top of a staff
+// member's required base `UserRole`. Security is always enforced by the
+// base role (JWT + @Roles() guards are unchanged). The custom role only:
+//   1. Hides admin nav items the base role would otherwise see (via
+//      adminNavOverrides — a map of { [navPath]: boolean } where `false`
+//      hides the item).
+//   2. Overrides the POS cashier-ops matrix per role (via posPermissions —
+//      same shape as BranchSetting.cashierPermissions), applied on top of
+//      the branch default inside permissions.service.requirePermission().
+//
+// Can never elevate — service + UI both reject overrides that would reveal
+// pages / actions the base role isn't already allowed to reach. Per-branch
+// scope to match how BranchSetting.cashierPermissions is already modelled.
+
+model CustomRole {
+  id                String    @id @default(cuid())
+  branchId          String
+  name              String // display label, e.g. "Head Chef"
+  description       String?
+  // The SECURITY anchor — JWT still carries this exact enum value and
+  // every @Roles() guard checks against it. Custom role inherits from this.
+  baseRole          UserRole
+  // Nav overrides — JSON { [navPath]: boolean }. A missing key means
+  // "defer to the base role's allowedRoles check". An explicit `false`
+  // hides the item for staff assigned to this custom role.
+  adminNavOverrides Json?
+  // POS cashier-ops overrides — mirrors CashierPermissions shape. Only
+  // consulted when baseRole ∈ { CASHIER, ADVISOR, WAITER }.
+  posPermissions    Json?
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  branch Branch  @relation(fields: [branchId], references: [id])
+  staff  Staff[]
+
+  @@unique([branchId, name])
+  @@index([branchId])
+  @@map("custom_roles")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
