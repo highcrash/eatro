@@ -50,6 +50,10 @@ interface LedgerPO {
   createdAt: string;
   receivedAt: string | null;
   items: LedgerPOItem[];
+  itemsTotal?: number;
+  receiptDiscount?: number;
+  receiptDiscountReason?: string | null;
+  receiptExtraFees?: Array<{ label: string; amount: number }>;
   total: number;
 }
 

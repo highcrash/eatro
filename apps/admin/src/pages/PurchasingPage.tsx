@@ -135,6 +135,12 @@ export default function PurchasingPage() {
   const [receiveExtras, setReceiveExtras] = useState<{ ingredientId: string; quantity: string; unitPrice: string }[]>([]);
   const [receiveExtraSearch, setReceiveExtraSearch] = useState<Record<number, string>>({});
   const [receiveExtraVariantPicker, setReceiveExtraVariantPicker] = useState<{ parent: Ingredient; idx: number } | null>(null);
+  // Receipt-level adjustments captured at delivery: a flat discount the
+  // supplier offered + extra fees (delivery, labour, packaging). Values
+  // entered as Taka in the form, converted to paisa on submit.
+  const [receiveDiscount, setReceiveDiscount] = useState('');
+  const [receiveDiscountReason, setReceiveDiscountReason] = useState('');
+  const [receiveExtraFees, setReceiveExtraFees] = useState<{ label: string; amount: string }[]>([]);
 
   // Return form state
   const [showReturnForm, setShowReturnForm] = useState(false);
@@ -208,8 +214,16 @@ export default function PurchasingPage() {
   });
 
   const receiveMutation = useMutation({
-    mutationFn: ({ id, items, additionalItems, notes }: { id: string; items: { purchaseOrderItemId: string; quantityReceived: number; unitPrice?: number; ingredientIdOverride?: string }[]; additionalItems?: { ingredientId: string; quantityReceived: number; unitPrice?: number }[]; notes: string }) =>
-      api.post(`/purchasing/${id}/receive`, { items, additionalItems, notes }),
+    mutationFn: ({ id, items, additionalItems, notes, receiptDiscount, receiptDiscountReason, receiptExtraFees }: {
+      id: string;
+      items: { purchaseOrderItemId: string; quantityReceived: number; unitPrice?: number; ingredientIdOverride?: string }[];
+      additionalItems?: { ingredientId: string; quantityReceived: number; unitPrice?: number }[];
+      notes: string;
+      receiptDiscount?: number;
+      receiptDiscountReason?: string;
+      receiptExtraFees?: { label: string; amount: number }[];
+    }) =>
+      api.post(`/purchasing/${id}/receive`, { items, additionalItems, notes, receiptDiscount, receiptDiscountReason, receiptExtraFees }),
     onSuccess: (updated) => {
       void qc.invalidateQueries({ queryKey: ['purchase-orders'] });
       void qc.invalidateQueries({ queryKey: ['ingredients'] });
@@ -220,6 +234,9 @@ export default function PurchasingPage() {
       setReceiveNotes('');
       setReceiveVariantOverrides({});
       setReceiveExtras([]);
+      setReceiveDiscount('');
+      setReceiveDiscountReason('');
+      setReceiveExtraFees([]);
     },
   });
 
@@ -319,7 +336,21 @@ export default function PurchasingPage() {
         unitPrice: e.unitPrice ? Math.round(parseFloat(e.unitPrice) * 100) : undefined,
       }));
     if (items.length === 0 && additionalItems.length === 0) return;
-    receiveMutation.mutate({ id: selectedPO.id, items, additionalItems: additionalItems.length > 0 ? additionalItems : undefined, notes: receiveNotes });
+    const discountTaka = parseFloat(receiveDiscount);
+    const receiptDiscount = Number.isFinite(discountTaka) && discountTaka > 0 ? Math.round(discountTaka * 100) : undefined;
+    const receiptExtraFees = receiveExtraFees
+      .map((f) => ({ label: f.label.trim(), amount: parseFloat(f.amount) }))
+      .filter((f) => f.label.length > 0 && Number.isFinite(f.amount) && f.amount > 0)
+      .map((f) => ({ label: f.label, amount: Math.round(f.amount * 100) }));
+    receiveMutation.mutate({
+      id: selectedPO.id,
+      items,
+      additionalItems: additionalItems.length > 0 ? additionalItems : undefined,
+      notes: receiveNotes,
+      receiptDiscount,
+      receiptDiscountReason: receiptDiscount ? (receiveDiscountReason.trim() || undefined) : undefined,
+      receiptExtraFees: receiptExtraFees.length > 0 ? receiptExtraFees : undefined,
+    });
   };
 
   const [returnError, setReturnError] = useState('');
@@ -1030,6 +1061,77 @@ export default function PurchasingPage() {
                     className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
                   />
                 </div>
+
+                {/* Receipt-level adjustments — supplier-offered discount + any
+                    extra fees tacked on at delivery (delivery, labour, etc.). */}
+                <div className="mt-4 pt-4 border-t border-[#2A2A2A] space-y-3">
+                  <p className="text-[#999] text-xs font-body tracking-widest uppercase">Receipt Adjustments</p>
+                  <div className="grid grid-cols-12 gap-3 items-end">
+                    <div className="col-span-3">
+                      <label className="text-[#666] text-[11px] font-body tracking-widest uppercase block mb-1">Discount (৳)</label>
+                      <input
+                        type="number" step="0.01" min="0"
+                        value={receiveDiscount}
+                        onChange={(e) => setReceiveDiscount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
+                      />
+                    </div>
+                    <div className="col-span-9">
+                      <label className="text-[#666] text-[11px] font-body tracking-widest uppercase block mb-1">Discount reason (optional)</label>
+                      <input
+                        value={receiveDiscountReason}
+                        onChange={(e) => setReceiveDiscountReason(e.target.value)}
+                        placeholder="e.g. bulk discount, damaged unit, loyalty"
+                        className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-[#666] text-[11px] font-body tracking-widest uppercase">Extra Fees</label>
+                      <button
+                        onClick={() => setReceiveExtraFees((f) => [...f, { label: '', amount: '' }])}
+                        className="text-[#FFA726] hover:text-white text-[11px] font-body tracking-widest uppercase"
+                      >
+                        + Add Fee
+                      </button>
+                    </div>
+                    {receiveExtraFees.length === 0 && (
+                      <p className="text-[#555] text-[11px] font-body">No extra fees. Click Add Fee for delivery / labour / packaging charges.</p>
+                    )}
+                    {receiveExtraFees.map((fee, idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-2 items-center mb-2">
+                        <div className="col-span-7">
+                          <input
+                            value={fee.label}
+                            onChange={(e) => setReceiveExtraFees((arr) => arr.map((f, i) => i === idx ? { ...f, label: e.target.value } : f))}
+                            placeholder="Label (e.g. Delivery, Labour)"
+                            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
+                          />
+                        </div>
+                        <div className="col-span-4">
+                          <input
+                            type="number" step="0.01" min="0"
+                            value={fee.amount}
+                            onChange={(e) => setReceiveExtraFees((arr) => arr.map((f, i) => i === idx ? { ...f, amount: e.target.value } : f))}
+                            placeholder="Amount (৳)"
+                            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <button
+                            onClick={() => setReceiveExtraFees((arr) => arr.filter((_, i) => i !== idx))}
+                            className="w-full text-[#666] hover:text-[#D62B2B] py-2"
+                            title="Remove"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
               {/* Grand Total */}
               {(() => {
@@ -1038,14 +1140,36 @@ export default function PurchasingPage() {
                   const p = parseFloat(receivePrices[item.id] ?? '') || (Number(item.unitCost) / 100);
                   return s + q * p;
                 }, 0);
-                const extraTotal = receiveExtras.reduce((s, e) => s + (parseFloat(e.quantity) || 0) * (parseFloat(e.unitPrice) || 0), 0);
-                const total = poTotal + extraTotal;
-                return total > 0 ? (
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#2A2A2A]">
-                    <span className="text-[#999] font-body text-sm">Receive Total</span>
-                    <span className="text-white font-display text-xl">৳{total.toFixed(2)}</span>
+                const extraItemsTotal = receiveExtras.reduce((s, e) => s + (parseFloat(e.quantity) || 0) * (parseFloat(e.unitPrice) || 0), 0);
+                const feesTotal = receiveExtraFees.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
+                const discount = parseFloat(receiveDiscount) || 0;
+                const subtotal = poTotal + extraItemsTotal;
+                const net = Math.max(0, subtotal + feesTotal - discount);
+                if (subtotal <= 0 && feesTotal <= 0 && discount <= 0) return null;
+                return (
+                  <div className="mt-3 pt-3 border-t border-[#2A2A2A] space-y-1.5 text-sm">
+                    <div className="flex items-center justify-between text-[#999] font-body">
+                      <span>Items + extras</span>
+                      <span>৳{subtotal.toFixed(2)}</span>
+                    </div>
+                    {feesTotal > 0 && (
+                      <div className="flex items-center justify-between text-[#FFA726] font-body text-xs">
+                        <span>+ Extra fees</span>
+                        <span>৳{feesTotal.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {discount > 0 && (
+                      <div className="flex items-center justify-between text-[#4CAF50] font-body text-xs">
+                        <span>− Discount{receiveDiscountReason.trim() ? ` (${receiveDiscountReason.trim()})` : ''}</span>
+                        <span>−৳{discount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between pt-1.5 border-t border-[#2A2A2A]">
+                      <span className="text-[#999] font-body">Receive Total</span>
+                      <span className="text-white font-display text-xl">৳{net.toFixed(2)}</span>
+                    </div>
                   </div>
-                ) : null;
+                );
               })()}
 
               {receiveMutation.error && (

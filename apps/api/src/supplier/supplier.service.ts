@@ -97,12 +97,24 @@ export class SupplierService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Calculate total billed
+    // Calculate total billed. Items first, then add any receipt-level
+    // extra fees (delivery, labour, etc.) and subtract receipt-level
+    // discount the supplier offered at delivery — these are persisted
+    // on the PurchaseOrder by purchasing.service.receiveGoods.
     let totalBilled = 0;
     for (const po of purchaseOrders) {
       for (const item of po.items) {
         totalBilled += item.unitCost.toNumber() * item.quantityReceived.toNumber();
       }
+      const fees = ((po as unknown as { receiptExtraFees?: Array<{ amount: number }> | null }).receiptExtraFees ?? null);
+      if (Array.isArray(fees)) {
+        for (const f of fees) {
+          if (Number(f?.amount) > 0) totalBilled += Number(f.amount);
+        }
+      }
+      const rawDiscount = (po as unknown as { receiptDiscount?: { toNumber(): number } | number | null }).receiptDiscount;
+      const discount = typeof rawDiscount === 'object' && rawDiscount && 'toNumber' in rawDiscount ? rawDiscount.toNumber() : Number(rawDiscount ?? 0);
+      if (discount > 0) totalBilled -= Math.min(totalBilled, discount);
     }
 
     const totalPaid = payments.reduce((s, p) => s + p.amount.toNumber(), 0);
@@ -116,22 +128,36 @@ export class SupplierService {
       totalPaid,
       totalReturned,
       balance: openingBalance + totalBilled - totalPaid - totalReturned,
-      purchaseOrders: purchaseOrders.map((po) => ({
-        id: po.id,
-        status: po.status,
-        createdAt: po.createdAt,
-        receivedAt: po.receivedAt,
-        items: po.items.map((item) => ({
-          id: item.id,
-          ingredientName: ingredientDisplayName(item.ingredient),
-          unit: item.unit || item.ingredient?.purchaseUnit || item.ingredient?.unit || '',
-          quantityOrdered: item.quantityOrdered.toNumber(),
-          quantityReceived: item.quantityReceived.toNumber(),
-          unitCost: item.unitCost.toNumber(),
-          total: item.unitCost.toNumber() * item.quantityReceived.toNumber(),
-        })),
-        total: po.items.reduce((s, i) => s + i.unitCost.toNumber() * i.quantityReceived.toNumber(), 0),
-      })),
+      purchaseOrders: purchaseOrders.map((po) => {
+        const itemsTotal = po.items.reduce((s, i) => s + i.unitCost.toNumber() * i.quantityReceived.toNumber(), 0);
+        const rawDiscount = (po as unknown as { receiptDiscount?: { toNumber(): number } | number | null }).receiptDiscount;
+        const discount = typeof rawDiscount === 'object' && rawDiscount && 'toNumber' in rawDiscount ? rawDiscount.toNumber() : Number(rawDiscount ?? 0);
+        const discountReason = (po as unknown as { receiptDiscountReason?: string | null }).receiptDiscountReason ?? null;
+        const fees = ((po as unknown as { receiptExtraFees?: Array<{ label: string; amount: number }> | null }).receiptExtraFees ?? null);
+        const feesArr = Array.isArray(fees) ? fees : [];
+        const feesTotal = feesArr.reduce((s, f) => s + Number(f?.amount ?? 0), 0);
+        return {
+          id: po.id,
+          status: po.status,
+          createdAt: po.createdAt,
+          receivedAt: po.receivedAt,
+          items: po.items.map((item) => ({
+            id: item.id,
+            ingredientName: ingredientDisplayName(item.ingredient),
+            unit: item.unit || item.ingredient?.purchaseUnit || item.ingredient?.unit || '',
+            quantityOrdered: item.quantityOrdered.toNumber(),
+            quantityReceived: item.quantityReceived.toNumber(),
+            unitCost: item.unitCost.toNumber(),
+            total: item.unitCost.toNumber() * item.quantityReceived.toNumber(),
+          })),
+          itemsTotal,
+          receiptDiscount: discount,
+          receiptDiscountReason: discountReason,
+          receiptExtraFees: feesArr,
+          // Net total — what actually moves the supplier ledger.
+          total: Math.max(0, itemsTotal + feesTotal - discount),
+        };
+      }),
       returns: returns.map((r) => ({
         id: r.id,
         completedAt: r.completedAt,

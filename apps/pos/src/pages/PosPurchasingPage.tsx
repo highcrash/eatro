@@ -498,14 +498,23 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
   const [rcvExtraSearch, setRcvExtraSearch] = useState<Record<number, string>>({});
   const [rcvExtraVariantPicker, setRcvExtraVariantPicker] = useState<{ parent: Ingredient; idx: number } | null>(null);
   const [closePartialCheck, setClosePartialCheck] = useState(false);
+  // Receipt-level adjustments (Taka, converted to paisa on submit). Discount
+  // = supplier-offered reduction on the whole shipment. Extra fees = delivery
+  // / labour / packaging tacked on at delivery.
+  const [rcvDiscount, setRcvDiscount] = useState('');
+  const [rcvDiscountReason, setRcvDiscountReason] = useState('');
+  const [rcvExtraFees, setRcvExtraFees] = useState<{ label: string; amount: string }[]>([]);
 
-  const grandTotal = (po
+  const itemsSubtotal = (po
     ? po.items.reduce((sum, item) => {
         const qty = parseFloat(receiveQtys[item.id] || '0') || 0;
         const price = parseFloat(receivePrices[item.id] || '') || (Number(item.unitCost) / 100);
         return sum + qty * price;
       }, 0)
     : 0) + rcvExtras.reduce((sum, e) => sum + (parseFloat(e.quantity) || 0) * (parseFloat(e.unitPrice) || 0), 0);
+  const feesSubtotal = rcvExtraFees.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
+  const discountSubtotal = parseFloat(rcvDiscount) || 0;
+  const grandTotal = Math.max(0, itemsSubtotal + feesSubtotal - discountSubtotal);
 
   const mut = useMutation({
     mutationFn: (body: object) => api.post('/cashier-ops/purchase-order/receive', body),
@@ -520,6 +529,9 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
       setReceivePrices({});
       setReceiveNotes('');
       setRcvExtras([]);
+      setRcvDiscount('');
+      setRcvDiscountReason('');
+      setRcvExtraFees([]);
       setClosePartialCheck(false);
       setError('Goods received ✓');
     },
@@ -550,6 +562,12 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
         unit: e.unit || undefined,
       }));
     if (!items.length && !additionalItems.length) return setError('Enter at least one received quantity');
+    const discountTaka = parseFloat(rcvDiscount);
+    const receiptDiscount = Number.isFinite(discountTaka) && discountTaka > 0 ? Math.round(discountTaka * 100) : undefined;
+    const receiptExtraFees = rcvExtraFees
+      .map((f) => ({ label: f.label.trim(), amount: parseFloat(f.amount) }))
+      .filter((f) => f.label.length > 0 && Number.isFinite(f.amount) && f.amount > 0)
+      .map((f) => ({ label: f.label, amount: Math.round(f.amount * 100) }));
     guardAndRun('receivePurchaseOrder', `Receive PO #${po.id.slice(-6).toUpperCase()} · ${po.supplier?.name ?? ''}`, (otp) => {
       mut.mutate({
         purchaseOrderId: po.id,
@@ -557,6 +575,9 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
         additionalItems: additionalItems.length > 0 ? additionalItems : undefined,
         notes: receiveNotes || undefined,
         closePartial: closePartialCheck || undefined,
+        receiptDiscount,
+        receiptDiscountReason: receiptDiscount ? (rcvDiscountReason.trim() || undefined) : undefined,
+        receiptExtraFees: receiptExtraFees.length > 0 ? receiptExtraFees : undefined,
         actionOtp: otp ?? undefined,
       });
     });
@@ -570,7 +591,7 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
         <label className="block text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-1.5">Open Purchase Order</label>
         <select
           value={poId}
-          onChange={(e) => { setPoId(e.target.value); setReceiveQtys({}); setReceivePrices({}); setReceiveNotes(''); }}
+          onChange={(e) => { setPoId(e.target.value); setReceiveQtys({}); setReceivePrices({}); setReceiveNotes(''); setRcvDiscount(''); setRcvDiscountReason(''); setRcvExtraFees([]); setRcvExtras([]); }}
           className="w-full bg-theme-bg rounded-theme px-3 py-2.5 text-sm font-semibold text-theme-text outline-none border border-transparent focus:border-theme-accent"
         >
           <option value="">— Select —</option>
@@ -729,9 +750,103 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
             />
           </div>
 
-          <div className="border-t border-theme-border mt-3 pt-3 flex items-center justify-between">
-            <span className="text-sm text-theme-text-muted">Total Receiving</span>
-            <span className="text-2xl font-extrabold text-theme-text">{formatCurrency(Math.round(grandTotal * 100))}</span>
+          {/* Receipt-level adjustments — discount + extra fees from the
+              supplier (delivery, labour, packaging). Applied to the
+              supplier's running balance after items are totalled. */}
+          <div className="border-t border-theme-border mt-3 pt-3 space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Receipt Adjustments</p>
+            <div className="grid grid-cols-12 gap-2 items-end">
+              <div className="col-span-4">
+                <label className="block text-[10px] uppercase tracking-wider text-theme-text-muted mb-1">Discount (৳)</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={rcvDiscount}
+                  onChange={(e) => setRcvDiscount(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full bg-theme-bg rounded-theme px-3 py-2 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
+                />
+              </div>
+              <div className="col-span-8">
+                <label className="block text-[10px] uppercase tracking-wider text-theme-text-muted mb-1">Reason (optional)</label>
+                <input
+                  value={rcvDiscountReason}
+                  onChange={(e) => setRcvDiscountReason(e.target.value)}
+                  placeholder="e.g. bulk discount, damaged unit"
+                  className="w-full bg-theme-bg rounded-theme px-3 py-2 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[10px] uppercase tracking-wider text-theme-text-muted">Extra Fees</label>
+                <button
+                  onClick={() => setRcvExtraFees((arr) => [...arr, { label: '', amount: '' }])}
+                  className="text-theme-accent hover:opacity-80 text-[11px] font-bold uppercase tracking-wider"
+                >
+                  + Add Fee
+                </button>
+              </div>
+              {rcvExtraFees.length === 0 && (
+                <p className="text-[11px] text-theme-text-muted">No extra fees. Add for delivery / labour / packaging.</p>
+              )}
+              {rcvExtraFees.map((fee, idx) => (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-center mb-1.5">
+                  <div className="col-span-7">
+                    <input
+                      value={fee.label}
+                      onChange={(e) => setRcvExtraFees((arr) => arr.map((f, i) => i === idx ? { ...f, label: e.target.value } : f))}
+                      placeholder="Label (e.g. Delivery)"
+                      className="w-full bg-theme-bg rounded-theme px-3 py-2 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
+                    />
+                  </div>
+                  <div className="col-span-4">
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={fee.amount}
+                      onChange={(e) => setRcvExtraFees((arr) => arr.map((f, i) => i === idx ? { ...f, amount: e.target.value } : f))}
+                      placeholder="৳"
+                      className="w-full bg-theme-bg rounded-theme px-3 py-2 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
+                    />
+                  </div>
+                  <div className="col-span-1">
+                    <button
+                      onClick={() => setRcvExtraFees((arr) => arr.filter((_, i) => i !== idx))}
+                      className="w-full text-theme-text-muted hover:text-theme-danger py-2"
+                      title="Remove"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-theme-border mt-3 pt-3 space-y-1">
+            {(feesSubtotal > 0 || discountSubtotal > 0) && (
+              <>
+                <div className="flex items-center justify-between text-xs text-theme-text-muted">
+                  <span>Items + extras</span>
+                  <span>{formatCurrency(Math.round(itemsSubtotal * 100))}</span>
+                </div>
+                {feesSubtotal > 0 && (
+                  <div className="flex items-center justify-between text-xs text-theme-warn">
+                    <span>+ Extra fees</span>
+                    <span>{formatCurrency(Math.round(feesSubtotal * 100))}</span>
+                  </div>
+                )}
+                {discountSubtotal > 0 && (
+                  <div className="flex items-center justify-between text-xs text-theme-pop">
+                    <span>− Discount{rcvDiscountReason.trim() ? ` (${rcvDiscountReason.trim()})` : ''}</span>
+                    <span>−{formatCurrency(Math.round(discountSubtotal * 100))}</span>
+                  </div>
+                )}
+              </>
+            )}
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-sm text-theme-text-muted">Total Receiving</span>
+              <span className="text-2xl font-extrabold text-theme-text">{formatCurrency(Math.round(grandTotal * 100))}</span>
+            </div>
           </div>
 
           {/* Close partial — only relevant when at least one PO item is under-received */}
