@@ -3,6 +3,23 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.14 — admin-configurable custom roles (2026-04-25)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/types:
+
+- **Custom roles.** Admin can now create branch-scoped roles (e.g.
+  "Head Chef", "Shift Supervisor", "Floor Lead") that overlay the
+  built-in six. Each custom role inherits a base role (the security
+  anchor — JWT + @Roles() checks still run against it) and can
+  (a) HIDE admin navigation items the base role would see, and
+  (b) tighten the POS cashier-ops matrix per role. Custom roles can
+  NEVER elevate beyond the base role. New "Custom Roles" sidebar
+  entry under system config; StaffPage gets a "Custom Role (optional
+  overlay)" dropdown.
+- The POS `/cashier-permissions` endpoint now returns the caller-
+  specific effective matrix (branch default merged with the staff's
+  custom-role overrides), so cashier buttons match the role.
+
 ## 0.8.13 — auto round-to-taka + Mushak display fix (2026-04-23)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/utils:
