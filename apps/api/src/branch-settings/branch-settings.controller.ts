@@ -26,6 +26,10 @@ export class BranchSettingsController {
       customMenuCostMargin?: number | null;
       customMenuNegotiateMargin?: number | null;
       customMenuMaxMargin?: number | null;
+      qrAllowSelfRemoveIngredients?: boolean;
+      tableTimerOrderToStartMin?: number | null;
+      tableTimerStartToDoneMin?: number | null;
+      tableTimerServedToClearMin?: number | null;
     },
   ) {
     return this.svc.update(user.branchId, dto);

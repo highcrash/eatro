@@ -22,6 +22,94 @@ const STATUS_BAR: Record<string, string> = {
   CLEANING:  'bg-theme-text-muted',
 };
 
+// ─── Table-status timer badge ────────────────────────────────────────────────
+
+interface TimerThresholds {
+  orderToStart: number; // minutes
+  startToDone: number;
+  servedToClear: number;
+}
+
+const DEFAULT_TIMER_THRESHOLDS: TimerThresholds = {
+  orderToStart: 30,
+  startToDone: 40,
+  servedToClear: 35,
+};
+
+function fmtElapsed(ms: number): string {
+  if (ms < 0) ms = 0;
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min < 60) return `${min}:${String(sec).padStart(2, '0')}`;
+  const hr = Math.floor(min / 60);
+  const m = min % 60;
+  return `${hr}h ${m}m`;
+}
+
+/**
+ * Per-table phase clock. Walks the order through three phases:
+ *   1. Order placed → kitchen Start (no item PREPARING yet)
+ *   2. Start → Done (items cooking)
+ *   3. Done → cleared (food ready, customer eating, awaiting pay)
+ * Each phase runs from the previous transition timestamp, not from the
+ * original order createdAt — so the clock "resets" at each handoff.
+ * Colour state: gray < threshold, amber 80-100%, red > 100% (pulsing).
+ */
+function TableTimerBadge({ order, thresholds }: { order: Order; thresholds: TimerThresholds }) {
+  // Tick every second so the badge counts up live.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const startAt = (order as { firstKitchenStartAt?: string | Date | null }).firstKitchenStartAt;
+  const doneAt = (order as { firstKitchenDoneAt?: string | Date | null }).firstKitchenDoneAt;
+
+  type Phase = { label: string; sinceMs: number; thresholdMin: number };
+  let phase: Phase;
+
+  if (doneAt) {
+    phase = {
+      label: 'Food Served',
+      sinceMs: now - new Date(doneAt).getTime(),
+      thresholdMin: thresholds.servedToClear,
+    };
+  } else if (startAt) {
+    phase = {
+      label: 'Food Preparing',
+      sinceMs: now - new Date(startAt).getTime(),
+      thresholdMin: thresholds.startToDone,
+    };
+  } else {
+    phase = {
+      label: 'Order Placed',
+      sinceMs: now - new Date(order.createdAt).getTime(),
+      thresholdMin: thresholds.orderToStart,
+    };
+  }
+
+  const limitMs = phase.thresholdMin * 60_000;
+  const ratio = limitMs > 0 ? phase.sinceMs / limitMs : 0;
+  // Tone:
+  //   < 0.8 → gray (calm)
+  //   0.8-1.0 → amber (approaching warning)
+  //   > 1.0 → red, pulsing (over threshold)
+  const tone = ratio >= 1
+    ? 'bg-theme-danger text-white animate-pulse'
+    : ratio >= 0.8
+      ? 'bg-theme-warn text-theme-text'
+      : 'bg-theme-bg text-theme-text-muted';
+
+  return (
+    <div className={`mt-1 px-2 py-1 text-[10px] font-theme-body font-bold tracking-wider uppercase rounded-theme leading-tight text-center ${tone}`}>
+      <div className="opacity-80">{phase.label}</div>
+      <div className="text-xs">{fmtElapsed(phase.sinceMs)}</div>
+    </div>
+  );
+}
+
 function ChairIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2">
@@ -317,6 +405,36 @@ export default function TablesPage() {
       .filter((o) => o.tableId && (o as any).billRequested)
       .map((o) => o.tableId!),
   );
+
+  // Latest active order per table → drives the per-table phase clock.
+  // pendingOrders + activeOrders cover every status that occupies a
+  // table (PENDING + CONFIRMED + PREPARING + READY + SERVED).
+  const orderByTable = useMemo(() => {
+    const m = new Map<string, Order>();
+    for (const o of [...pendingOrders, ...activeOrders]) {
+      if (!o.tableId) continue;
+      const cur = m.get(o.tableId);
+      if (!cur || new Date(o.createdAt) > new Date(cur.createdAt)) m.set(o.tableId, o);
+    }
+    return m;
+  }, [pendingOrders, activeOrders]);
+
+  // Branch-configurable timer thresholds — fall back to defaults when
+  // unset. Settings update is rare so the staleness here is fine.
+  const { data: branchSettings } = useQuery<{
+    tableTimerOrderToStartMin?: number | null;
+    tableTimerStartToDoneMin?: number | null;
+    tableTimerServedToClearMin?: number | null;
+  }>({
+    queryKey: ['branch-settings'],
+    queryFn: () => api.get('/branch-settings'),
+    staleTime: 60_000,
+  });
+  const timerThresholds: TimerThresholds = {
+    orderToStart: Number(branchSettings?.tableTimerOrderToStartMin ?? DEFAULT_TIMER_THRESHOLDS.orderToStart),
+    startToDone: Number(branchSettings?.tableTimerStartToDoneMin ?? DEFAULT_TIMER_THRESHOLDS.startToDone),
+    servedToClear: Number(branchSettings?.tableTimerServedToClearMin ?? DEFAULT_TIMER_THRESHOLDS.servedToClear),
+  };
 
   // Active takeaway / pending takeaway orders (no tableId)
   const takeawayOrders = useMemo(
@@ -649,6 +767,14 @@ export default function TablesPage() {
                   <div className="text-[10px] font-theme-body text-theme-text-muted uppercase tracking-widest">
                     {table.capacity} seats
                   </div>
+                  {/* Live phase clock — only when the table actually has
+                      an active order. Falls through to nothing for free /
+                      cleaning / reserved tables to keep the card tidy. */}
+                  {orderByTable.get(table.id) && (
+                    <div className="w-full">
+                      <TableTimerBadge order={orderByTable.get(table.id)!} thresholds={timerThresholds} />
+                    </div>
+                  )}
                 </div>
                 {/* Status bar */}
                 <div className={`h-2 w-full ${STATUS_BAR[table.status] ?? 'bg-theme-border'}`} />

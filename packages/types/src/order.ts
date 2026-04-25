@@ -93,6 +93,11 @@ export interface Order extends AuditFields {
   billRequested: boolean;
   paymentMethod: PaymentMethod | null;
   paidAt: Date | null;
+  /** Table-status timer milestones — used by POS Tables to render
+   *  per-table phase clocks. Captured server-side the first time the
+   *  underlying transition happens. */
+  firstKitchenStartAt?: Date | string | null;
+  firstKitchenDoneAt?: Date | string | null;
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────

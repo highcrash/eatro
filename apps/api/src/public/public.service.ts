@@ -31,6 +31,30 @@ const PUBLIC_MENU_ITEM_SELECT = {
   pieces: true,
   prepTime: true,
   spiceLevel: true,
+  // Addon groups + their options. The QR / website needs this to
+  // render the "pick a side / sauce" UI that POS has. Addon items
+  // themselves are filtered out of the standalone menu (isAddon=false
+  // in itemWhere) so they only appear here as group options.
+  addonGroups: {
+    where: { deletedAt: null },
+    orderBy: { sortOrder: 'asc' as const },
+    select: {
+      id: true,
+      name: true,
+      minPicks: true,
+      maxPicks: true,
+      sortOrder: true,
+      options: {
+        orderBy: { sortOrder: 'asc' as const },
+        select: {
+          id: true,
+          addonItemId: true,
+          sortOrder: true,
+          addon: { select: { id: true, name: true, price: true, isAvailable: true } },
+        },
+      },
+    },
+  },
 } as const;
 
 // Categories for the public menu — just presentational fields.

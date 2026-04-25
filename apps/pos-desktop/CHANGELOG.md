@@ -3,6 +3,34 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.16 — table timers + QR addons/variants + self-remove toggle (2026-04-25)
+
+Rebundles apps/pos + apps/qr + @restora/types:
+
+- **POS Tables — per-table phase clock.** Each occupied table card
+  now shows the live status timer: "Order Placed → 30:04",
+  "Food Preparing → 14:04", "Food Served → 35:33". Card turns amber
+  at 80% of the threshold and red+pulsing past 100%. Three phases,
+  each clock starts fresh from the previous transition (server
+  captures `firstKitchenStartAt` + `firstKitchenDoneAt` on the order
+  the very first time KDS Start / Done fires; idempotent on re-click).
+- **Admin Settings → Kitchen → Table Timers.** Three numeric inputs
+  (minutes) for the three phase thresholds; defaults 30 / 40 / 35.
+- **QR app supports variants + addons.** When a QR-app customer taps
+  a menu item with addon groups, an addon picker opens (same
+  min/max validation as POS). Cart-line key extends to include
+  addon picks so different combos are separate rows. Variants flow
+  through as standalone items (each variant is its own pickable
+  card with its own price + recipe — same as POS).
+- **QR self-service ingredient removal — admin toggle.** Off by
+  default. When OFF, the QR app shows only the existing Special
+  Note field — cashier reads the note in the pending-order view
+  and applies the removal manually via the POS Customise dialog.
+  Server strips any `removedIngredientIds` sent from QR when the
+  toggle is OFF, so a malicious client can't bypass.
+- **Live-safety.** Pure additive nullable schema columns. Existing
+  rows behave identically until the new columns get values.
+
 ## 1.0.15 — addons / modifiers (Phase 3) (2026-04-25)
 
 Rebundles apps/pos + apps/pos-desktop main + @restora/types + @restora/utils:

@@ -24,6 +24,10 @@ export class BranchSettingsService {
       customMenuCostMargin?: number | null;
       customMenuNegotiateMargin?: number | null;
       customMenuMaxMargin?: number | null;
+      qrAllowSelfRemoveIngredients?: boolean;
+      tableTimerOrderToStartMin?: number | null;
+      tableTimerStartToDoneMin?: number | null;
+      tableTimerServedToClearMin?: number | null;
     },
   ) {
     await this.getOrCreate(branchId);
@@ -34,6 +38,10 @@ export class BranchSettingsService {
         ...(dto.customMenuCostMargin !== undefined ? { customMenuCostMargin: dto.customMenuCostMargin } : {}),
         ...(dto.customMenuNegotiateMargin !== undefined ? { customMenuNegotiateMargin: dto.customMenuNegotiateMargin } : {}),
         ...(dto.customMenuMaxMargin !== undefined ? { customMenuMaxMargin: dto.customMenuMaxMargin } : {}),
+        ...(dto.qrAllowSelfRemoveIngredients != null ? { qrAllowSelfRemoveIngredients: dto.qrAllowSelfRemoveIngredients } : {}),
+        ...(dto.tableTimerOrderToStartMin !== undefined ? { tableTimerOrderToStartMin: dto.tableTimerOrderToStartMin } : {}),
+        ...(dto.tableTimerStartToDoneMin !== undefined ? { tableTimerStartToDoneMin: dto.tableTimerStartToDoneMin } : {}),
+        ...(dto.tableTimerServedToClearMin !== undefined ? { tableTimerServedToClearMin: dto.tableTimerServedToClearMin } : {}),
       },
     });
     this.cache.delete(branchId);

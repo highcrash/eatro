@@ -200,6 +200,15 @@ export class QrOrderController {
   async createQr(@Headers('x-branch-id') branchId: string, @Body() dto: CreateOrderDto, @Req() req: Request) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
+    // Strip self-service removals when the branch hasn't enabled them.
+    const settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
+    const allowRemove = settings?.qrAllowSelfRemoveIngredients ?? false;
+    if (!allowRemove && dto.items) {
+      dto = {
+        ...dto,
+        items: dto.items.map((i) => ({ ...i, removedIngredientIds: undefined })),
+      };
+    }
     return this.orderService.createQrOrder(branchId, dto);
   }
 
@@ -322,7 +331,7 @@ export class QrOrderController {
   async addItems(
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
-    @Body() body: { items: { menuItemId: string; quantity: number; notes?: string }[] },
+    @Body() body: { items: { menuItemId: string; quantity: number; notes?: string; addons?: { groupId: string; addonItemId: string }[]; removedIngredientIds?: string[] }[] },
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
@@ -331,7 +340,17 @@ export class QrOrderController {
     const order = await this.prisma.order.findFirst({ where: { id, deletedAt: null } });
     if (!order) throw new NotFoundException('Order not found');
     const needsApproval = order.status !== 'PENDING';
-    return this.orderService.addItemsToOrder(id, branchId, body.items, needsApproval);
+    // QR self-service ingredient removal — gated by branch setting.
+    // When OFF, strip removedIngredientIds from each line; the
+    // customer's intent flows through `notes` instead and the cashier
+    // applies the removal manually via the POS Customise dialog.
+    const settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
+    const allowRemove = settings?.qrAllowSelfRemoveIngredients ?? false;
+    const sanitized = body.items.map((it) => ({
+      ...it,
+      removedIngredientIds: allowRemove ? it.removedIngredientIds : undefined,
+    }));
+    return this.orderService.addItemsToOrder(id, branchId, sanitized, needsApproval);
   }
 
   @Post('qr/:id/items/:itemId/cancel')
