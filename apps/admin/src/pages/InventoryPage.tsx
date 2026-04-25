@@ -51,7 +51,7 @@ function downloadInventoryCSV() {
 // UNITS was hard-coded; it's now sourced via `useStockUnits()` at the
 // component level so custom units the admin has registered show up in
 // dropdowns alongside the built-in enum values.
-const CATEGORIES: IngredientCategory[] = ['RAW', 'CLEANING', 'PACKAGED', 'SPICE', 'DAIRY', 'BEVERAGE', 'OTHER'];
+const CATEGORIES: IngredientCategory[] = ['RAW', 'CLEANING', 'PACKAGED', 'SPICE', 'DAIRY', 'BEVERAGE', 'SUPPLY', 'OTHER'];
 
 // ─── Stock Report Tab Component ──────────────────────────────────────────────
 
@@ -217,7 +217,7 @@ const emptyIngForm: IngredientForm = { name: '', unit: 'G', minimumStock: '0', c
 
 interface AdjustForm {
   quantity: string;
-  type: 'PURCHASE' | 'ADJUSTMENT' | 'WASTE';
+  type: 'PURCHASE' | 'ADJUSTMENT' | 'WASTE' | 'OPERATIONAL_USE';
   notes: string;
 }
 
@@ -231,6 +231,11 @@ export default function InventoryPage() {
   const [adjustForm, setAdjustForm] = useState<AdjustForm>({ quantity: '0', type: 'ADJUSTMENT', notes: '' });
   const [searchText, setSearchText] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
+  // Recipe vs Supply pill filter. SUPPLY-category items (parcel bags,
+  // tissues, cleaner) are non-recipe and tracked via the manual usage
+  // log; the Supplies pill swaps the table to show their burn rate +
+  // a "Record Usage" action instead of "Adjust Stock".
+  const [kindFilter, setKindFilter] = useState<'all' | 'recipe' | 'supply'>('all');
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterStock, setFilterStock] = useState('');
   const [showCSVUpload, setShowCSVUpload] = useState(false);
@@ -250,6 +255,22 @@ export default function InventoryPage() {
   });
   const { units: UNITS } = useStockUnits();
 
+  // Pull the last-30-days usage map for the Supplies pill so each row
+  // can show "Used (30d)" without a per-row query. Cheap on a single
+  // request since the supplies report already aggregates server-side.
+  const { data: suppliesReport } = useQuery<{ rows: { ingredientId: string; usedQty: number; daysOfCover: number | null }[] }>({
+    queryKey: ['supplies-30d'],
+    queryFn: () => {
+      const to = new Date();
+      const from = new Date();
+      from.setDate(from.getDate() - 30);
+      const fmt = (d: Date) => d.toISOString().split('T')[0];
+      return api.get(`/reports/supplies?from=${fmt(from)}&to=${fmt(to)}`);
+    },
+    enabled: kindFilter === 'supply',
+  });
+  const usage30dById = new Map((suppliesReport?.rows ?? []).map((r) => [r.ingredientId, r] as const));
+
   const searchLower = searchText.trim().toLowerCase();
   const filteredIngredients = ingredients.filter((ing) => {
     if (searchLower) {
@@ -268,6 +289,8 @@ export default function InventoryPage() {
       if (!parentMatch && !variantMatch) return false;
     }
     if (filterCategory && ing.category !== filterCategory) return false;
+    if (kindFilter === 'recipe' && ing.category === 'SUPPLY') return false;
+    if (kindFilter === 'supply' && ing.category !== 'SUPPLY') return false;
     if (filterSupplier) {
       const hasSupplier = ing.suppliers?.some((s) => s.supplierId === filterSupplier) || ing.supplierId === filterSupplier;
       if (!hasSupplier) return false;
@@ -387,6 +410,8 @@ export default function InventoryPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['ingredients'] });
       void qc.invalidateQueries({ queryKey: ['stock-movements'] });
+      void qc.invalidateQueries({ queryKey: ['supplies-30d'] });
+      void qc.invalidateQueries({ queryKey: ['supplies-report'] });
       setAdjusting(null);
     },
   });
@@ -639,7 +664,13 @@ export default function InventoryPage() {
 
   const openAdjust = (ing: Ingredient) => {
     setAdjusting(ing);
-    setAdjustForm({ quantity: '0', type: 'ADJUSTMENT', notes: '' });
+    // Supplies default to OPERATIONAL_USE since the cashier almost
+    // always opens this dialog to record "we used 12 bags today".
+    setAdjustForm({
+      quantity: '0',
+      type: ing.category === 'SUPPLY' ? 'OPERATIONAL_USE' : 'ADJUSTMENT',
+      notes: '',
+    });
   };
 
   const movTypeColor: Record<string, string> = {
@@ -791,6 +822,32 @@ export default function InventoryPage() {
             </div>
           )}
 
+          {/* Recipe vs Supply pill — supplies are non-recipe operational
+              stock (parcel bags, tissues, cleaner) and use the manual
+              "Record Usage" log for consumption. */}
+          <div className="flex gap-2 items-center">
+            {([
+              { key: 'all', label: 'All Items' },
+              { key: 'recipe', label: 'Recipe items' },
+              { key: 'supply', label: 'Supplies' },
+            ] as const).map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setKindFilter(p.key)}
+                className={`px-4 py-2 text-xs font-body tracking-widest uppercase border transition-colors ${
+                  kindFilter === p.key
+                    ? 'bg-[#D62B2B] border-[#D62B2B] text-white'
+                    : 'bg-[#161616] border-[#2A2A2A] text-[#999] hover:text-white hover:border-[#444]'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+            {kindFilter === 'supply' && (
+              <p className="ml-3 text-[#666] font-body text-xs">Tissues, parcel bags, cleaner — not used in recipes</p>
+            )}
+          </div>
+
           {/* Search + Filters */}
           <div className="flex gap-3 items-end">
             <div className="flex-1 flex flex-col gap-1">
@@ -895,6 +952,21 @@ export default function InventoryPage() {
                           {isLow && <span className="ml-1 text-xs text-[#D62B2B]">▼ LOW</span>}
                           {ing.hasVariants && <span className="ml-1 text-[#666] text-[10px]">(agg)</span>}
                         </span>
+                        {kindFilter === 'supply' && ing.category === 'SUPPLY' && (() => {
+                          const u = usage30dById.get(ing.id);
+                          if (!u) return null;
+                          const days = u.daysOfCover;
+                          return (
+                            <p className="text-[10px] font-body text-[#666] mt-0.5">
+                              Used {u.usedQty.toFixed(0)} / 30d
+                              {days !== null && days < Infinity && (
+                                <span className={`ml-1 ${days < 7 ? 'text-[#D62B2B]' : days < 14 ? 'text-[#FFA726]' : 'text-[#666]'}`}>
+                                  · ~{Math.round(days)} days left
+                                </span>
+                              )}
+                            </p>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-[#999] font-body text-sm">{Number(ing.minimumStock).toFixed(2)}</td>
                       <td className="px-4 py-3 text-[#999] font-body text-sm">৳{(Number(ing.costPerUnit) / 100).toFixed(2)}</td>
@@ -905,7 +977,16 @@ export default function InventoryPage() {
                       </td>
                       <td className="px-4 py-3 flex gap-2 flex-wrap">
                         {!ing.hasVariants && (
-                          <button onClick={() => openAdjust(ing)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Adjust</button>
+                          <button
+                            onClick={() => openAdjust(ing)}
+                            className={`font-body text-xs tracking-widest uppercase transition-colors ${
+                              ing.category === 'SUPPLY'
+                                ? 'text-[#FFA726] hover:text-white'
+                                : 'text-[#999] hover:text-white'
+                            }`}
+                          >
+                            {ing.category === 'SUPPLY' ? 'Record Usage' : 'Adjust'}
+                          </button>
                         )}
                         <button onClick={() => openEditIng(ing)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Edit</button>
                         {!ing.hasVariants && !ing.parentId && (
@@ -1262,28 +1343,34 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Adjust Stock Dialog */}
+      {/* Adjust Stock Dialog (also doubles as Record Usage for SUPPLY) */}
       {adjusting && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setAdjusting(null)}>
           <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="font-display text-xl text-white tracking-widest mb-1">ADJUST STOCK</h2>
+            <h2 className="font-display text-xl text-white tracking-widest mb-1">
+              {adjusting.category === 'SUPPLY' ? 'RECORD USAGE' : 'ADJUST STOCK'}
+            </h2>
             <p className="text-[#999] font-body text-sm mb-6">{adjusting.name} — Current: {Number(adjusting.currentStock).toFixed(2)} {adjusting.unit}</p>
             <div className="space-y-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Type</label>
-                <select
-                  value={adjustForm.type}
-                  onChange={(e) => setAdjustForm((f) => ({ ...f, type: e.target.value as AdjustForm['type'] }))}
-                  className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
-                >
-                  <option value="PURCHASE">Purchase (add stock)</option>
-                  <option value="ADJUSTMENT">Adjustment (±)</option>
-                  <option value="WASTE">Waste (remove)</option>
-                </select>
-              </div>
+              {adjusting.category !== 'SUPPLY' && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Type</label>
+                  <select
+                    value={adjustForm.type}
+                    onChange={(e) => setAdjustForm((f) => ({ ...f, type: e.target.value as AdjustForm['type'] }))}
+                    className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
+                  >
+                    <option value="PURCHASE">Purchase (add stock)</option>
+                    <option value="ADJUSTMENT">Adjustment (±)</option>
+                    <option value="WASTE">Waste (remove)</option>
+                  </select>
+                </div>
+              )}
               <div className="flex flex-col gap-1">
                 <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">
-                  Quantity ({adjustForm.type === 'PURCHASE' ? '+' : adjustForm.type === 'WASTE' ? '−' : '±'}) in {adjusting.unit}
+                  {adjusting.category === 'SUPPLY'
+                    ? `Used quantity in ${adjusting.unit}`
+                    : `Quantity (${adjustForm.type === 'PURCHASE' ? '+' : adjustForm.type === 'WASTE' ? '−' : '±'}) in ${adjusting.unit}`}
                 </label>
                 <input
                   type="number" step="0.01"
@@ -1291,7 +1378,11 @@ export default function InventoryPage() {
                   onChange={(e) => setAdjustForm((f) => ({ ...f, quantity: e.target.value }))}
                   className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
                 />
-                <p className="text-[#666] text-xs font-body">Use negative for ADJUSTMENT to reduce stock.</p>
+                <p className="text-[#666] text-xs font-body">
+                  {adjusting.category === 'SUPPLY'
+                    ? 'Enter how many units were used. Stock will decrement automatically.'
+                    : 'Use negative for ADJUSTMENT to reduce stock.'}
+                </p>
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Notes</label>

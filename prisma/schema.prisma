@@ -1225,15 +1225,17 @@ enum IngredientCategory {
   SPICE
   DAIRY
   BEVERAGE
+  SUPPLY // non-recipe operational supplies — tissues, parcel bags, cleaner, plates
   OTHER
 }
 
 enum StockMovementType {
-  PURCHASE      // stock received from supplier
-  SALE          // auto-deducted on order creation
-  VOID_RETURN   // returned when order item is voided
-  ADJUSTMENT    // manual stock correction
-  WASTE         // waste/spoilage write-off
+  PURCHASE         // stock received from supplier
+  SALE             // auto-deducted on order creation
+  VOID_RETURN      // returned when order item is voided
+  ADJUSTMENT       // manual stock correction
+  WASTE            // waste/spoilage write-off
+  OPERATIONAL_USE  // manual usage log for non-recipe supplies (Inventory → Supplies)
 }
 
 enum StockUnit {

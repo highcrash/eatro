@@ -3,6 +3,42 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.25 — non-recipe supplies tracking (2026-04-25)
+
+No Electron-shell changes. Rebundles apps/admin + apps/api +
+@restora/types:
+
+- **New SUPPLY ingredient category.** Floor cleaner, parcel bags,
+  tissues, plates, bowls, paper straws — anything bought through
+  the supplier flow but never used in a recipe — gets tagged as
+  SUPPLY. The recipe ingredient picker hides them; the server
+  rejects supplies on `/recipes` upsert; daily-consumption stops
+  counting them as food cost.
+- **Inventory → Supplies pill.** New 3-pill filter row above the
+  ingredient table: All / Recipe items / Supplies. Selecting
+  Supplies swaps the per-row "Adjust" action to "Record Usage" and
+  surfaces a 30-day burn rate + days-of-cover ("Used 240 / 30d ·
+  ~22 days left") under each stock cell.
+- **Record Usage dialog.** When admin opens the action on a SUPPLY
+  row, the Adjust dialog hides the type dropdown, locks to the new
+  `OPERATIONAL_USE` movement, and labels the input "Used quantity"
+  — enter a positive number; server normalises to a decrement so
+  a stray sign can never inflate stock.
+- **New Reports → Supplies page.** MTD by default, per-supply rows
+  showing purchased qty + spend, used qty, wasted qty, current
+  stock, on-hand value, and days-of-cover. Totals card on top,
+  grand-totals row at the bottom, Print/PDF + CSV export.
+- **Daily Consumption split.** Reports stop folding packaging
+  spend into the food-cost margin. The existing
+  `/reports/stock/daily` response now carries a separate
+  `suppliesItems` + `totalSuppliesUsedValue` so admin's food-cost
+  percentage finally reflects food only.
+- **Migration** `20260425170000_add_supply_category_and_op_use` is
+  pure additive: `ALTER TYPE` adds `SUPPLY` to `IngredientCategory`
+  and `OPERATIONAL_USE` to `StockMovementType`. No data backfill,
+  existing rows untouched. Owner reclassifies any miscategorised
+  CLEANING/PACKAGED rows by hand from Inventory after deploy.
+
 ## 0.8.24 — +ADD ticket prints addons + customise lines (2026-04-25)
 
 Hotfix. When a cashier opened **Add Items** on an existing order and

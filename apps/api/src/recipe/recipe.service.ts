@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import type { UpsertRecipeDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
@@ -31,6 +31,24 @@ export class RecipeService {
       where: { id: menuItemId, branchId, deletedAt: null },
     });
     if (!menuItem) throw new NotFoundException(`Menu item ${menuItemId} not found`);
+
+    // Block SUPPLY-category ingredients from recipe lines. Supplies
+    // (parcel bags, cleaner, tissues) are tracked via the manual
+    // "Record Usage" log on Inventory → Supplies, not via recipe
+    // deduction — otherwise their consumption would double-count.
+    if (dto.items.length > 0) {
+      const ids = dto.items.map((i) => i.ingredientId);
+      const supplies = await this.prisma.ingredient.findMany({
+        where: { id: { in: ids }, branchId, category: 'SUPPLY' },
+        select: { id: true, name: true },
+      });
+      if (supplies.length > 0) {
+        const names = supplies.map((s) => s.name).join(', ');
+        throw new BadRequestException(
+          `Supplies cannot be added to recipes — record their usage from Inventory → Supplies (${names})`,
+        );
+      }
+    }
 
     return this.prisma.recipe.upsert({
       where: { menuItemId },
@@ -93,7 +111,7 @@ export class RecipeService {
 
     const ingredients = await this.prisma.ingredient.findMany({
       where: { branchId, deletedAt: null },
-      select: { id: true, name: true, unit: true, parentId: true },
+      select: { id: true, name: true, unit: true, parentId: true, category: true },
     });
     const ingredientByName = new Map(ingredients.map((i) => [i.name.toLowerCase(), i] as const));
 
@@ -123,6 +141,12 @@ export class RecipeService {
       const ing = ingredientByName.get(ingName);
       if (!ing) {
         errors.push(`Row ${i + 1}: ingredient "${row.ingredientName}" not found`);
+        skipped++;
+        continue;
+      }
+
+      if (ing.category === 'SUPPLY') {
+        errors.push(`Row ${i + 1}: "${row.ingredientName}" is a Supply — track via Inventory → Supplies, not recipes`);
         skipped++;
         continue;
       }
