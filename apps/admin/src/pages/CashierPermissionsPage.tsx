@@ -241,6 +241,7 @@ export default function CashierPermissionsPage() {
         {/* Production actions */}
         <Section icon={<ShieldAlert size={14} className="text-[#D62B2B]" />} title="Production">
           <ActionRow action="createPreReadyKT" value={perms.createPreReadyKT} onChange={(v) => setAction('createPreReadyKT', v)} />
+          <ActionRow action="createCustomMenu" value={perms.createCustomMenu} onChange={(v) => setAction('createCustomMenu', v)} />
         </Section>
 
         <div className="text-[10px] font-body text-[#666] flex items-center gap-3 pt-2">
