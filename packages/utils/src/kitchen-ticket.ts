@@ -43,6 +43,11 @@ export interface KitchenTicketInput {
     /** Raw OrderItem.modifications shape — accepted as a fallback so
      *  callers can pass an Order straight through without remapping. */
     modifications?: { removedNames?: string[] | null } | null;
+    /** Selected addon names ("Cheese Sauce", "Garlic Nun"). Rendered
+     *  as "+ <NAME>" rows under the item so the chef plates them. */
+    selectedAddons?: string[] | null;
+    /** Raw OrderItem.addons shape — accepted as fallback. */
+    addons?: { addonName: string }[] | null;
   }>;
   /** Kitchen section label printed as a sub-header on sectioned KOTs
    *  (e.g. "-- FOOD --", "-- BEVERAGE --"). Desktop-only; web POS
@@ -61,7 +66,11 @@ export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {
       const removedHtml = removed
         .map((n) => `<div class="item-removed">&minus; NO ${escapeHtml(n.toUpperCase())}</div>`)
         .join('');
-      return `<div class="item"><div class="item-line">${i.quantity}-:${escapeHtml(i.menuItemName)}</div>${removedHtml}${i.notes ? `<div class="item-note">&rarr; ${escapeHtml(i.notes)}</div>` : ''}<div class="item-sep"></div></div>`;
+      const addons = (i.selectedAddons ?? i.addons?.map((a) => a.addonName) ?? []).filter((n): n is string => !!n);
+      const addonsHtml = addons
+        .map((n) => `<div class="item-addon">+ ${escapeHtml(n)}</div>`)
+        .join('');
+      return `<div class="item"><div class="item-line">${i.quantity}-:${escapeHtml(i.menuItemName)}</div>${addonsHtml}${removedHtml}${i.notes ? `<div class="item-note">&rarr; ${escapeHtml(i.notes)}</div>` : ''}<div class="item-sep"></div></div>`;
     })
     .join('');
 
@@ -87,6 +96,7 @@ export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {
     .item-line { font-size: 28px; font-weight: 900; line-height: 1.15; }
     .item-note { font-size: 16px; font-style: italic; margin-top: 2px; margin-left: 16px; }
     .item-removed { font-size: 18px; font-weight: 900; margin-top: 2px; margin-left: 16px; letter-spacing: 1px; }
+    .item-addon { font-size: 18px; font-weight: 700; margin-top: 2px; margin-left: 16px; }
     .item-sep { border-top: 2px double #000; margin-top: 6px; }
     .notes { font-size: 14px; font-style: italic; margin-top: 10px; }
   </style></head><body>

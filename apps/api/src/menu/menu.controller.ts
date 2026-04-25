@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Put, Delete, Param, Body, Query, UseGuards, ValidationPipe } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 
-import type { CreateMenuItemDto, UpdateMenuItemDto, JwtPayload } from '@restora/types';
+import type { CreateMenuItemDto, UpdateMenuItemDto, UpsertAddonGroupDto, JwtPayload } from '@restora/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -16,8 +16,12 @@ export class MenuController {
   constructor(private readonly menuService: MenuService) {}
 
   @Get()
-  findAll(@CurrentUser() user: JwtPayload, @Query('includeCustom') includeCustom?: string) {
-    return this.menuService.findAll(user.branchId, includeCustom === 'true');
+  findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query('includeCustom') includeCustom?: string,
+    @Query('includeAddons') includeAddons?: string,
+  ) {
+    return this.menuService.findAll(user.branchId, includeCustom === 'true', includeAddons === 'true');
   }
 
   @Get(':id')
@@ -70,5 +74,30 @@ export class MenuController {
     @Body() dto: { items: { linkedMenuId: string; type: string; triggerQuantity: number; freeQuantity: number }[] },
   ) {
     return this.menuService.setLinkedItems(id, user.branchId, dto.items);
+  }
+
+  // ─── Addon groups (Phase 3) ───────────────────────────────────────────────
+
+  @Get(':id/addon-groups')
+  listAddonGroups(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.menuService.listAddonGroups(id, user.branchId);
+  }
+
+  @Post(':id/addon-groups')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  createAddonGroup(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpsertAddonGroupDto) {
+    return this.menuService.createAddonGroup(id, user.branchId, dto);
+  }
+
+  @Patch('addon-groups/:groupId')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  updateAddonGroup(@Param('groupId') groupId: string, @CurrentUser() user: JwtPayload, @Body() dto: UpsertAddonGroupDto) {
+    return this.menuService.updateAddonGroup(groupId, user.branchId, dto);
+  }
+
+  @Delete('addon-groups/:groupId')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  removeAddonGroup(@Param('groupId') groupId: string, @CurrentUser() user: JwtPayload) {
+    return this.menuService.removeAddonGroup(groupId, user.branchId);
   }
 }

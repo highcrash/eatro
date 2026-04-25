@@ -237,6 +237,7 @@ model Branch {
   mushakInvoices      MushakInvoice[]
   mushakNotes         MushakNote[]
   customRoles         CustomRole[]
+  menuItemAddonGroups MenuItemAddonGroup[]
 
   @@index([isActive])
   @@map("branches")
@@ -583,24 +584,82 @@ model MenuItem {
   /// opens the variant chooser. Server rejects orderItem.create against
   /// a parent shell. Legacy MenuItems all have isVariantParent=false.
   isVariantParent  Boolean @default(false)
+  /// True when this row is an addon (Extra Patty, Cheese Sauce,
+  /// Garlic Nun, etc). Filtered out of the main POS grid + the
+  /// website / QR feed; selectable only via an addon group on a
+  /// parent menu item. Reuses the existing price + recipe shape so
+  /// reports / costing engines work without modification.
+  isAddon          Boolean @default(false)
 
   // Relations
-  branch           Branch             @relation(fields: [branchId], references: [id])
-  category         MenuCategory       @relation(fields: [categoryId], references: [id])
-  cookingStation   CookingStation?    @relation(fields: [cookingStationId], references: [id])
+  branch           Branch                @relation(fields: [branchId], references: [id])
+  category         MenuCategory          @relation(fields: [categoryId], references: [id])
+  cookingStation   CookingStation?       @relation(fields: [cookingStationId], references: [id])
   orderItems       OrderItem[]
   recipe           Recipe?
-  comboItems       ComboItem[]        @relation("ComboMenu")
-  includedInCombos ComboItem[]        @relation("ComboIncluded")
-  linkedItems      LinkedItem[]       @relation("LinkedParent")
-  linkedFrom       LinkedItem[]       @relation("LinkedChild")
+  comboItems       ComboItem[]           @relation("ComboMenu")
+  includedInCombos ComboItem[]           @relation("ComboIncluded")
+  linkedItems      LinkedItem[]          @relation("LinkedParent")
+  linkedFrom       LinkedItem[]          @relation("LinkedChild")
   menuDiscounts    MenuItemDiscount[]
-  variantParent    MenuItem?          @relation("MenuVariants", fields: [variantParentId], references: [id])
-  variants         MenuItem[]         @relation("MenuVariants")
+  variantParent    MenuItem?             @relation("MenuVariants", fields: [variantParentId], references: [id])
+  variants         MenuItem[]            @relation("MenuVariants")
+  /// Addon groups attached to this menu item (the parent dish offers
+  /// these picks at order time). Only populated on non-addon items.
+  addonGroups      MenuItemAddonGroup[]
+  /// Junction rows that point AT this menu item when it serves as an
+  /// addon option. Inverse for MenuItemAddonOption.addon. Only
+  /// populated when isAddon=true.
+  addonOptionLinks MenuItemAddonOption[] @relation("MenuItemAddonChild")
 
   @@index([branchId, categoryId, isAvailable])
   @@index([branchId, sortOrder])
   @@map("menu_items")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MENU ADDONS (Phase 3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Group of addons offered on a parent menu item ("Sides", "Sauces").
+/// minPicks=0 + maxPicks=N matches the "up to N, can skip" UX from the
+/// product spec (e.g. up to 2 sides). Required groups set minPicks > 0.
+model MenuItemAddonGroup {
+  id          String                @id @default(cuid())
+  branchId    String
+  /// Parent menu item that offers this group.
+  menuItemId  String
+  name        String
+  minPicks    Int                   @default(0)
+  maxPicks    Int                   @default(1)
+  sortOrder   Int                   @default(0)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  deletedAt   DateTime?
+
+  branch      Branch                @relation(fields: [branchId], references: [id])
+  menuItem    MenuItem              @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  options     MenuItemAddonOption[]
+
+  @@index([menuItemId])
+  @@map("menu_item_addon_groups")
+}
+
+/// Junction: which addon (a MenuItem with isAddon=true) is offered in
+/// which group. Same addon can appear in many groups (e.g. Cheese Sauce
+/// available on both Steak and Burger).
+model MenuItemAddonOption {
+  id          String             @id @default(cuid())
+  groupId     String
+  /// MenuItem.id of the addon (the row must have isAddon=true).
+  addonItemId String
+  sortOrder   Int                @default(0)
+
+  group       MenuItemAddonGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  addon       MenuItem           @relation("MenuItemAddonChild", fields: [addonItemId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, addonItemId])
+  @@map("menu_item_addon_options")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -812,6 +871,14 @@ model OrderItem {
   /// so 2× without garlic + 2× normal land on two separate OrderItem
   /// rows (and two separate KT entries).
   modifications Json?
+  /// Per-line addon snapshot. Shape:
+  ///   [{ groupId, groupName, addonItemId, addonName, price, recipeMenuItemId? }]
+  /// Frozen at order time so a future menu edit doesn't rewrite history.
+  /// Stock for each addon's recipe deducts on top of the base item's
+  /// recipe; KT print + receipts itemize each pick under the base line.
+  /// Cart key includes an addons hash so different selections become
+  /// separate OrderItem rows.
+  addons        Json?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 

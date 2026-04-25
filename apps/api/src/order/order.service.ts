@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 
 import type { Prisma } from '@prisma/client';
-import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason, CorrectPaymentDto } from '@restora/types';
+import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason, CorrectPaymentDto, AddonSelectionInput, OrderItemAddonSnapshot } from '@restora/types';
 import { generateOrderNumber, type MushakLineItem, type MushakBuyerBlock } from '@restora/utils';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -119,19 +119,114 @@ export class OrderService {
       items: activeItems.map((i) => {
         const mods = (i as { modifications?: { removedNames?: string[] } | null }).modifications;
         const removed = mods?.removedNames ?? [];
+        const addons = ((i as { addons?: { addonName: string }[] | null }).addons) ?? [];
         return {
           name: i.menuItemName,
           quantity: i.quantity,
           notes: i.notes,
-          // Surface "no garlic" mods to KT consumers. Plain text so
-          // the existing thermal-print + HTML fallback paths render
-          // them without code changes (renderers join name + notes
-          // already; mods get appended to notes for back-compat).
           removedIngredients: removed,
+          // Surface selected addons so the chef knows what extras /
+          // sides / sauces to plate. Renderers append "+ Cheese Sauce"
+          // under the item line.
+          selectedAddons: addons.map((a) => a.addonName),
         };
       }),
       notes: order.notes,
     };
+  }
+
+  /**
+   * Validate + resolve a single line's addon picks against the parent
+   * menu item's addon groups. Returns:
+   *   - snapshot: frozen array stored on OrderItem.addons
+   *   - addonRecipeItems: synthetic [{menuItemId, quantity}] entries
+   *     for the recipe-deduction engine, one per selected addon
+   *     (multiplied by the line quantity).
+   *   - extraUnitPrice: paisa to add to the line's unit price.
+   *
+   * Throws BadRequestException when:
+   *   - groupId references a group that doesn't belong to this menu item
+   *   - addonItemId isn't a valid option in that group
+   *   - more than maxPicks selections in any group
+   *   - fewer than minPicks selections in any required group
+   */
+  private async resolveAddonsForLine(
+    branchId: string,
+    menuItemId: string,
+    quantity: number,
+    selections: AddonSelectionInput[],
+  ): Promise<{ snapshot: OrderItemAddonSnapshot[]; addonRecipeItems: { menuItemId: string; quantity: number }[]; extraUnitPrice: number }> {
+    // Pull the parent's groups + their valid options.
+    const groups = await this.prisma.menuItemAddonGroup.findMany({
+      where: { menuItemId, branchId, deletedAt: null },
+      include: {
+        options: {
+          include: { addon: { select: { id: true, name: true, price: true, isAvailable: true, isAddon: true } } },
+        },
+      },
+    });
+    if (groups.length === 0 && selections.length === 0) {
+      return { snapshot: [], addonRecipeItems: [], extraUnitPrice: 0 };
+    }
+
+    const validByGroup = new Map<string, Map<string, { id: string; name: string; price: { toNumber(): number } }>>();
+    for (const g of groups) {
+      const map = new Map<string, { id: string; name: string; price: { toNumber(): number } }>();
+      for (const opt of g.options) {
+        if (opt.addon.isAvailable !== false && opt.addon.isAddon) {
+          map.set(opt.addon.id, { id: opt.addon.id, name: opt.addon.name, price: opt.addon.price });
+        }
+      }
+      validByGroup.set(g.id, map);
+    }
+
+    // Tally picks per group.
+    const picksByGroup = new Map<string, AddonSelectionInput[]>();
+    for (const sel of selections ?? []) {
+      const valid = validByGroup.get(sel.groupId);
+      if (!valid) throw new BadRequestException('Addon group does not belong to this menu item');
+      if (!valid.has(sel.addonItemId)) throw new BadRequestException('Selected addon is not part of its group');
+      const arr = picksByGroup.get(sel.groupId) ?? [];
+      arr.push(sel);
+      picksByGroup.set(sel.groupId, arr);
+    }
+
+    // Enforce min/max per group.
+    for (const g of groups) {
+      const picks = picksByGroup.get(g.id) ?? [];
+      if (picks.length > g.maxPicks) {
+        throw new BadRequestException(`"${g.name}" allows at most ${g.maxPicks} pick(s); got ${picks.length}`);
+      }
+      if (picks.length < g.minPicks) {
+        throw new BadRequestException(`"${g.name}" requires at least ${g.minPicks} pick(s); got ${picks.length}`);
+      }
+    }
+
+    // Build snapshot + per-unit price + recipe-deduction entries.
+    const snapshot: OrderItemAddonSnapshot[] = [];
+    const addonRecipeItems: { menuItemId: string; quantity: number }[] = [];
+    let extraUnitPrice = 0;
+    for (const g of groups) {
+      const picks = picksByGroup.get(g.id) ?? [];
+      for (const sel of picks) {
+        const opt = validByGroup.get(g.id)!.get(sel.addonItemId)!;
+        const price = opt.price.toNumber();
+        snapshot.push({
+          groupId: g.id,
+          groupName: g.name,
+          addonItemId: opt.id,
+          addonName: opt.name,
+          price,
+        });
+        extraUnitPrice += price;
+        // Deduct the addon's recipe once per ordered unit. Empty recipe
+        // = no deduction, which is the "no-stock" footgun admin saw a
+        // warning about at addon-group save time.
+        addonRecipeItems.push({ menuItemId: opt.id, quantity });
+      }
+    }
+
+    return { snapshot, addonRecipeItems, extraUnitPrice };
   }
 
   async create(branchId: string, cashierId: string, dto: CreateOrderDto) {
@@ -202,11 +297,17 @@ export class OrderService {
       };
     };
 
-    // Calculate totals with discounted prices
-    const itemsData = dto.items.map((item) => {
+    // Calculate totals with discounted prices + resolve any addon
+    // selections per line. Addon picks are validated against the
+    // parent menu item's addon groups; their recipes feed the stock-
+    // deduction step below, and a snapshot of {group, addon, price}
+    // is frozen on each OrderItem.
+    const itemsData = await Promise.all(dto.items.map(async (item) => {
       const menuItem = menuItems.find((m) => m.id === item.menuItemId)!;
-      const unitPrice = getDiscountedPrice(item.menuItemId, menuItem.price.toNumber());
+      const baseUnit = getDiscountedPrice(item.menuItemId, menuItem.price.toNumber());
       const mods = buildModsSnapshot(item.removedIngredientIds);
+      const addonRes = await this.resolveAddonsForLine(branchId, item.menuItemId, item.quantity, item.addons ?? []);
+      const unitPrice = baseUnit + addonRes.extraUnitPrice;
       return {
         menuItemId: item.menuItemId,
         menuItemName: menuItem.name,
@@ -215,8 +316,12 @@ export class OrderService {
         totalPrice: unitPrice * item.quantity,
         notes: item.notes ?? null,
         modifications: mods as Prisma.InputJsonValue | undefined,
+        addons: addonRes.snapshot.length > 0 ? (addonRes.snapshot as unknown as Prisma.InputJsonValue) : undefined,
+        // Carry the deduction list on a non-persisted property; we
+        // pull it back out below before passing to the recipe engine.
+        _addonRecipeItems: addonRes.addonRecipeItems,
       };
-    });
+    }));
 
     const subtotal = itemsData.reduce((s, i) => s + i.totalPrice, 0);
     // Per-section VAT: items routed to a section with vatEnabled=false
@@ -258,6 +363,12 @@ export class OrderService {
       }
     }
 
+    // Strip the helper-only _addonRecipeItems before passing to Prisma.
+    const itemsForCreate = itemsData.map((row) => {
+      const { _addonRecipeItems, ...rest } = row;
+      void _addonRecipeItems; // referenced solely to satisfy TS noUnused
+      return rest;
+    });
     const order = await this.prisma.order.create({
       data: {
         orderNumber: generateOrderNumber(),
@@ -279,7 +390,7 @@ export class OrderService {
         discountAmount: 0,
         totalAmount,
         roundAdjustment,
-        items: { create: itemsData },
+        items: { create: itemsForCreate },
       },
       include: { items: true },
     });
@@ -291,16 +402,19 @@ export class OrderService {
     if (dto.tableId) this.ws.emitToBranch(branchId, 'table:updated', { id: dto.tableId, status: 'OCCUPIED' });
 
     // Deduct stock via recipe engine (best-effort, non-blocking).
-    // Removed ingredient IDs flow through so "no garlic" lines skip
-    // the garlic deduction.
+    // Each line contributes its own recipe AND every selected addon's
+    // recipe (Phase 3) — addons that have no recipe simply don't
+    // deduct anything (admin saw a warning at addon-group save time).
+    const baseRecipeItems = dto.items.map((i) => ({
+      menuItemId: i.menuItemId,
+      quantity: i.quantity,
+      removedIngredientIds: i.removedIngredientIds,
+    }));
+    const addonRecipeItems = itemsData.flatMap((i) => i._addonRecipeItems ?? []);
     void this.recipeService.deductStockForOrder(
       branchId,
       order.id,
-      dto.items.map((i) => ({
-        menuItemId: i.menuItemId,
-        quantity: i.quantity,
-        removedIngredientIds: i.removedIngredientIds,
-      })),
+      [...baseRecipeItems, ...addonRecipeItems],
     );
 
     return order;
@@ -756,7 +870,7 @@ export class OrderService {
     return updated;
   }
 
-  async addItemsToOrder(id: string, branchId: string, items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[] }[], needsApproval = false) {
+  async addItemsToOrder(id: string, branchId: string, items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: AddonSelectionInput[] }[], needsApproval = false) {
     const order = await this.findOne(id, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') {
       throw new BadRequestException('Cannot add items to this order');
@@ -817,10 +931,12 @@ export class OrderService {
       };
     };
 
-    const newItems = items.map((item) => {
+    const newItems = await Promise.all(items.map(async (item) => {
       const menuItem = menuItems.find((m) => m.id === item.menuItemId)!;
-      const unitPrice = getDiscountedPrice(item.menuItemId, menuItem.price.toNumber());
+      const baseUnit = getDiscountedPrice(item.menuItemId, menuItem.price.toNumber());
       const mods = buildModsSnapshot(item.removedIngredientIds);
+      const addonRes = await this.resolveAddonsForLine(branchId, item.menuItemId, item.quantity, item.addons ?? []);
+      const unitPrice = baseUnit + addonRes.extraUnitPrice;
       return {
         orderId: id,
         menuItemId: item.menuItemId,
@@ -831,10 +947,17 @@ export class OrderService {
         notes: item.notes ?? null,
         kitchenStatus: needsApproval ? 'PENDING_APPROVAL' as const : 'NEW' as const,
         modifications: mods as Prisma.InputJsonValue | undefined,
+        addons: addonRes.snapshot.length > 0 ? (addonRes.snapshot as unknown as Prisma.InputJsonValue) : undefined,
+        _addonRecipeItems: addonRes.addonRecipeItems,
       };
-    });
+    }));
 
-    await this.prisma.orderItem.createMany({ data: newItems });
+    const newItemsForCreate = newItems.map((row) => {
+      const { _addonRecipeItems, ...rest } = row;
+      void _addonRecipeItems;
+      return rest;
+    });
+    await this.prisma.orderItem.createMany({ data: newItemsForCreate });
 
     // Recalculate totals (only count approved + non-voided items)
     const allItems = await this.prisma.orderItem.findMany({ where: { orderId: id, voidedAt: null } });
@@ -849,16 +972,18 @@ export class OrderService {
 
     this.ws.emitToBranch(branchId, needsApproval ? 'order:items-pending' : 'order:updated', updated);
 
-    // Only deduct stock for immediately approved items. Mods flow
-    // through so "no garlic" lines skip garlic.
+    // Only deduct stock for immediately approved items. Mods + addon
+    // recipes flow through.
     if (!needsApproval) {
+      const baseRecipeItems = items.map((i) => ({
+        menuItemId: i.menuItemId,
+        quantity: i.quantity,
+        removedIngredientIds: i.removedIngredientIds,
+      }));
+      const addonRecipeItems = newItems.flatMap((i) => i._addonRecipeItems ?? []);
       void this.recipeService.deductStockForOrder(
         branchId, id,
-        items.map((i) => ({
-          menuItemId: i.menuItemId,
-          quantity: i.quantity,
-          removedIngredientIds: i.removedIngredientIds,
-        })),
+        [...baseRecipeItems, ...addonRecipeItems],
       );
     }
 
@@ -886,15 +1011,18 @@ export class OrderService {
     }
 
     // Deduct stock for newly approved items. Honour any per-line
-    // removals stored on the OrderItem at creation time.
-    void this.recipeService.deductStockForOrder(
-      branchId, id,
-      pendingItems.map((i) => ({
-        menuItemId: i.menuItemId,
-        quantity: i.quantity,
-        removedIngredientIds: ((i as { modifications?: { removedIngredientIds?: string[] } | null }).modifications?.removedIngredientIds) ?? undefined,
-      })),
-    );
+    // removals + selected addons stored on the OrderItem at creation
+    // time. Each addon's recipe deducts on top of the base item's.
+    const baseRecipe = pendingItems.map((i) => ({
+      menuItemId: i.menuItemId,
+      quantity: i.quantity,
+      removedIngredientIds: ((i as { modifications?: { removedIngredientIds?: string[] } | null }).modifications?.removedIngredientIds) ?? undefined,
+    }));
+    const addonRecipe = pendingItems.flatMap((i) => {
+      const addons = (i as { addons?: { addonItemId: string }[] | null }).addons ?? [];
+      return addons.map((a) => ({ menuItemId: a.addonItemId, quantity: i.quantity }));
+    });
+    void this.recipeService.deductStockForOrder(branchId, id, [...baseRecipe, ...addonRecipe]);
 
     return updated;
   }
@@ -946,13 +1074,17 @@ export class OrderService {
       this.ws.emitToKds(branchId, 'kds:ticket:new', updated);
     }
 
+    const addons = ((item as { addons?: { addonItemId: string }[] | null }).addons) ?? [];
     void this.recipeService.deductStockForOrder(
       branchId, orderId,
-      [{
-        menuItemId: item.menuItemId,
-        quantity: item.quantity,
-        removedIngredientIds: ((item as { modifications?: { removedIngredientIds?: string[] } | null }).modifications?.removedIngredientIds) ?? undefined,
-      }],
+      [
+        {
+          menuItemId: item.menuItemId,
+          quantity: item.quantity,
+          removedIngredientIds: ((item as { modifications?: { removedIngredientIds?: string[] } | null }).modifications?.removedIngredientIds) ?? undefined,
+        },
+        ...addons.map((a) => ({ menuItemId: a.addonItemId, quantity: item.quantity })),
+      ],
     );
 
     return updated;

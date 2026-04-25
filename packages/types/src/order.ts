@@ -25,6 +25,23 @@ export interface OrderItemModifications {
   removedNames: string[];
 }
 
+export interface OrderItemAddonSnapshot {
+  groupId: string;
+  groupName: string;
+  addonItemId: string;
+  addonName: string;
+  /** Per-unit price snapshotted at order time, in paisa. */
+  price: MoneyAmount;
+}
+
+/** DTO entry — what the POS sends per cart line. */
+export interface AddonSelectionInput {
+  /** AddonGroup id this pick belongs to (server validates existence). */
+  groupId: string;
+  /** MenuItem.id of the addon (must have isAddon=true). */
+  addonItemId: string;
+}
+
 export interface OrderItem {
   id: string;
   menuItemId: string;
@@ -39,6 +56,8 @@ export interface OrderItem {
   voidedById: string | null;
   /** Per-line ingredient removals captured at order time. */
   modifications?: OrderItemModifications | null;
+  /** Per-line addon selections captured at order time. */
+  addons?: OrderItemAddonSnapshot[] | null;
 }
 
 export interface OrderPayment {
@@ -84,6 +103,8 @@ export interface CreateOrderItemDto {
   notes?: string;
   /** Ingredient IDs to remove from this line's recipe. */
   removedIngredientIds?: string[];
+  /** Addon picks for this line. Server validates min/max per group. */
+  addons?: AddonSelectionInput[];
 }
 
 export interface CreateOrderDto {
@@ -102,6 +123,8 @@ export interface AddOrderItemDto {
   notes?: string;
   /** Ingredient IDs to remove from this line's recipe. */
   removedIngredientIds?: string[];
+  /** Addon picks for this line. Server validates min/max per group. */
+  addons?: AddonSelectionInput[];
 }
 
 export interface ProcessPaymentDto {

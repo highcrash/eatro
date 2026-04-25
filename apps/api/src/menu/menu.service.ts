@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 
-import type { CreateMenuItemDto, UpdateMenuItemDto, CreateCustomMenuDto } from '@restora/types';
+import type { CreateMenuItemDto, UpdateMenuItemDto, CreateCustomMenuDto, UpsertAddonGroupDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 
 const comboAndLinkedInclude = {
@@ -13,13 +13,23 @@ const comboAndLinkedInclude = {
     select: { id: true, name: true, price: true, isAvailable: true, sortOrder: true, recipe: { select: { id: true } } },
     orderBy: { sortOrder: 'asc' as const },
   },
+  addonGroups: {
+    where: { deletedAt: null },
+    orderBy: { sortOrder: 'asc' as const },
+    include: {
+      options: {
+        orderBy: { sortOrder: 'asc' as const },
+        include: { addon: { select: { id: true, name: true, price: true, isAvailable: true, recipe: { select: { id: true } } } } },
+      },
+    },
+  },
 };
 
 @Injectable()
 export class MenuService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(branchId: string, includeCustom = false) {
+  findAll(branchId: string, includeCustom = false, includeAddons = false) {
     return this.prisma.menuItem.findMany({
       where: {
         branchId,
@@ -28,6 +38,12 @@ export class MenuService {
         // unless explicitly requested. Reports walk OrderItem rows directly
         // and aren't affected.
         ...(includeCustom ? {} : { isCustom: false }),
+        // Addons live in the same table but are managed via the Addons
+        // editor on the parent item, so they're hidden from the main
+        // grid by default. The /menu endpoint passes includeAddons=true
+        // for POS so the picker can resolve addon snapshots when
+        // rendering the cart / receipt.
+        ...(includeAddons ? {} : { isAddon: false }),
       },
       include: comboAndLinkedInclude,
       orderBy: [{ category: { sortOrder: 'asc' } }, { sortOrder: 'asc' }],
@@ -44,15 +60,20 @@ export class MenuService {
   }
 
   /**
-   * Variant invariants enforced on create + update:
+   * Variant + addon invariants enforced on create + update:
    *  - A row cannot be both a parent shell and a child variant.
    *  - A child's parent must exist on the same branch and be a parent
    *    shell (variants are one level deep — no grandparents).
    *  - Promoting an item to a parent shell requires `price=0` (the
    *    shell isn't sold directly; price comes from each variant).
    *    Admin UI hides the price field on parents — server enforces.
+   *  - Addons cannot also be variant parents / variant children — they
+   *    live as their own concept (selectable via addon groups only).
    */
-  private async assertVariantShape(branchId: string, dto: { isVariantParent?: boolean; variantParentId?: string | null }, currentId?: string) {
+  private async assertVariantShape(branchId: string, dto: { isVariantParent?: boolean; variantParentId?: string | null; isAddon?: boolean }, currentId?: string) {
+    if (dto.isAddon && (dto.isVariantParent || dto.variantParentId)) {
+      throw new BadRequestException('An addon cannot also be a variant or a variant parent');
+    }
     if (dto.isVariantParent && dto.variantParentId) {
       throw new BadRequestException('A menu item cannot be both a parent shell and a child variant');
     }
@@ -512,5 +533,111 @@ export class MenuService {
     });
 
     return item;
+  }
+
+  // ─── Addon groups (Phase 3) ───────────────────────────────────────────────
+
+  /** All addon groups attached to a menu item, ordered. */
+  listAddonGroups(menuItemId: string, branchId: string) {
+    return this.prisma.menuItemAddonGroup.findMany({
+      where: { menuItemId, branchId, deletedAt: null },
+      orderBy: { sortOrder: 'asc' },
+      include: {
+        options: {
+          orderBy: { sortOrder: 'asc' },
+          include: { addon: { select: { id: true, name: true, price: true, isAvailable: true, recipe: { select: { id: true } } } } },
+        },
+      },
+    });
+  }
+
+  /**
+   * Validate an UpsertAddonGroupDto: every addonItemId must be a row
+   * on the same branch with `isAddon=true` and not soft-deleted. min /
+   * max picks must be sane.
+   */
+  private async assertAddonGroupShape(branchId: string, dto: UpsertAddonGroupDto) {
+    const min = Number(dto.minPicks) || 0;
+    const max = Number(dto.maxPicks) || 0;
+    if (min < 0 || max < 0) throw new BadRequestException('minPicks / maxPicks cannot be negative');
+    if (max > 0 && min > max) throw new BadRequestException('minPicks cannot exceed maxPicks');
+    if ((dto.addonItemIds?.length ?? 0) === 0) throw new BadRequestException('Add at least one addon option to the group');
+    const ids = Array.from(new Set(dto.addonItemIds));
+    const rows = await this.prisma.menuItem.findMany({
+      where: { id: { in: ids }, branchId, deletedAt: null },
+      select: { id: true, isAddon: true, name: true, recipe: { select: { id: true } } },
+    });
+    if (rows.length !== ids.length) throw new BadRequestException('One or more addon options not found on this branch');
+    const notAddon = rows.filter((r) => !r.isAddon);
+    if (notAddon.length > 0) {
+      throw new BadRequestException(`These items are not flagged as addons: ${notAddon.map((r) => r.name).join(', ')}`);
+    }
+    return rows;
+  }
+
+  /** Create a new addon group on a menu item. */
+  async createAddonGroup(menuItemId: string, branchId: string, dto: UpsertAddonGroupDto) {
+    await this.findOne(menuItemId, branchId);
+    const rows = await this.assertAddonGroupShape(branchId, dto);
+    return this.prisma.menuItemAddonGroup.create({
+      data: {
+        branchId,
+        menuItemId,
+        name: dto.name.trim(),
+        minPicks: Number(dto.minPicks) || 0,
+        maxPicks: Number(dto.maxPicks) || 1,
+        sortOrder: dto.sortOrder ?? 0,
+        options: {
+          create: dto.addonItemIds.map((id, idx) => ({
+            addonItemId: id,
+            sortOrder: idx,
+          })),
+        },
+      },
+      include: { options: { include: { addon: { select: { id: true, name: true, price: true, isAvailable: true, recipe: { select: { id: true } } } } } } },
+    }).then(async (g) => {
+      // Surface which options have no recipe so admin can spot the
+      // "addon contributes price but no stock deduction" footgun.
+      const noRecipeNames = rows.filter((r) => !r.recipe).map((r) => r.name);
+      return { ...g, warnings: noRecipeNames.length > 0 ? [`These addons have no recipe — selecting them won't deduct any stock: ${noRecipeNames.join(', ')}`] : [] };
+    });
+  }
+
+  /** Replace name + min/max + addon-options of an existing group. */
+  async updateAddonGroup(groupId: string, branchId: string, dto: UpsertAddonGroupDto) {
+    const existing = await this.prisma.menuItemAddonGroup.findFirst({
+      where: { id: groupId, branchId, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Addon group not found');
+    const rows = await this.assertAddonGroupShape(branchId, dto);
+    return this.prisma.menuItemAddonGroup.update({
+      where: { id: groupId },
+      data: {
+        name: dto.name.trim(),
+        minPicks: Number(dto.minPicks) || 0,
+        maxPicks: Number(dto.maxPicks) || 1,
+        sortOrder: dto.sortOrder ?? existing.sortOrder,
+        // Replace the option set wholesale; simpler than diffing.
+        options: {
+          deleteMany: {},
+          create: dto.addonItemIds.map((id, idx) => ({ addonItemId: id, sortOrder: idx })),
+        },
+      },
+      include: { options: { include: { addon: { select: { id: true, name: true, price: true, isAvailable: true, recipe: { select: { id: true } } } } } } },
+    }).then((g) => {
+      const noRecipeNames = rows.filter((r) => !r.recipe).map((r) => r.name);
+      return { ...g, warnings: noRecipeNames.length > 0 ? [`These addons have no recipe — selecting them won't deduct any stock: ${noRecipeNames.join(', ')}`] : [] };
+    });
+  }
+
+  async removeAddonGroup(groupId: string, branchId: string) {
+    const existing = await this.prisma.menuItemAddonGroup.findFirst({
+      where: { id: groupId, branchId, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Addon group not found');
+    return this.prisma.menuItemAddonGroup.update({
+      where: { id: groupId },
+      data: { deletedAt: new Date() },
+    });
   }
 }

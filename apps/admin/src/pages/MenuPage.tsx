@@ -6,6 +6,7 @@ import type { MenuItem, MenuCategory, CreateMenuItemDto, LinkedItemType } from '
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
 import { resizeImage } from '../lib/image-resize';
+import MenuAddonsDialog from './MenuAddonsDialog';
 
 /** Resolve image path — uploaded files are served at /uploads/x.jpg (proxied to API in dev) */
 function resolveImageUrl(url: string) {
@@ -228,6 +229,7 @@ function ItemDialog({
     seoDescription: (initial as any)?.seoDescription ?? '',
     isVariantParent: initial?.isVariantParent ?? false,
     variantParentId: initial?.variantParentId ?? '',
+    isAddon: initial?.isAddon ?? false,
   });
 
   // Parents available for "this is a variant of …" dropdown.
@@ -277,6 +279,7 @@ function ItemDialog({
       // Parent shells aren't sold directly — force price to 0 + clear
       // any "this is a variant of …" link. Children carry the price.
       const isParent = !!form.isVariantParent;
+      const isAddon = !!form.isAddon && !isParent && !form.variantParentId;
       const dto: CreateMenuItemDto & { isAvailable?: boolean } = {
         name: form.name,
         categoryId: form.categoryId,
@@ -288,6 +291,7 @@ function ItemDialog({
         imageUrl: form.imageUrl || undefined,
         isVariantParent: isParent,
         variantParentId: isParent ? null : (form.variantParentId || null),
+        isAddon,
       };
       const extra = {
         pieces: form.pieces || null,
@@ -367,6 +371,28 @@ function ItemDialog({
                 className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
             </div>
           )}
+
+          {/* Addon toggle — items flagged as addons are hidden from the
+              main grid and the public website; they show up only when a
+              parent menu item attaches them via an addon group. */}
+          <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-2">
+            <p className="text-[#CE93D8] text-[10px] font-body font-medium tracking-widest uppercase">Addon</p>
+            <label className="flex items-center gap-2 text-sm font-body text-[#999]">
+              <input
+                type="checkbox"
+                checked={form.isAddon}
+                disabled={form.isVariantParent || !!form.variantParentId}
+                onChange={(e) => set('isAddon', e.target.checked)}
+                className="accent-[#CE93D8]"
+              />
+              Treat as addon (selectable only via an Addon Group)
+            </label>
+            {form.isAddon && (
+              <p className="text-[10px] text-[#666] leading-relaxed">
+                This item won't appear in the POS grid or on the website. Attach it to a parent menu item via the <strong>Addons</strong> button on that item's row. Set this item's price to the addon surcharge (set to 0 for free addons).
+              </p>
+            )}
+          </div>
 
           {/* Variants block — parent shell toggle + (when not a parent) attach to a parent dropdown */}
           <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-2">
@@ -740,6 +766,7 @@ export default function MenuPage() {
   const [itemDialog, setItemDialog] = useState<{ open: boolean; item?: MenuItem }>({ open: false });
   const [comboDialog, setComboDialog] = useState<{ open: boolean; item?: MenuItem }>({ open: false });
   const [linkedDialog, setLinkedDialog] = useState<{ open: boolean; item?: MenuItem }>({ open: false });
+  const [addonsDialog, setAddonsDialog] = useState<{ open: boolean; item?: MenuItem }>({ open: false });
   const [activeParent, setActiveParent] = useState<string | null>(null);
   const [activeSub, setActiveSub] = useState<string | null>(null);
   const [menuSearch, setMenuSearch] = useState('');
@@ -758,7 +785,7 @@ export default function MenuPage() {
 
   const { data: menuItems = [] } = useQuery<MenuItem[]>({
     queryKey: ['menu'],
-    queryFn: () => api.get<MenuItem[]>('/menu'),
+    queryFn: () => api.get<MenuItem[]>('/menu?includeAddons=true'),
   });
 
   const { data: kitchenSections = [] } = useQuery<{ id: string; name: string; isActive: boolean }[]>({
@@ -1132,6 +1159,8 @@ export default function MenuPage() {
                     {item.isCombo && <span className="ml-2 text-[10px] font-medium tracking-widest uppercase text-[#D62B2B] border border-[#D62B2B] px-1.5 py-0.5">COMBO</span>}
                     {item.isVariantParent && <span className="ml-2 text-[10px] font-medium tracking-widest uppercase text-[#FFA726] border border-[#FFA726] px-1.5 py-0.5">PARENT • {item.variants?.length ?? 0}</span>}
                     {item.variantParentId && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#FFA726] border border-[#2A2A2A] px-1.5 py-0.5">VARIANT</span>}
+                    {item.isAddon && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#CE93D8] border border-[#CE93D8] px-1.5 py-0.5">ADDON</span>}
+                    {(item.addonGroups?.length ?? 0) > 0 && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#CE93D8] border border-[#2A2A2A] px-1.5 py-0.5">+A • {item.addonGroups!.length}</span>}
                     {(item.linkedItems?.length ?? 0) > 0 && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#999] border border-[#2A2A2A] px-1.5 py-0.5">LINKED</span>}
                   </td>
                   <td className="px-5 py-3 text-[#999]">{item.category?.name ?? '--'}</td>
@@ -1153,6 +1182,9 @@ export default function MenuPage() {
                     <div className="flex gap-2">
                       <button onClick={() => setComboDialog({ open: true, item })} title="Combo items" className="text-[#999] hover:text-[#D62B2B]"><Package size={14} /></button>
                       <button onClick={() => setLinkedDialog({ open: true, item })} title="Linked items" className="text-[#999] hover:text-[#D62B2B]"><Link2 size={14} /></button>
+                      {!item.isAddon && !item.isVariantParent && !item.variantParentId && (
+                        <button onClick={() => setAddonsDialog({ open: true, item })} title="Addon groups" className="text-[#999] hover:text-[#CE93D8] text-[11px] font-bold uppercase tracking-wider">+A</button>
+                      )}
                       <button onClick={() => setItemDialog({ open: true, item })} className="text-[#999] hover:text-white"><Pencil size={14} /></button>
                       <button onClick={() => { if (confirm(`Delete "${item.name}"?`)) deleteItem.mutate(item.id); }}
                         className="text-[#999] hover:text-[#D62B2B]"><Trash2 size={14} /></button>
@@ -1172,6 +1204,7 @@ export default function MenuPage() {
       {itemDialog.open && <ItemDialog categories={categories} initial={itemDialog.item} allItems={menuItems} onClose={() => setItemDialog({ open: false })} />}
       {comboDialog.open && comboDialog.item && <ComboDialog item={comboDialog.item} allItems={menuItems} onClose={() => setComboDialog({ open: false })} />}
       {linkedDialog.open && linkedDialog.item && <LinkedDialog item={linkedDialog.item} allItems={menuItems} onClose={() => setLinkedDialog({ open: false })} />}
+      {addonsDialog.open && addonsDialog.item && <MenuAddonsDialog menuItem={addonsDialog.item} allItems={menuItems} onClose={() => setAddonsDialog({ open: false })} />}
 
       {/* CSV Import Modal */}
       {csvOpen && (
