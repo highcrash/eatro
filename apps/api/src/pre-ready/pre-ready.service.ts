@@ -34,10 +34,40 @@ export class PreReadyService {
     return item;
   }
 
-  createItem(branchId: string, dto: CreatePreReadyItemDto) {
-    return this.prisma.preReadyItem.create({
+  /**
+   * Create a pre-ready item AND mirror it as an inventory ingredient with
+   * a `[PR] ` prefix immediately — no need to wait for the first
+   * production run. Cost defaults to 0 because the recipe doesn't exist
+   * yet; admin clicks Recalculate Cost after wiring the recipe to fill
+   * it in. The mirrored ingredient is what menu items reference when
+   * a pre-ready food appears in a recipe.
+   */
+  async createItem(branchId: string, dto: CreatePreReadyItemDto) {
+    const item = await this.prisma.preReadyItem.create({
       data: { branchId, name: dto.name, unit: dto.unit as any, minimumStock: dto.minimumStock ?? 0 },
     });
+
+    const ingredientName = `[PR] ${item.name}`;
+    const existing = await this.prisma.ingredient.findFirst({
+      where: { branchId, name: ingredientName, deletedAt: null },
+      select: { id: true },
+    });
+    if (!existing) {
+      await this.prisma.ingredient.create({
+        data: {
+          branchId,
+          name: ingredientName,
+          unit: item.unit,
+          category: 'OTHER',
+          currentStock: 0,
+          minimumStock: 0,
+          costPerUnit: 0,
+          itemCode: `PR-${item.id.slice(-6).toUpperCase()}`,
+        },
+      });
+    }
+
+    return item;
   }
 
   async updateItem(id: string, branchId: string, dto: { name?: string; minimumStock?: number }) {
@@ -82,7 +112,7 @@ export class PreReadyService {
 
   async upsertRecipe(preReadyItemId: string, branchId: string, dto: UpsertPreReadyRecipeDto) {
     await this.findOneItem(preReadyItemId, branchId);
-    return this.prisma.preReadyRecipe.upsert({
+    const recipe = await this.prisma.preReadyRecipe.upsert({
       where: { preReadyItemId },
       create: {
         preReadyItemId,
@@ -99,6 +129,13 @@ export class PreReadyService {
       },
       include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true } } } } },
     });
+
+    // Recipe just changed — refresh the cached cost-per-unit so the
+    // pre-ready list and the mirrored inventory ingredient stay current
+    // even if no production happens yet.
+    await this.recalcCost(preReadyItemId, branchId).catch(() => {});
+
+    return recipe;
   }
 
   /**
@@ -624,5 +661,120 @@ export class PreReadyService {
       include: { preReadyItem: { select: { id: true, name: true, unit: true } } },
       orderBy: { expiryDate: 'asc' },
     });
+  }
+
+  // ── Cost calculator ──────────────────────────────────────────────────────
+
+  /**
+   * Compute the cost-per-produced-unit for a pre-ready item from its
+   * recipe. Walks each recipe ingredient, converts the recipe quantity
+   * into the ingredient's native unit, multiplies by current
+   * costPerUnit (paisa), and divides the sum by yield. For variant-
+   * parents the cheapest active variant's cost is used (matches the
+   * cost a fresh production would actually deduct against). Items with
+   * no recipe or no yield return 0.
+   */
+  private async computeCostPerUnit(branchId: string, preReadyItemId: string): Promise<number> {
+    const item = await this.prisma.preReadyItem.findFirst({
+      where: { id: preReadyItemId, branchId },
+      include: { recipe: { include: { items: true } } },
+    });
+    if (!item?.recipe || item.recipe.items.length === 0) return 0;
+
+    const yieldQty = item.recipe.yieldQuantity.toNumber();
+    if (yieldQty <= 0) return 0;
+
+    let totalCost = 0;
+    for (const ri of item.recipe.items) {
+      const ing = await this.prisma.ingredient.findUnique({
+        where: { id: ri.ingredientId },
+        select: { id: true, unit: true, costPerUnit: true, hasVariants: true },
+      });
+      if (!ing) continue;
+
+      let deductQty = ri.quantity.toNumber();
+      if (ri.unit !== ing.unit) {
+        try {
+          deductQty = await this.unitConversionService.convert(branchId, deductQty, ri.unit, ing.unit);
+        } catch {
+          // Conversion missing — skip this line so the rest of the
+          // recipe still contributes to the cost estimate.
+          continue;
+        }
+      }
+
+      let unitCost = ing.costPerUnit.toNumber();
+      if (ing.hasVariants && unitCost === 0) {
+        // Parent's costPerUnit is often 0 because real cost lives on
+        // variants. Take the cheapest active variant's cost so the
+        // estimate reflects what a production would actually consume.
+        const variants = await this.prisma.ingredient.findMany({
+          where: { parentId: ing.id, isActive: true, deletedAt: null },
+          select: { costPerUnit: true },
+        });
+        const positive = variants.map((v) => v.costPerUnit.toNumber()).filter((c) => c > 0);
+        if (positive.length > 0) unitCost = Math.min(...positive);
+      }
+
+      totalCost += deductQty * unitCost;
+    }
+
+    return Math.round(totalCost / yieldQty);
+  }
+
+  /**
+   * Refresh the cached cost-per-unit on a pre-ready item AND on its
+   * mirrored `[PR] <name>` inventory ingredient. Returns the updated
+   * pre-ready item with its recipe so the UI can re-render in place.
+   * Safe to call repeatedly — pure function of current ingredient
+   * costs + recipe.
+   */
+  async recalcCost(preReadyItemId: string, branchId: string) {
+    const item = await this.findOneItem(preReadyItemId, branchId);
+    const cost = await this.computeCostPerUnit(branchId, preReadyItemId);
+
+    await this.prisma.preReadyItem.update({
+      where: { id: preReadyItemId },
+      data: { costPerUnit: cost },
+    });
+
+    // Also refresh the mirrored ingredient so menu-recipe valuations
+    // and reports pick up the new cost. We only update the cost field
+    // — stock + everything else is owned by production runs.
+    const ingredientName = `[PR] ${item.name}`;
+    const mirror = await this.prisma.ingredient.findFirst({
+      where: { branchId, name: ingredientName, deletedAt: null },
+      select: { id: true },
+    });
+    if (mirror) {
+      await this.prisma.ingredient.update({
+        where: { id: mirror.id },
+        data: { costPerUnit: cost },
+      });
+    }
+
+    return this.findOneItem(preReadyItemId, branchId);
+  }
+
+  /**
+   * Recalculate cost for every pre-ready item in the branch. Used by the
+   * one-click "Recalculate All" button on the admin Pre-Ready page.
+   */
+  async recalcAllCosts(branchId: string) {
+    const items = await this.prisma.preReadyItem.findMany({
+      where: { branchId, deletedAt: null },
+      select: { id: true },
+    });
+    let updated = 0;
+    for (const it of items) {
+      try {
+        await this.recalcCost(it.id, branchId);
+        updated++;
+      } catch {
+        // Skip items whose recipe is broken; they stay at the previous
+        // cost rather than blocking the bulk refresh.
+      }
+    }
+    return { updated, total: items.length };
   }
 }
