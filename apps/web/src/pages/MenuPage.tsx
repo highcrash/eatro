@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -6,6 +6,16 @@ import { getActiveBranchId, useWebsiteContent, useBranding } from '../lib/cms';
 import { formatCurrency } from '@restora/utils';
 import SEO from '../components/SEO';
 import MenuCarousel from '../components/MenuCarousel';
+
+// Inline chevron — web app has no icon dep, no point adding one for two
+// glyphs. Stroke-currentColor lets the existing nav color tokens drive it.
+function Chevron({ dir }: { dir: 'left' | 'right' }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {dir === 'left' ? <polyline points="15 18 9 12 15 6" /> : <polyline points="9 18 15 12 9 6" />}
+    </svg>
+  );
+}
 
 function ItemCard({ it, navigate }: { it: any; navigate: (path: string) => void }) {
   const hasDiscount = it.discountedPrice != null && it.discountedPrice < it.price;
@@ -118,6 +128,36 @@ export default function MenuPage() {
   const { data: branding } = useBranding();
   const siteName = (content as any)?.seoSiteName || branding?.name || 'EATRO';
 
+  // Sticky category bar — overflow-x scroller with chevron buttons +
+  // edge fades. Buttons hide when their direction is fully scrolled
+  // so the bar still looks clean when all tabs fit.
+  const catScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const updateScrollState = useCallback(() => {
+    const el = catScrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+  useEffect(() => {
+    updateScrollState();
+    const el = catScrollRef.current;
+    if (!el) return;
+    const onResize = () => updateScrollState();
+    el.addEventListener('scroll', updateScrollState, { passive: true });
+    window.addEventListener('resize', onResize);
+    return () => {
+      el.removeEventListener('scroll', updateScrollState);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [updateScrollState, parentCategories.length, discountedItems.length]);
+  const scrollByAmount = (dir: -1 | 1) => {
+    const el = catScrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth * 0.7, behavior: 'smooth' });
+  };
+
   return (
     <div>
       <SEO
@@ -133,11 +173,30 @@ export default function MenuPage() {
         </div>
       </section>
 
-      {/* Sticky category nav */}
+      {/* Sticky category nav — chevron buttons + edge fades make it
+          obvious there are more tabs off-screen. The chevrons hide
+          themselves when scrolled to that edge so a short tab list
+          still looks clean. */}
       {categories.length > 0 && (
         <div className="sticky top-16 z-30 bg-bg/95 backdrop-blur border-b border-border">
-          <div className="max-w-7xl mx-auto px-6">
-            <div className="flex gap-1 overflow-x-auto no-scrollbar py-3">
+          <div className="max-w-7xl mx-auto px-6 relative">
+            {/* Left chevron */}
+            {canScrollLeft && (
+              <button
+                type="button"
+                onClick={() => scrollByAmount(-1)}
+                aria-label="Scroll categories left"
+                className="hidden md:flex absolute left-1 top-1/2 -translate-y-1/2 z-20 w-9 h-9 items-center justify-center bg-bg border border-border text-text hover:bg-accent hover:text-white hover:border-accent transition-colors shadow-lg"
+              >
+                <Chevron dir="left" />
+              </button>
+            )}
+            {/* Left edge fade */}
+            {canScrollLeft && (
+              <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-bg to-transparent z-10" />
+            )}
+
+            <div ref={catScrollRef} className="flex gap-1 overflow-x-auto no-scrollbar py-3 scroll-smooth">
               <button
                 onClick={() => setActive(null)}
                 className={`flex-shrink-0 px-5 py-2 text-sm font-semibold uppercase tracking-wider transition-colors ${
@@ -168,6 +227,22 @@ export default function MenuPage() {
                 </button>
               ))}
             </div>
+
+            {/* Right edge fade */}
+            {canScrollRight && (
+              <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-bg to-transparent z-10" />
+            )}
+            {/* Right chevron */}
+            {canScrollRight && (
+              <button
+                type="button"
+                onClick={() => scrollByAmount(1)}
+                aria-label="Scroll categories right"
+                className="hidden md:flex absolute right-1 top-1/2 -translate-y-1/2 z-20 w-9 h-9 items-center justify-center bg-bg border border-border text-text hover:bg-accent hover:text-white hover:border-accent transition-colors shadow-lg"
+              >
+                <Chevron dir="right" />
+              </button>
+            )}
           </div>
         </div>
       )}
