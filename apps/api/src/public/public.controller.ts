@@ -51,6 +51,28 @@ export class PublicController {
   }
 
   /**
+   * Public-safe slice of BranchSetting for the QR app — exposes only
+   * the toggles the customer-facing UI needs (whether self-service
+   * ingredient removal is allowed). No staff data, no SMS keys, no
+   * money policy fields leak.
+   */
+  @Get('branch/:branchId/settings')
+  getBranchPublicSettings(@Param('branchId') branchId: string) {
+    return this.publicService.getPublicBranchSettings(branchId);
+  }
+
+  /**
+   * Recipe ingredients for a single menu item — used by the QR app's
+   * "Customise ingredients" picker when the branch has the
+   * qrAllowSelfRemoveIngredients toggle ON. Returns ONLY ingredient
+   * id + name (no quantities, no costs, no supplier info).
+   */
+  @Get('menu/recipe/:menuItemId')
+  getPublicRecipe(@Param('menuItemId') menuItemId: string) {
+    return this.publicService.getPublicRecipe(menuItemId);
+  }
+
+  /**
    * OG Meta Tags endpoint — returns HTML with Open Graph tags for social media crawlers.
    * Usage: Configure your static site hosting to proxy /og/* to this endpoint,
    * or use this as a fallback for crawlers that don't execute JavaScript.

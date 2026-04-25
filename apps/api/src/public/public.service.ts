@@ -357,4 +357,41 @@ export class PublicService {
       take: 20,
     });
   }
+
+  /**
+   * Public-safe BranchSetting slice for the QR app. Returns only the
+   * customer-facing toggles — never SMS keys, margin policies, or
+   * reservation rules. The QR app uses this to decide whether to
+   * render the structured ingredient-removal UI vs the free-text
+   * Special Note field.
+   */
+  async getPublicBranchSettings(branchId: string) {
+    const s = await this.prisma.branchSetting.findUnique({
+      where: { branchId },
+      select: { qrAllowSelfRemoveIngredients: true },
+    });
+    return {
+      qrAllowSelfRemoveIngredients: s?.qrAllowSelfRemoveIngredients ?? false,
+    };
+  }
+
+  /**
+   * Recipe ingredients (id + name only) for the QR Customise picker.
+   * Quantities, costs, and supplier info are stripped — the customer
+   * just needs the names of what's in the dish to tick what to remove.
+   */
+  async getPublicRecipe(menuItemId: string) {
+    const recipe = await this.prisma.recipe.findUnique({
+      where: { menuItemId },
+      select: {
+        items: {
+          select: {
+            id: true,
+            ingredient: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+    return recipe ?? { items: [] };
+  }
 }
