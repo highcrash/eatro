@@ -17,7 +17,8 @@ export type CashierAction =
   | 'paySupplier'
   | 'createExpense'
   | 'payPayroll'
-  | 'createPreReadyKT';
+  | 'createPreReadyKT'
+  | 'createCustomMenu';
 
 export interface ActionPermission {
   enabled: boolean;
@@ -39,6 +40,7 @@ export interface CashierPermissions {
   createExpense: ExpensePermission;
   payPayroll: ActionPermission;
   createPreReadyKT: ActionPermission;
+  createCustomMenu: ActionPermission;
 }
 
 /** Defaults applied when BranchSetting.cashierPermissions is null or invalid. */
@@ -50,6 +52,7 @@ export const DEFAULT_CASHIER_PERMISSIONS: CashierPermissions = {
   createExpense:        { enabled: false, approval: 'OTP', allowedCategories: [], categoryApproval: {} },
   payPayroll:           { enabled: false, approval: 'OTP' },
   createPreReadyKT:     { enabled: false, approval: 'AUTO' },
+  createCustomMenu:     { enabled: false, approval: 'AUTO' },
 };
 
 export function parseCashierPermissions(raw: string | null | undefined): CashierPermissions {
@@ -73,6 +76,7 @@ export function parseCashierPermissions(raw: string | null | undefined): Cashier
       createExpense:        { ...merged.createExpense, ...(fix(merged.createExpense) as ActionPermission) },
       payPayroll:           fix(merged.payPayroll),
       createPreReadyKT:     fix(merged.createPreReadyKT),
+      createCustomMenu:     fix(merged.createCustomMenu),
     };
   } catch {
     return DEFAULT_CASHIER_PERMISSIONS;

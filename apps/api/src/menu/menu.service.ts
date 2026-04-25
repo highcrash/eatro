@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 
-import type { CreateMenuItemDto, UpdateMenuItemDto } from '@restora/types';
+import type { CreateMenuItemDto, UpdateMenuItemDto, CreateCustomMenuDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 
 const comboAndLinkedInclude = {
@@ -14,9 +14,16 @@ const comboAndLinkedInclude = {
 export class MenuService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(branchId: string) {
+  findAll(branchId: string, includeCustom = false) {
     return this.prisma.menuItem.findMany({
-      where: { branchId, deletedAt: null },
+      where: {
+        branchId,
+        deletedAt: null,
+        // Hide POS-created custom items from the standard admin Menu page
+        // unless explicitly requested. Reports walk OrderItem rows directly
+        // and aren't affected.
+        ...(includeCustom ? {} : { isCustom: false }),
+      },
       include: comboAndLinkedInclude,
       orderBy: [{ category: { sortOrder: 'asc' } }, { sortOrder: 'asc' }],
     });
@@ -230,5 +237,221 @@ export class MenuService {
     }
 
     return this.findOne(menuItemId, branchId);
+  }
+
+  // ─── POS Customised Menu ──────────────────────────────────────────────────
+
+  /**
+   * Recipe-source list for the POS Customised Menu "Copy from recipe"
+   * picker. Returns every menu item AND pre-ready item in the branch
+   * that has a recipe attached, flattened to a tagged shape the POS
+   * can paste from. Quantities are returned in the recipe's own units;
+   * for pre-ready items we also include the yieldQuantity so the POS
+   * can scale to one produced unit if needed.
+   */
+  async listRecipeSourcesForBranch(branchId: string): Promise<Array<{
+    id: string;
+    name: string;
+    kind: 'menu' | 'preReady';
+    yieldQty: number;
+    items: { ingredientId: string; quantity: number; unit: string }[];
+  }>> {
+    const [menuRecipes, preReadyRecipes] = await Promise.all([
+      this.prisma.recipe.findMany({
+        where: { menuItem: { branchId, deletedAt: null } },
+        include: { menuItem: { select: { id: true, name: true, isCustom: true } }, items: true },
+      }),
+      this.prisma.preReadyRecipe.findMany({
+        where: { preReadyItem: { branchId, deletedAt: null } },
+        include: { preReadyItem: { select: { id: true, name: true } }, items: true },
+      }),
+    ]);
+
+    const menuList = menuRecipes
+      // Don't surface previously-saved one-off custom items as copy sources
+      // by default — they pollute the picker. Cashiers who want to clone
+      // the same custom dish twice can still ask admin to duplicate it.
+      .filter((r) => r.menuItem && !r.menuItem.isCustom && r.items.length > 0)
+      .map((r) => ({
+        id: r.menuItem!.id,
+        name: r.menuItem!.name,
+        kind: 'menu' as const,
+        yieldQty: 1,
+        items: r.items.map((i) => ({
+          ingredientId: i.ingredientId,
+          quantity: i.quantity.toNumber(),
+          unit: i.unit as unknown as string,
+        })),
+      }));
+
+    const prList = preReadyRecipes
+      .filter((r) => r.items.length > 0)
+      .map((r) => ({
+        id: r.preReadyItem!.id,
+        name: `[PR] ${r.preReadyItem!.name}`,
+        kind: 'preReady' as const,
+        yieldQty: r.yieldQuantity.toNumber(),
+        items: r.items.map((i) => ({
+          ingredientId: i.ingredientId,
+          quantity: i.quantity.toNumber(),
+          unit: i.unit as unknown as string,
+        })),
+      }));
+
+    return [...menuList, ...prList].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Get-or-create the auto-managed "Custom Orders" category for a branch.
+   * Always websiteVisible=false so the website / QR feed never shows it.
+   * Re-uses an existing category named "Custom Orders" (case-insensitive)
+   * if one already exists, so admins can rename it freely without losing
+   * the linkage as long as they keep the name.
+   */
+  private async getOrCreateCustomCategory(branchId: string) {
+    const existing = await this.prisma.menuCategory.findFirst({
+      where: { branchId, deletedAt: null, name: 'Custom Orders' },
+    });
+    if (existing) return existing;
+    return this.prisma.menuCategory.create({
+      data: {
+        branchId,
+        name: 'Custom Orders',
+        websiteVisible: false,
+        sortOrder: 9999,
+      },
+    });
+  }
+
+  /**
+   * Compute COGS for a recipe-line list using current ingredient costs.
+   * Mirrors the performance-report cost engine (variant-fallback to the
+   * cheapest active variant when the parent has cost = 0). Result in paisa.
+   */
+  private async computeRecipeCogs(items: { ingredientId: string; quantity: number }[]): Promise<number> {
+    if (items.length === 0) return 0;
+    const ids = [...new Set(items.map((i) => i.ingredientId))];
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, costPerUnit: true, hasVariants: true },
+    });
+    const byId = new Map(ingredients.map((i) => [i.id, i] as const));
+
+    const variantCache = new Map<string, number>();
+    const resolveCost = async (ingredientId: string): Promise<number> => {
+      const ing = byId.get(ingredientId);
+      if (!ing) return 0;
+      const direct = ing.costPerUnit.toNumber();
+      if (direct > 0 || !ing.hasVariants) return direct;
+      if (variantCache.has(ingredientId)) return variantCache.get(ingredientId)!;
+      const variants = await this.prisma.ingredient.findMany({
+        where: { parentId: ingredientId, isActive: true, deletedAt: null },
+        select: { costPerUnit: true },
+      });
+      const positives = variants.map((v) => v.costPerUnit.toNumber()).filter((c) => c > 0);
+      const cost = positives.length > 0 ? Math.min(...positives) : 0;
+      variantCache.set(ingredientId, cost);
+      return cost;
+    };
+
+    let total = 0;
+    for (const it of items) {
+      total += (await resolveCost(it.ingredientId)) * it.quantity;
+    }
+    return Math.round(total);
+  }
+
+  /**
+   * Create a one-shot Customised Menu item from POS. Get-or-creates the
+   * hidden "Custom Orders" category, validates the selling price against
+   * the branch's three margin policies (cost, negotiate, max), and
+   * persists MenuItem + Recipe so the existing addItemsToOrder + recipe
+   * deduction pipeline picks it up unchanged. Server defensively re-merges
+   * duplicate (ingredientId, unit) lines by summing quantity, mirroring
+   * the POS UI's "Salt 2g + Salt 4g = 6g" rule.
+   */
+  async createCustomFromCashier(branchId: string, dto: CreateCustomMenuDto) {
+    const name = (dto.name ?? '').trim();
+    if (!name) throw new BadRequestException('Custom menu name is required');
+    if (!dto.items || dto.items.length === 0) {
+      throw new BadRequestException('Custom menu must include at least one recipe ingredient');
+    }
+    const sellingPrice = Math.round(Number(dto.sellingPrice) || 0);
+    if (sellingPrice <= 0) throw new BadRequestException('Selling price must be greater than zero');
+
+    // Defensive re-merge by (ingredientId, unit) — UI already merges, but
+    // a malicious client could submit duplicates that bypass the hint.
+    const mergedMap = new Map<string, { ingredientId: string; quantity: number; unit: string }>();
+    for (const it of dto.items) {
+      const unit = (it.unit ?? '').trim().toUpperCase() || 'G';
+      const key = `${it.ingredientId}::${unit}`;
+      const existing = mergedMap.get(key);
+      if (existing) existing.quantity += Number(it.quantity) || 0;
+      else mergedMap.set(key, { ingredientId: it.ingredientId, quantity: Number(it.quantity) || 0, unit });
+    }
+    const merged = [...mergedMap.values()].filter((r) => r.quantity > 0);
+    if (merged.length === 0) throw new BadRequestException('All recipe lines have zero quantity');
+
+    // Compute COGS using merged lines.
+    const cogs = await this.computeRecipeCogs(merged);
+
+    // Margin policy from BranchSetting.
+    const settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
+    const costMargin = settings?.customMenuCostMargin?.toNumber() ?? null;
+    const negotiate = settings?.customMenuNegotiateMargin?.toNumber() ?? null;
+    const maxMargin = settings?.customMenuMaxMargin?.toNumber() ?? null;
+
+    const floor = costMargin != null ? Math.round(cogs * (1 + costMargin / 100)) : cogs;
+    const absoluteMin = negotiate != null && negotiate > 0
+      ? Math.round(floor * (1 - negotiate / 100))
+      : floor;
+    const ceiling = maxMargin != null ? Math.round(cogs * (1 + maxMargin / 100)) : null;
+
+    if (cogs > 0 && sellingPrice < absoluteMin) {
+      throw new BadRequestException(
+        `Selling price ${(sellingPrice / 100).toFixed(2)} is below the minimum allowed ${(absoluteMin / 100).toFixed(2)} (cost ${(cogs / 100).toFixed(2)})`,
+      );
+    }
+    if (ceiling != null && sellingPrice > ceiling) {
+      throw new BadRequestException(
+        `Selling price ${(sellingPrice / 100).toFixed(2)} is above the maximum allowed ${(ceiling / 100).toFixed(2)} (cost ${(cogs / 100).toFixed(2)})`,
+      );
+    }
+
+    const category = await this.getOrCreateCustomCategory(branchId);
+
+    // Slug needs a unique suffix — multiple "Extra Spicy Chicken" customs
+    // would otherwise collide on the (branchId, slug) unique index.
+    const slug = `${this.slugify(name)}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const item = await this.prisma.menuItem.create({
+      data: {
+        branchId,
+        categoryId: category.id,
+        name,
+        description: dto.description ?? null,
+        price: sellingPrice,
+        costPrice: cogs,
+        type: 'FOOD',
+        isAvailable: true,
+        websiteVisible: false,
+        isCustom: true,
+        slug,
+        recipe: {
+          create: {
+            items: {
+              create: merged.map((m) => ({
+                ingredientId: m.ingredientId,
+                quantity: m.quantity,
+                unit: m.unit as any,
+              })),
+            },
+          },
+        },
+      },
+      include: comboAndLinkedInclude,
+    });
+
+    return item;
   }
 }

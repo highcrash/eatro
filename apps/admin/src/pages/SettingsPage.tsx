@@ -548,20 +548,61 @@ function SmsSettingsSection({ isOwner }: { isOwner: boolean }) {
 function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
   const qc = useQueryClient();
 
-  const { data: settings, isLoading } = useQuery<{ useKds: boolean }>({
+  interface KitchenSettings {
+    useKds: boolean;
+    customMenuCostMargin: number | null;
+    customMenuNegotiateMargin: number | null;
+    customMenuMaxMargin: number | null;
+  }
+
+  const { data: settings, isLoading } = useQuery<KitchenSettings>({
     queryKey: ['branch-settings'],
     queryFn: () => api.get('/branch-settings'),
   });
 
   const updateMut = useMutation({
-    mutationFn: (data: { useKds: boolean }) => api.patch('/branch-settings', data),
+    mutationFn: (data: Partial<KitchenSettings>) => api.patch('/branch-settings', data),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['branch-settings'] }),
   });
 
+  // Performance report supplies the suggested margin (avg of items with cost).
+  const { data: perf } = useQuery<{ suggestedCustomMenuMargin: number | null }>({
+    queryKey: ['performance-suggest'],
+    queryFn: () => api.get('/reports/performance'),
+    enabled: isOwner,
+  });
+
+  const [costMargin, setCostMargin] = useState('');
+  const [negotiate, setNegotiate] = useState('');
+  const [maxMargin, setMaxMargin] = useState('');
+  const [touched, setTouched] = useState(false);
+
   if (isLoading || !settings) return null;
 
+  // Display value: local state when the user has touched the form, else
+  // the persisted server value. Avoids a useEffect-sync footgun.
+  const dispCost = touched ? costMargin : (settings.customMenuCostMargin == null ? '' : String(settings.customMenuCostMargin));
+  const dispNeg = touched ? negotiate : (settings.customMenuNegotiateMargin == null ? '' : String(settings.customMenuNegotiateMargin));
+  const dispMax = touched ? maxMargin : (settings.customMenuMaxMargin == null ? '' : String(settings.customMenuMaxMargin));
+
+  const parseDecimal = (s: string): number | null => {
+    const t = s.trim();
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+
+  const saveCustomMenu = () => {
+    updateMut.mutate({
+      customMenuCostMargin: parseDecimal(dispCost),
+      customMenuNegotiateMargin: parseDecimal(dispNeg),
+      customMenuMaxMargin: parseDecimal(dispMax),
+    });
+    setTouched(false);
+  };
+
   return (
-    <div className="mt-8">
+    <div className="mt-8 space-y-6">
       <div className="mb-4">
         <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Operations</p>
         <h2 className="font-display text-2xl text-white tracking-wide">KITCHEN</h2>
@@ -585,6 +626,68 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
               className="accent-[#D62B2B] w-4 h-4"
             />
           </label>
+        </div>
+      </div>
+
+      {/* Custom Menu margin policy — drives POS Customised Menu pricing rules. */}
+      <div className="bg-[#161616] border border-[#2A2A2A]">
+        <div className="px-5 py-4 border-b border-[#2A2A2A]">
+          <p className="text-sm font-body text-white font-medium mb-1">Custom Menu Pricing</p>
+          <p className="text-xs font-body text-[#999] leading-relaxed">
+            Controls the price floor / ceiling cashiers see when they create a one-off Custom Menu item in POS. All percentages are
+            applied to recipe COGS.
+          </p>
+        </div>
+        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">
+              Cost Margin %
+              {perf?.suggestedCustomMenuMargin != null && (
+                <button
+                  type="button"
+                  onClick={() => { setCostMargin(perf.suggestedCustomMenuMargin!.toFixed(2)); setTouched(true); }}
+                  className="ml-2 text-[#FFA726] hover:text-white normal-case tracking-normal"
+                  title="Use the average margin from your Performance Report (items with cost only)"
+                >Suggest {perf.suggestedCustomMenuMargin.toFixed(1)}%</button>
+              )}
+            </label>
+            <input
+              type="number" step="0.01" min="0" value={dispCost}
+              onChange={(e) => { setCostMargin(e.target.value); setTouched(true); }}
+              placeholder="e.g. 52"
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]"
+            />
+            <p className="text-[10px] text-[#555] mt-1 leading-relaxed">52 → ৳40 cost = ৳60.80 floor.</p>
+          </div>
+          <div>
+            <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Negotiate Margin %</label>
+            <input
+              type="number" step="0.01" min="0" value={dispNeg}
+              onChange={(e) => { setNegotiate(e.target.value); setTouched(true); }}
+              placeholder="optional"
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]"
+            />
+            <p className="text-[10px] text-[#555] mt-1 leading-relaxed">10 = cashier may price 10% below floor. Empty / 0 = locked.</p>
+          </div>
+          <div>
+            <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Max Margin %</label>
+            <input
+              type="number" step="0.01" min="0" value={dispMax}
+              onChange={(e) => { setMaxMargin(e.target.value); setTouched(true); }}
+              placeholder="optional"
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]"
+            />
+            <p className="text-[10px] text-[#555] mt-1 leading-relaxed">200 = max selling price = 3× cost. Empty = no cap.</p>
+          </div>
+        </div>
+        <div className="px-5 py-3 border-t border-[#2A2A2A] flex justify-end">
+          <button
+            disabled={!isOwner || !touched || updateMut.isPending}
+            onClick={saveCustomMenu}
+            className="bg-[#D62B2B] hover:bg-[#F03535] disabled:opacity-40 text-white font-body text-xs px-4 py-2 tracking-widest uppercase transition-colors"
+          >
+            {updateMut.isPending ? 'Saving…' : 'Save Custom Menu Policy'}
+          </button>
         </div>
       </div>
     </div>

@@ -19,6 +19,7 @@ const ACTION_LABELS: Record<CashierAction, { label: string; description: string 
   createExpense:        { label: 'Create Expense',         description: 'Cashier can record an operational expense' },
   payPayroll:           { label: 'Pay Payroll',            description: 'Cashier can disburse a generated payroll' },
   createPreReadyKT:     { label: 'Pre-Ready Kitchen Ticket', description: 'Cashier can create a kitchen production ticket for pre-ready items' },
+  createCustomMenu:     { label: 'Create Custom Menu Item', description: 'Cashier can build a one-off menu item from existing recipes (POS Customised Menu)' },
 };
 
 const EXPENSE_CATEGORIES: ExpenseCategory[] = [

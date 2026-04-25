@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Put, Delete, Param, Body, UseGuards, ValidationPipe } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Delete, Param, Body, Query, UseGuards, ValidationPipe } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 
 import type { CreateMenuItemDto, UpdateMenuItemDto, JwtPayload } from '@restora/types';
@@ -16,8 +16,8 @@ export class MenuController {
   constructor(private readonly menuService: MenuService) {}
 
   @Get()
-  findAll(@CurrentUser() user: JwtPayload) {
-    return this.menuService.findAll(user.branchId);
+  findAll(@CurrentUser() user: JwtPayload, @Query('includeCustom') includeCustom?: string) {
+    return this.menuService.findAll(user.branchId, includeCustom === 'true');
   }
 
   @Get(':id')

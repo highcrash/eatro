@@ -28,6 +28,7 @@ import SalesReportPage from './pages/SalesReportPage';
 import DailyReportsPage from './pages/DailyReportsPage';
 import VoidReportPage from './pages/VoidReportPage';
 import ItemsSoldReportPage from './pages/ItemsSoldReportPage';
+import PerformanceReportPage from './pages/PerformanceReportPage';
 import MushakRegisterPage from './pages/MushakRegisterPage';
 import MushakInvoiceView from './pages/MushakInvoiceView';
 import BranchesPage from './pages/BranchesPage';
@@ -70,6 +71,7 @@ export default function AdminApp() {
         <Route path="/reports/daily" element={<DailyReportsPage />} />
         <Route path="/reports/voids" element={<VoidReportPage />} />
         <Route path="/reports/items" element={<ItemsSoldReportPage />} />
+        <Route path="/reports/performance" element={<PerformanceReportPage />} />
         <Route path="/reports/mushak" element={<MushakRegisterPage />} />
         <Route path="/mushak/invoices/:id" element={<MushakInvoiceView />} />
         <Route path="/mushak/notes/:id" element={<MushakInvoiceView />} />

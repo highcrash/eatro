@@ -272,6 +272,16 @@ model BranchSetting {
   reservationSmsRejectTemplate    String?
   reservationSmsReminderTemplate  String?
   reservationTermsOfService       String?
+  /// % markup over recipe COGS for POS Customised Menu items.
+  /// 52 means selling price floor = cost × 1.52.
+  /// Null = no enforced floor (legacy behaviour).
+  customMenuCostMargin       Decimal? @db.Decimal(5, 2)
+  /// Optional downward room from the calculated floor (10 = cashier may
+  /// negotiate up to 10% below). Null / 0 = price is locked at the floor.
+  customMenuNegotiateMargin  Decimal? @db.Decimal(5, 2)
+  /// Optional upward ceiling expressed as % markup over cost (200 = max
+  /// 200% over cost). Null = no cap.
+  customMenuMaxMargin        Decimal? @db.Decimal(5, 2)
 
   branch Branch @relation(fields: [branchId], references: [id])
 
@@ -552,6 +562,11 @@ model MenuItem {
   prepTime          String?                        // e.g. "15 min"
   spiceLevel        String?                        // e.g. "Mild", "Medium", "Hot"
   websiteVisible    Boolean      @default(true)    // hide from website without affecting POS
+  /// True for items created via POS Customised Menu. UI uses this to
+  /// hide them from the admin Menu page filter and to bypass website /
+  /// QR feeds (websiteVisible=false handles the latter; this is the
+  /// explicit provenance flag).
+  isCustom          Boolean      @default(false)
 
   // Relations
   branch           Branch          @relation(fields: [branchId], references: [id])

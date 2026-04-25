@@ -230,6 +230,66 @@ export interface ItemsSoldReport {
   };
 }
 
+// ─── Performance Report ──────────────────────────────────────────────────────
+
+/**
+ * Per-menu-item performance for a date range. COGS is sum of
+ * recipe.items[i].quantity × ingredient.costPerUnit (with variant-fallback
+ * when the parent has no cost) × orderItem.quantity. Items with no recipe
+ * report cogs=0 and marginPct=null.
+ */
+export interface PerformanceItemRow {
+  menuItemId: string;
+  name: string;
+  categoryId: string;
+  categoryName: string;
+  quantity: number;
+  revenue: MoneyAmount;
+  cogs: MoneyAmount;
+  grossProfit: MoneyAmount;
+  /** null when revenue is 0 or cogs is 0 (no recipe). */
+  marginPct: number | null;
+}
+
+export interface PerformanceCategoryRow {
+  categoryId: string;
+  categoryName: string;
+  quantity: number;
+  revenue: MoneyAmount;
+  cogs: MoneyAmount;
+  grossProfit: MoneyAmount;
+  marginPct: number | null;
+}
+
+/**
+ * Inventory price-volatility row — surfaces ingredients whose
+ * PurchaseOrderItem.unitCost has shifted across deliveries in the period.
+ * Filtered to ≥ 2 distinct prices to keep the noise low.
+ */
+export interface InventoryPriceVolatilityRow {
+  ingredientId: string;
+  ingredientName: string;
+  unit: string;
+  distinctPrices: number;
+  minUnitCost: MoneyAmount;
+  maxUnitCost: MoneyAmount;
+  avgUnitCost: MoneyAmount;
+  latestUnitCost: MoneyAmount;
+  deliveries: number;
+}
+
+export interface PerformanceReport {
+  from: string;
+  to: string;
+  items: PerformanceItemRow[];
+  categories: PerformanceCategoryRow[];
+  inventoryVolatility: InventoryPriceVolatilityRow[];
+  /** Suggested cost-margin% derived from average margin across items
+   *  with cogs > 0 (skips menu items without a recipe). Used by the
+   *  admin Settings page to pre-fill the custom-menu margin field. */
+  suggestedCustomMenuMargin: number | null;
+}
+
 /** Row rendered in the admin Mushak register — interleaved 6.3 + 6.8. */
 export interface MushakRegisterRow {
   kind: 'INVOICE' | 'NOTE';

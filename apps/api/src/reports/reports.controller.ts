@@ -44,6 +44,16 @@ export class ReportsController {
     return this.reportsService.getItemsSold(user.branchId, from, to);
   }
 
+  @Get('performance')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  getPerformance(
+    @CurrentUser() user: JwtPayload,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.reportsService.getPerformanceReport(user.branchId, from, to);
+  }
+
   @Get('revenue-by-category')
   getRevenueByCategory(@CurrentUser() user: JwtPayload, @Query('period') period = 'today') {
     return this.reportsService.getRevenueByCategory(user.branchId, period);
