@@ -989,6 +989,11 @@ model PreReadyItem {
   unit         StockUnit @default(PCS)
   currentStock Decimal   @default(0) @db.Decimal(14, 4)
   minimumStock Decimal   @default(0) @db.Decimal(14, 4)
+  /// Auto-calculated cost per produced unit, derived from the item's
+  /// recipe (sum of ingredient cost × deduct qty / yield). Refreshed by
+  /// the Recalculate Cost button or whenever a production is completed.
+  /// Stored in paisa.
+  costPerUnit  Decimal   @default(0) @db.Decimal(14, 2)
   isActive     Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

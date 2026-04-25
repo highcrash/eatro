@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChefHat, Plus, X, Check, Trash2 } from 'lucide-react';
 
 import type { CashierAction, PreReadyItem, ProductionOrder } from '@restora/types';
+import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
 import { useIsOnline } from '../lib/online';
 import { OfflineBanner } from '../components/OfflineHint';
@@ -103,12 +104,14 @@ export default function PosPreReadyPage() {
                     <th className="px-4 py-3 text-left">Item</th>
                     <th className="px-4 py-3 text-right">Stock</th>
                     <th className="px-4 py-3 text-right">Min</th>
+                    <th className="px-4 py-3 text-right">Cost / Unit</th>
                     <th className="px-4 py-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.filter((i) => i.isActive).map((it) => {
                     const low = Number(it.minimumStock) > 0 && Number(it.currentStock) <= Number(it.minimumStock);
+                    const cost = Number(it.costPerUnit) || 0;
                     return (
                       <tr key={it.id} className="border-t border-theme-border">
                         <td className="px-4 py-3 font-semibold text-theme-text">{it.name}</td>
@@ -117,6 +120,9 @@ export default function PosPreReadyPage() {
                         </td>
                         <td className="px-4 py-3 text-right text-theme-text-muted">
                           {Number(it.minimumStock).toFixed(2)} {it.unit}
+                        </td>
+                        <td className="px-4 py-3 text-right text-theme-text-muted">
+                          {cost > 0 ? `${formatCurrency(cost)}/${it.unit}` : '—'}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
@@ -130,7 +136,7 @@ export default function PosPreReadyPage() {
                     );
                   })}
                   {items.filter((i) => i.isActive).length === 0 && (
-                    <tr><td colSpan={4} className="px-4 py-12 text-center text-theme-text-muted text-sm">No pre-ready items configured</td></tr>
+                    <tr><td colSpan={5} className="px-4 py-12 text-center text-theme-text-muted text-sm">No pre-ready items configured</td></tr>
                   )}
                 </tbody>
               </table>

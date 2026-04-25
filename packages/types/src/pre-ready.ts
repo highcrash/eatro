@@ -7,6 +7,8 @@ export interface PreReadyItem {
   unit: string;
   currentStock: number;
   minimumStock: number;
+  /** Auto-calculated cost per produced unit (paisa). */
+  costPerUnit: number;
   isActive: boolean;
   createdAt: Date;
   recipe?: PreReadyRecipe | null;

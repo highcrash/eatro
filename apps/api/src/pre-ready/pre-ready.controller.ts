@@ -42,6 +42,18 @@ export class PreReadyController {
     return this.preReadyService.removeItem(id, user.branchId);
   }
 
+  @Post('items/:id/recalc-cost')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  recalcCost(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.preReadyService.recalcCost(id, user.branchId);
+  }
+
+  @Post('items/recalc-cost-all')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  recalcAllCosts(@CurrentUser() user: JwtPayload) {
+    return this.preReadyService.recalcAllCosts(user.branchId);
+  }
+
   // Recipes
   @Put('items/:id/recipe')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')

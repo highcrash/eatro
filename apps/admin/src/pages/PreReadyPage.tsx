@@ -306,6 +306,22 @@ export default function PreReadyPage() {
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['pre-ready-items'] }); setEditingItem(null); },
   });
 
+  const recalcCostMut = useMutation({
+    mutationFn: (id: string) => api.post(`/pre-ready/items/${id}/recalc-cost`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pre-ready-items'] });
+      void qc.invalidateQueries({ queryKey: ['ingredients'] });
+    },
+  });
+
+  const recalcAllCostMut = useMutation({
+    mutationFn: () => api.post<{ updated: number; total: number }>('/pre-ready/items/recalc-cost-all', {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pre-ready-items'] });
+      void qc.invalidateQueries({ queryKey: ['ingredients'] });
+    },
+  });
+
   const deleteItemMut = useMutation({
     mutationFn: (id: string) => api.delete(`/pre-ready/items/${id}`),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['pre-ready-items'] }); setDeleteError(null); },
@@ -462,6 +478,14 @@ Fried Onion,500,G,Oil,100,ML`;
               >
                 Bulk Import CSV
               </button>
+              <button
+                onClick={() => recalcAllCostMut.mutate()}
+                disabled={recalcAllCostMut.isPending}
+                title="Refresh cost-per-unit on every pre-ready item from current ingredient costs"
+                className="border border-[#FFA726] text-[#FFA726] hover:bg-[#FFA726] hover:text-black font-body text-sm px-4 py-2 transition-colors disabled:opacity-50"
+              >
+                {recalcAllCostMut.isPending ? 'Recalculating…' : 'Recalculate Costs'}
+              </button>
               <button onClick={() => setShowAddItem(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">+ ADD ITEM</button>
             </>
           )}
@@ -560,9 +584,13 @@ Fried Onion,500,G,Oil,100,ML`;
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {cost ? (
-                        <span className={`font-body text-xs font-medium ${cost.costPerUnit > 0 ? 'text-white' : 'text-[#666]'}`}>
-                          {formatCurrency(cost.costPerUnit)}/{item.unit}
+                      {Number(item.costPerUnit) > 0 ? (
+                        <span className="font-body text-xs font-medium text-white">
+                          {formatCurrency(Number(item.costPerUnit))}/{item.unit}
+                        </span>
+                      ) : cost && cost.costPerUnit > 0 ? (
+                        <span className="font-body text-xs font-medium text-[#999]" title="Estimated from recipe — click Recalc to cache">
+                          ~{formatCurrency(cost.costPerUnit)}/{item.unit}
                         </span>
                       ) : (
                         <span className="text-[#444] font-body text-xs">—</span>
@@ -570,6 +598,12 @@ Fried Onion,500,G,Oil,100,ML`;
                     </td>
                     <td className="px-4 py-3 flex gap-2">
                       <button onClick={() => openRecipe(item)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Recipe</button>
+                      <button
+                        onClick={() => recalcCostMut.mutate(item.id)}
+                        disabled={recalcCostMut.isPending}
+                        title="Refresh the cached cost-per-unit from current ingredient costs"
+                        className="text-[#FFA726] hover:text-white font-body text-xs tracking-widest uppercase transition-colors disabled:opacity-50"
+                      >Recalc</button>
                       <button onClick={() => openEditItem(item)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Edit</button>
                       <button onClick={() => handleDeleteItem(item)} className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs tracking-widest uppercase transition-colors">Delete</button>
                     </td>

@@ -3,6 +3,23 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.11 — pre-ready cost-per-unit + auto inventory mirror (2026-04-25)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/types:
+
+- **Pre-ready items now carry a cached cost-per-unit** derived from the
+  recipe (sum of ingredient cost × deduct qty / yield, with unit
+  conversions and variant-fallback). Refreshed automatically when the
+  recipe is saved or a production completes, and surfaced as a Cost
+  column in the POS Pre-Ready list and the admin items table.
+- **Recalculate Costs button** (per-row + bulk on the admin Pre-Ready
+  page) refreshes the cached cost on demand, so admins can re-price
+  after ingredient costs change without running a fresh production.
+- **Auto-mirror to inventory on create.** Creating a pre-ready item
+  immediately creates a matching `[PR] <name>` ingredient row (cost 0
+  until the recipe is wired). Menu recipes can reference pre-ready
+  foods from day one — no waiting for a first production run.
+
 ## 1.0.10 — payment correction + items-sold report (2026-04-25)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/types:
