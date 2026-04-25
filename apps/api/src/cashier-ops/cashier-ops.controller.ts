@@ -12,6 +12,7 @@ import { PreReadyService } from '../pre-ready/pre-ready.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { SmsService } from '../sms/sms.service';
 import { MenuService } from '../menu/menu.service';
+import { RecipeService } from '../recipe/recipe.service';
 
 /**
  * Phase 7 — POS-side cashier purchasing operations.
@@ -39,6 +40,7 @@ export class CashierOpsController {
     private readonly permissions: PermissionsService,
     private readonly sms: SmsService,
     private readonly menu: MenuService,
+    private readonly recipes: RecipeService,
   ) {}
 
   /** List open POs (DRAFT/SENT/PARTIAL) — used by the Receive Goods tab. */
@@ -189,6 +191,17 @@ export class CashierOpsController {
   @Get('custom-menu/sources')
   async listCustomMenuSources(@CurrentUser() user: JwtPayload) {
     return this.menu.listRecipeSourcesForBranch(user.branchId);
+  }
+
+  /**
+   * Cashier-readable recipe lookup powering the "Customise" dialog —
+   * picks which ingredients the customer wants removed from a single
+   * order line. The /recipes endpoint is admin-only, so this is the
+   * dedicated read-only path for POS.
+   */
+  @Get('recipes/menu-item/:menuItemId')
+  async getRecipeForCustomise(@Param('menuItemId') menuItemId: string, @CurrentUser() user: JwtPayload) {
+    return this.recipes.findByMenuItem(menuItemId, user.branchId);
   }
 
   @Post('custom-menu')

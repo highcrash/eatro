@@ -18,12 +18,28 @@ import BillModal from '../components/BillModal';
 import RefundOrderDialog from '../components/RefundOrderDialog';
 import CustomMenuDialog from '../components/CustomMenuDialog';
 import VariantPickerDialog from '../components/VariantPickerDialog';
+import CustomiseLineDialog from '../components/CustomiseLineDialog';
 import { useCashierPermissions } from '../lib/permissions';
 
 interface CartItem {
   menuItem: MenuItem;
   quantity: number;
   notes?: string;
+  /** Ingredient IDs the customer asked to remove from this line.
+   *  When set, the cart treats this as a distinct line from the same
+   *  menu item without removals — so 2× without garlic + 2× normal
+   *  land on two rows / two KT entries. */
+  removedIngredientIds?: string[];
+  /** Cached display names for the cart UI + the KT print fallback.
+   *  Resolved when the cashier saves the dialog. */
+  removedNames?: string[];
+}
+
+/** Stable key for matching cart lines (variant + same removed-ID set
+ *  = same cart row; different removals = separate row). */
+function cartLineKey(item: { menuItem: { id: string }; removedIngredientIds?: string[]; notes?: string }): string {
+  const ids = [...(item.removedIngredientIds ?? [])].sort().join(',');
+  return `${item.menuItem.id}::${ids}::${item.notes ?? ''}`;
 }
 
 // ─── Void Item Dialog ─────────────────────────────────────────────────────────
@@ -306,11 +322,14 @@ function AddItemsOverlay({
       return;
     }
     setNewItemCart((prev) => {
-      const existing = prev.find((c) => c.menuItem.id === item.id);
-      if (existing) return prev.map((c) => c.menuItem.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+      const key = cartLineKey({ menuItem: { id: item.id } });
+      const existing = prev.find((c) => cartLineKey(c) === key);
+      if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
       return [...prev, { menuItem: item, quantity: 1 }];
     });
   };
+
+  const [customizingNewKey, setCustomizingNewKey] = useState<string | null>(null);
 
   // ── Keyboard navigation ──────────────────────────────────────────────────
   const GRID_COLS = 5;
@@ -383,11 +402,11 @@ function AddItemsOverlay({
     if (child) child.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [hoverIdx]);
 
-  const removeFromNewCart = (menuItemId: string) => {
+  const removeFromNewCart = (key: string) => {
     setNewItemCart((prev) => {
-      const existing = prev.find((c) => c.menuItem.id === menuItemId);
-      if (!existing || existing.quantity <= 1) return prev.filter((c) => c.menuItem.id !== menuItemId);
-      return prev.map((c) => c.menuItem.id === menuItemId ? { ...c, quantity: c.quantity - 1 } : c);
+      const existing = prev.find((c) => cartLineKey(c) === key);
+      if (!existing || existing.quantity <= 1) return prev.filter((c) => cartLineKey(c) !== key);
+      return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity - 1 } : c);
     });
   };
 
@@ -539,8 +558,11 @@ function AddItemsOverlay({
             {newItemCart.length === 0 ? (
               <p className="text-center text-theme-text-muted text-xs py-6">Tap items to add</p>
             ) : (
-              newItemCart.map(({ menuItem, quantity, notes }) => (
-                <div key={menuItem.id} className="bg-theme-bg rounded-theme p-3">
+              newItemCart.map((line) => {
+                const { menuItem, quantity, notes, removedNames } = line;
+                const key = cartLineKey(line);
+                return (
+                <div key={key} className="bg-theme-bg rounded-theme p-3">
                   <div className="flex items-start gap-2">
                     <span className="w-7 h-7 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center text-xs font-bold shrink-0">
                       {quantity}
@@ -550,6 +572,11 @@ function AddItemsOverlay({
                       <p className="text-[11px] text-theme-text-muted">
                         {formatCurrency(Number(menuItem.price))} each
                       </p>
+                      {removedNames && removedNames.length > 0 && (
+                        <p className="text-[10px] text-theme-danger font-bold mt-0.5 leading-tight">
+                          {removedNames.map((n) => `NO ${n.toUpperCase()}`).join(' • ')}
+                        </p>
+                      )}
                     </div>
                     <span className="text-sm font-bold text-theme-text shrink-0">
                       {formatCurrency(Number(menuItem.price) * quantity)}
@@ -561,12 +588,12 @@ function AddItemsOverlay({
                       <input
                         autoFocus={!notes}
                         value={notes}
-                        onChange={(e) => setNewItemCart((prev) => prev.map((c) => c.menuItem.id === menuItem.id ? { ...c, notes: e.target.value } : c))}
-                        placeholder="e.g. extra spicy, no onions"
+                        onChange={(e) => setNewItemCart((prev) => prev.map((c) => cartLineKey(c) === key ? { ...c, notes: e.target.value } : c))}
+                        placeholder="e.g. extra spicy, well done"
                         className="flex-1 bg-theme-surface rounded-theme px-2 py-1 text-[11px] text-theme-text outline-none border border-theme-border focus:border-theme-accent"
                       />
                       <button
-                        onClick={() => setNewItemCart((prev) => prev.map((c) => c.menuItem.id === menuItem.id ? { ...c, notes: undefined } : c))}
+                        onClick={() => setNewItemCart((prev) => prev.map((c) => cartLineKey(c) === key ? { ...c, notes: undefined } : c))}
                         className="text-theme-text-muted hover:text-theme-danger text-xs"
                       >
                         <X size={11} />
@@ -574,25 +601,34 @@ function AddItemsOverlay({
                     </div>
                   ) : null}
 
-                  <div className="mt-2 flex items-center justify-between">
-                    {notes === undefined ? (
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      {notes === undefined && (
+                        <button
+                          onClick={() => setNewItemCart((prev) => prev.map((c) => cartLineKey(c) === key ? { ...c, notes: '' } : c))}
+                          className="text-[10px] text-theme-text-muted hover:text-theme-accent flex items-center gap-1 transition-colors"
+                        >
+                          📝 Note
+                        </button>
+                      )}
                       <button
-                        onClick={() => setNewItemCart((prev) => prev.map((c) => c.menuItem.id === menuItem.id ? { ...c, notes: '' } : c))}
+                        onClick={() => setCustomizingNewKey(key)}
                         className="text-[10px] text-theme-text-muted hover:text-theme-accent flex items-center gap-1 transition-colors"
+                        title="Remove ingredients (no garlic, no peanut, etc.)"
                       >
-                        📝 Add note
+                        🍴 Customise
                       </button>
-                    ) : <span />}
-                    <div className="flex items-center gap-1 ml-auto">
+                    </div>
+                    <div className="flex items-center gap-1">
                       <button
-                        onClick={() => removeFromNewCart(menuItem.id)}
+                        onClick={() => removeFromNewCart(key)}
                         className="w-6 h-6 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center hover:border-theme-danger hover:text-theme-danger transition-colors"
                       >
                         <Minus size={10} />
                       </button>
                       <span className="w-4 text-center text-xs font-bold">{quantity}</span>
                       <button
-                        onClick={() => addToNewCart(menuItem)}
+                        onClick={() => setNewItemCart((prev) => prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c))}
                         className="w-6 h-6 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center hover:border-theme-accent hover:text-theme-accent transition-colors"
                       >
                         <Plus size={10} />
@@ -600,7 +636,8 @@ function AddItemsOverlay({
                     </div>
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -634,14 +671,42 @@ function AddItemsOverlay({
           onClose={() => setVariantPickerFor(null)}
           onPick={(variant) => {
             setNewItemCart((prev) => {
-              const existing = prev.find((c) => c.menuItem.id === variant.id);
-              if (existing) return prev.map((c) => c.menuItem.id === variant.id ? { ...c, quantity: c.quantity + 1 } : c);
+              const key = cartLineKey({ menuItem: { id: variant.id } });
+              const existing = prev.find((c) => cartLineKey(c) === key);
+              if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
               return [...prev, { menuItem: variant, quantity: 1 }];
             });
             setVariantPickerFor(null);
           }}
         />
       )}
+
+      {customizingNewKey && (() => {
+        const line = newItemCart.find((c) => cartLineKey(c) === customizingNewKey);
+        if (!line) return null;
+        return (
+          <CustomiseLineDialog
+            menuItemId={line.menuItem.id}
+            menuItemName={line.menuItem.name}
+            initialRemovedIds={line.removedIngredientIds ?? []}
+            onClose={() => setCustomizingNewKey(null)}
+            onSave={(ids, names) => {
+              setNewItemCart((prev) => {
+                const updated = prev.map((c) => cartLineKey(c) === customizingNewKey ? { ...c, removedIngredientIds: ids.length > 0 ? ids : undefined, removedNames: names.length > 0 ? names : undefined } : c);
+                const merged: typeof updated = [];
+                for (const row of updated) {
+                  const k = cartLineKey(row);
+                  const existing = merged.find((m) => cartLineKey(m) === k);
+                  if (existing) existing.quantity += row.quantity;
+                  else merged.push(row);
+                }
+                return merged;
+              });
+              setCustomizingNewKey(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -754,6 +819,7 @@ function ActiveOrderView({
             menuItemName: c.menuItem.name,
             menuItemId: c.menuItem.id,
             notes: c.notes ?? null,
+            removedIngredients: c.removedNames && c.removedNames.length > 0 ? c.removedNames : undefined,
           })),
         });
         if (!res?.ok) alert(`Kitchen add-items print failed: ${res?.message ?? 'unknown error'}`);
@@ -1436,7 +1502,7 @@ function ActiveOrderView({
           newItemCart={newItemCart}
           setNewItemCart={setNewItemCart}
           onClose={() => { setShowAddItems(false); setNewItemCart([]); }}
-          onSubmit={() => addItemsMutation.mutate(newItemCart.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity, notes: c.notes || undefined })))}
+          onSubmit={() => addItemsMutation.mutate(newItemCart.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity, notes: c.notes || undefined, removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined })))}
           isPending={addItemsMutation.isPending}
           orderNumber={order.orderNumber}
         />
@@ -1789,6 +1855,7 @@ function NewOrderView({
   const [hoverIdx, setHoverIdx] = useState(0);
   const [showCustomMenu, setShowCustomMenu] = useState(false);
   const [variantPickerFor, setVariantPickerFor] = useState<MenuItem | null>(null);
+  const [customizingKey, setCustomizingKey] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const { data: cashierPerms } = useCashierPermissions();
@@ -1854,8 +1921,11 @@ function NewOrderView({
       return;
     }
     setCart((prev) => {
-      const existing = prev.find((c) => c.menuItem.id === item.id);
-      if (existing) return prev.map((c) => c.menuItem.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+      // Match by line key: same menu item + same removed set + same
+      // notes = stack on the same row. Default new tap = no removals.
+      const key = cartLineKey({ menuItem: { id: item.id } });
+      const existing = prev.find((c) => cartLineKey(c) === key);
+      if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
       return [...prev, { menuItem: item, quantity: 1 }];
     });
   };
@@ -1918,11 +1988,11 @@ function NewOrderView({
     if (child) child.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [hoverIdx]);
 
-  const removeFromCart = (itemId: string) => {
+  const removeFromCart = (key: string) => {
     setCart((prev) => {
-      const existing = prev.find((c) => c.menuItem.id === itemId);
-      if (!existing || existing.quantity <= 1) return prev.filter((c) => c.menuItem.id !== itemId);
-      return prev.map((c) => c.menuItem.id === itemId ? { ...c, quantity: c.quantity - 1 } : c);
+      const existing = prev.find((c) => cartLineKey(c) === key);
+      if (!existing || existing.quantity <= 1) return prev.filter((c) => cartLineKey(c) !== key);
+      return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity - 1 } : c);
     });
   };
 
@@ -1968,13 +2038,15 @@ function NewOrderView({
       waiterId: waiterId || undefined,
       guestCount: guestCount > 0 ? guestCount : undefined,
       type: tableId ? 'DINE_IN' : 'TAKEAWAY',
-      items: cart.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity, notes: c.notes || undefined })),
+      items: cart.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity, notes: c.notes || undefined, removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined })),
     });
   };
 
-  const setCartNote = (menuItemId: string, notes: string) => {
-    setCart((prev) => prev.map((c) => c.menuItem.id === menuItemId ? { ...c, notes } : c));
+  const setCartNote = (key: string, notes: string) => {
+    setCart((prev) => prev.map((c) => cartLineKey(c) === key ? { ...c, notes } : c));
   };
+
+  // (setCartLineMods inlined into the dialog onSave below.)
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-theme-bg">
@@ -2151,8 +2223,11 @@ function NewOrderView({
               Tap items to add
             </div>
           ) : (
-            cart.map(({ menuItem, quantity, notes }) => (
-              <div key={menuItem.id} className="bg-theme-bg rounded-theme p-3">
+            cart.map((line) => {
+              const { menuItem, quantity, notes, removedNames } = line;
+              const key = cartLineKey(line);
+              return (
+              <div key={key} className="bg-theme-bg rounded-theme p-3">
                 <div className="flex items-start gap-2">
                   <span className="w-7 h-7 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center text-xs font-bold shrink-0">
                     {quantity}
@@ -2162,6 +2237,11 @@ function NewOrderView({
                     <p className="text-[11px] text-theme-text-muted">
                       {formatCurrency(Number(menuItem.price))} each
                     </p>
+                    {removedNames && removedNames.length > 0 && (
+                      <p className="text-[10px] text-theme-danger font-bold mt-0.5 leading-tight">
+                        {removedNames.map((n) => `NO ${n.toUpperCase()}`).join(' • ')}
+                      </p>
+                    )}
                   </div>
                   <span className="text-sm font-bold text-theme-text shrink-0">
                     {formatCurrency(Number(menuItem.price) * quantity)}
@@ -2173,12 +2253,12 @@ function NewOrderView({
                     <input
                       autoFocus={!notes}
                       value={notes}
-                      onChange={(e) => setCartNote(menuItem.id, e.target.value)}
-                      placeholder="e.g. extra spicy, no onions"
+                      onChange={(e) => setCartNote(key, e.target.value)}
+                      placeholder="e.g. extra spicy, well done"
                       className="flex-1 bg-theme-surface rounded-theme px-2 py-1 text-[11px] text-theme-text outline-none border border-theme-border focus:border-theme-accent"
                     />
                     <button
-                      onClick={() => setCart((prev) => prev.map((c) => c.menuItem.id === menuItem.id ? { ...c, notes: undefined } : c))}
+                      onClick={() => setCart((prev) => prev.map((c) => cartLineKey(c) === key ? { ...c, notes: undefined } : c))}
                       className="text-theme-text-muted hover:text-theme-danger text-xs"
                       title="Remove note"
                     >
@@ -2187,25 +2267,37 @@ function NewOrderView({
                   </div>
                 ) : null}
 
-                <div className="mt-2 flex items-center justify-between">
-                  {notes === undefined ? (
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {notes === undefined && (
+                      <button
+                        onClick={() => setCartNote(key, '')}
+                        className="text-[10px] text-theme-text-muted hover:text-theme-accent flex items-center gap-1 transition-colors"
+                      >
+                        📝 Note
+                      </button>
+                    )}
                     <button
-                      onClick={() => setCartNote(menuItem.id, '')}
+                      onClick={() => setCustomizingKey(key)}
                       className="text-[10px] text-theme-text-muted hover:text-theme-accent flex items-center gap-1 transition-colors"
+                      title="Remove ingredients (no garlic, no peanut, etc.)"
                     >
-                      📝 Add note
+                      🍴 Customise
                     </button>
-                  ) : <span />}
-                  <div className="flex items-center gap-1 ml-auto">
+                  </div>
+                  <div className="flex items-center gap-1">
                     <button
-                      onClick={() => removeFromCart(menuItem.id)}
+                      onClick={() => removeFromCart(key)}
                       className="w-6 h-6 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center hover:border-theme-accent hover:text-theme-accent transition-colors"
                     >
                       <Minus size={10} />
                     </button>
                     <span className="w-4 text-center text-xs font-bold">{quantity}</span>
                     <button
-                      onClick={() => addToCart(menuItem)}
+                      onClick={() => {
+                        // Re-add with the same mod set so the line stays merged.
+                        setCart((prev) => prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c));
+                      }}
                       className="w-6 h-6 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center hover:border-theme-accent hover:text-theme-accent transition-colors"
                     >
                       <Plus size={10} />
@@ -2213,7 +2305,8 @@ function NewOrderView({
                   </div>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
 
@@ -2266,14 +2359,45 @@ function NewOrderView({
           onClose={() => setVariantPickerFor(null)}
           onPick={(variant) => {
             setCart((prev) => {
-              const existing = prev.find((c) => c.menuItem.id === variant.id);
-              if (existing) return prev.map((c) => c.menuItem.id === variant.id ? { ...c, quantity: c.quantity + 1 } : c);
+              const key = cartLineKey({ menuItem: { id: variant.id } });
+              const existing = prev.find((c) => cartLineKey(c) === key);
+              if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
               return [...prev, { menuItem: variant, quantity: 1 }];
             });
             setVariantPickerFor(null);
           }}
         />
       )}
+
+      {customizingKey && (() => {
+        const line = cart.find((c) => cartLineKey(c) === customizingKey);
+        if (!line) return null;
+        return (
+          <CustomiseLineDialog
+            menuItemId={line.menuItem.id}
+            menuItemName={line.menuItem.name}
+            initialRemovedIds={line.removedIngredientIds ?? []}
+            onClose={() => setCustomizingKey(null)}
+            onSave={(ids, names) => {
+              // Re-key the line. If another cart row now has the same
+              // (menuItemId, removedIds, notes) signature, merge them
+              // by summing quantity — keeps the cart tidy.
+              setCart((prev) => {
+                const updated = prev.map((c) => cartLineKey(c) === customizingKey ? { ...c, removedIngredientIds: ids.length > 0 ? ids : undefined, removedNames: names.length > 0 ? names : undefined } : c);
+                const merged: typeof updated = [];
+                for (const row of updated) {
+                  const k = cartLineKey(row);
+                  const existing = merged.find((m) => cartLineKey(m) === k);
+                  if (existing) existing.quantity += row.quantity;
+                  else merged.push(row);
+                }
+                return merged;
+              });
+              setCustomizingKey(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
