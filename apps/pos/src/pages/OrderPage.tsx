@@ -16,6 +16,8 @@ import PaymentModal from '../components/PaymentModal';
 import ReceiptModal from '../components/ReceiptModal';
 import BillModal from '../components/BillModal';
 import RefundOrderDialog from '../components/RefundOrderDialog';
+import CustomMenuDialog from '../components/CustomMenuDialog';
+import { useCashierPermissions } from '../lib/permissions';
 
 interface CartItem {
   menuItem: MenuItem;
@@ -250,8 +252,12 @@ function AddItemsOverlay({
   const [addSearch, setAddSearch] = useState('');
   const [addCatId, setAddCatId] = useState<string | null>(null);
   const [hoverIdx, setHoverIdx] = useState(0);
+  const [showCustomMenu, setShowCustomMenu] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const { data: cashierPerms } = useCashierPermissions();
+  const customMenuPerm = cashierPerms?.createCustomMenu;
+  const canCreateCustom = !!customMenuPerm?.enabled && customMenuPerm.approval !== 'NONE';
 
   // Fetch categories from API for proper hierarchy (includes parents with 0 direct items)
   const { data: apiCategories = [] } = useQuery<{ id: string; name: string; parentId: string | null; children?: { id: string; name: string }[] }[]>({
@@ -392,8 +398,8 @@ function AddItemsOverlay({
         {/* Menu side */}
         <section className="flex-1 min-w-0 flex flex-col">
           {/* Search */}
-          <div className="px-6 pt-4 pb-3">
-            <div className="relative max-w-md">
+          <div className="px-6 pt-4 pb-3 flex items-center gap-3">
+            <div className="relative flex-1 max-w-md">
               <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
               <input
                 ref={searchRef}
@@ -409,6 +415,16 @@ function AddItemsOverlay({
                 </button>
               )}
             </div>
+            {canCreateCustom && (
+              <button
+                type="button"
+                onClick={() => setShowCustomMenu(true)}
+                className="text-xs font-bold uppercase tracking-wider bg-theme-accent text-white rounded-theme px-3 py-2 hover:opacity-90 inline-flex items-center gap-1"
+                title="Create a one-off custom menu item"
+              >
+                <Plus size={12} /> Custom
+              </button>
+            )}
           </div>
 
           {/* Category pill tabs */}
@@ -571,6 +587,17 @@ function AddItemsOverlay({
           </div>
         </aside>
       </div>
+
+      {showCustomMenu && customMenuPerm && (
+        <CustomMenuDialog
+          approval={customMenuPerm.approval === 'OTP' ? 'OTP' : 'AUTO'}
+          onClose={() => setShowCustomMenu(false)}
+          onCreated={(item) => {
+            setNewItemCart((prev) => [...prev, { menuItem: item, quantity: 1 }]);
+            setShowCustomMenu(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1716,8 +1743,12 @@ function NewOrderView({
   const [waiterId, setWaiterId] = useState<string>('');
   const [guestCount, setGuestCount] = useState<number>(0);
   const [hoverIdx, setHoverIdx] = useState(0);
+  const [showCustomMenu, setShowCustomMenu] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const { data: cashierPerms } = useCashierPermissions();
+  const customMenuPerm = cashierPerms?.createCustomMenu;
+  const canCreateCustom = !!customMenuPerm?.enabled && customMenuPerm.approval !== 'NONE';
 
   const { data: menuItems = [] } = useQuery<MenuItem[]>({
     queryKey: ['menu'],
@@ -1943,6 +1974,16 @@ function NewOrderView({
               />
             </div>
           )}
+          {canCreateCustom && (
+            <button
+              type="button"
+              onClick={() => setShowCustomMenu(true)}
+              className="text-xs font-bold uppercase tracking-wider bg-theme-accent text-white rounded-theme px-3 py-2 hover:opacity-90 inline-flex items-center gap-1"
+              title="Create a one-off custom menu item"
+            >
+              <Plus size={12} /> Custom
+            </button>
+          )}
         </div>
 
         {/* Category pill tabs */}
@@ -2126,6 +2167,17 @@ function NewOrderView({
         </div>
       </aside>
       </div>
+
+      {showCustomMenu && customMenuPerm && (
+        <CustomMenuDialog
+          approval={customMenuPerm.approval === 'OTP' ? 'OTP' : 'AUTO'}
+          onClose={() => setShowCustomMenu(false)}
+          onCreated={(item) => {
+            setCart((prev) => [...prev, { menuItem: item, quantity: 1 }]);
+            setShowCustomMenu(false);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -3,6 +3,31 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.12 — performance report + POS Customised Menu (2026-04-25)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/types:
+
+- **Performance Report** (admin → Reports → Performance): per-menu-item
+  qty / revenue / COGS / gross profit / margin% over a date range, with
+  a category roll-up and an inventory price-volatility panel that
+  highlights ingredients whose unit cost has shifted across deliveries.
+  Header surfaces an average margin baseline that can be one-click
+  applied as the Custom Menu cost-margin in Settings.
+- **POS Customised Menu**: cashier (gated by the new `createCustomMenu`
+  Cashier Permission) can build a one-off dish — name, optional
+  description, recipe assembled by copying lines from any existing menu
+  or pre-ready recipe (multi-source, duplicate ingredients auto-merge
+  by summing quantity). Server validates the selling price against the
+  branch's three margin policies (cost, negotiate, max) and creates a
+  hidden MenuItem in an auto-managed "Custom Orders" category so it
+  rides the existing recipe → stock-deduction pipeline. The new item
+  appears in the cart immediately and shows up in every report without
+  polluting the website / admin Menu page.
+- **Branch margin policy** (Settings → Kitchen → Custom Menu Pricing):
+  three new fields — Cost Margin %, Negotiate Margin %, Max Margin %.
+  All three default to "no enforced floor / ceiling" so legacy installs
+  behave identically until admin opts in.
+
 ## 1.0.11 — pre-ready cost-per-unit + auto inventory mirror (2026-04-25)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/types:

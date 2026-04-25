@@ -19,13 +19,21 @@ export class BranchSettingsService {
 
   async update(
     branchId: string,
-    dto: { useKds?: boolean },
+    dto: {
+      useKds?: boolean;
+      customMenuCostMargin?: number | null;
+      customMenuNegotiateMargin?: number | null;
+      customMenuMaxMargin?: number | null;
+    },
   ) {
     await this.getOrCreate(branchId);
     const updated = await this.prisma.branchSetting.update({
       where: { branchId },
       data: {
         ...(dto.useKds != null ? { useKds: dto.useKds } : {}),
+        ...(dto.customMenuCostMargin !== undefined ? { customMenuCostMargin: dto.customMenuCostMargin } : {}),
+        ...(dto.customMenuNegotiateMargin !== undefined ? { customMenuNegotiateMargin: dto.customMenuNegotiateMargin } : {}),
+        ...(dto.customMenuMaxMargin !== undefined ? { customMenuMaxMargin: dto.customMenuMaxMargin } : {}),
       },
     });
     this.cache.delete(branchId);

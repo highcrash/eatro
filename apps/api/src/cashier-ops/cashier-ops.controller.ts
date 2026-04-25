@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards, BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
-import type { JwtPayload, CreatePurchaseOrderDto, ReceiveGoodsDto, CreateReturnDto, CreateExpenseDto } from '@restora/types';
+import type { JwtPayload, CreatePurchaseOrderDto, ReceiveGoodsDto, CreateReturnDto, CreateExpenseDto, CreateCustomMenuDto } from '@restora/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -11,6 +11,7 @@ import { PayrollService } from '../payroll/payroll.service';
 import { PreReadyService } from '../pre-ready/pre-ready.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { SmsService } from '../sms/sms.service';
+import { MenuService } from '../menu/menu.service';
 
 /**
  * Phase 7 — POS-side cashier purchasing operations.
@@ -37,6 +38,7 @@ export class CashierOpsController {
     private readonly preReady: PreReadyService,
     private readonly permissions: PermissionsService,
     private readonly sms: SmsService,
+    private readonly menu: MenuService,
   ) {}
 
   /** List open POs (DRAFT/SENT/PARTIAL) — used by the Receive Goods tab. */
@@ -172,6 +174,33 @@ export class CashierOpsController {
     // Auto-advance from PENDING → APPROVED so the cashier can mark Complete in
     // a single flow (mirrors auto-send for cashier purchase orders).
     return this.preReady.approveProduction(created.id, user.branchId, user.sub);
+  }
+
+  // ─── POS Customised Menu ───────────────────────────────────────────────────
+
+  /**
+   * Recipe sources for the POS Customised Menu "Copy from recipe" picker.
+   * Returns every menu item AND pre-ready item that has a recipe attached,
+   * with the raw lines so the dialog can paste them into the working list.
+   * Access is gated only by branch membership (the JwtAuthGuard at module
+   * level), since cashiers can't see this data on the existing /menu or
+   * /recipes endpoints.
+   */
+  @Get('custom-menu/sources')
+  async listCustomMenuSources(@CurrentUser() user: JwtPayload) {
+    return this.menu.listRecipeSourcesForBranch(user.branchId);
+  }
+
+  @Post('custom-menu')
+  async createCustomMenu(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateCustomMenuDto,
+  ) {
+    if (!dto?.name || !dto.items?.length || !dto.sellingPrice) {
+      throw new BadRequestException('name, sellingPrice and at least one item are required');
+    }
+    await this.permissions.requirePermission(user.branchId, user.role, 'createCustomMenu', dto.actionOtp, user.customRoleId ?? null);
+    return this.menu.createCustomFromCashier(user.branchId, dto);
   }
 
   @Post('payroll/pay')

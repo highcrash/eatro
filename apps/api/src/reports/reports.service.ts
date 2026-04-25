@@ -227,6 +227,226 @@ export class ReportsService {
     };
   }
 
+  /**
+   * Performance Report — per-menu-item qty / revenue / COGS / gross profit
+   * / margin% over a date range, plus a category roll-up and an inventory
+   * price-volatility panel. Defaults to today when both from + to are
+   * omitted (mirrors getSalesDetail). COGS computation walks each item's
+   * Recipe and falls back to the cheapest active variant's cost when the
+   * parent ingredient has cost = 0 (matches the pre-ready cost helper).
+   */
+  async getPerformanceReport(branchId: string, from?: string, to?: string) {
+    const now = new Date();
+    let dateFrom: Date;
+    let dateTo: Date;
+
+    if (!from && !to) {
+      dateFrom = new Date(now); dateFrom.setHours(0, 0, 0, 0);
+      dateTo = new Date(now); dateTo.setHours(23, 59, 59, 999);
+    } else {
+      dateFrom = new Date(from || now.toISOString().split('T')[0]);
+      dateFrom.setHours(0, 0, 0, 0);
+      dateTo = new Date(to || now.toISOString().split('T')[0]);
+      dateTo.setHours(23, 59, 59, 999);
+    }
+
+    const orderItems = await this.prisma.orderItem.findMany({
+      where: {
+        order: { branchId, status: 'PAID', paidAt: { gte: dateFrom, lte: dateTo }, deletedAt: null },
+        voidedAt: null,
+      },
+      include: {
+        menuItem: {
+          include: {
+            category: true,
+            recipe: { include: { items: { include: { ingredient: true } } } },
+          },
+        },
+      },
+    });
+
+    // Variant-fallback cost lookup. Cache cheapest-variant cost per parent
+    // so the per-item pass doesn't re-query for repeated ingredients.
+    const variantCostCache = new Map<string, number>();
+    const resolveCost = async (ingredientId: string, parentCost: number, hasVariants: boolean): Promise<number> => {
+      if (parentCost > 0 || !hasVariants) return parentCost;
+      if (variantCostCache.has(ingredientId)) return variantCostCache.get(ingredientId)!;
+      const variants = await this.prisma.ingredient.findMany({
+        where: { parentId: ingredientId, isActive: true, deletedAt: null },
+        select: { costPerUnit: true },
+      });
+      const positives = variants.map((v) => v.costPerUnit.toNumber()).filter((c) => c > 0);
+      const cost = positives.length > 0 ? Math.min(...positives) : 0;
+      variantCostCache.set(ingredientId, cost);
+      return cost;
+    };
+
+    interface ItemAgg {
+      menuItemId: string;
+      name: string;
+      categoryId: string;
+      categoryName: string;
+      quantity: number;
+      revenue: number;
+      cogs: number;
+    }
+    const byItem = new Map<string, ItemAgg>();
+
+    for (const oi of orderItems) {
+      const mi = oi.menuItem;
+      const cat = mi.category;
+      let agg = byItem.get(mi.id);
+      if (!agg) {
+        agg = {
+          menuItemId: mi.id,
+          name: mi.name,
+          categoryId: cat.id,
+          categoryName: cat.name,
+          quantity: 0,
+          revenue: 0,
+          cogs: 0,
+        };
+        byItem.set(mi.id, agg);
+      }
+      agg.quantity += oi.quantity;
+      agg.revenue += oi.totalPrice.toNumber();
+
+      // Per-unit recipe cost — sum(recipeItem.qty × ingredient.costPerUnit).
+      // Note: we don't apply unit conversions here. Recipes that store the
+      // recipe-line in the ingredient's native unit (the common case) are
+      // exact; mismatched units return an under-counted cost rather than
+      // a hard failure, which is the right tradeoff for a report.
+      if (mi.recipe) {
+        let unitCost = 0;
+        for (const ri of mi.recipe.items) {
+          const ing = ri.ingredient;
+          const cost = await resolveCost(ing.id, ing.costPerUnit.toNumber(), ing.hasVariants ?? false);
+          unitCost += ri.quantity.toNumber() * cost;
+        }
+        agg.cogs += unitCost * oi.quantity;
+      }
+    }
+
+    const items = [...byItem.values()].map((a) => {
+      const grossProfit = a.revenue - a.cogs;
+      const marginPct = a.revenue > 0 && a.cogs > 0 ? (grossProfit / a.revenue) * 100 : null;
+      return {
+        menuItemId: a.menuItemId,
+        name: a.name,
+        categoryId: a.categoryId,
+        categoryName: a.categoryName,
+        quantity: a.quantity,
+        revenue: a.revenue,
+        cogs: a.cogs,
+        grossProfit,
+        marginPct,
+      };
+    }).sort((x, y) => y.revenue - x.revenue);
+
+    // Category roll-up.
+    const byCat = new Map<string, { id: string; name: string; quantity: number; revenue: number; cogs: number }>();
+    for (const i of items) {
+      let c = byCat.get(i.categoryId);
+      if (!c) {
+        c = { id: i.categoryId, name: i.categoryName, quantity: 0, revenue: 0, cogs: 0 };
+        byCat.set(i.categoryId, c);
+      }
+      c.quantity += i.quantity;
+      c.revenue += i.revenue;
+      c.cogs += i.cogs;
+    }
+    const categories = [...byCat.values()].map((c) => {
+      const grossProfit = c.revenue - c.cogs;
+      const marginPct = c.revenue > 0 && c.cogs > 0 ? (grossProfit / c.revenue) * 100 : null;
+      return {
+        categoryId: c.id,
+        categoryName: c.name,
+        quantity: c.quantity,
+        revenue: c.revenue,
+        cogs: c.cogs,
+        grossProfit,
+        marginPct,
+      };
+    }).sort((x, y) => y.revenue - x.revenue);
+
+    // Inventory price volatility — group purchase_order_items by ingredient
+    // over the date range, surface only those with > 1 distinct unitCost.
+    const purchaseRows = await this.prisma.purchaseOrderItem.findMany({
+      where: {
+        purchaseOrder: { branchId, deletedAt: null },
+        createdAt: { gte: dateFrom, lte: dateTo },
+      },
+      include: { ingredient: { select: { id: true, name: true, unit: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    interface PriceAgg {
+      ingredientId: string;
+      ingredientName: string;
+      unit: string;
+      prices: Set<number>;
+      sum: number;
+      min: number;
+      max: number;
+      count: number;
+      latest: number;
+    }
+    const byIng = new Map<string, PriceAgg>();
+    for (const r of purchaseRows) {
+      const cost = r.unitCost.toNumber();
+      const id = r.ingredientId;
+      let p = byIng.get(id);
+      if (!p) {
+        p = {
+          ingredientId: id,
+          ingredientName: r.ingredient.name,
+          unit: r.ingredient.unit,
+          prices: new Set(),
+          sum: 0,
+          min: cost,
+          max: cost,
+          count: 0,
+          latest: cost, // first row in DESC order = latest
+        };
+        byIng.set(id, p);
+      }
+      p.prices.add(cost);
+      p.sum += cost;
+      if (cost < p.min) p.min = cost;
+      if (cost > p.max) p.max = cost;
+      p.count += 1;
+    }
+    const inventoryVolatility = [...byIng.values()]
+      .filter((p) => p.prices.size >= 2)
+      .map((p) => ({
+        ingredientId: p.ingredientId,
+        ingredientName: p.ingredientName,
+        unit: p.unit,
+        distinctPrices: p.prices.size,
+        minUnitCost: p.min,
+        maxUnitCost: p.max,
+        avgUnitCost: p.sum / p.count,
+        latestUnitCost: p.latest,
+        deliveries: p.count,
+      }))
+      .sort((a, b) => (b.maxUnitCost - b.minUnitCost) - (a.maxUnitCost - a.minUnitCost));
+
+    // Suggested margin% = average of marginPct across items where cogs > 0.
+    const margins = items.map((i) => i.marginPct).filter((m): m is number => m !== null && m > 0);
+    const suggestedCustomMenuMargin = margins.length > 0
+      ? Math.round((margins.reduce((s, m) => s + m, 0) / margins.length) * 100) / 100
+      : null;
+
+    return {
+      from: dateFrom.toISOString(),
+      to: dateTo.toISOString(),
+      items,
+      categories,
+      inventoryVolatility,
+      suggestedCustomMenuMargin,
+    };
+  }
+
   async getRevenueByCategory(branchId: string, period: string) {
     const { from, to } = this.getDateRange(period);
 

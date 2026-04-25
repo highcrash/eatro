@@ -38,6 +38,8 @@ export interface MenuItem extends AuditFields {
   prepTime: string | null;
   spiceLevel: string | null;
   websiteVisible: boolean;
+  /** True when the item was created via POS Customised Menu. */
+  isCustom?: boolean;
   comboItems?: ComboItem[];
   linkedItems?: LinkedItem[];
 }
@@ -85,6 +87,24 @@ export interface UpdateMenuItemDto extends Partial<CreateMenuItemDto> {
   prepTime?: string | null;
   spiceLevel?: string | null;
   websiteVisible?: boolean;
+}
+
+/**
+ * POS Customised Menu — cashier-side payload for one-shot custom dishes
+ * that aren't on the standard menu. Server creates a hidden MenuItem in
+ * the auto-seeded "Custom Orders" category, attaches the recipe so stock
+ * deducts via the existing pipeline, and validates sellingPrice against
+ * branch margin policy.
+ */
+export interface CreateCustomMenuDto {
+  name: string;
+  description?: string;
+  /** Selling price in paisa. Server enforces floor / ceiling. */
+  sellingPrice: number;
+  /** Recipe lines. Server re-merges by (ingredientId, unit). */
+  items: { ingredientId: string; quantity: number; unit?: string }[];
+  /** OTP token when admin gated createCustomMenu with approval=OTP. */
+  actionOtp?: string;
 }
 
 // ─── Table ────────────────────────────────────────────────────────────────────

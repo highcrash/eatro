@@ -21,7 +21,12 @@ export class BranchSettingsController {
   @Roles('OWNER', 'MANAGER')
   update(
     @CurrentUser() user: JwtPayload,
-    @Body() dto: { useKds?: boolean },
+    @Body() dto: {
+      useKds?: boolean;
+      customMenuCostMargin?: number | null;
+      customMenuNegotiateMargin?: number | null;
+      customMenuMaxMargin?: number | null;
+    },
   ) {
     return this.svc.update(user.branchId, dto);
   }
