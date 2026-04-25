@@ -800,6 +800,14 @@ model OrderItem {
   voidedAt      DateTime?
   voidReason    String?
   voidedById    String?
+  /// Per-line modifications applied at order time. Shape:
+  ///   { removedIngredientIds: string[], removedNames: string[] }
+  /// Stock-deduction skips removed ingredient IDs; KT print prepends
+  /// "— NO <NAME>" lines per removed ingredient. Null / empty = no
+  /// mods (legacy behaviour). Cart key includes a hash of removedIds
+  /// so 2× without garlic + 2× normal land on two separate OrderItem
+  /// rows (and two separate KT entries).
+  modifications Json?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 

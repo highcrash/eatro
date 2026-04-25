@@ -18,6 +18,13 @@ export type KitchenTicketStatus = 'NEW' | 'PENDING_APPROVAL' | 'ACKNOWLEDGED' | 
 
 // ─── Order ────────────────────────────────────────────────────────────────────
 
+export interface OrderItemModifications {
+  /** Ingredient IDs the customer asked to remove from this line. */
+  removedIngredientIds: string[];
+  /** Frozen names of removed ingredients — survives ingredient rename. */
+  removedNames: string[];
+}
+
 export interface OrderItem {
   id: string;
   menuItemId: string;
@@ -30,6 +37,8 @@ export interface OrderItem {
   voidedAt: Date | null;
   voidReason: string | null;
   voidedById: string | null;
+  /** Per-line ingredient removals captured at order time. */
+  modifications?: OrderItemModifications | null;
 }
 
 export interface OrderPayment {
@@ -73,6 +82,8 @@ export interface CreateOrderItemDto {
   menuItemId: string;
   quantity: number;
   notes?: string;
+  /** Ingredient IDs to remove from this line's recipe. */
+  removedIngredientIds?: string[];
 }
 
 export interface CreateOrderDto {
@@ -89,6 +100,8 @@ export interface AddOrderItemDto {
   menuItemId: string;
   quantity: number;
   notes?: string;
+  /** Ingredient IDs to remove from this line's recipe. */
+  removedIngredientIds?: string[];
 }
 
 export interface ProcessPaymentDto {

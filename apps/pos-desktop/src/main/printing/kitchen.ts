@@ -97,6 +97,11 @@ function buildKitchenJob(ticket: KitchenTicketInput): ThermalJob {
   job.lines.push({ kind: 'align-left' });
   for (const it of activeItems) {
     job.lines.push({ kind: 'text', text: `${it.quantity}-: ${it.menuItemName}`, bold: true, size: 'large' });
+    // Print "no garlic" mods in bold so the chef can't miss them.
+    const removed = (it.removedIngredients ?? it.modifications?.removedNames ?? []).filter((n): n is string => !!n);
+    for (const name of removed) {
+      job.lines.push({ kind: 'text', text: `   -- NO ${name.toUpperCase()}`, bold: true });
+    }
     if (it.notes) job.lines.push({ kind: 'text', text: `   -> ${it.notes}` });
     job.lines.push({ kind: 'divider' });
   }

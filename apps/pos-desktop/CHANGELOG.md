@@ -3,6 +3,31 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.20 — per-order ingredient removal (Phase 2) (2026-04-25)
+
+Rebundles apps/pos + apps/pos-desktop main + @restora/types + @restora/utils:
+
+- **"No garlic" mods.** Cashier opens a Customise button on any
+  cart line → ticks the ingredients to remove → save. The cart
+  line auto-splits when mods differ — 4× chicken (2× without
+  garlic + 2× normal) lands as two cart rows / two KT entries.
+- **Stock deduction respects mods.** Removed ingredients are
+  skipped during the recipe deduction, so a "no garlic" line
+  doesn't pull garlic stock for that line.
+- **KT print** prepends a bold `— NO <NAME>` line under each
+  modified item. Works on both the Electron thermal-printer path
+  (apps/pos-desktop ESC/POS) and the browser HTML fallback.
+- **Snapshot semantics.** Removed ingredient names are frozen on
+  the OrderItem at order time, so a future ingredient rename
+  doesn't rewrite history. Reports keep grouping by menuItemId
+  (mods are display-only).
+- **Live-safety.** Pure additive nullable JSON column. Existing
+  OrderItem rows have `modifications=null` and behave identically.
+- New cashier-readable endpoint
+  `GET /cashier-ops/recipes/menu-item/:id` powers the Customise
+  picker without exposing the admin-only `/recipes` route.
+- Phase 3 (addons / modifiers) ships next.
+
 ## 0.8.19 — menu variants (Phase 1 of variants/mods/addons) (2026-04-25)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/types:

@@ -112,11 +112,20 @@ export class OrderService {
       type: order.type,
       tableNumber: order.tableNumber,
       createdAt: order.createdAt,
-      items: activeItems.map((i) => ({
-        name: i.menuItemName,
-        quantity: i.quantity,
-        notes: i.notes,
-      })),
+      items: activeItems.map((i) => {
+        const mods = (i as { modifications?: { removedNames?: string[] } | null }).modifications;
+        const removed = mods?.removedNames ?? [];
+        return {
+          name: i.menuItemName,
+          quantity: i.quantity,
+          notes: i.notes,
+          // Surface "no garlic" mods to KT consumers. Plain text so
+          // the existing thermal-print + HTML fallback paths render
+          // them without code changes (renderers join name + notes
+          // already; mods get appended to notes for back-compat).
+          removedIngredients: removed,
+        };
+      }),
       notes: order.notes,
     };
   }
@@ -167,10 +176,32 @@ export class OrderService {
       return Math.round(originalPrice * (1 - discount.value.toNumber() / 100));
     };
 
+    // Resolve removed-ingredient names once per order (snapshot-frozen
+    // on the OrderItem so a future ingredient rename doesn't rewrite
+    // history). Uses a single lookup across all unique IDs.
+    const allRemovedIds = Array.from(new Set(dto.items.flatMap((i) => i.removedIngredientIds ?? [])));
+    const removedIngLookup = allRemovedIds.length > 0
+      ? new Map(
+          (await this.prisma.ingredient.findMany({
+            where: { id: { in: allRemovedIds } },
+            select: { id: true, name: true },
+          })).map((i) => [i.id, i.name] as const),
+        )
+      : new Map<string, string>();
+    const buildModsSnapshot = (removedIds?: string[]) => {
+      const ids = (removedIds ?? []).filter((id) => removedIngLookup.has(id));
+      if (ids.length === 0) return null;
+      return {
+        removedIngredientIds: ids,
+        removedNames: ids.map((id) => removedIngLookup.get(id) as string),
+      };
+    };
+
     // Calculate totals with discounted prices
     const itemsData = dto.items.map((item) => {
       const menuItem = menuItems.find((m) => m.id === item.menuItemId)!;
       const unitPrice = getDiscountedPrice(item.menuItemId, menuItem.price.toNumber());
+      const mods = buildModsSnapshot(item.removedIngredientIds);
       return {
         menuItemId: item.menuItemId,
         menuItemName: menuItem.name,
@@ -178,6 +209,7 @@ export class OrderService {
         unitPrice,
         totalPrice: unitPrice * item.quantity,
         notes: item.notes ?? null,
+        modifications: mods as Prisma.InputJsonValue | undefined,
       };
     });
 
@@ -253,11 +285,17 @@ export class OrderService {
     }
     if (dto.tableId) this.ws.emitToBranch(branchId, 'table:updated', { id: dto.tableId, status: 'OCCUPIED' });
 
-    // Deduct stock via recipe engine (best-effort, non-blocking)
+    // Deduct stock via recipe engine (best-effort, non-blocking).
+    // Removed ingredient IDs flow through so "no garlic" lines skip
+    // the garlic deduction.
     void this.recipeService.deductStockForOrder(
       branchId,
       order.id,
-      dto.items.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+      dto.items.map((i) => ({
+        menuItemId: i.menuItemId,
+        quantity: i.quantity,
+        removedIngredientIds: i.removedIngredientIds,
+      })),
     );
 
     return order;
@@ -713,7 +751,7 @@ export class OrderService {
     return updated;
   }
 
-  async addItemsToOrder(id: string, branchId: string, items: { menuItemId: string; quantity: number; notes?: string }[], needsApproval = false) {
+  async addItemsToOrder(id: string, branchId: string, items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[] }[], needsApproval = false) {
     const order = await this.findOne(id, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') {
       throw new BadRequestException('Cannot add items to this order');
@@ -754,9 +792,30 @@ export class OrderService {
       return Math.round(originalPrice * (1 - discount.value.toNumber() / 100));
     };
 
+    // Snapshot removed-ingredient names so KT print + receipt + reports
+    // survive a future ingredient rename. Same engine as `create`.
+    const allRemovedIds = Array.from(new Set(items.flatMap((i) => i.removedIngredientIds ?? [])));
+    const removedIngLookup = allRemovedIds.length > 0
+      ? new Map(
+          (await this.prisma.ingredient.findMany({
+            where: { id: { in: allRemovedIds } },
+            select: { id: true, name: true },
+          })).map((i) => [i.id, i.name] as const),
+        )
+      : new Map<string, string>();
+    const buildModsSnapshot = (removedIds?: string[]) => {
+      const ids = (removedIds ?? []).filter((id) => removedIngLookup.has(id));
+      if (ids.length === 0) return null;
+      return {
+        removedIngredientIds: ids,
+        removedNames: ids.map((id) => removedIngLookup.get(id) as string),
+      };
+    };
+
     const newItems = items.map((item) => {
       const menuItem = menuItems.find((m) => m.id === item.menuItemId)!;
       const unitPrice = getDiscountedPrice(item.menuItemId, menuItem.price.toNumber());
+      const mods = buildModsSnapshot(item.removedIngredientIds);
       return {
         orderId: id,
         menuItemId: item.menuItemId,
@@ -766,6 +825,7 @@ export class OrderService {
         totalPrice: unitPrice * item.quantity,
         notes: item.notes ?? null,
         kitchenStatus: needsApproval ? 'PENDING_APPROVAL' as const : 'NEW' as const,
+        modifications: mods as Prisma.InputJsonValue | undefined,
       };
     });
 
@@ -784,11 +844,16 @@ export class OrderService {
 
     this.ws.emitToBranch(branchId, needsApproval ? 'order:items-pending' : 'order:updated', updated);
 
-    // Only deduct stock for immediately approved items
+    // Only deduct stock for immediately approved items. Mods flow
+    // through so "no garlic" lines skip garlic.
     if (!needsApproval) {
       void this.recipeService.deductStockForOrder(
         branchId, id,
-        items.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+        items.map((i) => ({
+          menuItemId: i.menuItemId,
+          quantity: i.quantity,
+          removedIngredientIds: i.removedIngredientIds,
+        })),
       );
     }
 
@@ -815,10 +880,15 @@ export class OrderService {
       this.ws.emitToKds(branchId, 'kds:ticket:new', updated);
     }
 
-    // Deduct stock for newly approved items
+    // Deduct stock for newly approved items. Honour any per-line
+    // removals stored on the OrderItem at creation time.
     void this.recipeService.deductStockForOrder(
       branchId, id,
-      pendingItems.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+      pendingItems.map((i) => ({
+        menuItemId: i.menuItemId,
+        quantity: i.quantity,
+        removedIngredientIds: ((i as { modifications?: { removedIngredientIds?: string[] } | null }).modifications?.removedIngredientIds) ?? undefined,
+      })),
     );
 
     return updated;
@@ -873,7 +943,11 @@ export class OrderService {
 
     void this.recipeService.deductStockForOrder(
       branchId, orderId,
-      [{ menuItemId: item.menuItemId, quantity: item.quantity }],
+      [{
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        removedIngredientIds: ((item as { modifications?: { removedIngredientIds?: string[] } | null }).modifications?.removedIngredientIds) ?? undefined,
+      }],
     );
 
     return updated;

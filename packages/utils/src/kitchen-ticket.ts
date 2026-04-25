@@ -36,6 +36,13 @@ export interface KitchenTicketInput {
     menuItemId?: string | null;
     notes?: string | null;
     voidedAt?: string | Date | null;
+    /** Per-line ingredient removals ("no garlic", "no peanut").
+     *  Rendered as bold "— NO <NAME>" rows under the item so the chef
+     *  spots them at a glance. */
+    removedIngredients?: string[] | null;
+    /** Raw OrderItem.modifications shape — accepted as a fallback so
+     *  callers can pass an Order straight through without remapping. */
+    modifications?: { removedNames?: string[] | null } | null;
   }>;
   /** Kitchen section label printed as a sub-header on sectioned KOTs
    *  (e.g. "-- FOOD --", "-- BEVERAGE --"). Desktop-only; web POS
@@ -49,10 +56,13 @@ export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {
   // kitchen-POS reference layout where cooks scan the ticket from a
   // distance and need the item rows to stand out at a glance.
   const itemsHtml = activeItems
-    .map(
-      (i) =>
-        `<div class="item"><div class="item-line">${i.quantity}-:${escapeHtml(i.menuItemName)}</div>${i.notes ? `<div class="item-note">&rarr; ${escapeHtml(i.notes)}</div>` : ''}<div class="item-sep"></div></div>`,
-    )
+    .map((i) => {
+      const removed = (i.removedIngredients ?? i.modifications?.removedNames ?? []).filter((n): n is string => !!n);
+      const removedHtml = removed
+        .map((n) => `<div class="item-removed">&minus; NO ${escapeHtml(n.toUpperCase())}</div>`)
+        .join('');
+      return `<div class="item"><div class="item-line">${i.quantity}-:${escapeHtml(i.menuItemName)}</div>${removedHtml}${i.notes ? `<div class="item-note">&rarr; ${escapeHtml(i.notes)}</div>` : ''}<div class="item-sep"></div></div>`;
+    })
     .join('');
 
   const createdAt = new Date(ticket.createdAt);
@@ -76,6 +86,7 @@ export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {
     .item { margin: 4px 0 0; }
     .item-line { font-size: 28px; font-weight: 900; line-height: 1.15; }
     .item-note { font-size: 16px; font-style: italic; margin-top: 2px; margin-left: 16px; }
+    .item-removed { font-size: 18px; font-weight: 900; margin-top: 2px; margin-left: 16px; letter-spacing: 1px; }
     .item-sep { border-top: 2px double #000; margin-top: 6px; }
     .notes { font-size: 14px; font-style: italic; margin-top: 10px; }
   </style></head><body>

@@ -251,8 +251,13 @@ export class RecipeService {
     return { menuItemId, totalCost, breakdown };
   }
 
-  // Used by OrderService to deduct stock on order creation
-  async deductStockForOrder(branchId: string, orderId: string, items: { menuItemId: string; quantity: number }[]) {
+  /**
+   * Used by OrderService to deduct stock on order creation. Each
+   * `items[]` entry may carry `removedIngredientIds` — recipe lines
+   * referencing one of those IDs are skipped, so a "no garlic" mod
+   * doesn't pull garlic stock for that line.
+   */
+  async deductStockForOrder(branchId: string, orderId: string, items: { menuItemId: string; quantity: number; removedIngredientIds?: string[] }[]) {
     const menuItemIds = items.map((i) => i.menuItemId);
     const recipes = await this.prisma.recipe.findMany({
       where: { menuItemId: { in: menuItemIds } },
@@ -277,7 +282,12 @@ export class RecipeService {
       const recipe = recipes.find((r) => r.menuItemId === orderItem.menuItemId);
       if (!recipe) continue;
 
+      const removed = new Set(orderItem.removedIngredientIds ?? []);
+
       for (const recipeItem of recipe.items) {
+        // Honour per-line removals: skip any recipe line whose
+        // ingredient (or its parent, when applicable) was removed.
+        if (removed.has(recipeItem.ingredientId)) continue;
         let totalQty = recipeItem.quantity.toNumber() * orderItem.quantity;
         // Convert if recipe item unit differs from ingredient's native unit
         if (recipeItem.unit !== recipeItem.ingredient.unit) {
