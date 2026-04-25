@@ -173,6 +173,7 @@ export class CleanupService {
       }
 
       case 'suppliers': {
+        deleted.supplierAdjustments = (await p.supplierAdjustment.deleteMany({ where: { supplier: { branchId } } })).count;
         deleted.supplierPayments = (await p.supplierPayment.deleteMany({ where: { supplier: { branchId } } })).count;
         deleted.ingredientSuppliers = (await p.ingredientSupplier.deleteMany({ where: { supplier: { branchId } } })).count;
         deleted.suppliers = (await p.supplier.deleteMany({ where })).count;
@@ -231,6 +232,7 @@ export class CleanupService {
         deleted.purchaseReturns = (await p.purchaseReturn.deleteMany({ where })).count;
         deleted.purchaseOrderItems = (await p.purchaseOrderItem.deleteMany({ where: { purchaseOrder: { branchId } } })).count;
         deleted.purchaseOrders = (await p.purchaseOrder.deleteMany({ where })).count;
+        deleted.supplierAdjustments = (await p.supplierAdjustment.deleteMany({ where: { supplier: { branchId } } })).count;
         deleted.supplierPayments = (await p.supplierPayment.deleteMany({ where: { supplier: { branchId } } })).count;
         deleted.expenses = (await p.expense.deleteMany({ where })).count;
         deleted.accountTransactions = (await p.accountTransaction.deleteMany({ where })).count;

@@ -103,6 +103,28 @@ export interface SupplierPayment {
   paidBy?: { id: string; name: string };
 }
 
+/** Manual ledger correction (Owner/Manager only). Pure ledger-only:
+ *  adjusts Supplier.totalDue and shows up in the supplier ledger view
+ *  as its own line. Never touches a cash/bank account or creates an
+ *  Expense mirror. Negative amount reduces debt, positive amount
+ *  increases it. */
+export interface SupplierAdjustment {
+  id: string;
+  branchId: string;
+  supplierId: string;
+  amount: number;
+  reason: string;
+  recordedById: string;
+  createdAt: Date;
+  recordedBy?: { id: string; name: string };
+}
+
+export interface RecordSupplierAdjustmentDto {
+  /** Signed: negative reduces totalDue, positive increases. */
+  amount: number;
+  reason: string;
+}
+
 export interface StockMovement {
   id: string;
   branchId: string;

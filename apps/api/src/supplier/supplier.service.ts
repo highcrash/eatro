@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import type { CreateSupplierDto, UpdateSupplierDto } from '@restora/types';
 import { ingredientDisplayName } from '@restora/utils';
 import { PrismaService } from '../prisma/prisma.service';
@@ -97,6 +97,15 @@ export class SupplierService {
       orderBy: { createdAt: 'desc' },
     });
 
+    // Manual ledger corrections (e.g. wrong opening balance) recorded
+    // by Owner/Manager via POST /suppliers/:id/adjust. Strictly ledger-
+    // only — never touched a cash account or expense.
+    const adjustments = await this.prisma.supplierAdjustment.findMany({
+      where: { branchId, supplierId: id },
+      include: { recordedBy: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
     // Calculate total billed. Items first, then add any receipt-level
     // extra fees (delivery, labour, etc.) and subtract receipt-level
     // discount the supplier offered at delivery — these are persisted
@@ -120,6 +129,11 @@ export class SupplierService {
     const totalPaid = payments.reduce((s, p) => s + p.amount.toNumber(), 0);
     const totalReturned = returns.reduce((s, r) => r.items.reduce((ss, i) => ss + i.unitPrice.toNumber() * i.quantity.toNumber(), s), 0);
     const openingBalance = supplier.openingBalance.toNumber();
+    // Adjustments are signed: negative shrinks debt, positive grows it.
+    // Sum directly into the running balance — same accounting as
+    // payments (negative side) but kept as its own bucket so the
+    // ledger view can distinguish "paid" from "manually corrected".
+    const totalAdjustments = adjustments.reduce((s, a) => s + a.amount.toNumber(), 0);
 
     return {
       supplier,
@@ -127,7 +141,8 @@ export class SupplierService {
       totalBilled,
       totalPaid,
       totalReturned,
-      balance: openingBalance + totalBilled - totalPaid - totalReturned,
+      totalAdjustments,
+      balance: openingBalance + totalBilled - totalPaid - totalReturned + totalAdjustments,
       purchaseOrders: purchaseOrders.map((po) => {
         const itemsTotal = po.items.reduce((s, i) => s + i.unitCost.toNumber() * i.quantityReceived.toNumber(), 0);
         const rawDiscount = (po as unknown as { receiptDiscount?: { toNumber(): number } | number | null }).receiptDiscount;
@@ -171,7 +186,59 @@ export class SupplierService {
         total: r.items.reduce((s, i) => s + i.unitPrice.toNumber() * i.quantity.toNumber(), 0),
       })),
       payments,
+      adjustments: adjustments.map((a) => ({
+        id: a.id,
+        amount: a.amount.toNumber(),
+        reason: a.reason,
+        createdAt: a.createdAt,
+        recordedBy: a.recordedBy,
+      })),
     };
+  }
+
+  /**
+   * Record a manual ledger correction. Pure ledger-only:
+   *   - Decrements/increments Supplier.totalDue by `dto.amount` (signed).
+   *   - Writes an audit row to SupplierAdjustment for the ledger view.
+   *   - Does NOT touch any cash/bank Account.
+   *   - Does NOT create an Expense mirror.
+   *   - Does NOT post to Mushak / VAT.
+   *
+   * Use case: admin entered the wrong opening balance, supplier ledger
+   * has a small off-by-X error from a deleted PO, etc. Owner/Manager
+   * only — gated at the controller layer.
+   */
+  async recordAdjustment(
+    branchId: string,
+    supplierId: string,
+    staffId: string,
+    dto: { amount: number; reason: string },
+  ) {
+    if (!Number.isFinite(dto.amount) || dto.amount === 0) {
+      throw new BadRequestException('Adjustment amount must be a non-zero number');
+    }
+    if (!dto.reason?.trim()) {
+      throw new BadRequestException('Adjustment reason is required');
+    }
+    await this.findOne(supplierId, branchId);
+
+    return this.prisma.$transaction(async (tx) => {
+      const adjustment = await tx.supplierAdjustment.create({
+        data: {
+          branchId,
+          supplierId,
+          amount: dto.amount,
+          reason: dto.reason.trim(),
+          recordedById: staffId,
+        },
+        include: { recordedBy: { select: { id: true, name: true } } },
+      });
+      await tx.supplier.update({
+        where: { id: supplierId },
+        data: { totalDue: { increment: dto.amount } },
+      });
+      return adjustment;
+    });
   }
 
   async makePayment(branchId: string, staffId: string, dto: { supplierId: string; purchaseOrderId?: string; amount: number; paymentMethod?: string; reference?: string; notes?: string }) {

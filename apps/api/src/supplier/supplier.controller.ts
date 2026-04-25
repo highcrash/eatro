@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { JwtPayload, CreateSupplierDto, UpdateSupplierDto } from '@restora/types';
+import type { JwtPayload, CreateSupplierDto, UpdateSupplierDto, RecordSupplierAdjustmentDto } from '@restora/types';
 
 @Controller('suppliers')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -39,6 +39,19 @@ export class SupplierController {
   @Get(':id/ledger')
   getLedger(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.supplierService.getSupplierLedger(id, user.branchId);
+  }
+
+  // Manual ledger correction. Owner/Manager only — Advisor/Cashier
+  // are blocked even though they have read access. Pure ledger-only;
+  // no cash account is touched (see SupplierService.recordAdjustment).
+  @Post(':id/adjust')
+  @Roles('OWNER', 'MANAGER')
+  recordAdjustment(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: RecordSupplierAdjustmentDto,
+  ) {
+    return this.supplierService.recordAdjustment(user.branchId, id, user.sub, dto);
   }
 
   @Post()

@@ -73,15 +73,26 @@ interface LedgerReturn {
   total: number;
 }
 
+interface LedgerAdjustment {
+  id: string;
+  amount: number;
+  reason: string;
+  createdAt: string | Date;
+  recordedBy?: { id: string; name: string };
+}
+
 interface LedgerData {
   supplier: Supplier;
+  openingBalance: number;
   totalBilled: number;
   totalPaid: number;
   totalReturned: number;
+  totalAdjustments: number;
   balance: number;
   purchaseOrders: LedgerPO[];
   returns: LedgerReturn[];
   payments: SupplierPayment[];
+  adjustments: LedgerAdjustment[];
 }
 
 const emptyForm: SupplierForm = { name: '', contactName: '', phone: '', email: '', address: '', notes: '', category: 'GENERAL', openingBalance: '' };
@@ -105,6 +116,12 @@ export default function SuppliersPage() {
 
   // Ledger dialog state
   const [ledgerSupplier, setLedgerSupplier] = useState<Supplier | null>(null);
+
+  // Adjustment dialog state — pure ledger correction (e.g. wrong
+  // opening balance). Direction is signed: typing 4000 with a
+  // "Reduce debt" toggle posts -4000.
+  const [adjustingSupplier, setAdjustingSupplier] = useState<Supplier | null>(null);
+  const [adjustForm, setAdjustForm] = useState<{ amount: string; direction: 'reduce' | 'increase'; reason: string }>({ amount: '', direction: 'reduce', reason: '' });
 
   // Filter state
   const [categoryFilter, setCategoryFilter] = useState<SupplierCategory | ''>('');
@@ -158,6 +175,20 @@ export default function SuppliersPage() {
     },
   });
 
+  // Manual ledger correction — calls /suppliers/:id/adjust. Server
+  // adjusts only Supplier.totalDue + writes an audit row; no cash
+  // account / expense posted. Owner/Manager only at the API.
+  const adjustMutation = useMutation({
+    mutationFn: (data: { supplierId: string; amount: number; reason: string }) =>
+      api.post(`/suppliers/${data.supplierId}/adjust`, { amount: data.amount, reason: data.reason }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['suppliers'] });
+      void qc.invalidateQueries({ queryKey: ['supplier-ledger'] });
+      setAdjustingSupplier(null);
+      setAdjustForm({ amount: '', direction: 'reduce', reason: '' });
+    },
+  });
+
   const openAdd = () => { setEditing(null); setForm(emptyForm); setShowDialog(true); };
   const openEdit = (s: Supplier) => {
     setEditing(s);
@@ -171,6 +202,23 @@ export default function SuppliersPage() {
 
   const openLedger = (s: Supplier) => { setLedgerSupplier(s); };
   const closeLedger = () => { setLedgerSupplier(null); };
+
+  const openAdjust = (s: Supplier) => {
+    setAdjustingSupplier(s);
+    setAdjustForm({ amount: '', direction: 'reduce', reason: '' });
+  };
+  const handleAdjust = () => {
+    if (!adjustingSupplier) return;
+    const raw = parseFloat(adjustForm.amount);
+    if (!Number.isFinite(raw) || raw <= 0) return;
+    if (!adjustForm.reason.trim()) return;
+    const signed = adjustForm.direction === 'reduce' ? -raw : raw;
+    adjustMutation.mutate({
+      supplierId: adjustingSupplier.id,
+      amount: Math.round(signed * 100),
+      reason: adjustForm.reason.trim(),
+    });
+  };
 
   const handlePay = () => {
     if (!payingSupplier || !paymentForm.amount) return;
@@ -407,6 +455,114 @@ export default function SuppliersPage() {
         </div>
       )}
 
+      {/* Ledger Adjustment Dialog. Pure ledger correction — server
+          updates Supplier.totalDue + writes an audit row only. NO
+          cash account is debited, NO Expense is created, NO Mushak
+          posting happens. Use to fix a wrong opening balance or a
+          small reconciliation discrepancy. */}
+      {adjustingSupplier && (() => {
+        const cur = (adjustingSupplier.totalDue ?? 0);
+        const raw = parseFloat(adjustForm.amount) || 0;
+        const signed = adjustForm.direction === 'reduce' ? -Math.round(raw * 100) : Math.round(raw * 100);
+        const next = cur + signed;
+        return (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setAdjustingSupplier(null)}>
+            <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+              <h2 className="font-display text-xl text-white tracking-widest mb-1">LEDGER ADJUSTMENT</h2>
+              <p className="text-[#999] font-body text-sm mb-1">{adjustingSupplier.name}</p>
+              <p className="text-[#FFA726] font-body text-[11px] mb-5">
+                Pure ledger correction. Does NOT touch cash, expenses, or accounts.
+              </p>
+
+              <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 mb-4">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <p className="text-[#666] font-body text-[9px] tracking-widest uppercase mb-1">Current Owed</p>
+                    <p className="font-display text-white text-lg">{formatCurrency(cur)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[#666] font-body text-[9px] tracking-widest uppercase mb-1">Adjustment</p>
+                    <p className={`font-display text-lg ${signed < 0 ? 'text-[#4CAF50]' : signed > 0 ? 'text-[#FFA726]' : 'text-[#666]'}`}>
+                      {signed === 0 ? '—' : (signed < 0 ? '-' : '+') + formatCurrency(Math.abs(signed))}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[#666] font-body text-[9px] tracking-widest uppercase mb-1">Will Become</p>
+                    <p className="font-display text-white text-lg">{formatCurrency(next)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Direction</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAdjustForm((f) => ({ ...f, direction: 'reduce' }))}
+                      className={`flex-1 py-2 text-xs font-body tracking-widest uppercase border transition-colors ${
+                        adjustForm.direction === 'reduce'
+                          ? 'bg-[#4CAF50] border-[#4CAF50] text-white'
+                          : 'bg-[#0D0D0D] border-[#2A2A2A] text-[#999] hover:border-[#444]'
+                      }`}
+                    >
+                      Reduce Debt
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdjustForm((f) => ({ ...f, direction: 'increase' }))}
+                      className={`flex-1 py-2 text-xs font-body tracking-widest uppercase border transition-colors ${
+                        adjustForm.direction === 'increase'
+                          ? 'bg-[#FFA726] border-[#FFA726] text-black'
+                          : 'bg-[#0D0D0D] border-[#2A2A2A] text-[#999] hover:border-[#444]'
+                      }`}
+                    >
+                      Increase Debt
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Amount (BDT)</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={adjustForm.amount}
+                    onChange={(e) => setAdjustForm((f) => ({ ...f, amount: e.target.value }))}
+                    placeholder="e.g. 4000"
+                    className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#FFA726] transition-colors"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Reason (required)</label>
+                  <input
+                    value={adjustForm.reason}
+                    onChange={(e) => setAdjustForm((f) => ({ ...f, reason: e.target.value }))}
+                    placeholder="e.g. Wrong opening balance correction"
+                    className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#FFA726] transition-colors"
+                  />
+                </div>
+              </div>
+
+              {adjustMutation.error && (
+                <p className="text-[#F03535] text-xs font-body mt-3">{(adjustMutation.error as Error).message}</p>
+              )}
+
+              <div className="flex gap-3 mt-6">
+                <button onClick={() => setAdjustingSupplier(null)} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
+                <button
+                  onClick={handleAdjust}
+                  disabled={!adjustForm.amount || raw <= 0 || !adjustForm.reason.trim() || adjustMutation.isPending}
+                  className="flex-1 bg-[#FFA726] hover:bg-[#FFB74D] text-black font-body text-sm py-2.5 transition-colors disabled:opacity-50"
+                >
+                  {adjustMutation.isPending ? 'Posting…' : 'Post Adjustment'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Ledger Dialog */}
       {ledgerSupplier && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={closeLedger}>
@@ -518,6 +674,37 @@ export default function SuppliersPage() {
                   </div>
                 )}
 
+                {/* Adjustments list — manual ledger corrections. Pure
+                    ledger-only (no cash account / expense touched).  */}
+                {ledgerData.adjustments && ledgerData.adjustments.length > 0 && (
+                  <div>
+                    <h3 className="font-display text-sm text-white tracking-widest mb-3">LEDGER ADJUSTMENTS</h3>
+                    <div className="bg-[#0D0D0D] border border-[#2A2A2A]">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-[#2A2A2A]">
+                            {['Date', 'Amount', 'Reason', 'Recorded By'].map((h) => (
+                              <th key={h} className="text-left px-3 py-2 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ledgerData.adjustments.map((a) => (
+                            <tr key={a.id} className="border-b border-[#2A2A2A] last:border-0">
+                              <td className="px-3 py-2 text-[#999] font-body text-xs">{new Date(a.createdAt).toLocaleDateString()}</td>
+                              <td className={`px-3 py-2 font-body text-xs font-medium ${a.amount < 0 ? 'text-[#4CAF50]' : 'text-[#FFA726]'}`}>
+                                {a.amount < 0 ? '-' : '+'}{formatCurrency(Math.abs(a.amount))}
+                              </td>
+                              <td className="px-3 py-2 text-[#999] font-body text-xs">{a.reason}</td>
+                              <td className="px-3 py-2 text-[#999] font-body text-xs">{a.recordedBy?.name ?? '--'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 {/* Payments list */}
                 <div>
                   <h3 className="font-display text-sm text-white tracking-widest mb-3">PAYMENT HISTORY</h3>
@@ -554,6 +741,13 @@ export default function SuppliersPage() {
             <div className="flex gap-3 mt-6">
               <button onClick={closeLedger} className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm px-6 py-2.5 transition-colors">Close</button>
               <button onClick={() => { closeLedger(); openPayment(ledgerSupplier); }} className="bg-[#4CAF50] hover:bg-[#66BB6A] text-white font-body text-sm px-6 py-2.5 transition-colors">Make Payment</button>
+              <button
+                onClick={() => { closeLedger(); openAdjust(ledgerSupplier); }}
+                className="bg-[#FFA726] hover:bg-[#FFB74D] text-black font-body text-sm px-6 py-2.5 transition-colors"
+                title="Manually correct the supplier's owed balance — does NOT touch any cash account"
+              >
+                Ledger Adjustment
+              </button>
               {ledgerData && (
                 <button
                   onClick={() => {
