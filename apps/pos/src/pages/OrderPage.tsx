@@ -851,54 +851,32 @@ function ActiveOrderView({
     },
   });
 
-  const printNewItemsKT = async (ord: Order, newItems: CartItem[]) => {
-    // Desktop path — hit the kitchen printer slot directly. Previously this
-    // went through window.open + print-shim which mis-routed everything to
-    // the reports printer.
-    const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
-    if (desktopPrint) {
-      try {
-        const res = await desktopPrint({
-          orderNumber: `${ord.orderNumber} (+ADD)`,
-          tableNumber: ord.tableNumber,
-          type: ord.type,
-          createdAt: new Date().toISOString(),
-          items: newItems.map((c) => ({
-            quantity: c.quantity,
-            menuItemName: c.menuItem.name,
-            menuItemId: c.menuItem.id,
-            notes: c.notes ?? null,
-            removedIngredients: c.removedNames && c.removedNames.length > 0 ? c.removedNames : undefined,
-            selectedAddons: c.addons && c.addons.length > 0 ? c.addons.map((a) => a.addonName) : undefined,
-          })),
-        });
-        if (!res?.ok) alert(`Kitchen add-items print failed: ${res?.message ?? 'unknown error'}`);
-      } catch (err) {
-        alert(`Kitchen add-items print failed: ${(err as Error).message}`);
-      }
-      return;
+  const printNewItemsKT = (ord: Order, newItems: CartItem[]) => {
+    // Build a KitchenTicketInput-shaped ticket for the +ADD lines and
+    // hand it to the shared printer. Routes through the desktop ESC/POS
+    // path (window.desktop.print.kitchen) when available and falls back
+    // to the shared HTML popup template otherwise. The previous inline
+    // browser fallback rendered only quantity + name, so customise
+    // ("NO GARLIC") and addon ("+ Cheese Sauce") lines vanished from
+    // the +ADD ticket.
+    const ticket = {
+      orderNumber: `${ord.orderNumber} (+ADD)`,
+      tableNumber: ord.tableNumber,
+      type: ord.type,
+      createdAt: new Date().toISOString(),
+      items: newItems.map((c) => ({
+        quantity: c.quantity,
+        menuItemName: c.menuItem.name,
+        menuItemId: c.menuItem.id,
+        notes: c.notes ?? null,
+        removedIngredients: c.removedNames && c.removedNames.length > 0 ? c.removedNames : undefined,
+        selectedAddons: c.addons && c.addons.length > 0 ? c.addons.map((a) => a.addonName) : undefined,
+      })),
+    };
+    const ok = printKitchenTicketUtil(ticket);
+    if (!ok) {
+      alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
     }
-    // Browser fallback — popup window + auto-print.
-    const items = newItems
-      .map((c) => `<tr><td style="padding:4px 0;font-size:16px;font-weight:bold">${c.quantity}\u00d7</td><td style="padding:4px 8px;font-size:16px">${c.menuItem.name}</td></tr>`)
-      .join('');
-    const html = `<html><head><style>
-      body { font-family: monospace; width: 80mm; margin: 0; padding: 8px; }
-      h1 { font-size: 24px; margin: 0; text-align: center; }
-      .meta { font-size: 12px; text-align: center; color: #666; margin: 4px 0 12px; }
-      table { width: 100%; border-collapse: collapse; }
-      .divider { border-top: 1px dashed #000; margin: 8px 0; }
-    </style></head><body>
-      <h1>*** ADDITIONAL ITEMS ***</h1>
-      <div class="meta">#${ord.orderNumber} &mdash; ${ord.tableNumber ? 'Table ' + ord.tableNumber : ord.type}</div>
-      <div class="meta">${new Date().toLocaleTimeString()}</div>
-      <div class="divider"></div>
-      <table>${items}</table>
-      <div class="divider"></div>
-      <script>window.onload=function(){window.print();window.close();}<\/script>
-    </body></html>`;
-    const win = window.open('', '_blank', 'width=320,height=600');
-    if (win) { win.document.write(html); win.document.close(); }
   };
 
   const voidItemMutation = useMutation({

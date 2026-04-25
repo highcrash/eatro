@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.24 — +ADD ticket prints addons + customise lines (2026-04-25)
+
+Hotfix. When a cashier opened **Add Items** on an existing order and
+either picked an addon group or used the **🍴 Customise** button to
+remove ingredients, the resulting "+ADD" kitchen ticket dropped both
+sets of lines:
+
+- The browser-fallback popup template was a custom inline `<table>`
+  that printed only quantity + name (no `+ <ADDON>`, no `-- NO <ING>`).
+- The desktop ESC/POS branch sent the right fields, but cashiers on
+  the web POS — and any KDS-disabled tenants relying on the popup —
+  saw a stripped-down ticket so the kitchen never knew about the
+  modification.
+
+Both paths now route through the shared `printKitchenTicket` helper
+in `@restora/utils`, which already renders `removedIngredients` as
+bold `-- NO <NAME>` rows and `selectedAddons` as `+ <NAME>` rows on
+both the desktop ESC/POS layout and the browser HTML popup. No
+schema or API change.
+
 ## 0.8.23 — apply QR addons/notes/customise to qr-order app (2026-04-25)
 
 Hotfix follow-up to 0.8.22. The previous rollout added QR addon
