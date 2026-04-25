@@ -40,6 +40,16 @@ export interface MenuItem extends AuditFields {
   websiteVisible: boolean;
   /** True when the item was created via POS Customised Menu. */
   isCustom?: boolean;
+  /** Parent FK when this row is a sellable variant. Null on
+   *  standalone items and on parent shells. */
+  variantParentId?: string | null;
+  /** True when this row is a non-sellable picker shell. */
+  isVariantParent?: boolean;
+  /** Sellable children — populated on parent rows in admin / POS
+   *  pickers. Empty on standalone items and on variants themselves. */
+  variants?: MenuItem[];
+  /** Optional back-reference for child rows. */
+  variantParent?: MenuItem | null;
   comboItems?: ComboItem[];
   linkedItems?: LinkedItem[];
 }
@@ -78,6 +88,11 @@ export interface CreateMenuItemDto {
   imageUrl?: string;
   tags?: string;
   cookingStationId?: string | null;
+  /** When set, this new item is a child variant of the given parent. */
+  variantParentId?: string | null;
+  /** When true, this new item is a non-sellable picker shell. Server
+   *  rejects orderItem.create against rows with this flag set. */
+  isVariantParent?: boolean;
 }
 
 export interface UpdateMenuItemDto extends Partial<CreateMenuItemDto> {
@@ -87,6 +102,11 @@ export interface UpdateMenuItemDto extends Partial<CreateMenuItemDto> {
   prepTime?: string | null;
   spiceLevel?: string | null;
   websiteVisible?: boolean;
+}
+
+/** Reorder / rename a parent's child variants in one call. */
+export interface SetVariantsDto {
+  variantIds: string[];
 }
 
 /**
