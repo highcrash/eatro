@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useBranding, resolveLogoUrl } from '../lib/branding';
 import LicenseBanner from '../components/LicenseBanner';
 import {
@@ -32,8 +32,11 @@ import {
   Monitor,
   KeyRound,
   MessageSquare,
+  Search,
+  ChevronRight,
+  X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Branch, LoginResponse } from '@restora/types';
 import { api } from '../lib/api';
@@ -175,6 +178,73 @@ export default function AdminLayout() {
     return found?.adminNavOverrides ?? {};
   })();
 
+  // ─── Sidebar search + collapsible groups ──────────────────────────────
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [search, setSearch] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  const searchRef = useRef<HTMLInputElement>(null);
+  const q = search.trim().toLowerCase();
+
+  // Which group contains the currently active route — auto-expanded so
+  // the user always sees their current location's siblings without
+  // hunting for them.
+  const activeGroupIdx = useMemo(() => {
+    for (let i = 0; i < NAV_GROUPS.length; i++) {
+      if (NAV_GROUPS[i].items.some((it) => location.pathname === it.to || location.pathname.startsWith(it.to + '/'))) {
+        return i;
+      }
+    }
+    return -1;
+  }, [location.pathname]);
+
+  // First match used by the search box's Enter shortcut so the user can
+  // type "settings" + Enter and jump straight in.
+  const firstMatchTo = useMemo(() => {
+    if (!q) return null;
+    const role = user?.role ?? '';
+    for (const group of NAV_GROUPS) {
+      for (const item of group.items) {
+        if (item.allowedRoles && !item.allowedRoles.includes(role)) continue;
+        if (navOverrides[item.to] === false) continue;
+        const hay = `${item.label} ${item.to}`.toLowerCase();
+        if (hay.includes(q)) return item.to;
+      }
+    }
+    return null;
+  }, [q, user?.role, navOverrides]);
+
+  const toggleGroup = (idx: number) => {
+    setExpandedGroups((cur) => {
+      const next = new Set(cur);
+      // The active group is implicit-open via activeGroupIdx; toggling it
+      // adds it to the explicit set so subsequent navigation doesn't
+      // collapse it from under the user.
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  // Global "/" focuses the sidebar search; Esc clears it. Skip when the
+  // user is already typing in another input so we don't hijack form
+  // entry across the admin.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if (e.key === '/' && !typing) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === 'Escape' && document.activeElement === searchRef.current) {
+        setSearch('');
+        searchRef.current?.blur();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const handleSwitchBranch = async (branchId: string) => {
     if (branchId === user?.branchId) { setSwitching(false); return; }
     try {
@@ -192,18 +262,31 @@ export default function AdminLayout() {
   return (
     <div className="h-screen flex bg-[#0D0D0D]">
       {/* Sidebar */}
-      <aside className="w-52 shrink-0 bg-[#111] border-r border-[#2A2A2A] flex flex-col overflow-hidden">
+      <aside className="w-60 shrink-0 bg-[#111] border-r border-[#2A2A2A] flex flex-col overflow-hidden">
         {/* Logo — pinned top */}
         <div className="px-4 py-4 border-b border-[#2A2A2A] flex items-center gap-2.5 shrink-0">
           {logoUrl ? (
-            <img src={logoUrl} alt="" className="w-7 h-7 object-contain shrink-0" />
+            <img src={logoUrl} alt="" className="w-8 h-8 object-contain shrink-0" />
           ) : (
-            <div className="w-7 h-7 bg-[#D62B2B] flex items-center justify-center shrink-0">
-              <span className="font-display text-white text-xs tracking-wider">{brandInitial}</span>
+            <div className="w-8 h-8 bg-[#D62B2B] flex items-center justify-center shrink-0">
+              <span className="font-display text-white text-sm tracking-wider">{brandInitial}</span>
             </div>
           )}
-          <span className="font-display text-white text-base tracking-widest truncate">{brandName.toUpperCase()}</span>
+          <span className="font-display text-white text-lg tracking-widest truncate">{brandName.toUpperCase()}</span>
         </div>
+
+        {/* Search bar — pinned just under the logo. "/" focuses, Esc clears. */}
+        <SidebarSearch
+          query={search}
+          onChange={setSearch}
+          inputRef={searchRef}
+          onEnter={() => {
+            if (firstMatchTo) {
+              navigate(firstMatchTo);
+              setSearch('');
+            }
+          }}
+        />
 
         {/* Nav — scrollable, hidden scrollbar */}
         <nav className="flex-1 py-2 px-2 overflow-y-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
@@ -217,29 +300,57 @@ export default function AdminLayout() {
               if (item.allowedRoles && !item.allowedRoles.includes(role)) return false;
               // Then: custom-role override. Explicit `false` hides the item.
               if (navOverrides[item.to] === false) return false;
+              // Then: search filter (matches label OR path).
+              if (q) {
+                const hay = `${item.label} ${item.to}`.toLowerCase();
+                if (!hay.includes(q)) return false;
+              }
               return true;
             });
             if (visibleItems.length === 0) return null;
+
+            // A group is open when: searching (always), no label (always),
+            // it contains the active route, or the user toggled it open.
+            const isOpen = !!q
+              || !group.label
+              || activeGroupIdx === gIdx
+              || expandedGroups.has(gIdx);
+
             return (
-              <div key={gIdx} className={gIdx > 0 ? 'mt-3' : ''}>
+              <div key={gIdx} className={gIdx > 0 ? 'mt-2' : ''}>
                 {group.label && (
-                  <p className="px-2.5 mb-1 text-[9px] font-body font-medium tracking-[0.2em] text-[#444] uppercase">{group.label}</p>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(gIdx)}
+                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-body font-semibold tracking-[0.18em] text-[#666] hover:text-white uppercase transition-colors"
+                  >
+                    <span>{group.label}</span>
+                    <ChevronRight
+                      size={12}
+                      className={`text-[#444] transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                    />
+                  </button>
                 )}
-                <div className="space-y-px">
-                  {visibleItems.map(({ to, icon: Icon, label }) => (
-                    <NavLink key={to} to={to} className={({ isActive }) =>
-                      `flex items-center gap-2.5 px-2.5 py-1.5 text-[12px] font-body transition-colors ${
-                        isActive ? 'bg-[#D62B2B] text-white font-medium' : 'text-[#777] hover:bg-[#1A1A1A] hover:text-white'
-                      }`
-                    }>
-                      <Icon size={14} />
-                      {label}
-                    </NavLink>
-                  ))}
-                </div>
+                {isOpen && (
+                  <div className="space-y-px">
+                    {visibleItems.map(({ to, icon: Icon, label }) => (
+                      <NavLink key={to} to={to} className={({ isActive }) =>
+                        `flex items-center gap-2.5 px-2.5 py-2 text-[13px] font-body transition-colors ${
+                          isActive ? 'bg-[#D62B2B] text-white font-medium' : 'text-[#999] hover:bg-[#1A1A1A] hover:text-white'
+                        }`
+                      }>
+                        <Icon size={15} />
+                        {label}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
+          {q && firstMatchTo === null && (
+            <p className="px-3 py-6 text-center text-[12px] font-body text-[#666]">No matches for "{search}"</p>
+          )}
         </nav>
 
         {/* Branch switcher (OWNER only) + User + Logout — pinned bottom */}
@@ -275,16 +386,16 @@ export default function AdminLayout() {
               )}
             </div>
           ) : (
-            <p className="text-[10px] font-body text-[#666] mb-3 flex items-center gap-1">
-              <Building2 size={10} /> {user?.branchName}
+            <p className="text-[11px] font-body text-[#666] mb-3 flex items-center gap-1">
+              <Building2 size={11} /> {user?.branchName}
             </p>
           )}
 
-          <p className="text-xs font-body text-white font-medium truncate">{user?.name}</p>
-          <p className="text-[10px] font-body text-[#666] mb-2">{user?.role}</p>
+          <p className="text-[13px] font-body text-white font-medium truncate">{user?.name}</p>
+          <p className="text-[11px] font-body text-[#666] mb-2">{user?.role}</p>
           <button
             onClick={clearAuth}
-            className="flex items-center gap-2 text-[10px] font-body text-[#666] hover:text-[#D62B2B] transition-colors tracking-widest uppercase"
+            className="flex items-center gap-2 text-[11px] font-body text-[#666] hover:text-[#D62B2B] transition-colors tracking-widest uppercase"
           >
             <LogOut size={11} />
             Sign Out
@@ -299,6 +410,51 @@ export default function AdminLayout() {
         <main className="flex-1 overflow-auto p-8">
           <Outlet />
         </main>
+      </div>
+    </div>
+  );
+}
+
+/** Sidebar search input. Press "/" anywhere to focus; Esc clears.
+ *  Enter jumps to the first matching nav item. */
+function SidebarSearch({
+  query,
+  onChange,
+  inputRef,
+  onEnter,
+}: {
+  query: string;
+  onChange: (v: string) => void;
+  inputRef: React.RefObject<HTMLInputElement>;
+  onEnter: () => void;
+}) {
+  return (
+    <div className="px-3 py-2 border-b border-[#2A2A2A] shrink-0">
+      <div className="relative">
+        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#555] pointer-events-none" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onEnter();
+            }
+          }}
+          placeholder='Search… (press "/")'
+          className="w-full bg-[#0D0D0D] border border-[#2A2A2A] focus:border-[#D62B2B] outline-none transition-colors pl-7 pr-7 py-1.5 text-[12px] font-body text-white placeholder:text-[#555]"
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[#555] hover:text-white p-0.5"
+            aria-label="Clear search"
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
     </div>
   );
