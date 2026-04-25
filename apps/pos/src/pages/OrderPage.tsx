@@ -17,6 +17,7 @@ import ReceiptModal from '../components/ReceiptModal';
 import BillModal from '../components/BillModal';
 import RefundOrderDialog from '../components/RefundOrderDialog';
 import CustomMenuDialog from '../components/CustomMenuDialog';
+import VariantPickerDialog from '../components/VariantPickerDialog';
 import { useCashierPermissions } from '../lib/permissions';
 
 interface CartItem {
@@ -253,11 +254,24 @@ function AddItemsOverlay({
   const [addCatId, setAddCatId] = useState<string | null>(null);
   const [hoverIdx, setHoverIdx] = useState(0);
   const [showCustomMenu, setShowCustomMenu] = useState(false);
+  const [variantPickerFor, setVariantPickerFor] = useState<MenuItem | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const { data: cashierPerms } = useCashierPermissions();
   const customMenuPerm = cashierPerms?.createCustomMenu;
   const canCreateCustom = !!customMenuPerm?.enabled && customMenuPerm.approval !== 'NONE';
+
+  const variantsByParent = (() => {
+    const m = new Map<string, MenuItem[]>();
+    for (const item of menuItems) {
+      if (item.variantParentId) {
+        const arr = m.get(item.variantParentId) ?? [];
+        arr.push(item);
+        m.set(item.variantParentId, arr);
+      }
+    }
+    return m;
+  })();
 
   // Fetch categories from API for proper hierarchy (includes parents with 0 direct items)
   const { data: apiCategories = [] } = useQuery<{ id: string; name: string; parentId: string | null; children?: { id: string; name: string }[] }[]>({
@@ -272,11 +286,13 @@ function AddItemsOverlay({
     .filter((c) => c.parentId === pid)
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  // Filter items
+  // Filter items — same logic as the new-order grid: hide variant
+  // children + custom one-offs.
   const searchLower = addSearch.trim().toLowerCase();
   const childIdsOfSelected = addCatId ? getChildren(addCatId).map((c) => c.id) : [];
   const filteredItems = menuItems
     .filter((m) => m.isAvailable)
+    .filter((m) => !m.variantParentId && !m.isCustom)
     .filter((m) => {
       if (searchLower) return m.name.toLowerCase().includes(searchLower);
       if (!addCatId) return true;
@@ -285,6 +301,10 @@ function AddItemsOverlay({
     });
 
   const addToNewCart = (item: MenuItem) => {
+    if (item.isVariantParent) {
+      setVariantPickerFor(item);
+      return;
+    }
     setNewItemCart((prev) => {
       const existing = prev.find((c) => c.menuItem.id === item.id);
       if (existing) return prev.map((c) => c.menuItem.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
@@ -469,6 +489,7 @@ function AddItemsOverlay({
             {filteredItems.map((item, idx) => {
               const inCart = newItemCart.find((c) => c.menuItem.id === item.id);
               const isHover = idx === hoverIdx;
+              const childCount = item.isVariantParent ? (variantsByParent.get(item.id)?.length ?? 0) : 0;
               return (
                 <button
                   key={item.id}
@@ -482,6 +503,11 @@ function AddItemsOverlay({
                       {inCart.quantity}
                     </div>
                   )}
+                  {item.isVariantParent && (
+                    <div className="absolute top-0.5 left-0.5 px-1 py-0.5 text-[7px] font-bold uppercase tracking-wider text-white bg-theme-accent rounded-theme z-10">
+                      {childCount}v
+                    </div>
+                  )}
                   <div className="aspect-square bg-theme-bg rounded-theme mb-1 flex items-center justify-center overflow-hidden">
                     {item.imageUrl ? (
                       <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
@@ -490,7 +516,9 @@ function AddItemsOverlay({
                     )}
                   </div>
                   <p className="text-[10px] font-semibold text-theme-text leading-tight truncate">{item.name}</p>
-                  <p className="text-[11px] font-bold text-theme-text">{formatCurrency(Number(item.price))}</p>
+                  <p className="text-[11px] font-bold text-theme-text">
+                    {item.isVariantParent ? <span className="text-theme-text-muted text-[9px]">Pick variant</span> : formatCurrency(Number(item.price))}
+                  </p>
                 </button>
               );
             })}
@@ -595,6 +623,22 @@ function AddItemsOverlay({
           onCreated={(item) => {
             setNewItemCart((prev) => [...prev, { menuItem: item, quantity: 1 }]);
             setShowCustomMenu(false);
+          }}
+        />
+      )}
+
+      {variantPickerFor && (
+        <VariantPickerDialog
+          parent={variantPickerFor}
+          variants={variantsByParent.get(variantPickerFor.id) ?? []}
+          onClose={() => setVariantPickerFor(null)}
+          onPick={(variant) => {
+            setNewItemCart((prev) => {
+              const existing = prev.find((c) => c.menuItem.id === variant.id);
+              if (existing) return prev.map((c) => c.menuItem.id === variant.id ? { ...c, quantity: c.quantity + 1 } : c);
+              return [...prev, { menuItem: variant, quantity: 1 }];
+            });
+            setVariantPickerFor(null);
           }}
         />
       )}
@@ -1744,6 +1788,7 @@ function NewOrderView({
   const [guestCount, setGuestCount] = useState<number>(0);
   const [hoverIdx, setHoverIdx] = useState(0);
   const [showCustomMenu, setShowCustomMenu] = useState(false);
+  const [variantPickerFor, setVariantPickerFor] = useState<MenuItem | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const { data: cashierPerms } = useCashierPermissions();
@@ -1754,6 +1799,22 @@ function NewOrderView({
     queryKey: ['menu'],
     queryFn: () => api.get<MenuItem[]>('/menu'),
   });
+
+  // Lookup of a parent's children. Variants stay in the flat /menu
+  // response so reports / lookups keep working; we just hide them
+  // from the grid (the parent shell represents them) and route picks
+  // through the variant chooser.
+  const variantsByParent = (() => {
+    const m = new Map<string, MenuItem[]>();
+    for (const item of menuItems) {
+      if (item.variantParentId) {
+        const arr = m.get(item.variantParentId) ?? [];
+        arr.push(item);
+        m.set(item.variantParentId, arr);
+      }
+    }
+    return m;
+  })();
 
   const { data: waiters = [] } = useQuery<{ id: string; name: string; role: string; isActive: boolean }[]>({
     queryKey: ['waiters'],
@@ -1772,6 +1833,11 @@ function NewOrderView({
   const searchTrimmed = search.trim().toLowerCase();
   const childIdsOfActive = activeCategory ? getSubCats(activeCategory).map((c) => c.id) : [];
   const filtered = menuItems
+    // Hide variant children — the parent shell card represents them
+    // in the grid; clicking the parent opens a chooser. Hide custom
+    // one-off menu items too (they live inside their order, not the
+    // standard grid).
+    .filter((m) => !m.variantParentId && !m.isCustom)
     .filter((m) => {
       if (searchTrimmed) return m.name.toLowerCase().includes(searchTrimmed);
       if (!activeCategory) return true;
@@ -1781,6 +1847,12 @@ function NewOrderView({
   const subtotal = cart.reduce((s, c) => s + Number(c.menuItem.price) * c.quantity, 0);
 
   const addToCart = (item: MenuItem) => {
+    // Parent shells have no price + no recipe — open the variant chooser
+    // instead of dropping the shell into the cart.
+    if (item.isVariantParent) {
+      setVariantPickerFor(item);
+      return;
+    }
     setCart((prev) => {
       const existing = prev.find((c) => c.menuItem.id === item.id);
       if (existing) return prev.map((c) => c.menuItem.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
@@ -2027,6 +2099,7 @@ function NewOrderView({
           {availableItems.map((item, idx) => {
             const inCart = cart.find((c) => c.menuItem.id === item.id);
             const isHover = idx === hoverIdx;
+            const childCount = item.isVariantParent ? (variantsByParent.get(item.id)?.length ?? 0) : 0;
             return (
               <button
                 key={item.id}
@@ -2040,6 +2113,11 @@ function NewOrderView({
                     {inCart.quantity}
                   </div>
                 )}
+                {item.isVariantParent && (
+                  <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white bg-theme-accent rounded-theme z-10">
+                    {childCount} variants
+                  </div>
+                )}
                 <div className="aspect-square bg-theme-bg rounded-theme mb-1.5 flex items-center justify-center overflow-hidden">
                   {item.imageUrl ? (
                     <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
@@ -2048,7 +2126,9 @@ function NewOrderView({
                   )}
                 </div>
                 <p className="text-[11px] font-semibold text-theme-text leading-tight truncate">{item.name}</p>
-                <p className="text-xs font-bold text-theme-text">{formatCurrency(Number(item.price))}</p>
+                <p className="text-xs font-bold text-theme-text">
+                  {item.isVariantParent ? <span className="text-theme-text-muted text-[10px]">Pick a variant</span> : formatCurrency(Number(item.price))}
+                </p>
               </button>
             );
           })}
@@ -2175,6 +2255,22 @@ function NewOrderView({
           onCreated={(item) => {
             setCart((prev) => [...prev, { menuItem: item, quantity: 1 }]);
             setShowCustomMenu(false);
+          }}
+        />
+      )}
+
+      {variantPickerFor && (
+        <VariantPickerDialog
+          parent={variantPickerFor}
+          variants={variantsByParent.get(variantPickerFor.id) ?? []}
+          onClose={() => setVariantPickerFor(null)}
+          onPick={(variant) => {
+            setCart((prev) => {
+              const existing = prev.find((c) => c.menuItem.id === variant.id);
+              if (existing) return prev.map((c) => c.menuItem.id === variant.id ? { ...c, quantity: c.quantity + 1 } : c);
+              return [...prev, { menuItem: variant, quantity: 1 }];
+            });
+            setVariantPickerFor(null);
           }}
         />
       )}

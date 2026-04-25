@@ -132,6 +132,13 @@ export class OrderService {
       throw new BadRequestException('One or more menu items are unavailable');
     }
 
+    // Reject parent variant shells — those are picker placeholders, not
+    // sellable items. POS opens a chooser when a parent is tapped.
+    const parents = menuItems.filter((m) => (m as { isVariantParent?: boolean }).isVariantParent);
+    if (parents.length > 0) {
+      throw new BadRequestException(`These items have variants — pick a variant: ${parents.map((p) => p.name).join(', ')}`);
+    }
+
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
 
     // Fetch active menu item discounts for price adjustment
@@ -719,6 +726,12 @@ export class OrderService {
 
     if (menuItems.length !== menuItemIds.length) {
       throw new BadRequestException('One or more menu items are unavailable');
+    }
+
+    // Reject parent variant shells — pick a variant via the POS chooser.
+    const addParents = menuItems.filter((m) => (m as { isVariantParent?: boolean }).isVariantParent);
+    if (addParents.length > 0) {
+      throw new BadRequestException(`These items have variants — pick a variant: ${addParents.map((p) => p.name).join(', ')}`);
     }
 
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });

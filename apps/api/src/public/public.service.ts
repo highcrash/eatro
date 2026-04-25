@@ -149,6 +149,10 @@ export class PublicService {
       isAvailable: true,
       deletedAt: null,
       websiteVisible: true,
+      // Variant parent shells are non-sellable picker placeholders;
+      // never expose them on the public site / QR feed. The shell's
+      // child variants flow through as standalone items here.
+      isVariantParent: false,
     };
     if (hiddenItemIds.length > 0) itemWhere.id = { notIn: hiddenItemIds };
 
@@ -236,7 +240,7 @@ export class PublicService {
       // "You might also like" — top selling from same category
       const topItems = await this.prisma.orderItem.groupBy({
         by: ['menuItemId'],
-        where: { order: { branchId, status: 'PAID' }, menuItem: { categoryId, deletedAt: null, isAvailable: true, websiteVisible: true } },
+        where: { order: { branchId, status: 'PAID' }, menuItem: { categoryId, deletedAt: null, isAvailable: true, websiteVisible: true, isVariantParent: false } },
         _sum: { quantity: true },
         orderBy: { _sum: { quantity: 'desc' } },
         take: 8,
@@ -253,7 +257,7 @@ export class PublicService {
 
     // Items tagged with recommendedTag
     const tagged = await this.prisma.menuItem.findMany({
-      where: { branchId, deletedAt: null, isAvailable: true, websiteVisible: true, tags: { contains: tag } },
+      where: { branchId, deletedAt: null, isAvailable: true, websiteVisible: true, isVariantParent: false, tags: { contains: tag } },
       select: { ...PUBLIC_MENU_ITEM_SELECT, category: { select: PUBLIC_CATEGORY_SELECT } },
       take: 10,
     });
@@ -262,7 +266,7 @@ export class PublicService {
     // Fallback: top selling items
     const topAll = await this.prisma.orderItem.groupBy({
       by: ['menuItemId'],
-      where: { order: { branchId, status: 'PAID' }, menuItem: { deletedAt: null, isAvailable: true } },
+      where: { order: { branchId, status: 'PAID' }, menuItem: { deletedAt: null, isAvailable: true, isVariantParent: false } },
       _sum: { quantity: true },
       orderBy: { _sum: { quantity: 'desc' } },
       take: 10,
@@ -279,7 +283,7 @@ export class PublicService {
     const now = new Date();
     const dayName = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
     const discounts = await this.prisma.menuItemDiscount.findMany({
-      where: { isActive: true, startDate: { lte: now }, endDate: { gte: now }, menuItem: { branchId, deletedAt: null, isAvailable: true, websiteVisible: true } },
+      where: { isActive: true, startDate: { lte: now }, endDate: { gte: now }, menuItem: { branchId, deletedAt: null, isAvailable: true, websiteVisible: true, isVariantParent: false } },
       select: {
         type: true,
         value: true,

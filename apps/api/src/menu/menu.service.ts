@@ -8,6 +8,11 @@ const comboAndLinkedInclude = {
   cookingStation: { select: { id: true, name: true } },
   comboItems: { include: { includedItem: { select: { id: true, name: true, price: true } } } },
   linkedItems: { include: { linkedMenu: { select: { id: true, name: true, price: true } } } },
+  variants: {
+    where: { deletedAt: null },
+    select: { id: true, name: true, price: true, isAvailable: true, sortOrder: true, recipe: { select: { id: true } } },
+    orderBy: { sortOrder: 'asc' as const },
+  },
 };
 
 @Injectable()
@@ -38,7 +43,37 @@ export class MenuService {
     return item;
   }
 
-  create(branchId: string, dto: CreateMenuItemDto) {
+  /**
+   * Variant invariants enforced on create + update:
+   *  - A row cannot be both a parent shell and a child variant.
+   *  - A child's parent must exist on the same branch and be a parent
+   *    shell (variants are one level deep — no grandparents).
+   *  - Promoting an item to a parent shell requires `price=0` (the
+   *    shell isn't sold directly; price comes from each variant).
+   *    Admin UI hides the price field on parents — server enforces.
+   */
+  private async assertVariantShape(branchId: string, dto: { isVariantParent?: boolean; variantParentId?: string | null }, currentId?: string) {
+    if (dto.isVariantParent && dto.variantParentId) {
+      throw new BadRequestException('A menu item cannot be both a parent shell and a child variant');
+    }
+    if (dto.variantParentId) {
+      const parent = await this.prisma.menuItem.findFirst({
+        where: { id: dto.variantParentId, branchId, deletedAt: null },
+      });
+      if (!parent) {
+        throw new BadRequestException('Variant parent not found on this branch');
+      }
+      if (!parent.isVariantParent) {
+        throw new BadRequestException('Target menu item is not a variant parent — toggle "Has Variants" on it first');
+      }
+      if (parent.id === currentId) {
+        throw new BadRequestException('A menu item cannot be its own parent');
+      }
+    }
+  }
+
+  async create(branchId: string, dto: CreateMenuItemDto) {
+    await this.assertVariantShape(branchId, dto);
     const slug = this.slugify(dto.name);
     return this.prisma.menuItem.create({
       data: { ...dto, branchId, slug },
@@ -47,7 +82,21 @@ export class MenuService {
   }
 
   async update(id: string, branchId: string, dto: UpdateMenuItemDto) {
-    await this.findOne(id, branchId);
+    const existing = await this.findOne(id, branchId);
+    await this.assertVariantShape(branchId, dto, id);
+
+    // If admin is turning OFF parent shell on an item that still has
+    // active children, refuse — children would be orphaned. Admin must
+    // first move / delete the children explicitly.
+    if (dto.isVariantParent === false && existing.isVariantParent) {
+      const children = await this.prisma.menuItem.count({
+        where: { variantParentId: id, deletedAt: null },
+      });
+      if (children > 0) {
+        throw new BadRequestException(`Cannot disable variants: ${children} child variant(s) still exist. Move or delete them first.`);
+      }
+    }
+
     const data: any = { ...dto };
     // Auto-update slug if name changes and no custom slug
     if (dto.name && !data.slug) data.slug = this.slugify(dto.name);
@@ -64,6 +113,16 @@ export class MenuService {
 
   async remove(id: string, branchId: string) {
     await this.findOne(id, branchId);
+    // Block deletion of a parent shell that still owns active variants.
+    // The children would otherwise have a dangling FK that the migration
+    // ON DELETE SET NULL would clear — silently turning them into
+    // standalone items in admin. Owner must move / delete children first.
+    const childCount = await this.prisma.menuItem.count({
+      where: { variantParentId: id, deletedAt: null },
+    });
+    if (childCount > 0) {
+      throw new BadRequestException(`Cannot delete: this menu item has ${childCount} active variant(s). Delete or detach them first.`);
+    }
     return this.prisma.menuItem.update({
       where: { id },
       data: { deletedAt: new Date() },

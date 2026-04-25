@@ -200,10 +200,12 @@ function CategoryDialog({
 function ItemDialog({
   categories,
   initial,
+  allItems,
   onClose,
 }: {
   categories: MenuCategory[];
   initial?: MenuItem;
+  allItems: MenuItem[];
   onClose: () => void;
 }) {
   const qc = useQueryClient();
@@ -224,7 +226,21 @@ function ItemDialog({
     websiteVisible: initial?.websiteVisible ?? true,
     seoTitle: (initial as any)?.seoTitle ?? '',
     seoDescription: (initial as any)?.seoDescription ?? '',
+    isVariantParent: initial?.isVariantParent ?? false,
+    variantParentId: initial?.variantParentId ?? '',
   });
+
+  // Parents available for "this is a variant of …" dropdown.
+  // Excludes self (avoid cycles) and any item that is itself a child.
+  const parentOptions = allItems
+    .filter((m) => m.isVariantParent && m.id !== initial?.id && !m.deletedAt)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // If editing a parent shell, list its current children to show admin
+  // what's inside.
+  const childVariants = initial?.isVariantParent
+    ? allItems.filter((m) => m.variantParentId === initial.id && !m.deletedAt).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
@@ -258,15 +274,20 @@ function ItemDialog({
 
   const mutation = useMutation({
     mutationFn: () => {
+      // Parent shells aren't sold directly — force price to 0 + clear
+      // any "this is a variant of …" link. Children carry the price.
+      const isParent = !!form.isVariantParent;
       const dto: CreateMenuItemDto & { isAvailable?: boolean } = {
         name: form.name,
         categoryId: form.categoryId,
         type: form.type as 'FOOD' | 'BEVERAGE' | 'MODIFIER',
-        price: Math.round(parseFloat(form.price) * 100),
+        price: isParent ? 0 : Math.round(parseFloat(form.price) * 100),
         description: form.description || undefined,
         cookingStationId: form.cookingStationId || null,
         tags: form.tags || undefined,
         imageUrl: form.imageUrl || undefined,
+        isVariantParent: isParent,
+        variantParentId: isParent ? null : (form.variantParentId || null),
       };
       const extra = {
         pieces: form.pieces || null,
@@ -339,10 +360,53 @@ function ItemDialog({
             </div>
           </div>
 
-          <div>
-            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Price (Tk) *</label>
-            <input type="number" step="0.01" min="0" value={form.price} onChange={(e) => set('price', e.target.value)}
-              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
+          {!form.isVariantParent && (
+            <div>
+              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Price (Tk) *</label>
+              <input type="number" step="0.01" min="0" value={form.price} onChange={(e) => set('price', e.target.value)}
+                className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
+            </div>
+          )}
+
+          {/* Variants block — parent shell toggle + (when not a parent) attach to a parent dropdown */}
+          <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-2">
+            <p className="text-[#FFA726] text-[10px] font-body font-medium tracking-widest uppercase">Variants</p>
+            <label className="flex items-center gap-2 text-sm font-body text-[#999]">
+              <input
+                type="checkbox"
+                checked={form.isVariantParent}
+                disabled={!!form.variantParentId}
+                onChange={(e) => set('isVariantParent', e.target.checked)}
+                className="accent-[#D62B2B]"
+              />
+              Has Variants (this is a picker shell — variants carry their own price + recipe)
+            </label>
+            {form.isVariantParent ? (
+              <p className="text-[10px] text-[#666] leading-relaxed">
+                Save this item, then add each variant ({initial?.name || 'this item'} → "Prawn", "Chicken", etc.) as separate menu items and pick this one as their <em>Parent</em>.
+                {childVariants.length > 0 && (
+                  <span className="block mt-1 text-[#999]">{childVariants.length} variant(s) attached: {childVariants.map((v) => v.name).join(', ')}</span>
+                )}
+              </p>
+            ) : (
+              <div>
+                <label className="text-[10px] font-body text-[#666] tracking-widest uppercase block mb-1">Parent (optional — make this a variant of)</label>
+                <select
+                  value={form.variantParentId}
+                  onChange={(e) => set('variantParentId', e.target.value)}
+                  disabled={form.isVariantParent}
+                  className="w-full bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                >
+                  <option value="">— Standalone item —</option>
+                  {parentOptions.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                {parentOptions.length === 0 && (
+                  <p className="text-[10px] text-[#555] mt-1">No parent shells yet. Create one by toggling "Has Variants" on another menu item.</p>
+                )}
+              </div>
+            )}
           </div>
 
           <div>
@@ -461,7 +525,7 @@ function ItemDialog({
           <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
           <button
             onClick={() => mutation.mutate()}
-            disabled={!form.name.trim() || !form.price || mutation.isPending}
+            disabled={!form.name.trim() || (!form.isVariantParent && !form.price) || mutation.isPending}
             className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40"
           >
             {mutation.isPending ? 'Saving...' : 'Save'}
@@ -1063,13 +1127,16 @@ export default function MenuPage() {
                     )}
                   </td>
                   <td className="px-5 py-3 font-medium text-white">
+                    {item.variantParentId && <span className="text-[#666] mr-1">└</span>}
                     {item.name}
                     {item.isCombo && <span className="ml-2 text-[10px] font-medium tracking-widest uppercase text-[#D62B2B] border border-[#D62B2B] px-1.5 py-0.5">COMBO</span>}
+                    {item.isVariantParent && <span className="ml-2 text-[10px] font-medium tracking-widest uppercase text-[#FFA726] border border-[#FFA726] px-1.5 py-0.5">PARENT • {item.variants?.length ?? 0}</span>}
+                    {item.variantParentId && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#FFA726] border border-[#2A2A2A] px-1.5 py-0.5">VARIANT</span>}
                     {(item.linkedItems?.length ?? 0) > 0 && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#999] border border-[#2A2A2A] px-1.5 py-0.5">LINKED</span>}
                   </td>
                   <td className="px-5 py-3 text-[#999]">{item.category?.name ?? '--'}</td>
                   <td className={`px-5 py-3 ${sectionId ? 'text-white' : 'text-[#666]'}`}>{sectionName}</td>
-                  <td className="px-5 py-3 text-white">{formatCurrency(Number(item.price))}</td>
+                  <td className="px-5 py-3 text-white">{item.isVariantParent ? <span className="text-[#666] text-xs">— variants priced separately</span> : formatCurrency(Number(item.price))}</td>
                   <td className="px-5 py-3">
                     <div className="flex flex-wrap gap-1">
                       {tags.map((tag, i) => (
@@ -1102,7 +1169,7 @@ export default function MenuPage() {
       </div>
 
       {catDialog.open && <CategoryDialog initial={catDialog.cat} categories={categories} onClose={() => setCatDialog({ open: false })} />}
-      {itemDialog.open && <ItemDialog categories={categories} initial={itemDialog.item} onClose={() => setItemDialog({ open: false })} />}
+      {itemDialog.open && <ItemDialog categories={categories} initial={itemDialog.item} allItems={menuItems} onClose={() => setItemDialog({ open: false })} />}
       {comboDialog.open && comboDialog.item && <ComboDialog item={comboDialog.item} allItems={menuItems} onClose={() => setComboDialog({ open: false })} />}
       {linkedDialog.open && linkedDialog.item && <LinkedDialog item={linkedDialog.item} allItems={menuItems} onClose={() => setLinkedDialog({ open: false })} />}
 

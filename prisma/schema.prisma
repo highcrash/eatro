@@ -567,6 +567,18 @@ model MenuItem {
   /// QR feeds (websiteVisible=false handles the latter; this is the
   /// explicit provenance flag).
   isCustom          Boolean      @default(false)
+  /// Nullable parent FK. When set, this row is a sellable variant
+  /// (e.g. "Hargao Prawn") and `variantParent` is the picker shell
+  /// (e.g. "Hargao"). When null, item is either a standalone sellable
+  /// item (legacy behaviour) or itself a parent shell when
+  /// `isVariantParent=true`. Variants are limited to ONE level deep —
+  /// admin / API enforce.
+  variantParentId   String?
+  /// True when this item is a non-sellable picker shell that exists
+  /// only to group its variants. POS picker shows it as a card; click
+  /// opens the variant chooser. Server rejects orderItem.create against
+  /// a parent shell. Legacy MenuItems all have isVariantParent=false.
+  isVariantParent   Boolean      @default(false)
 
   // Relations
   branch           Branch          @relation(fields: [branchId], references: [id])
@@ -579,6 +591,8 @@ model MenuItem {
   linkedItems      LinkedItem[]    @relation("LinkedParent")
   linkedFrom       LinkedItem[]    @relation("LinkedChild")
   menuDiscounts    MenuItemDiscount[]
+  variantParent    MenuItem?          @relation("MenuVariants", fields: [variantParentId], references: [id])
+  variants         MenuItem[]         @relation("MenuVariants")
 
   @@index([branchId, categoryId, isAvailable])
   @@index([branchId, sortOrder])

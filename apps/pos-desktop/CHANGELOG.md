@@ -3,6 +3,34 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.19 — menu variants (Phase 1 of variants/mods/addons) (2026-04-25)
+
+No Electron-shell changes. Rebundles apps/pos + @restora/types:
+
+- **Menu variants.** A menu item can now act as a "picker shell"
+  that groups several sellable variants — each variant is a real
+  MenuItem with its own price + recipe. Example: one shell "Dim
+  Sum Hargao" → "Prawn ৳450" (prawn recipe) + "Chicken ৳350"
+  (chicken recipe). Cashier taps the shell in POS → variant chooser
+  opens → picks one → it lands in the cart at the variant's price
+  and deducts the variant's recipe.
+- **Admin Menu page** gets a "Has Variants" toggle on the edit
+  dialog. When enabled, the Price field is hidden (variants carry
+  the price). A "Parent" dropdown on standalone items lets you
+  attach them as variants of an existing parent. List view badges
+  parents with `PARENT • N` and indents children with `└`.
+- **Reports unchanged.** Variants are first-class MenuItem rows so
+  Items Sold, Performance, Mushak, etc. all keep working — each
+  variant shows up as its own row (Hargao Prawn separate from
+  Hargao Chicken), which is what we want for distinct prices and
+  costs.
+- **Live-safety.** Pure additive schema (`variantParentId` nullable
+  + `isVariantParent` defaults false). Existing menu items behave
+  identically until admin opts in. Variants are limited to one
+  level deep — a parent cannot itself be a variant.
+- Phases 2 (per-order ingredient removal) and 3 (addons / modifiers)
+  ship in follow-up rollouts.
+
 ## 0.8.18 — performance report + POS Customised Menu (2026-04-25)
 
 No Electron-shell changes. Rebundles apps/pos + @restora/types:
