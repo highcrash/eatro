@@ -3,6 +3,18 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.21 — admin Menu: variants render under their parent (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin:
+
+- **Variant rows now nest directly under their parent** in the admin
+  Menu list — `Latte (PARENT • 3)` immediately followed by `Latte –
+  Single`, `Latte – Double`, etc., instead of being scattered
+  alphabetically across the table. Standalone items render first,
+  then each parent + its variants, then any orphan variants whose
+  parent is filtered out by the search/category. No data change —
+  client-side ordering only.
+
 ## 1.0.20 — admin sidebar: collapsible groups + quick-jump search (2026-04-25)
 
 No Electron-shell changes. Rebundles apps/admin:
