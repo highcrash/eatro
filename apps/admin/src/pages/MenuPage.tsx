@@ -833,7 +833,39 @@ export default function MenuPage() {
         (m.description ?? '').toLowerCase().includes(q)
       );
     }
-    return items;
+
+    // Group variants directly under their parent so the list renders as
+    //   Latte           PARENT • 3
+    //     └ Latte – Single  VARIANT
+    //     └ Latte – Double  VARIANT
+    //     └ Latte – Triple  VARIANT
+    //   Espresso        PARENT • 2
+    //     ...
+    // instead of scattering variants alphabetically. Search/category
+    // filters above run first, so a variant matched by the search but
+    // whose parent was filtered out still appears (as an orphan, by
+    // itself) — that's intentional, the user is trying to find it.
+    const parents = items.filter((m) => m.isVariantParent);
+    const variants = items.filter((m) => m.variantParentId);
+    const standalone = items.filter((m) => !m.isVariantParent && !m.variantParentId);
+    const variantsByParent = new Map<string, typeof variants>();
+    for (const v of variants) {
+      if (!v.variantParentId) continue;
+      const arr = variantsByParent.get(v.variantParentId) ?? [];
+      arr.push(v);
+      variantsByParent.set(v.variantParentId, arr);
+    }
+    const orphans = variants.filter((v) => !v.variantParentId || !parents.some((p) => p.id === v.variantParentId));
+
+    const ordered: typeof items = [];
+    for (const m of standalone) ordered.push(m);
+    for (const p of parents) {
+      ordered.push(p);
+      const kids = (variantsByParent.get(p.id) ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
+      for (const k of kids) ordered.push(k);
+    }
+    for (const o of orphans) ordered.push(o);
+    return ordered;
   })();
 
   const deleteCat = useMutation({
