@@ -1,13 +1,22 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ShoppingCart, Minus, Plus } from 'lucide-react';
 
 import type { MenuItem } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
-import { useCartStore } from '../store/cart.store';
+import { useCartStore, type CartAddon } from '../store/cart.store';
 import { apiUrl } from '../lib/api';
 import { useSessionStore } from '../store/session.store';
+
+interface BranchSettingsLite {
+  qrAllowSelfRemoveIngredients?: boolean;
+}
+
+interface RecipeIngredient {
+  id: string;
+  ingredient: { id: string; name: string };
+}
 
 export default function ItemPage() {
   const { itemId } = useParams<{ itemId: string }>();
@@ -16,6 +25,9 @@ export default function ItemPage() {
   const branchName = useSessionStore((s) => s.branchName);
   const { addItem, items: cart } = useCartStore();
   const [qty, setQty] = useState(1);
+  const [picks, setPicks] = useState<Map<string, CartAddon>>(new Map());
+  const [notes, setNotes] = useState('');
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
 
   const { data } = useQuery<{ categories: unknown[]; items: MenuItem[] }>({
     queryKey: ['qr-menu', branchId],
@@ -25,8 +37,52 @@ export default function ItemPage() {
     },
   });
 
+  // Branch settings — drives whether the customer sees the structured
+  // ingredient-removal checkboxes or only the free-text Special Note.
+  const { data: settings } = useQuery<BranchSettingsLite>({
+    queryKey: ['qr-public-settings', branchId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/public/branch/${branchId}/settings`));
+      if (!res.ok) return {};
+      return res.json();
+    },
+    enabled: !!branchId,
+  });
+  const allowSelfRemove = !!settings?.qrAllowSelfRemoveIngredients;
+
   const item = data?.items.find((m) => m.id === itemId);
+
+  // Recipe lookup (only fetched when self-remove is on). Uses the same
+  // public endpoint pattern; falls back gracefully when the endpoint
+  // is missing or the menu item has no recipe.
+  const { data: recipe } = useQuery<{ items: RecipeIngredient[] } | null>({
+    queryKey: ['qr-public-recipe', itemId],
+    queryFn: async () => {
+      try {
+        const res = await fetch(apiUrl(`/public/menu/recipe/${itemId}`));
+        if (!res.ok) return null;
+        return res.json();
+      } catch { return null; }
+    },
+    enabled: !!itemId && allowSelfRemove,
+  });
+
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
+
+  const groups = useMemo(
+    () => (item?.addonGroups ?? []).filter((g) => g.options.length > 0),
+    [item],
+  );
+
+  const picksByGroup = useMemo(() => {
+    const m = new Map<string, CartAddon[]>();
+    for (const p of picks.values()) {
+      const arr = m.get(p.groupId) ?? [];
+      arr.push(p);
+      m.set(p.groupId, arr);
+    }
+    return m;
+  }, [picks]);
 
   if (!item) {
     return (
@@ -35,9 +91,54 @@ export default function ItemPage() {
   }
 
   const tags = item.tags ? item.tags.split(',').map((t) => t.trim()).filter(Boolean) : [];
+  const addonsTotal = [...picks.values()].reduce((s, p) => s + p.price, 0);
+  const unitPrice = Number(item.price) + addonsTotal;
+  const unmet = groups.filter((g) => (picksByGroup.get(g.id)?.length ?? 0) < g.minPicks);
+  const canAdd = unmet.length === 0;
+
+  const togglePick = (g: { id: string; name: string; maxPicks: number }, addon: { id: string; name: string; price: number }) => {
+    const k = `${g.id}:${addon.id}`;
+    setPicks((prev) => {
+      const next = new Map(prev);
+      if (next.has(k)) { next.delete(k); return next; }
+      const inGroup = [...next.values()].filter((p) => p.groupId === g.id);
+      if (inGroup.length >= g.maxPicks) {
+        // FIFO drop the oldest pick in this group.
+        next.delete(`${g.id}:${inGroup[0].addonItemId}`);
+      }
+      next.set(k, { groupId: g.id, groupName: g.name, addonItemId: addon.id, addonName: addon.name, price: addon.price });
+      return next;
+    });
+  };
+
+  const toggleRemoved = (id: string) => {
+    setRemoved((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleAdd = () => {
-    for (let i = 0; i < qty; i++) addItem(item);
+    if (!canAdd) return;
+    // When self-remove is on, fold the removed-ingredient names into
+    // the line's notes field — server still respects the
+    // qrAllowSelfRemoveIngredients toggle, but kitchen sees a clear
+    // "NO X / NO Y" string. (Using notes keeps the wire shape v1.)
+    let combinedNotes = notes.trim();
+    if (allowSelfRemove && removed.size > 0 && recipe) {
+      const removedNames = recipe.items
+        .filter((ri) => removed.has(ri.ingredient.id))
+        .map((ri) => `NO ${ri.ingredient.name.toUpperCase()}`);
+      const prefix = removedNames.join(' • ');
+      combinedNotes = combinedNotes ? `${prefix} | ${combinedNotes}` : prefix;
+    }
+    addItem(item, {
+      addons: picks.size > 0 ? [...picks.values()] : undefined,
+      notes: combinedNotes || undefined,
+      quantity: qty,
+    });
     void navigate(-1);
   };
 
@@ -93,9 +194,100 @@ export default function ItemPage() {
 
         {/* Price */}
         <div className="mt-6 border-t border-[#2A2A2A] pt-5">
-          <p className="font-display text-2xl text-white tracking-wider">{formatCurrency(item.price)}</p>
+          <p className="font-display text-2xl text-white tracking-wider">{formatCurrency(unitPrice)}</p>
+          {addonsTotal > 0 && (
+            <p className="text-[11px] text-[#888] font-body mt-1">Base {formatCurrency(item.price)} + addons {formatCurrency(addonsTotal)}</p>
+          )}
+        </div>
+
+        {/* Addon groups */}
+        {groups.length > 0 && (
+          <div className="mt-6 space-y-4">
+            {groups.map((g) => {
+              const here = picksByGroup.get(g.id) ?? [];
+              const need = g.minPicks > 0 && here.length < g.minPicks;
+              return (
+                <div key={g.id} className="border border-[#2A2A2A] bg-[#1A1A1A] p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-body font-medium text-sm text-white">{g.name}</p>
+                    <p className={`text-[10px] font-body uppercase tracking-widest ${need ? 'text-[#F03535]' : 'text-[#888]'}`}>
+                      {g.minPicks === 0 ? `Optional · max ${g.maxPicks}` : g.minPicks === g.maxPicks ? `Pick ${g.minPicks}` : `Pick ${g.minPicks}-${g.maxPicks}`}
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    {g.options.map((opt) => {
+                      const addon = opt.addon;
+                      if (!addon) return null;
+                      const checked = picks.has(`${g.id}:${addon.id}`);
+                      const disabled = addon.isAvailable === false;
+                      return (
+                        <button
+                          key={opt.id}
+                          disabled={disabled}
+                          onClick={() => togglePick(g, { id: addon.id, name: addon.name, price: Number(addon.price) })}
+                          className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 border ${
+                            checked ? 'bg-[#C8FF00]/10 border-[#C8FF00]' : 'bg-[#0D0D0D] border-[#2A2A2A] hover:border-[#888]'
+                          } ${disabled ? 'opacity-50' : ''}`}
+                        >
+                          <span className="flex items-center gap-2 text-sm font-body text-white">
+                            <input type="checkbox" checked={checked} readOnly className="accent-[#C8FF00]" />
+                            {addon.name}
+                          </span>
+                          <span className="text-sm font-body font-medium text-white">{Number(addon.price) > 0 ? `+${formatCurrency(Number(addon.price))}` : 'Free'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Self-service ingredient removal — only when admin enabled it */}
+        {allowSelfRemove && recipe && recipe.items.length > 0 && (
+          <div className="mt-6 border border-[#2A2A2A] bg-[#1A1A1A] p-3">
+            <p className="font-body font-medium text-sm text-white mb-1">Customise ingredients</p>
+            <p className="text-[11px] text-[#888] font-body mb-2">Tick to remove from your dish.</p>
+            <div className="space-y-1.5">
+              {recipe.items.map((ri) => {
+                const checked = removed.has(ri.ingredient.id);
+                return (
+                  <button
+                    key={ri.id}
+                    onClick={() => toggleRemoved(ri.ingredient.id)}
+                    className={`w-full text-left px-3 py-2 flex items-center gap-2 border ${
+                      checked ? 'bg-[#F03535]/10 border-[#F03535]' : 'bg-[#0D0D0D] border-[#2A2A2A] hover:border-[#888]'
+                    }`}
+                  >
+                    <input type="checkbox" checked={checked} readOnly className="accent-[#F03535]" />
+                    <span className={`text-sm font-body ${checked ? 'text-[#F03535] font-medium line-through' : 'text-white'}`}>{ri.ingredient.name}</span>
+                    {checked && <span className="ml-auto text-[10px] uppercase tracking-widest text-[#F03535] font-medium">No</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Special note — always available, regardless of toggle */}
+        <div className="mt-6">
+          <label className="block text-[11px] font-body text-[#888] uppercase tracking-widest mb-1">Special note (optional)</label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder={allowSelfRemove ? 'Anything else for the kitchen…' : 'e.g. no garlic, less spicy, allergic to peanuts'}
+            rows={2}
+            className="w-full bg-[#1A1A1A] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#C8FF00] placeholder:text-[#555] resize-none"
+          />
+          {!allowSelfRemove && (
+            <p className="text-[10px] text-[#666] font-body mt-1">Cashier will read your note before sending to the kitchen.</p>
+          )}
         </div>
       </div>
+
+      {/* Spacer so the sticky bar doesn't cover the last block */}
+      <div className="h-32" />
 
       {/* Bottom: Qty + Add to Cart */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-[#0D0D0D] border-t border-[#2A2A2A] px-5 py-4 flex items-center gap-4 z-20">
@@ -119,10 +311,12 @@ export default function ItemPage() {
         {/* Add to cart button */}
         <button
           onClick={handleAdd}
-          className="flex-1 bg-[#C8FF00] text-[#0D0D0D] py-3 font-body font-medium text-sm flex items-center justify-between px-5"
+          disabled={!canAdd}
+          title={canAdd ? '' : `Required: ${unmet.map((g) => g.name).join(', ')}`}
+          className="flex-1 bg-[#C8FF00] text-[#0D0D0D] py-3 font-body font-medium text-sm flex items-center justify-between px-5 disabled:opacity-40"
         >
           <span>Add to Cart</span>
-          <span className="font-display text-lg tracking-wide">{formatCurrency(item.price * qty)}</span>
+          <span className="font-display text-lg tracking-wide">{formatCurrency(unitPrice * qty)}</span>
         </button>
       </div>
     </div>

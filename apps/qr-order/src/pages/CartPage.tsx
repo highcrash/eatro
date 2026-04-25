@@ -17,8 +17,25 @@ export default function CartPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const { items, removeItem, updateQuantity, clearCart } = useCartStore();
-  const subtotal = items.reduce((s, c) => s + c.menuItem.price * c.quantity, 0);
+  const subtotal = items.reduce((s, c) => {
+    const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
+    return s + (Number(c.menuItem.price) + addonsTotal) * c.quantity;
+  }, 0);
   const isAddingToOrder = !!activeOrderId;
+
+  /** Map a cart entry → API line shape. Sends addon picks (groupId +
+   *  addonItemId pairs); the server snapshots names + prices itself.
+   *  `notes` carries any "no garlic" requests when admin has the QR
+   *  self-service toggle OFF — server will leave them as text and the
+   *  cashier applies the structural removal at acceptance time. */
+  const lineToDto = (c: typeof items[number]) => ({
+    menuItemId: c.menuItem.id,
+    quantity: c.quantity,
+    notes: c.notes,
+    addons: c.addons && c.addons.length > 0
+      ? c.addons.map((a) => ({ groupId: a.groupId, addonItemId: a.addonItemId }))
+      : undefined,
+  });
 
   const handleOrder = async () => {
     setSubmitting(true);
@@ -27,11 +44,11 @@ export default function CartPage() {
         ? apiUrl(`/orders/qr/${activeOrderId}/items`)
         : apiUrl('/orders/qr');
       const body = activeOrderId
-        ? { items: items.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity })) }
+        ? { items: items.map(lineToDto) }
         : {
             tableId: tableId ?? undefined,
             type: tableId ? 'DINE_IN' : 'TAKEAWAY',
-            items: items.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity })),
+            items: items.map(lineToDto),
           };
 
       const res = await fetch(url, {
@@ -94,8 +111,12 @@ export default function CartPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {items.map(({ menuItem, quantity }) => (
-              <div key={menuItem.id} className="flex gap-3 items-start py-3 border-b border-[#F2F1EE] last:border-0">
+            {items.map((line) => {
+              const { menuItem, quantity, addons, notes, key } = line;
+              const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
+              const unitPrice = Number(menuItem.price) + addonsTotal;
+              return (
+              <div key={key} className="flex gap-3 items-start py-3 border-b border-[#F2F1EE] last:border-0">
                 {/* Image */}
                 <div className="w-16 h-16 bg-[#F2F1EE] overflow-hidden flex-shrink-0">
                   {menuItem.imageUrl ? (
@@ -108,20 +129,28 @@ export default function CartPage() {
                 {/* Details */}
                 <div className="flex-1 min-w-0">
                   <p className="font-body font-medium text-sm text-[#111] leading-tight">{menuItem.name}</p>
-                  {menuItem.description && (
+                  {addons && addons.length > 0 && (
+                    <p className="text-[11px] text-[#D62B2B] font-body font-medium mt-0.5 leading-tight">
+                      {addons.map((a) => `+ ${a.addonName}${a.price > 0 ? ` (${formatCurrency(a.price)})` : ''}`).join(' • ')}
+                    </p>
+                  )}
+                  {notes && (
+                    <p className="text-[11px] text-[#666] font-body italic mt-0.5 leading-tight">📝 {notes}</p>
+                  )}
+                  {menuItem.description && !notes && (
                     <p className="text-[11px] text-[#999] font-body mt-0.5 line-clamp-1">{menuItem.description}</p>
                   )}
                   {/* Qty controls */}
                   <div className="flex items-center gap-0 mt-2 border border-[#E8E6E3] w-fit">
                     <button
-                      onClick={() => updateQuantity(menuItem.id, quantity - 1)}
+                      onClick={() => updateQuantity(key, quantity - 1)}
                       className="w-8 h-8 flex items-center justify-center text-[#111] hover:bg-[#F2F1EE] transition-colors"
                     >
                       <Minus size={12} />
                     </button>
                     <span className="w-7 text-center font-body font-medium text-sm text-[#111]">{quantity}</span>
                     <button
-                      onClick={() => updateQuantity(menuItem.id, quantity + 1)}
+                      onClick={() => updateQuantity(key, quantity + 1)}
                       className="w-8 h-8 flex items-center justify-center text-[#111] hover:bg-[#F2F1EE] transition-colors"
                     >
                       <Plus size={12} />
@@ -131,13 +160,14 @@ export default function CartPage() {
 
                 {/* Price + remove */}
                 <div className="flex flex-col items-end gap-1">
-                  <button onClick={() => removeItem(menuItem.id)} className="text-[#CCC] hover:text-[#D62B2B] transition-colors p-0.5">
+                  <button onClick={() => removeItem(key)} className="text-[#CCC] hover:text-[#D62B2B] transition-colors p-0.5">
                     <X size={14} />
                   </button>
-                  <p className="font-display text-lg text-[#111] tracking-wide mt-auto">{formatCurrency(menuItem.price * quantity)}</p>
+                  <p className="font-display text-lg text-[#111] tracking-wide mt-auto">{formatCurrency(unitPrice * quantity)}</p>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

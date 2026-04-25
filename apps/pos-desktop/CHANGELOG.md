@@ -3,6 +3,34 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.23 — apply QR addons/notes/customise to qr-order app (2026-04-25)
+
+Hotfix follow-up to 0.8.22. The previous rollout added QR addon
+support to `apps/qr/` but production deploys `apps/qr-order/` —
+this commit ports the same UX into the customer-facing app.
+
+- **qr-order ItemPage** now renders the addon picker (with min/max
+  validation) for any item that has addon groups. Live total
+  updates as customer toggles options.
+- **qr-order CartPage** uses the new line-key cart store, sends
+  `addons` + `notes` to the order DTO, and shows addon picks +
+  special notes inline on each cart row.
+- **Cart store** (`apps/qr-order/src/store/cart.store.ts`) extends
+  CartEntry with `addons` + `notes` and a stable line key so
+  different selections become separate rows. Storage key bumped to
+  `restora-qr-cart-v2` so any old in-flight carts don't collide.
+- **QR self-service ingredient removal** appears as a "Customise
+  ingredients" checklist on the item page when admin has the
+  branch toggle ON. When OFF, the existing Special Note textarea
+  is the only path — cashier reads it on order acceptance and
+  applies the removal manually via POS Customise.
+- **New public endpoints** powering the QR pickers, both read-only
+  and limited-scope:
+  - `GET /public/branch/:branchId/settings` — exposes only the
+    qrAllowSelfRemoveIngredients toggle (no SMS keys etc).
+  - `GET /public/menu/recipe/:menuItemId` — ingredient id + name
+    only (no quantities, costs, or supplier info).
+
 ## 0.8.22 — table timers + QR addons/variants + self-remove toggle (2026-04-25)
 
 Rebundles apps/pos + apps/qr + @restora/types:
