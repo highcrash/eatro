@@ -21,13 +21,31 @@ interface PublicMenu {
   items: MenuItem[];
 }
 
+interface CartAddon {
+  groupId: string;
+  groupName: string;
+  addonItemId: string;
+  addonName: string;
+  price: number;
+}
+
 interface CartItem {
+  /** Stable key for matching cart rows when the same menu item is
+   *  added with different addons / notes. */
+  key: string;
   menuItemId: string;
   name: string;
+  /** Base unit price (the menu item price). Total per unit = price + addons. */
   price: number;
   quantity: number;
   imageUrl?: string | null;
   notes?: string;
+  addons?: CartAddon[];
+}
+
+function qrCartKey(it: { menuItemId: string; addons?: CartAddon[]; notes?: string }): string {
+  const a = [...(it.addons ?? [])].map((x) => `${x.groupId}:${x.addonItemId}`).sort().join(',');
+  return `${it.menuItemId}::${a}::${it.notes ?? ''}`;
 }
 
 interface OrderStatusItem {
@@ -497,6 +515,19 @@ function TableOrderPage() {
     enabled: !!tableInfo?.branchId,
   });
 
+  const [addonPickerFor, setAddonPickerFor] = useState<MenuItem | null>(null);
+
+  /** Map a CartItem to the API line shape, including addons (groupId +
+   *  addonItemId only — server snapshots names + prices itself). */
+  const lineToDto = (c: CartItem) => ({
+    menuItemId: c.menuItemId,
+    quantity: c.quantity,
+    notes: c.notes,
+    addons: c.addons && c.addons.length > 0
+      ? c.addons.map((a) => ({ groupId: a.groupId, addonItemId: a.addonItemId }))
+      : undefined,
+  });
+
   // Place new order
   const orderMutation = useMutation({
     mutationFn: () =>
@@ -504,7 +535,7 @@ function TableOrderPage() {
         tableId: tableId!,
         type: 'DINE_IN',
         customerId: customerId || undefined,
-        items: cart.map((c) => ({ menuItemId: c.menuItemId, quantity: c.quantity, notes: c.notes })),
+        items: cart.map(lineToDto),
       }),
     onSuccess: (order) => {
       setOrderId(order.id);
@@ -519,7 +550,7 @@ function TableOrderPage() {
   const addItemsMutation = useMutation({
     mutationFn: () =>
       api.addItems(orderId!, tableInfo!.branchId, {
-        items: cart.map((c) => ({ menuItemId: c.menuItemId, quantity: c.quantity, notes: c.notes })),
+        items: cart.map(lineToDto),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['order-status', orderId] });
@@ -530,24 +561,45 @@ function TableOrderPage() {
   });
 
   const addToCart = useCallback((item: MenuItem) => {
-    const effectivePrice = (item as any).discountedPrice ?? Number(item.price);
+    const groups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
+    if (groups.length > 0) {
+      // Defer to the addon picker before adding — addons must be
+      // chosen at add time so the price + recipe are right.
+      setAddonPickerFor(item);
+      return;
+    }
+    const effectivePrice = (item as { discountedPrice?: number | null }).discountedPrice ?? Number(item.price);
     setCart((prev) => {
-      const existing = prev.find((c) => c.menuItemId === item.id);
-      if (existing) return prev.map((c) => c.menuItemId === item.id ? { ...c, quantity: c.quantity + 1 } : c);
-      return [...prev, { menuItemId: item.id, name: item.name, price: effectivePrice, quantity: 1, imageUrl: item.imageUrl }];
+      const key = qrCartKey({ menuItemId: item.id });
+      const existing = prev.find((c) => c.key === key);
+      if (existing) return prev.map((c) => c.key === key ? { ...c, quantity: c.quantity + 1 } : c);
+      return [...prev, { key, menuItemId: item.id, name: item.name, price: effectivePrice, quantity: 1, imageUrl: item.imageUrl }];
     });
   }, []);
 
-  const removeFromCart = useCallback((menuItemId: string) => {
+  const addToCartWithAddons = useCallback((item: MenuItem, addons: CartAddon[]) => {
+    const effectivePrice = (item as { discountedPrice?: number | null }).discountedPrice ?? Number(item.price);
     setCart((prev) => {
-      const existing = prev.find((c) => c.menuItemId === menuItemId);
+      const key = qrCartKey({ menuItemId: item.id, addons });
+      const existing = prev.find((c) => c.key === key);
+      if (existing) return prev.map((c) => c.key === key ? { ...c, quantity: c.quantity + 1 } : c);
+      return [...prev, { key, menuItemId: item.id, name: item.name, price: effectivePrice, quantity: 1, imageUrl: item.imageUrl, addons }];
+    });
+  }, []);
+
+  const removeFromCart = useCallback((key: string) => {
+    setCart((prev) => {
+      const existing = prev.find((c) => c.key === key);
       if (!existing) return prev;
-      if (existing.quantity === 1) return prev.filter((c) => c.menuItemId !== menuItemId);
-      return prev.map((c) => c.menuItemId === menuItemId ? { ...c, quantity: c.quantity - 1 } : c);
+      if (existing.quantity === 1) return prev.filter((c) => c.key !== key);
+      return prev.map((c) => c.key === key ? { ...c, quantity: c.quantity - 1 } : c);
     });
   }, []);
 
-  const cartTotal = cart.reduce((s, c) => s + c.price * c.quantity, 0);
+  const cartTotal = cart.reduce((s, c) => {
+    const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
+    return s + (c.price + addonsTotal) * c.quantity;
+  }, 0);
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
 
   const categories = menu?.categories.filter((c) => !c.parentId) ?? [];
@@ -703,7 +755,7 @@ function TableOrderPage() {
         <div className="px-5 pb-24">
           <div className="grid grid-cols-2 gap-3 mt-3">
             {visibleItems.map((item) => (
-              <FoodCard key={item.id} item={item} cartQty={cart.find((c) => c.menuItemId === item.id)?.quantity ?? 0} onAdd={() => addToCart(item)} />
+              <FoodCard key={item.id} item={item} cartQty={cart.filter((c) => c.menuItemId === item.id).reduce((s, c) => s + c.quantity, 0)} onAdd={() => addToCart(item)} />
             ))}
           </div>
           {visibleItems.length === 0 && (
@@ -725,7 +777,7 @@ function TableOrderPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {items.slice(0, 4).map((item) => (
-                  <FoodCard key={item.id} item={item} cartQty={cart.find((c) => c.menuItemId === item.id)?.quantity ?? 0} onAdd={() => addToCart(item)} />
+                  <FoodCard key={item.id} item={item} cartQty={cart.filter((c) => c.menuItemId === item.id).reduce((s, c) => s + c.quantity, 0)} onAdd={() => addToCart(item)} />
                 ))}
               </div>
             </div>
@@ -759,8 +811,11 @@ function TableOrderPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-            {cart.map((item) => (
-              <div key={item.menuItemId} className="flex gap-3 items-start py-3 border-b border-[#F2F1EE] last:border-0">
+            {cart.map((item) => {
+              const addonsTotal = (item.addons ?? []).reduce((s, a) => s + a.price, 0);
+              const unitPrice = item.price + addonsTotal;
+              return (
+              <div key={item.key} className="flex gap-3 items-start py-3 border-b border-[#F2F1EE] last:border-0">
                 {/* Thumbnail */}
                 <div className="w-16 h-16 bg-[#F2F1EE] overflow-hidden flex-shrink-0">
                   {item.imageUrl ? (
@@ -771,27 +826,33 @@ function TableOrderPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-body font-medium text-sm text-[#111] leading-tight">{item.name}</p>
-                  <p className="text-[11px] text-[#999] font-body mt-0.5">{formatCurrency(item.price)} each</p>
+                  <p className="text-[11px] text-[#999] font-body mt-0.5">{formatCurrency(unitPrice)} each</p>
+                  {item.addons && item.addons.length > 0 && (
+                    <p className="text-[11px] text-[#D62B2B] font-body font-medium mt-0.5 leading-tight">
+                      {item.addons.map((a) => `+ ${a.addonName}${a.price > 0 ? ` (${formatCurrency(a.price)})` : ''}`).join(' • ')}
+                    </p>
+                  )}
                   {/* Qty controls */}
                   <div className="flex items-center gap-0 mt-2 border border-[#E8E6E2] w-fit">
-                    <button onClick={() => removeFromCart(item.menuItemId)} className="w-8 h-8 flex items-center justify-center text-[#111] hover:bg-[#F2F1EE] text-lg">−</button>
+                    <button onClick={() => removeFromCart(item.key)} className="w-8 h-8 flex items-center justify-center text-[#111] hover:bg-[#F2F1EE] text-lg">−</button>
                     <span className="w-7 text-center font-body font-medium text-sm text-[#111]">{item.quantity}</span>
                     <button
-                      onClick={() => { const mi = menu?.items.find((i) => i.id === item.menuItemId); if (mi) addToCart(mi); }}
+                      onClick={() => setCart((prev) => prev.map((c) => c.key === item.key ? { ...c, quantity: c.quantity + 1 } : c))}
                       className="w-8 h-8 flex items-center justify-center text-[#111] hover:bg-[#F2F1EE] text-lg"
                     >+</button>
                   </div>
                   {/* Item note */}
                   <input
                     value={item.notes || ''}
-                    onChange={(e) => setCart((prev) => prev.map((c) => c.menuItemId === item.menuItemId ? { ...c, notes: e.target.value } : c))}
+                    onChange={(e) => setCart((prev) => prev.map((c) => c.key === item.key ? { ...c, notes: e.target.value } : c))}
                     placeholder="Add note (e.g. no onion, extra spicy)..."
                     className="mt-2 w-full border border-[#E8E6E2] px-2 py-1.5 text-[11px] font-body text-[#666] outline-none focus:border-[#D62B2B] placeholder:text-[#CCC]"
                   />
                 </div>
-                <p className="font-display text-lg text-[#111] tracking-wide">{formatCurrency(item.price * item.quantity)}</p>
+                <p className="font-display text-lg text-[#111] tracking-wide">{formatCurrency(unitPrice * item.quantity)}</p>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Summary + submit */}
@@ -908,6 +969,127 @@ function TableOrderPage() {
           </div>
         </div>
       )}
+
+      {/* Addon picker — opens when an item with addonGroups is added. */}
+      {addonPickerFor && (
+        <QrAddonPicker
+          item={addonPickerFor}
+          onClose={() => setAddonPickerFor(null)}
+          onConfirm={(picks) => {
+            addToCartWithAddons(addonPickerFor, picks);
+            setAddonPickerFor(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── QR Addon Picker ─────────────────────────────────────────────────────────
+
+function QrAddonPicker({ item, onClose, onConfirm }: {
+  item: MenuItem;
+  onClose: () => void;
+  onConfirm: (picks: CartAddon[]) => void;
+}) {
+  const groups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
+  const [picks, setPicks] = useState<Map<string, CartAddon>>(new Map());
+
+  const togglePick = (groupId: string, groupName: string, optAddon: { id: string; name: string; price: number }, maxPicks: number) => {
+    const key = `${groupId}:${optAddon.id}`;
+    setPicks((prev) => {
+      const next = new Map(prev);
+      if (next.has(key)) { next.delete(key); return next; }
+      const inGroup = [...next.values()].filter((p) => p.groupId === groupId);
+      if (inGroup.length >= maxPicks) {
+        // FIFO drop the oldest selection in this group to make room.
+        next.delete(`${groupId}:${inGroup[0].addonItemId}`);
+      }
+      next.set(key, { groupId, groupName, addonItemId: optAddon.id, addonName: optAddon.name, price: optAddon.price });
+      return next;
+    });
+  };
+
+  const picksByGroup = (() => {
+    const m = new Map<string, CartAddon[]>();
+    for (const p of picks.values()) {
+      const arr = m.get(p.groupId) ?? [];
+      arr.push(p);
+      m.set(p.groupId, arr);
+    }
+    return m;
+  })();
+
+  const unmet = groups.filter((g) => (picksByGroup.get(g.id)?.length ?? 0) < g.minPicks);
+  const canSave = unmet.length === 0;
+  const addonsTotal = [...picks.values()].reduce((s, p) => s + p.price, 0);
+  const baseUnit = (item as { discountedPrice?: number | null }).discountedPrice ?? Number(item.price);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <header className="px-5 py-4 border-b border-[#E8E6E2] flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-body text-[#D62B2B] tracking-widest uppercase">Customise</p>
+            <h3 className="font-display text-xl text-[#111] tracking-wide">{item.name}</h3>
+            <p className="text-[11px] font-body text-[#666] mt-0.5">Base {formatCurrency(baseUnit)}</p>
+          </div>
+          <button onClick={onClose} className="text-[#999] hover:text-[#111] text-xl">✕</button>
+        </header>
+        <div className="overflow-y-auto p-4 space-y-4">
+          {groups.map((g) => {
+            const here = picksByGroup.get(g.id) ?? [];
+            const need = g.minPicks > 0 && here.length < g.minPicks;
+            return (
+              <div key={g.id} className="bg-[#F2F1EE] p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-body font-medium text-sm text-[#111]">{g.name}</p>
+                  <p className={`text-[10px] font-body uppercase tracking-widest ${need ? 'text-[#D62B2B]' : 'text-[#666]'}`}>
+                    {g.minPicks === 0 ? `Optional · max ${g.maxPicks}` : g.minPicks === g.maxPicks ? `Pick ${g.minPicks}` : `Pick ${g.minPicks}-${g.maxPicks}`}
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  {g.options.map((opt) => {
+                    const addon = opt.addon;
+                    if (!addon) return null;
+                    const checked = picks.has(`${g.id}:${addon.id}`);
+                    const disabled = addon.isAvailable === false;
+                    return (
+                      <button
+                        key={opt.id}
+                        disabled={disabled}
+                        onClick={() => togglePick(g.id, g.name, { id: addon.id, name: addon.name, price: Number(addon.price) }, g.maxPicks)}
+                        className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 border ${
+                          checked ? 'bg-[#D62B2B]/10 border-[#D62B2B]' : 'bg-white border-[#E8E6E2] hover:border-[#111]'
+                        } ${disabled ? 'opacity-50' : ''}`}
+                      >
+                        <span className="flex items-center gap-2 text-sm font-body text-[#111]">
+                          <input type="checkbox" checked={checked} readOnly className="accent-[#D62B2B]" />
+                          {addon.name}
+                        </span>
+                        <span className="text-sm font-body font-medium text-[#111]">{Number(addon.price) > 0 ? `+${formatCurrency(Number(addon.price))}` : 'Free'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <footer className="px-5 py-4 border-t border-[#E8E6E2] flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-body text-[#666] uppercase tracking-widest">Total per unit</p>
+            <p className="font-display text-lg text-[#111]">{formatCurrency(baseUnit + addonsTotal)}</p>
+          </div>
+          <button
+            disabled={!canSave}
+            onClick={() => onConfirm([...picks.values()])}
+            className="bg-[#C8FF00] text-[#0D0D0D] px-6 py-3 font-body font-medium text-sm disabled:opacity-40"
+          >
+            Add to Cart
+          </button>
+        </footer>
+      </div>
     </div>
   );
 }

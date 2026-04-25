@@ -553,6 +553,10 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
     customMenuCostMargin: number | null;
     customMenuNegotiateMargin: number | null;
     customMenuMaxMargin: number | null;
+    qrAllowSelfRemoveIngredients?: boolean;
+    tableTimerOrderToStartMin?: number | null;
+    tableTimerStartToDoneMin?: number | null;
+    tableTimerServedToClearMin?: number | null;
   }
 
   const { data: settings, isLoading } = useQuery<KitchenSettings>({
@@ -689,6 +693,97 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
             {updateMut.isPending ? 'Saving…' : 'Save Custom Menu Policy'}
           </button>
         </div>
+      </div>
+
+      {/* Table-status timer thresholds */}
+      <TableTimersBlock settings={settings} isOwner={isOwner} updateMut={updateMut} />
+
+      {/* QR self-service ingredient removal */}
+      <div className="bg-[#161616] border border-[#2A2A2A]">
+        <div className="px-5 py-4 flex items-center justify-between">
+          <div className="pr-6">
+            <p className="text-sm font-body text-white font-medium mb-1">QR — Self-service ingredient removal</p>
+            <p className="text-xs font-body text-[#999] leading-relaxed">
+              When ON, QR-app customers can tick ingredients to remove from each item ("no garlic"). When OFF (default), the QR app shows only a Special Note field — the cashier reads the note and applies the removal manually via Customise on the POS line at order acceptance time.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+            <span className="text-xs font-body text-[#999]">{settings.qrAllowSelfRemoveIngredients ? 'On' : 'Off'}</span>
+            <input
+              type="checkbox"
+              checked={!!settings.qrAllowSelfRemoveIngredients}
+              disabled={!isOwner || updateMut.isPending}
+              onChange={(e) => updateMut.mutate({ qrAllowSelfRemoveIngredients: e.target.checked })}
+              className="accent-[#D62B2B] w-4 h-4"
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TableTimersBlock({ settings, isOwner, updateMut }: {
+  settings: { tableTimerOrderToStartMin?: number | null; tableTimerStartToDoneMin?: number | null; tableTimerServedToClearMin?: number | null };
+  isOwner: boolean;
+  updateMut: { mutate: (data: Record<string, number | null>) => void; isPending: boolean };
+}) {
+  const [t1, setT1] = useState('');
+  const [t2, setT2] = useState('');
+  const [t3, setT3] = useState('');
+  const [touched, setTouched] = useState(false);
+  const v = (n: number | null | undefined, fb: number) => n == null ? String(fb) : String(n);
+  const dispT1 = touched ? t1 : v(settings.tableTimerOrderToStartMin, 30);
+  const dispT2 = touched ? t2 : v(settings.tableTimerStartToDoneMin, 40);
+  const dispT3 = touched ? t3 : v(settings.tableTimerServedToClearMin, 35);
+  const num = (s: string): number | null => {
+    const n = Number(s.trim());
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+  };
+  const save = () => {
+    updateMut.mutate({
+      tableTimerOrderToStartMin: num(dispT1),
+      tableTimerStartToDoneMin: num(dispT2),
+      tableTimerServedToClearMin: num(dispT3),
+    });
+    setTouched(false);
+  };
+  return (
+    <div className="bg-[#161616] border border-[#2A2A2A]">
+      <div className="px-5 py-4 border-b border-[#2A2A2A]">
+        <p className="text-sm font-body text-white font-medium mb-1">Table Timers (POS Tables page)</p>
+        <p className="text-xs font-body text-[#999] leading-relaxed">
+          Each phase clock starts fresh from the previous transition. Cards turn amber at 80% of the threshold and red+pulsing past 100%. Defaults: 30 / 40 / 35 minutes.
+        </p>
+      </div>
+      <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Order Placed → Kitchen Start (min)</label>
+          <input type="number" min="1" value={dispT1}
+            onChange={(e) => { setT1(e.target.value); setTouched(true); }}
+            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]" />
+        </div>
+        <div>
+          <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Kitchen Start → Done (min)</label>
+          <input type="number" min="1" value={dispT2}
+            onChange={(e) => { setT2(e.target.value); setTouched(true); }}
+            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]" />
+        </div>
+        <div>
+          <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Served → Cleared (min)</label>
+          <input type="number" min="1" value={dispT3}
+            onChange={(e) => { setT3(e.target.value); setTouched(true); }}
+            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]" />
+        </div>
+      </div>
+      <div className="px-5 py-3 border-t border-[#2A2A2A] flex justify-end">
+        <button
+          disabled={!isOwner || !touched || updateMut.isPending}
+          onClick={save}
+          className="bg-[#D62B2B] hover:bg-[#F03535] disabled:opacity-40 text-white font-body text-xs px-4 py-2 tracking-widest uppercase transition-colors"
+        >
+          {updateMut.isPending ? 'Saving…' : 'Save Timer Thresholds'}
+        </button>
       </div>
     </div>
   );

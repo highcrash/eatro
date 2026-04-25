@@ -68,7 +68,13 @@ export class RestoraPosGateway implements OnGatewayConnection, OnGatewayDisconne
 
     await this.prisma.order.update({
       where: { id: orderId },
-      data: { status: 'PREPARING' },
+      data: {
+        status: 'PREPARING',
+        // Capture the very first transition timestamp — drives the
+        // POS Tables "kitchen acked" timer. Skip if already set so
+        // re-clicking Start doesn't reset the clock.
+        ...(order.firstKitchenStartAt ? {} : { firstKitchenStartAt: new Date() }),
+      },
     });
 
     // Broadcast to all KDS and branch clients
@@ -95,7 +101,13 @@ export class RestoraPosGateway implements OnGatewayConnection, OnGatewayDisconne
 
     await this.prisma.order.update({
       where: { id: orderId },
-      data: { status: 'READY' },
+      data: {
+        status: 'READY',
+        // Capture the first time kitchen marked everything DONE so
+        // the POS Tables "served-pending" timer can start. Skip when
+        // already set (idempotent).
+        ...(order.firstKitchenDoneAt ? {} : { firstKitchenDoneAt: new Date() }),
+      },
     });
 
     // Broadcast

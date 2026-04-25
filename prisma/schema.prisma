@@ -283,6 +283,19 @@ model BranchSetting {
   /// Optional upward ceiling expressed as % markup over cost (200 = max
   /// 200% over cost). Null = no cap.
   customMenuMaxMargin        Decimal? @db.Decimal(5, 2)
+  /// Allow QR-app customers to remove ingredients themselves ("no
+  /// garlic"). When false (default), the QR app shows only the
+  /// "Special note" field — cashier reads the note and applies the
+  /// removal manually via the existing POS Customise dialog at order
+  /// acceptance time.
+  qrAllowSelfRemoveIngredients Boolean @default(false)
+  /// Table-status timer thresholds in minutes. Order placed → kitchen
+  /// Start (default 30); Start → kitchen Done (40); Served → cleared
+  /// (35). Each phase clock starts fresh from the previous phase's
+  /// transition timestamp. Null = use defaults.
+  tableTimerOrderToStartMin  Int? @default(30)
+  tableTimerStartToDoneMin   Int? @default(40)
+  tableTimerServedToClearMin Int? @default(35)
 
   branch Branch @relation(fields: [branchId], references: [id])
 
@@ -820,6 +833,12 @@ model Order {
   waiterId            String?
   guestCount          Int         @default(0) // number of guests at the table (printed on bill/receipt)
   billRequested       Boolean     @default(false)
+  /// First time any item on this order moved to PREPARING — drives the
+  /// table-status "kitchen acked" timer on the POS Tables page.
+  firstKitchenStartAt DateTime?
+  /// First time the order's items reached DONE / READY — drives the
+  /// "served, awaiting pay/clear" timer (last phase).
+  firstKitchenDoneAt  DateTime?
   voidReason          String?
   voidedById          String?
   voidedAt            DateTime?
