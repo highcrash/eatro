@@ -3,6 +3,21 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.26 — admin sidebar: collapsible groups + quick-jump search (2026-04-25)
+
+No Electron-shell changes. Rebundles apps/admin:
+
+- **Quick-jump search** pinned just under the logo. Press "/"
+  anywhere in admin to focus, type a keyword (e.g. "settings",
+  "supplies", "mushak"), Enter to jump straight in. Esc clears.
+- **Collapsible nav groups** so the sidebar stops growing past the
+  fold. The group containing the active route auto-expands; other
+  groups stay folded behind a chevron until clicked. Searching
+  expands all groups and filters items by label or path.
+- **Larger nav text + wider sidebar** (208 → 240 px, font 12 →
+  13 px, icons 14 → 15 px) so labels stay legible on retina /
+  high-DPI displays without squinting.
+
 ## 0.8.25 — non-recipe supplies tracking (2026-04-25)
 
 No Electron-shell changes. Rebundles apps/admin + apps/api +
