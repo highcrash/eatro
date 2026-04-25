@@ -52,6 +52,11 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'linkedItem', table: 'linked_items' },
   { accessor: 'recipe', table: 'recipes' },
   { accessor: 'recipeItem', table: 'recipe_items' },
+  // Addon groups + their option junctions (Phase 3). Restored after
+  // menu_items because group.menuItemId + option.addonItemId both FK
+  // into it. Cleanup-ordering mirror lives in cleanup.service.
+  { accessor: 'menuItemAddonGroup', table: 'menu_item_addon_groups' },
+  { accessor: 'menuItemAddonOption', table: 'menu_item_addon_options' },
 
   // Tier 5 — pre-ready
   { accessor: 'preReadyItem', table: 'pre_ready_items' },

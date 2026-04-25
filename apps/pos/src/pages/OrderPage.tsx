@@ -19,6 +19,7 @@ import RefundOrderDialog from '../components/RefundOrderDialog';
 import CustomMenuDialog from '../components/CustomMenuDialog';
 import VariantPickerDialog from '../components/VariantPickerDialog';
 import CustomiseLineDialog from '../components/CustomiseLineDialog';
+import AddonPickerDialog from '../components/AddonPickerDialog';
 import { useCashierPermissions } from '../lib/permissions';
 
 interface CartItem {
@@ -33,13 +34,21 @@ interface CartItem {
   /** Cached display names for the cart UI + the KT print fallback.
    *  Resolved when the cashier saves the dialog. */
   removedNames?: string[];
+  /** Addon picks for this line; cart key includes a hash of the
+   *  selected (groupId,addonItemId) pairs so different selections
+   *  become separate cart rows. */
+  addons?: { groupId: string; groupName: string; addonItemId: string; addonName: string; price: number }[];
 }
 
 /** Stable key for matching cart lines (variant + same removed-ID set
- *  = same cart row; different removals = separate row). */
-function cartLineKey(item: { menuItem: { id: string }; removedIngredientIds?: string[]; notes?: string }): string {
+ *  + same addon picks + same notes = same cart row). */
+function cartLineKey(item: { menuItem: { id: string }; removedIngredientIds?: string[]; notes?: string; addons?: { groupId: string; addonItemId: string }[] }): string {
   const ids = [...(item.removedIngredientIds ?? [])].sort().join(',');
-  return `${item.menuItem.id}::${ids}::${item.notes ?? ''}`;
+  const addonsKey = [...(item.addons ?? [])]
+    .map((a) => `${a.groupId}:${a.addonItemId}`)
+    .sort()
+    .join(',');
+  return `${item.menuItem.id}::${ids}::${addonsKey}::${item.notes ?? ''}`;
 }
 
 // ─── Void Item Dialog ─────────────────────────────────────────────────────────
@@ -308,7 +317,7 @@ function AddItemsOverlay({
   const childIdsOfSelected = addCatId ? getChildren(addCatId).map((c) => c.id) : [];
   const filteredItems = menuItems
     .filter((m) => m.isAvailable)
-    .filter((m) => !m.variantParentId && !m.isCustom)
+    .filter((m) => !m.variantParentId && !m.isCustom && !m.isAddon)
     .filter((m) => {
       if (searchLower) return m.name.toLowerCase().includes(searchLower);
       if (!addCatId) return true;
@@ -321,6 +330,11 @@ function AddItemsOverlay({
       setVariantPickerFor(item);
       return;
     }
+    const groups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
+    if (groups.length > 0) {
+      setAddonPickerForNew(item);
+      return;
+    }
     setNewItemCart((prev) => {
       const key = cartLineKey({ menuItem: { id: item.id } });
       const existing = prev.find((c) => cartLineKey(c) === key);
@@ -330,6 +344,7 @@ function AddItemsOverlay({
   };
 
   const [customizingNewKey, setCustomizingNewKey] = useState<string | null>(null);
+  const [addonPickerForNew, setAddonPickerForNew] = useState<MenuItem | null>(null);
 
   // ── Keyboard navigation ──────────────────────────────────────────────────
   const GRID_COLS = 5;
@@ -411,7 +426,10 @@ function AddItemsOverlay({
   };
 
   const newCartTotal = newItemCart.reduce(
-    (s, c) => s + Number(c.menuItem.price) * c.quantity,
+    (s, c) => {
+      const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
+      return s + (Number(c.menuItem.price) + addonsTotal) * c.quantity;
+    },
     0,
   );
 
@@ -559,8 +577,10 @@ function AddItemsOverlay({
               <p className="text-center text-theme-text-muted text-xs py-6">Tap items to add</p>
             ) : (
               newItemCart.map((line) => {
-                const { menuItem, quantity, notes, removedNames } = line;
+                const { menuItem, quantity, notes, removedNames, addons } = line;
                 const key = cartLineKey(line);
+                const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
+                const unitPrice = Number(menuItem.price) + addonsTotal;
                 return (
                 <div key={key} className="bg-theme-bg rounded-theme p-3">
                   <div className="flex items-start gap-2">
@@ -570,8 +590,13 @@ function AddItemsOverlay({
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-theme-text truncate">{menuItem.name}</p>
                       <p className="text-[11px] text-theme-text-muted">
-                        {formatCurrency(Number(menuItem.price))} each
+                        {formatCurrency(unitPrice)} each
                       </p>
+                      {addons && addons.length > 0 && (
+                        <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">
+                          {addons.map((a) => `+ ${a.addonName}${a.price > 0 ? ` (${formatCurrency(a.price)})` : ''}`).join(' • ')}
+                        </p>
+                      )}
                       {removedNames && removedNames.length > 0 && (
                         <p className="text-[10px] text-theme-danger font-bold mt-0.5 leading-tight">
                           {removedNames.map((n) => `NO ${n.toUpperCase()}`).join(' • ')}
@@ -579,7 +604,7 @@ function AddItemsOverlay({
                       )}
                     </div>
                     <span className="text-sm font-bold text-theme-text shrink-0">
-                      {formatCurrency(Number(menuItem.price) * quantity)}
+                      {formatCurrency(unitPrice * quantity)}
                     </span>
                   </div>
 
@@ -670,13 +695,37 @@ function AddItemsOverlay({
           variants={variantsByParent.get(variantPickerFor.id) ?? []}
           onClose={() => setVariantPickerFor(null)}
           onPick={(variant) => {
+            setVariantPickerFor(null);
+            const groups = (variant.addonGroups ?? []).filter((g) => g.options.length > 0);
+            if (groups.length > 0) {
+              setAddonPickerForNew(variant);
+              return;
+            }
             setNewItemCart((prev) => {
               const key = cartLineKey({ menuItem: { id: variant.id } });
               const existing = prev.find((c) => cartLineKey(c) === key);
               if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
               return [...prev, { menuItem: variant, quantity: 1 }];
             });
-            setVariantPickerFor(null);
+          }}
+        />
+      )}
+
+      {addonPickerForNew && (
+        <AddonPickerDialog
+          menuItem={addonPickerForNew}
+          groups={(addonPickerForNew.addonGroups ?? []).filter((g) => g.options.length > 0)}
+          onClose={() => setAddonPickerForNew(null)}
+          onSave={(picks) => {
+            const item = addonPickerForNew;
+            setAddonPickerForNew(null);
+            setNewItemCart((prev) => {
+              const newLine = { menuItem: item, quantity: 1, addons: picks };
+              const key = cartLineKey({ menuItem: { id: item.id }, addons: picks });
+              const existing = prev.find((c) => cartLineKey(c) === key);
+              if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
+              return [...prev, newLine];
+            });
           }}
         />
       )}
@@ -786,7 +835,7 @@ function ActiveOrderView({
 
   const { data: menuItems = [] } = useQuery<MenuItem[]>({
     queryKey: ['menu'],
-    queryFn: () => api.get<MenuItem[]>('/menu'),
+    queryFn: () => api.get<MenuItem[]>('/menu?includeAddons=true'),
     enabled: showAddItems,
   });
 
@@ -820,6 +869,7 @@ function ActiveOrderView({
             menuItemId: c.menuItem.id,
             notes: c.notes ?? null,
             removedIngredients: c.removedNames && c.removedNames.length > 0 ? c.removedNames : undefined,
+            selectedAddons: c.addons && c.addons.length > 0 ? c.addons.map((a) => a.addonName) : undefined,
           })),
         });
         if (!res?.ok) alert(`Kitchen add-items print failed: ${res?.message ?? 'unknown error'}`);
@@ -1502,7 +1552,13 @@ function ActiveOrderView({
           newItemCart={newItemCart}
           setNewItemCart={setNewItemCart}
           onClose={() => { setShowAddItems(false); setNewItemCart([]); }}
-          onSubmit={() => addItemsMutation.mutate(newItemCart.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity, notes: c.notes || undefined, removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined })))}
+          onSubmit={() => addItemsMutation.mutate(newItemCart.map((c) => ({
+            menuItemId: c.menuItem.id,
+            quantity: c.quantity,
+            notes: c.notes || undefined,
+            removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined,
+            addons: c.addons && c.addons.length > 0 ? c.addons.map((a) => ({ groupId: a.groupId, addonItemId: a.addonItemId })) : undefined,
+          })))}
           isPending={addItemsMutation.isPending}
           orderNumber={order.orderNumber}
         />
@@ -1856,6 +1912,7 @@ function NewOrderView({
   const [showCustomMenu, setShowCustomMenu] = useState(false);
   const [variantPickerFor, setVariantPickerFor] = useState<MenuItem | null>(null);
   const [customizingKey, setCustomizingKey] = useState<string | null>(null);
+  const [addonPickerFor, setAddonPickerFor] = useState<MenuItem | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const { data: cashierPerms } = useCashierPermissions();
@@ -1864,7 +1921,7 @@ function NewOrderView({
 
   const { data: menuItems = [] } = useQuery<MenuItem[]>({
     queryKey: ['menu'],
-    queryFn: () => api.get<MenuItem[]>('/menu'),
+    queryFn: () => api.get<MenuItem[]>('/menu?includeAddons=true'),
   });
 
   // Lookup of a parent's children. Variants stay in the flat /menu
@@ -1904,14 +1961,17 @@ function NewOrderView({
     // in the grid; clicking the parent opens a chooser. Hide custom
     // one-off menu items too (they live inside their order, not the
     // standard grid).
-    .filter((m) => !m.variantParentId && !m.isCustom)
+    .filter((m) => !m.variantParentId && !m.isCustom && !m.isAddon)
     .filter((m) => {
       if (searchTrimmed) return m.name.toLowerCase().includes(searchTrimmed);
       if (!activeCategory) return true;
       return m.categoryId === activeCategory || childIdsOfActive.includes(m.categoryId);
     });
 
-  const subtotal = cart.reduce((s, c) => s + Number(c.menuItem.price) * c.quantity, 0);
+  const subtotal = cart.reduce((s, c) => {
+    const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
+    return s + (Number(c.menuItem.price) + addonsTotal) * c.quantity;
+  }, 0);
 
   const addToCart = (item: MenuItem) => {
     // Parent shells have no price + no recipe — open the variant chooser
@@ -1920,9 +1980,17 @@ function NewOrderView({
       setVariantPickerFor(item);
       return;
     }
+    // Items with addon groups go through the addon chooser before
+    // landing in the cart. Empty groups (admin saved 0 options) skip.
+    const groups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
+    if (groups.length > 0) {
+      setAddonPickerFor(item);
+      return;
+    }
     setCart((prev) => {
       // Match by line key: same menu item + same removed set + same
-      // notes = stack on the same row. Default new tap = no removals.
+      // addons + same notes = stack on the same row. Default new tap
+      // = no addons / removals.
       const key = cartLineKey({ menuItem: { id: item.id } });
       const existing = prev.find((c) => cartLineKey(c) === key);
       if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
@@ -2038,7 +2106,13 @@ function NewOrderView({
       waiterId: waiterId || undefined,
       guestCount: guestCount > 0 ? guestCount : undefined,
       type: tableId ? 'DINE_IN' : 'TAKEAWAY',
-      items: cart.map((c) => ({ menuItemId: c.menuItem.id, quantity: c.quantity, notes: c.notes || undefined, removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined })),
+      items: cart.map((c) => ({
+        menuItemId: c.menuItem.id,
+        quantity: c.quantity,
+        notes: c.notes || undefined,
+        removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined,
+        addons: c.addons && c.addons.length > 0 ? c.addons.map((a) => ({ groupId: a.groupId, addonItemId: a.addonItemId })) : undefined,
+      })),
     });
   };
 
@@ -2224,8 +2298,10 @@ function NewOrderView({
             </div>
           ) : (
             cart.map((line) => {
-              const { menuItem, quantity, notes, removedNames } = line;
+              const { menuItem, quantity, notes, removedNames, addons } = line;
               const key = cartLineKey(line);
+              const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
+              const unitPrice = Number(menuItem.price) + addonsTotal;
               return (
               <div key={key} className="bg-theme-bg rounded-theme p-3">
                 <div className="flex items-start gap-2">
@@ -2235,8 +2311,13 @@ function NewOrderView({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-theme-text truncate">{menuItem.name}</p>
                     <p className="text-[11px] text-theme-text-muted">
-                      {formatCurrency(Number(menuItem.price))} each
+                      {formatCurrency(unitPrice)} each
                     </p>
+                    {addons && addons.length > 0 && (
+                      <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">
+                        {addons.map((a) => `+ ${a.addonName}${a.price > 0 ? ` (${formatCurrency(a.price)})` : ''}`).join(' • ')}
+                      </p>
+                    )}
                     {removedNames && removedNames.length > 0 && (
                       <p className="text-[10px] text-theme-danger font-bold mt-0.5 leading-tight">
                         {removedNames.map((n) => `NO ${n.toUpperCase()}`).join(' • ')}
@@ -2244,7 +2325,7 @@ function NewOrderView({
                     )}
                   </div>
                   <span className="text-sm font-bold text-theme-text shrink-0">
-                    {formatCurrency(Number(menuItem.price) * quantity)}
+                    {formatCurrency(unitPrice * quantity)}
                   </span>
                 </div>
 
@@ -2358,13 +2439,39 @@ function NewOrderView({
           variants={variantsByParent.get(variantPickerFor.id) ?? []}
           onClose={() => setVariantPickerFor(null)}
           onPick={(variant) => {
+            setVariantPickerFor(null);
+            // If the variant has addon groups, chain into the addon
+            // chooser instead of dropping straight into the cart.
+            const groups = (variant.addonGroups ?? []).filter((g) => g.options.length > 0);
+            if (groups.length > 0) {
+              setAddonPickerFor(variant);
+              return;
+            }
             setCart((prev) => {
               const key = cartLineKey({ menuItem: { id: variant.id } });
               const existing = prev.find((c) => cartLineKey(c) === key);
               if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
               return [...prev, { menuItem: variant, quantity: 1 }];
             });
-            setVariantPickerFor(null);
+          }}
+        />
+      )}
+
+      {addonPickerFor && (
+        <AddonPickerDialog
+          menuItem={addonPickerFor}
+          groups={(addonPickerFor.addonGroups ?? []).filter((g) => g.options.length > 0)}
+          onClose={() => setAddonPickerFor(null)}
+          onSave={(picks) => {
+            const item = addonPickerFor;
+            setAddonPickerFor(null);
+            setCart((prev) => {
+              const newLine = { menuItem: item, quantity: 1, addons: picks };
+              const key = cartLineKey({ menuItem: { id: item.id }, addons: picks });
+              const existing = prev.find((c) => cartLineKey(c) === key);
+              if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
+              return [...prev, newLine];
+            });
           }}
         />
       )}

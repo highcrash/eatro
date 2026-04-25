@@ -3,6 +3,42 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.21 — addons / modifiers (Phase 3) (2026-04-25)
+
+Rebundles apps/pos + apps/pos-desktop main + @restora/types + @restora/utils:
+
+- **Addons / modifiers.** A menu item flagged `isAddon=true` (Extra
+  Patty, Cheese Sauce, Garlic Nun) becomes selectable only via an
+  Addon Group attached to a parent menu item. Each addon is a real
+  MenuItem with its own price + recipe — same engines compute COGS,
+  same engines deduct stock.
+- **Addon Groups** with `minPicks` / `maxPicks`. Required groups
+  (min ≥ 1) block the picker's Save button until satisfied. Optional
+  groups (min = 0) let the cashier skip ("no sauce"). Multiple
+  groups per menu item are supported (Steak: pick 0–2 sides + pick
+  0–1 sauce).
+- **POS picker** opens automatically when the cashier taps a parent
+  with addon groups (after the variant chooser if applicable). Live
+  total = base + addons. Cart-line key now includes addon picks so
+  each unique combination is its own row + KT entry.
+- **Recipe deduction** runs on every selected addon's recipe in
+  addition to the base item's. Empty addon recipe = no deduction
+  (admin sees a warning when saving the group: "These addons have
+  no recipe — selecting them won't deduct any stock").
+- **KT print** prepends `+ Cheese Sauce` rows under each modified
+  item; admin Receipt + Mushak slip itemize each addon for VAT.
+- **Admin Menu page** gets a new `+A` action button per parent item
+  → opens the Addon Groups editor (create / edit / delete groups,
+  pick which addon items belong to each, set min/max). New "Treat
+  as addon" toggle on the item edit dialog hides the row from the
+  main grid + the website / QR feed.
+- **Backups + cleanup audit.** Two new tables added to
+  `BACKUP_MODELS` (`menu_item_addon_groups`, `menu_item_addon_options`).
+  Cleanup `menu-items` + `menu-all` scopes auto-cascade via
+  `onDelete: Cascade` FKs; DataCleanupPage copy updated.
+- **Live-safety.** Pure additive schema. Existing rows behave
+  identically until admin attaches an addon group.
+
 ## 0.8.20 — per-order ingredient removal (Phase 2) (2026-04-25)
 
 Rebundles apps/pos + apps/pos-desktop main + @restora/types + @restora/utils:

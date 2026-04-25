@@ -89,8 +89,8 @@ const SECTIONS: Section[] = [
   {
     title: 'Menu',
     actions: [
-      { scope: 'menu-items', label: 'Delete all menu items', desc: 'Removes items and their recipes; categories stay.' },
-      { scope: 'menu-all', label: 'Delete menu items + categories', desc: 'Wipes the entire menu structure.', danger: true },
+      { scope: 'menu-items', label: 'Delete all menu items', desc: 'Removes items, their recipes, and any addon groups attached to them. Categories stay.' },
+      { scope: 'menu-all', label: 'Delete menu items + categories', desc: 'Wipes the entire menu structure including addon groups + options.', danger: true },
     ],
   },
   {

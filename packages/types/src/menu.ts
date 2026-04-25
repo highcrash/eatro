@@ -50,8 +50,57 @@ export interface MenuItem extends AuditFields {
   variants?: MenuItem[];
   /** Optional back-reference for child rows. */
   variantParent?: MenuItem | null;
+  /** True when this row is an addon (Extra Patty, Cheese Sauce, etc).
+   *  Filtered from main grid + website / QR feed. */
+  isAddon?: boolean;
+  /** Addon groups attached to this menu item. Populated on parents. */
+  addonGroups?: MenuItemAddonGroup[];
   comboItems?: ComboItem[];
   linkedItems?: LinkedItem[];
+}
+
+// ─── Addons (Phase 3) ────────────────────────────────────────────────────────
+
+export interface MenuItemAddonOption {
+  id: string;
+  groupId: string;
+  addonItemId: string;
+  sortOrder: number;
+  /** Hydrated addon detail when available (admin + POS pickers). */
+  addon?: MenuItem;
+}
+
+export interface MenuItemAddonGroup {
+  id: string;
+  branchId: string;
+  menuItemId: string;
+  name: string;
+  /** Customer must pick at least this many. 0 = optional group. */
+  minPicks: number;
+  /** Customer can pick at most this many. */
+  maxPicks: number;
+  sortOrder: number;
+  options: MenuItemAddonOption[];
+}
+
+export interface UpsertAddonGroupDto {
+  name: string;
+  minPicks: number;
+  maxPicks: number;
+  sortOrder?: number;
+  /** Addon MenuItem IDs in the order they should appear. Server
+   *  validates each row is `isAddon=true` on the same branch. */
+  addonItemIds: string[];
+}
+
+/** Snapshot stored on OrderItem.addons. Frozen at order time. */
+export interface OrderItemAddon {
+  groupId: string;
+  groupName: string;
+  addonItemId: string;
+  addonName: string;
+  /** Per-unit price snapshotted at order time, in paisa. */
+  price: number;
 }
 
 // ─── Combo Items ─────────────────────────────────────────────────────────────
@@ -93,6 +142,9 @@ export interface CreateMenuItemDto {
   /** When true, this new item is a non-sellable picker shell. Server
    *  rejects orderItem.create against rows with this flag set. */
   isVariantParent?: boolean;
+  /** When true, this new item is an addon (selectable only via an
+   *  addon group on a parent menu item). */
+  isAddon?: boolean;
 }
 
 export interface UpdateMenuItemDto extends Partial<CreateMenuItemDto> {
