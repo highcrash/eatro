@@ -79,6 +79,21 @@ export class ReportsController {
     return this.reportsService.getStockReport(user.branchId);
   }
 
+  @Get('supplies')
+  @Roles('OWNER', 'MANAGER')
+  getSuppliesReport(
+    @CurrentUser() user: JwtPayload,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const today = new Date().toISOString().split('T')[0];
+    return this.reportsService.getSuppliesReport(
+      user.branchId,
+      from ?? today,
+      to ?? today,
+    );
+  }
+
   @Get('stock/monthly')
   getMonthlyStockReport(
     @CurrentUser() user: JwtPayload,

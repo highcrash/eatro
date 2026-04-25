@@ -74,7 +74,10 @@ export default function RecipesPage() {
   const { data: ingredients = [] } = useQuery<Ingredient[]>({
     queryKey: ['ingredients'],
     queryFn: () => api.get('/ingredients'),
-    select: (data) => data.filter((i) => i.isActive),
+    // Hide SUPPLY-category items (parcel bags, tissues, cleaner) from
+    // the recipe ingredient picker. They're tracked via Inventory →
+    // Supplies and the server rejects them on /recipes upsert anyway.
+    select: (data) => data.filter((i) => i.isActive && i.category !== 'SUPPLY'),
   });
 
   const { data: preReadyItems = [] } = useQuery<PreReadyItem[]>({

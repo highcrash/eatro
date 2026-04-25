@@ -123,7 +123,10 @@ export default function PreReadyPage() {
   const { data: ingredients = [] } = useQuery<Ingredient[]>({
     queryKey: ['ingredients'],
     queryFn: () => api.get('/ingredients'),
-    select: (d) => d.filter((i) => i.isActive),
+    // Hide SUPPLY-category items (parcel bags, tissues, cleaner) — they
+    // can't be part of a pre-ready recipe; tracked via Inventory →
+    // Supplies and the server rejects them on /recipes upsert.
+    select: (d) => d.filter((i) => i.isActive && i.category !== 'SUPPLY'),
   });
 
   const { data: menuItems = [] } = useQuery<MenuItem[]>({

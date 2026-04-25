@@ -609,13 +609,25 @@ export class IngredientService {
       throw new BadRequestException('Cannot adjust stock on a parent ingredient. Adjust stock on a specific variant.');
     }
 
+    // OPERATIONAL_USE is the manual usage log for non-recipe supplies
+    // (parcel bags, tissues, cleaner). UX enters a positive "Used 12";
+    // server normalises to a decrement so a positive payload can never
+    // accidentally inflate stock.
+    const movementQty = dto.type === 'OPERATIONAL_USE'
+      ? -Math.abs(dto.quantity)
+      : dto.quantity;
+
+    if (dto.type === 'OPERATIONAL_USE' && ingredient.category !== 'SUPPLY') {
+      throw new BadRequestException('OPERATIONAL_USE only applies to ingredients in the SUPPLY category');
+    }
+
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.stockMovement.create({
         data: {
           branchId,
           ingredientId: id,
           type: dto.type,
-          quantity: dto.quantity,
+          quantity: movementQty,
           notes: dto.notes ?? null,
           staffId,
         },
@@ -623,7 +635,7 @@ export class IngredientService {
 
       const result = await tx.ingredient.update({
         where: { id },
-        data: { currentStock: { increment: dto.quantity } },
+        data: { currentStock: { increment: movementQty } },
         include: { supplier: true },
       });
 

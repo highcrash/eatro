@@ -16,7 +16,7 @@ export interface CustomUnit {
   deletedAt: string | null;
 }
 export type StockMovementType = 'PURCHASE' | 'SALE' | 'VOID_RETURN' | 'ADJUSTMENT' | 'WASTE';
-export type IngredientCategory = 'RAW' | 'CLEANING' | 'PACKAGED' | 'SPICE' | 'DAIRY' | 'BEVERAGE' | 'OTHER';
+export type IngredientCategory = 'RAW' | 'CLEANING' | 'PACKAGED' | 'SPICE' | 'DAIRY' | 'BEVERAGE' | 'SUPPLY' | 'OTHER';
 
 export interface Supplier {
   id: string;
@@ -178,8 +178,47 @@ export interface CreateVariantDto {
 
 export interface AdjustStockDto {
   quantity: number;   // positive = add, negative = remove
-  type: 'ADJUSTMENT' | 'WASTE' | 'PURCHASE';
+  type: 'ADJUSTMENT' | 'WASTE' | 'PURCHASE' | 'OPERATIONAL_USE';
   notes?: string;
+}
+
+/** Single row of the Supplies report — one per SUPPLY-category
+ *  ingredient, scoped to a date window. Used by Reports → Supplies
+ *  and the Inventory page's "Used (last 30d)" column. */
+export interface SuppliesReportRow {
+  ingredientId: string;
+  name: string;
+  unit: string;
+  /** Stock on hand right now (snapshot at request time). */
+  currentStock: number;
+  /** Cost per stock unit, snapshotted from the ingredient. */
+  costPerUnit: number;
+  /** On-hand value = currentStock × costPerUnit. */
+  onHandValue: number;
+  /** Units purchased in the window (sum of PURCHASE movements). */
+  purchasedQty: number;
+  /** Total spend in the window (purchasedQty × costPerUnit). */
+  purchasedCost: number;
+  /** Units consumed in the window (sum of OPERATIONAL_USE). */
+  usedQty: number;
+  /** Units written off in the window (sum of WASTE). */
+  wastedQty: number;
+  /** Trailing 30-day burn rate per day, used to project days-of-cover. */
+  avgDailyUsage: number;
+  /** Estimated days of cover at the trailing burn rate. null when
+   *  there's no recent usage to extrapolate from. */
+  daysOfCover: number | null;
+}
+
+export interface SuppliesReportResponse {
+  rows: SuppliesReportRow[];
+  totals: {
+    purchasedCost: number;
+    usedQty: number;
+    onHandValue: number;
+  };
+  windowFrom: string;
+  windowTo: string;
 }
 
 export interface UpsertRecipeDto {

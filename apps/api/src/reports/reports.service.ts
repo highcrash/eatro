@@ -588,10 +588,10 @@ export class ReportsService {
 
     const movements = await this.prisma.stockMovement.findMany({
       where: { branchId, createdAt: { gte: from, lte: to } },
-      include: { ingredient: { select: { id: true, name: true, unit: true, costPerUnit: true } } },
+      include: { ingredient: { select: { id: true, name: true, unit: true, costPerUnit: true, category: true } } },
     });
 
-    const byIngredient: Record<string, { name: string; unit: string; costPerUnit: number; consumed: number; received: number; wasted: number }> = {};
+    const byIngredient: Record<string, { name: string; unit: string; costPerUnit: number; category: string; consumed: number; received: number; wasted: number; suppliesUsed: number }> = {};
     for (const m of movements) {
       const key = m.ingredientId;
       if (!byIngredient[key]) {
@@ -599,12 +599,14 @@ export class ReportsService {
           name: m.ingredient.name,
           unit: m.ingredient.unit,
           costPerUnit: m.ingredient.costPerUnit.toNumber(),
-          consumed: 0, received: 0, wasted: 0,
+          category: m.ingredient.category,
+          consumed: 0, received: 0, wasted: 0, suppliesUsed: 0,
         };
       }
       const qty = Math.abs(m.quantity.toNumber());
       if (m.type === 'SALE') byIngredient[key].consumed += qty;
       else if (m.type === 'WASTE') byIngredient[key].wasted += qty;
+      else if (m.type === 'OPERATIONAL_USE') byIngredient[key].suppliesUsed += qty;
       else if (m.type === 'PURCHASE' || m.type === 'VOID_RETURN') byIngredient[key].received += qty;
     }
 
@@ -613,14 +615,107 @@ export class ReportsService {
       ...data,
       consumedValue: data.consumed * data.costPerUnit,
       wastedValue: data.wasted * data.costPerUnit,
+      suppliesUsedValue: data.suppliesUsed * data.costPerUnit,
     }));
+
+    // SUPPLY ingredients are reported separately so packaging spend
+    // doesn't pollute the food-cost margin. The Supplies report on
+    // /reports/supplies surfaces the same numbers in detail.
+    const foodItems = items.filter((i) => i.category !== 'SUPPLY');
+    const supplyItems = items.filter((i) => i.category === 'SUPPLY');
 
     return {
       date,
-      items: items.sort((a, b) => b.consumedValue - a.consumedValue),
-      totalConsumedValue: items.reduce((s, i) => s + i.consumedValue, 0),
-      totalWastedValue: items.reduce((s, i) => s + i.wastedValue, 0),
+      items: foodItems.sort((a, b) => b.consumedValue - a.consumedValue),
+      totalConsumedValue: foodItems.reduce((s, i) => s + i.consumedValue, 0),
+      totalWastedValue: foodItems.reduce((s, i) => s + i.wastedValue, 0),
+      suppliesItems: supplyItems.sort((a, b) => b.suppliesUsedValue - a.suppliesUsedValue),
+      totalSuppliesUsedValue: supplyItems.reduce((s, i) => s + i.suppliesUsedValue, 0),
       totalMovements: movements.length,
+    };
+  }
+
+  /**
+   * Supplies report — one row per SUPPLY-category ingredient over a
+   * date window. Surfaces purchase total, manual usage (the
+   * OPERATIONAL_USE log), waste, on-hand value, and a trailing 30-day
+   * burn rate so owners can see days-of-cover at a glance.
+   */
+  async getSuppliesReport(branchId: string, from: string, to: string) {
+    const fromDate = new Date(from);
+    fromDate.setHours(0, 0, 0, 0);
+    const toDate = new Date(to);
+    toDate.setHours(23, 59, 59, 999);
+
+    const supplies = await this.prisma.ingredient.findMany({
+      where: { branchId, deletedAt: null, category: 'SUPPLY' },
+      select: { id: true, name: true, unit: true, currentStock: true, costPerUnit: true },
+    });
+
+    if (supplies.length === 0) {
+      return {
+        rows: [],
+        totals: { purchasedCost: 0, usedQty: 0, onHandValue: 0 },
+        windowFrom: fromDate.toISOString(),
+        windowTo: toDate.toISOString(),
+      };
+    }
+
+    const supplyIds = supplies.map((s) => s.id);
+    const movements = await this.prisma.stockMovement.findMany({
+      where: { branchId, ingredientId: { in: supplyIds }, createdAt: { gte: fromDate, lte: toDate } },
+      select: { ingredientId: true, type: true, quantity: true },
+    });
+
+    // Trailing 30-day window for the burn-rate projection. Independent
+    // of the report window so a "today only" view still surfaces a
+    // meaningful days-of-cover estimate.
+    const burnFrom = new Date(toDate);
+    burnFrom.setDate(burnFrom.getDate() - 30);
+    burnFrom.setHours(0, 0, 0, 0);
+    const burnMovements = await this.prisma.stockMovement.findMany({
+      where: { branchId, ingredientId: { in: supplyIds }, type: 'OPERATIONAL_USE', createdAt: { gte: burnFrom, lte: toDate } },
+      select: { ingredientId: true, quantity: true },
+    });
+    const usedLast30 = new Map<string, number>();
+    for (const m of burnMovements) {
+      usedLast30.set(m.ingredientId, (usedLast30.get(m.ingredientId) ?? 0) + Math.abs(m.quantity.toNumber()));
+    }
+
+    const rows = supplies.map((s) => {
+      const ms = movements.filter((m) => m.ingredientId === s.id);
+      const purchasedQty = ms.filter((m) => m.type === 'PURCHASE').reduce((sum, m) => sum + Math.abs(m.quantity.toNumber()), 0);
+      const usedQty = ms.filter((m) => m.type === 'OPERATIONAL_USE').reduce((sum, m) => sum + Math.abs(m.quantity.toNumber()), 0);
+      const wastedQty = ms.filter((m) => m.type === 'WASTE').reduce((sum, m) => sum + Math.abs(m.quantity.toNumber()), 0);
+      const costPerUnit = s.costPerUnit.toNumber();
+      const currentStock = s.currentStock.toNumber();
+      const avgDailyUsage = (usedLast30.get(s.id) ?? 0) / 30;
+      const daysOfCover = avgDailyUsage > 0 ? currentStock / avgDailyUsage : null;
+      return {
+        ingredientId: s.id,
+        name: s.name,
+        unit: s.unit,
+        currentStock,
+        costPerUnit,
+        onHandValue: currentStock * costPerUnit,
+        purchasedQty,
+        purchasedCost: purchasedQty * costPerUnit,
+        usedQty,
+        wastedQty,
+        avgDailyUsage,
+        daysOfCover,
+      };
+    });
+
+    return {
+      rows: rows.sort((a, b) => b.purchasedCost - a.purchasedCost),
+      totals: {
+        purchasedCost: rows.reduce((s, r) => s + r.purchasedCost, 0),
+        usedQty: rows.reduce((s, r) => s + r.usedQty, 0),
+        onHandValue: rows.reduce((s, r) => s + r.onHandValue, 0),
+      },
+      windowFrom: fromDate.toISOString(),
+      windowTo: toDate.toISOString(),
     };
   }
 
