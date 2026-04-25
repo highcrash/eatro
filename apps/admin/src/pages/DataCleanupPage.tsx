@@ -102,7 +102,7 @@ const SECTIONS: Section[] = [
   {
     title: 'Suppliers',
     actions: [
-      { scope: 'suppliers', label: 'Delete all suppliers', desc: 'Removes suppliers and their payments / links.' },
+      { scope: 'suppliers', label: 'Delete all suppliers', desc: 'Removes suppliers and their payments, ledger adjustments, ingredient links.' },
     ],
   },
   {

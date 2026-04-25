@@ -3,6 +3,39 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.22 — supplier ledger adjustments (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin + apps/api +
+@restora/types:
+
+- **New "Ledger Adjustment" action** on the Supplier Ledger dialog
+  (Owner/Manager only). Owner picks Reduce / Increase Debt, enters
+  an amount + a required reason, and the dialog previews
+  `Current Owed → Adjustment → Will Become` before posting. Used
+  for fixing wrong opening balances or small reconciliation errors
+  without rolling cash through a fake "payment".
+- **Pure ledger-only**, by design:
+  - Adjusts `Supplier.totalDue` only.
+  - Writes a `SupplierAdjustment` audit row with reason + recorded-
+    by + timestamp.
+  - Does NOT touch any cash/bank Account.
+  - Does NOT create an Expense mirror.
+  - Does NOT post to Mushak / VAT.
+  - Daily Report, work-period close, supplier ageing all read
+    SupplierPayment rows — adjustments stay out of cash flow.
+- **Supplier ledger view** now shows an "Ledger Adjustments"
+  section listing every correction (date, signed amount, reason,
+  who recorded it). The running balance sums purchases + payments
+  + returns + adjustments live, so the displayed "Owed" figure
+  always matches the audit trail.
+- **Migration** `20260426100000_add_supplier_adjustment` adds a
+  single new `supplier_adjustments` table. Pure additive — existing
+  rows untouched.
+- **Backup + cleanup audit:** `supplierAdjustment` added to
+  `BACKUP_MODELS`; `cleanup.service.ts` `suppliers` and `reset-all`
+  scopes drop adjustments before suppliers; DataCleanupPage copy
+  updated to mention them.
+
 ## 1.0.21 — admin Menu: variants render under their parent (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin:

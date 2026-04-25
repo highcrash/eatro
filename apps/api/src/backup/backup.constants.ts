@@ -72,6 +72,7 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'purchaseReturnItem', table: 'purchase_return_items' },
   { accessor: 'stockMovement', table: 'stock_movements' },
   { accessor: 'supplierPayment', table: 'supplier_payments' },
+  { accessor: 'supplierAdjustment', table: 'supplier_adjustments' },
   { accessor: 'wasteLog', table: 'waste_logs' },
 
   // Tier 7 — discounts & reservation
