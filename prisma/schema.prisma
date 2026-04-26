@@ -1385,8 +1385,9 @@ model Ingredient {
   piecesPerPack Int? // e.g. 10 pcs per pack
   sku           String? // supplier barcode / SKU
   // Website display
-  imageUrl      String? // square image for website ingredient display
-  showOnWebsite Boolean @default(true) // show ingredient name on website menu detail pages
+  imageUrl           String? // square image for website ingredient display
+  showOnWebsite      Boolean @default(true) // show ingredient name on website menu detail pages
+  websiteDisplayName String? // optional alias rendered to customers (e.g. "Aromatic Garlic" hides internal "Garlic Powder"); falls back to `name` when null
 
   // Relations
   branch              Branch               @relation(fields: [branchId], references: [id])

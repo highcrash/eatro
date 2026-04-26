@@ -40,6 +40,19 @@ export default function MenuPage() {
   const { items: cart, addItem } = useCartStore();
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
 
+  // Wrap addItem for the FoodCard + button. Items with addon groups
+  // need the addon picker (otherwise the cashier loses required-pick
+  // state + the addon's price markup); we route to the item detail
+  // page which already runs the picker. Plain items add directly.
+  const handleQuickAdd = (item: MenuItem) => {
+    const groups = ((item as any).addonGroups ?? []).filter((g: any) => (g.options ?? []).length > 0);
+    if (groups.length > 0) {
+      void navigate(`/item/${item.id}`);
+      return;
+    }
+    addItem(item);
+  };
+
   // Build a parent → children index. The QR pill row only shows
   // top-level (parent) categories — sub-categories are folded into
   // their parent so a tap on "Beverages" lights up Tea + Coffee +
@@ -234,7 +247,7 @@ export default function MenuPage() {
         <div className="px-5 pb-24">
           <div className="grid grid-cols-2 gap-3 mt-3">
             {filtered.map((item) => (
-              <FoodCard key={item.id} item={item} onAdd={addItem} onTap={() => void navigate(`/item/${item.id}`)} />
+              <FoodCard key={item.id} item={item} onAdd={handleQuickAdd} onTap={() => void navigate(`/item/${item.id}`)} />
             ))}
           </div>
           {filtered.length === 0 && (
@@ -256,7 +269,7 @@ export default function MenuPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {items.slice(0, 4).map((item) => (
-                  <FoodCard key={item.id} item={item} onAdd={addItem} onTap={() => void navigate(`/item/${item.id}`)} />
+                  <FoodCard key={item.id} item={item} onAdd={handleQuickAdd} onTap={() => void navigate(`/item/${item.id}`)} />
                 ))}
               </div>
             </div>
