@@ -19,6 +19,42 @@ function downloadExampleCSV() {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Merge a list of recipe lines, summing quantities for any line that
+ * shares the same `ingredientId::UNIT` key. Mirrors the POS Custom
+ * Menu Dialog `mergeLines` so admin can stack multiple "Copy from"
+ * actions without losing prior copies and without tripping the
+ * server-side unique-(recipeId, ingredientId) constraint.
+ *
+ * Empty / placeholder rows (no ingredientId) pass through unchanged
+ * at the tail so a half-edited row the user is mid-creating doesn't
+ * vanish.
+ */
+function mergeRecipeLines(
+  lines: Array<{ ingredientId: string; quantity: string; unit: string }>,
+): Array<{ ingredientId: string; quantity: string; unit: string }> {
+  const map = new Map<string, { ingredientId: string; quantity: string; unit: string }>();
+  const placeholders: typeof lines = [];
+  for (const l of lines) {
+    if (!l.ingredientId) {
+      placeholders.push(l);
+      continue;
+    }
+    const unitKey = (l.unit || 'G').toUpperCase();
+    const key = `${l.ingredientId}::${unitKey}`;
+    const qty = parseFloat(l.quantity) || 0;
+    const existing = map.get(key);
+    if (existing) {
+      const sum = (parseFloat(existing.quantity) || 0) + qty;
+      // Trim trailing zeros so "1" + "1" stays "2", not "2.000000".
+      existing.quantity = String(parseFloat(sum.toFixed(6)));
+    } else {
+      map.set(key, { ingredientId: l.ingredientId, quantity: String(qty), unit: unitKey });
+    }
+  }
+  return [...map.values(), ...placeholders];
+}
+
 interface CostBreakdown {
   menuItemId: string;
   totalCost: number;
@@ -151,16 +187,29 @@ export default function RecipesPage() {
     ...preReadyItems.filter((pr) => pr.recipe && pr.recipe.items.length > 0).map((pr) => ({ id: pr.id, name: `[PR] ${pr.name}`, type: 'preready' as const })),
   ];
 
+  // Last-copied source id, used to flash a "Copied" indicator on the
+  // picker row so admin can stack multiple sources without wondering
+  // whether the click registered.
+  const [lastCopiedId, setLastCopiedId] = useState<string | null>(null);
+  const flashCopied = (id: string) => {
+    setLastCopiedId(id);
+    window.setTimeout(() => setLastCopiedId((cur) => (cur === id ? null : cur)), 1200);
+  };
+
   const handleCopyFromMenu = async (sourceId: string) => {
     try {
       const r = await api.get<Recipe>(`/recipes/menu-item/${sourceId}`);
       if (r && r.items) {
-        setLines(r.items.map((i) => ({ ingredientId: i.ingredientId, quantity: String(i.quantity), unit: i.unit ?? 'G' })));
-        setNotes(r.notes ?? notes);
+        // APPEND-AND-DEDUPE — never replace the working list, sum
+        // quantities for any ingredient that's already present in the
+        // same unit. Picker stays open so admin can stack copies from
+        // multiple sources.
+        const incoming = r.items.map((i) => ({ ingredientId: i.ingredientId, quantity: String(i.quantity), unit: i.unit ?? 'G' }));
+        setLines((cur) => mergeRecipeLines([...cur, ...incoming]));
+        if (r.notes) setNotes((cur) => cur ? `${cur}\n${r.notes}` : r.notes!);
+        flashCopied(sourceId);
       }
     } catch { /* no recipe */ }
-    setShowCopyFrom(false);
-    setCopySearch('');
     setIngSearch({});
     setCsvErrors({});
   };
@@ -168,11 +217,11 @@ export default function RecipesPage() {
   const handleCopyFromPreReady = (sourceId: string) => {
     const pr = preReadyItems.find((p) => p.id === sourceId);
     if (pr?.recipe?.items) {
-      setLines(pr.recipe.items.map((i) => ({ ingredientId: i.ingredientId, quantity: String(i.quantity), unit: (i as any).unit ?? i.ingredient?.unit ?? 'G' })));
-      setNotes(pr.recipe.notes ?? notes);
+      const incoming = pr.recipe.items.map((i) => ({ ingredientId: i.ingredientId, quantity: String(i.quantity), unit: (i as any).unit ?? i.ingredient?.unit ?? 'G' }));
+      setLines((cur) => mergeRecipeLines([...cur, ...incoming]));
+      if (pr.recipe.notes) setNotes((cur) => cur ? `${cur}\n${pr.recipe!.notes}` : pr.recipe!.notes!);
+      flashCopied(sourceId);
     }
-    setShowCopyFrom(false);
-    setCopySearch('');
     setIngSearch({});
     setCsvErrors({});
   };
@@ -738,13 +787,16 @@ Mango Lassi,Sugar,15,G`;
         </div>
       </div>
 
-      {/* Copy from existing recipe modal */}
+      {/* Copy from existing recipe modal — additive: tapping a source
+          merges its lines into the working recipe (sums any duplicate
+          ingredient by id+unit), so admin can stack multiple sources
+          without losing prior copies. Modal stays open until Done. */}
       {showCopyFrom && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setShowCopyFrom(false)}>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => { setShowCopyFrom(false); setLastCopiedId(null); }}>
           <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-[#2A2A2A]">
               <h2 className="font-display text-lg text-white tracking-widest">COPY RECIPE FROM</h2>
-              <p className="text-[#666] font-body text-xs mt-1">Select a menu item or pre-ready item to copy its recipe ingredients.</p>
+              <p className="text-[#666] font-body text-xs mt-1">Tap a source to add its ingredients. Duplicate ingredients (same unit) are summed. Stack multiple sources, then click Done.</p>
               <input
                 value={copySearch}
                 onChange={(e) => setCopySearch(e.target.value)}
@@ -756,23 +808,31 @@ Mango Lassi,Sugar,15,G`;
             <div className="flex-1 overflow-y-auto">
               {allRecipeSources
                 .filter((s) => !copySearch || s.name.toLowerCase().includes(copySearch.toLowerCase()))
-                .map((source) => (
-                  <button
-                    key={`${source.type}-${source.id}`}
-                    onClick={() => source.type === 'menu' ? void handleCopyFromMenu(source.id) : handleCopyFromPreReady(source.id)}
-                    className="w-full text-left px-5 py-3 border-b border-[#2A2A2A] hover:bg-[#1F1F1F] transition-colors"
-                  >
-                    <span className="text-white font-body text-sm">{source.name}</span>
-                    <span className="text-[#666] font-body text-xs ml-2">{source.type === 'preready' ? 'Pre-Ready' : 'Menu Item'}</span>
-                  </button>
-                ))}
+                .map((source) => {
+                  const justCopied = lastCopiedId === source.id;
+                  return (
+                    <button
+                      key={`${source.type}-${source.id}`}
+                      onClick={() => source.type === 'menu' ? void handleCopyFromMenu(source.id) : handleCopyFromPreReady(source.id)}
+                      className={`w-full text-left px-5 py-3 border-b border-[#2A2A2A] transition-colors flex items-center justify-between gap-2 ${justCopied ? 'bg-[#4CAF50]/10' : 'hover:bg-[#1F1F1F]'}`}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="text-white font-body text-sm">{source.name}</span>
+                        <span className="text-[#666] font-body text-xs ml-2">{source.type === 'preready' ? 'Pre-Ready' : 'Menu Item'}</span>
+                      </span>
+                      {justCopied && (
+                        <span className="text-[#4CAF50] font-body text-[10px] tracking-widest uppercase whitespace-nowrap">✓ Copied</span>
+                      )}
+                    </button>
+                  );
+                })}
               {allRecipeSources.filter((s) => !copySearch || s.name.toLowerCase().includes(copySearch.toLowerCase())).length === 0 && (
                 <p className="px-5 py-8 text-center text-[#666] font-body text-sm">No items with recipes found.</p>
               )}
             </div>
             <div className="px-5 py-3 border-t border-[#2A2A2A]">
-              <button onClick={() => setShowCopyFrom(false)} className="w-full bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2 transition-colors">
-                Cancel
+              <button onClick={() => { setShowCopyFrom(false); setLastCopiedId(null); }} className="w-full bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2 transition-colors">
+                Done
               </button>
             </div>
           </div>
