@@ -55,6 +55,11 @@ export default function RecipesPage() {
   const [notes, setNotes] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [ingredientFilter, setIngredientFilter] = useState('');
+  // "Missing recipe" pill — filters the list to menu items that have
+  // no recipe row in DB yet, so admin can see at a glance what's
+  // still owed. Detected via `id in allCosts` because getAllCosts
+  // emits an entry for every recipe (even when total cost is zero).
+  const [showOnlyMissing, setShowOnlyMissing] = useState(false);
   const [ingSearch, setIngSearch] = useState<Record<number, string>>({});
   const [showAutofill, setShowAutofill] = useState(false);
   const [showCopyFrom, setShowCopyFrom] = useState(false);
@@ -418,6 +423,20 @@ Mango Lassi,Sugar,15,G`;
                 <button onClick={() => setIngredientFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#666] hover:text-white text-xs">✕</button>
               )}
             </div>
+            {/* Missing-recipe filter — admin needs to spot-check what
+                still has no recipe so stock isn't deducting on sale. */}
+            <button
+              type="button"
+              onClick={() => setShowOnlyMissing((v) => !v)}
+              className={`w-full px-3 py-2 text-xs font-body tracking-widest uppercase border transition-colors ${
+                showOnlyMissing
+                  ? 'bg-[#FFA726] border-[#FFA726] text-black'
+                  : 'bg-[#0D0D0D] border-[#2A2A2A] text-[#999] hover:text-white hover:border-[#444]'
+              }`}
+              title="Show only menu items that don't have a recipe yet"
+            >
+              {showOnlyMissing ? '✓ ' : ''}Missing recipes only
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto">
             {menuItems
@@ -435,6 +454,7 @@ Mango Lassi,Sugar,15,G`;
                 if (!matchIng) return true;
                 return ingredientMap[matchIng.id]?.includes(m.id) ?? false;
               })
+              .filter((m) => !showOnlyMissing || !(m.id in allCosts))
               .map((m) => {
                 const sell = Number(m.price);
                 const cost = allCosts[m.id] ?? 0;
