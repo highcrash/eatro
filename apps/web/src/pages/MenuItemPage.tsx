@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -14,6 +15,18 @@ interface Ingredient {
   id: string;
   name: string;
   imageUrl: string | null;
+}
+
+interface VariantSummary {
+  id: string;
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  price: number;
+  imageUrl?: string | null;
+  pieces?: number | null;
+  prepTime?: string | null;
+  spiceLevel?: string | null;
 }
 
 interface MenuItemDetail {
@@ -37,6 +50,10 @@ interface MenuItemDetail {
   prepTime?: string | null;
   spiceLevel?: string | null;
   ingredients?: Ingredient[];
+  /** Set on variant parent shells; render variant tabs when present. */
+  isVariantParent?: boolean;
+  variantParentId?: string | null;
+  variants?: VariantSummary[];
 }
 
 interface RecommendedItem {
@@ -63,6 +80,59 @@ export default function MenuItemPage() {
     enabled: !!itemId,
   });
 
+  // Variant tab selection. When the loaded item is a parent shell with
+  // variants, default to the cheapest variant so the page never opens
+  // with the parent's empty placeholder visible.
+  const variants = (item?.isVariantParent ? item.variants : undefined) ?? [];
+  const sortedVariants = [...variants].sort((a, b) => Number(a.price) - Number(b.price));
+  const baseVariantPrice = sortedVariants[0]?.price ?? 0;
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+  useEffect(() => {
+    // Reset whenever the parent changes; pick the cheapest as default.
+    if (sortedVariants.length === 0) {
+      setSelectedVariantId(null);
+      return;
+    }
+    if (!selectedVariantId || !sortedVariants.some((v) => v.id === selectedVariantId)) {
+      setSelectedVariantId(sortedVariants[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.id, sortedVariants.length]);
+
+  // Fetch the selected variant's full detail so we can swap its
+  // image / description / ingredients / pieces info into the page.
+  // The list-level variant payload only carries the lightweight tab
+  // fields (id, name, price, imageUrl); ingredients live on the
+  // variant's own getMenuItem response.
+  const { data: variantDetail } = useQuery<MenuItemDetail>({
+    queryKey: ['menu-item-variant', selectedVariantId],
+    queryFn: () => api.getJson<MenuItemDetail>(`/public/menu/${getActiveBranchId()}/item/${selectedVariantId}`),
+    enabled: !!selectedVariantId && !!item?.isVariantParent,
+  });
+
+  // "Displayed" overlays the selected variant on top of the parent so
+  // identity (category, SEO) sticks to the parent while the swap-able
+  // bits (image, description, price, pieces, ingredients) reflect the
+  // active variant. Standalone items: displayed === item.
+  const displayed: MenuItemDetail | undefined = item?.isVariantParent && variantDetail
+    ? {
+        ...item,
+        imageUrl: variantDetail.imageUrl ?? item.imageUrl,
+        description: variantDetail.description ?? item.description,
+        price: variantDetail.price,
+        discountedPrice: variantDetail.discountedPrice,
+        discountType: variantDetail.discountType,
+        discountValue: variantDetail.discountValue,
+        discountEndDate: variantDetail.discountEndDate,
+        discountApplicableDays: variantDetail.discountApplicableDays,
+        tags: variantDetail.tags,
+        pieces: variantDetail.pieces,
+        prepTime: variantDetail.prepTime,
+        spiceLevel: variantDetail.spiceLevel,
+        ingredients: variantDetail.ingredients,
+      }
+    : item;
+
   const { data: related } = useQuery<RecommendedItem[]>({
     queryKey: ['recommended', getActiveBranchId(), item?.categoryId],
     queryFn: () =>
@@ -73,7 +143,7 @@ export default function MenuItemPage() {
   });
 
   const relatedFiltered = (related ?? []).filter((r) => r.id !== itemId);
-  const hasDiscount = item?.discountedPrice != null && item.discountedPrice < item.price;
+  const hasDiscount = displayed?.discountedPrice != null && displayed.discountedPrice < displayed.price;
 
   if (isLoading) {
     return (
@@ -96,21 +166,26 @@ export default function MenuItemPage() {
 
   const siteName = (content as any)?.seoSiteName || branding?.name || 'Your Restaurant';
   const itemTitle = item.seoTitle || `${siteName} — ${item.name}`;
-  const itemDesc = item.seoDescription || item.description || `${item.name} at ${siteName}. ${formatCurrency(Number(item.price))}`;
+  // Use the parent's price when available (or the cheapest variant) so
+  // the SEO description never reads ৳0 for a parent shell.
+  const seoPrice = item.price > 0 ? item.price : baseVariantPrice;
+  const itemDesc = item.seoDescription || item.description || `${item.name} at ${siteName}. ${formatCurrency(Number(seoPrice))}`;
+  const heroImage = displayed?.imageUrl || item.imageUrl;
+  const heroAlt = displayed?.name || item.name;
 
   return (
     <div>
       <SEO
         title={itemTitle}
         description={itemDesc}
-        image={item.imageUrl || undefined}
+        image={heroImage || undefined}
       />
       {/* Hero image header */}
       <section className="relative h-[50vh] md:h-[60vh] min-h-[400px] overflow-hidden bg-card">
-        {item.imageUrl ? (
+        {heroImage ? (
           <img
-            src={item.imageUrl}
-            alt={item.name}
+            src={heroImage}
+            alt={heroAlt}
             className="absolute inset-0 w-full h-full object-contain p-8 md:p-16"
           />
         ) : (
@@ -146,19 +221,52 @@ export default function MenuItemPage() {
           {item.name}
         </h1>
 
+        {/* Variant tabs — only when this is a parent shell with at
+            least one variant. Each tile shows the variant name + the
+            price differential vs the cheapest variant ("+৳100"); the
+            cheapest reads as its absolute price. Clicking swaps the
+            hero image, description, ingredients, and info cards. */}
+        {sortedVariants.length > 0 && (
+          <div className="mt-6 flex flex-wrap gap-2">
+            {sortedVariants.map((v) => {
+              const diff = Number(v.price) - Number(baseVariantPrice);
+              const active = selectedVariantId === v.id;
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => setSelectedVariantId(v.id)}
+                  className={`flex flex-col items-start gap-0.5 px-4 py-2 border transition-colors text-left ${
+                    active
+                      ? 'bg-accent text-white border-accent'
+                      : 'bg-card text-text border-border hover:border-accent/50'
+                  }`}
+                >
+                  <span className="text-sm font-semibold">{v.name}</span>
+                  <span className={`text-xs ${active ? 'text-white/80' : 'text-muted'}`}>
+                    {diff <= 0
+                      ? formatCurrency(Number(v.price))
+                      : `+${formatCurrency(diff)}`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Price */}
         <div className="mt-4">
           <div className="flex items-baseline gap-3">
             {hasDiscount ? (
               <>
-                <span className="font-display text-4xl text-accent">{formatCurrency(item.discountedPrice!)}</span>
-                <span className="text-muted text-lg line-through">{formatCurrency(Number(item.price))}</span>
-                {item.discountType === 'PERCENTAGE' && item.discountValue && (
-                  <span className="bg-accent/20 text-accent text-xs font-semibold px-2 py-0.5">{item.discountValue}% OFF</span>
+                <span className="font-display text-4xl text-accent">{formatCurrency(displayed!.discountedPrice!)}</span>
+                <span className="text-muted text-lg line-through">{formatCurrency(Number(displayed!.price))}</span>
+                {displayed!.discountType === 'PERCENTAGE' && displayed!.discountValue && (
+                  <span className="bg-accent/20 text-accent text-xs font-semibold px-2 py-0.5">{displayed!.discountValue}% OFF</span>
                 )}
               </>
             ) : (
-              <span className="font-display text-4xl text-accent">{formatCurrency(Number(item.price))}</span>
+              <span className="font-display text-4xl text-accent">{formatCurrency(Number(displayed?.price ?? baseVariantPrice))}</span>
             )}
           </div>
           {hasDiscount && (
@@ -200,14 +308,14 @@ export default function MenuItemPage() {
         </div>
 
         {/* Description */}
-        {item.description && (
-          <p className="text-muted leading-relaxed mt-6 max-w-2xl">{item.description}</p>
+        {displayed?.description && (
+          <p className="text-muted leading-relaxed mt-6 max-w-2xl">{displayed.description}</p>
         )}
 
         {/* Tags */}
-        {item.tags && (
+        {displayed?.tags && (
           <div className="flex flex-wrap gap-2 mt-6">
-            {(Array.isArray(item.tags) ? item.tags : String(item.tags).split(',').map(t => t.trim()).filter(Boolean)).map((tag) => (
+            {(Array.isArray(displayed.tags) ? displayed.tags : String(displayed.tags).split(',').map(t => t.trim()).filter(Boolean)).map((tag) => (
               <span
                 key={tag}
                 className="text-xs font-semibold uppercase tracking-wider px-3 py-1 border border-border text-muted"
@@ -219,11 +327,11 @@ export default function MenuItemPage() {
         )}
 
         {/* Key Ingredients */}
-        {content?.showKeyIngredients && item.ingredients && item.ingredients.length > 0 && (
+        {content?.showKeyIngredients && displayed?.ingredients && displayed.ingredients.length > 0 && (
           <div className="mt-10">
             <h2 className="font-display text-2xl tracking-wider mb-4">KEY INGREDIENTS</h2>
             <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-              {item.ingredients.map((ing) => (
+              {displayed.ingredients.map((ing) => (
                 <div key={ing.id} className="flex-shrink-0 flex flex-col items-center gap-2 w-20">
                   {ing.imageUrl ? (
                     <img
@@ -247,26 +355,26 @@ export default function MenuItemPage() {
 
         {/* Info cards: Pieces, Prep Time, Spice Level */}
         {(
-          (content?.showPieces && item.pieces != null) ||
-          (content?.showPrepTime && item.prepTime) ||
-          (content?.showSpiceLevel && item.spiceLevel)
+          (content?.showPieces && displayed?.pieces != null) ||
+          (content?.showPrepTime && displayed?.prepTime) ||
+          (content?.showSpiceLevel && displayed?.spiceLevel)
         ) && (
           <div className="grid grid-cols-3 gap-4 mt-10">
-            {content?.showPieces && item.pieces != null && (
+            {content?.showPieces && displayed?.pieces != null && (
               <div className="glass p-4 text-center">
-                <p className="font-display text-3xl text-accent">{item.pieces}</p>
+                <p className="font-display text-3xl text-accent">{displayed.pieces}</p>
                 <p className="text-xs text-muted uppercase tracking-wider mt-1">Pieces</p>
               </div>
             )}
-            {content?.showPrepTime && item.prepTime && (
+            {content?.showPrepTime && displayed?.prepTime && (
               <div className="glass p-4 text-center">
-                <p className="font-display text-3xl text-accent">{item.prepTime}</p>
+                <p className="font-display text-3xl text-accent">{displayed.prepTime}</p>
                 <p className="text-xs text-muted uppercase tracking-wider mt-1">Prep Time</p>
               </div>
             )}
-            {content?.showSpiceLevel && item.spiceLevel && (
+            {content?.showSpiceLevel && displayed?.spiceLevel && (
               <div className="glass p-4 text-center">
-                <p className="font-display text-3xl text-accent">{item.spiceLevel}</p>
+                <p className="font-display text-3xl text-accent">{displayed.spiceLevel}</p>
                 <p className="text-xs text-muted uppercase tracking-wider mt-1">Spice Level</p>
               </div>
             )}
