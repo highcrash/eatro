@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.36 — admin Recipes + Pre-Ready: additive "Copy from" (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin only:
+
+- Both **admin Recipes** page and **admin Pre-Ready** recipe
+  builder now use the same additive merge as the POS Custom Menu
+  Dialog: tapping a "Copy from" source **adds** that recipe's
+  ingredients to the working list instead of overwriting it.
+  Stack as many sources as needed.
+- **Same-ingredient + same-unit lines are summed** so the server-
+  side `(recipeId, ingredientId)` unique constraint never trips.
+  Different units are kept separate (10g salt + 1kg salt → two
+  rows, not auto-converted).
+- The picker stays open after each copy so admin can keep adding;
+  the just-tapped row flashes a green ✓ Copied badge for ~1.2s as
+  feedback. **Done** button replaces the previous Cancel.
+- Empty / placeholder rows the user is mid-creating pass through
+  unchanged at the tail; they're never auto-collapsed into the
+  merged set.
+
 ## 0.8.35 — Recipes page: "Missing recipes only" filter (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin only:

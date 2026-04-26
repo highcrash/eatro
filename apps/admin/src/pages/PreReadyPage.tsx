@@ -6,6 +6,37 @@ import type { PreReadyItem, ProductionOrder, PreReadyBatch, Ingredient, Producti
 import type { MenuItem } from '@restora/types';
 import { useStockUnits } from '../lib/units';
 
+/**
+ * Merge a list of pre-ready recipe lines, summing quantities for any
+ * line that shares the same `ingredientId::UNIT` key. Mirrors the
+ * POS Custom Menu Dialog mergeLines so admin can stack multiple
+ * "Copy from" actions without losing prior copies and without
+ * tripping the server-side unique-(recipeId, ingredientId) constraint.
+ */
+function mergeRecipeLines(
+  lines: Array<{ ingredientId: string; quantity: string; unit: string }>,
+): Array<{ ingredientId: string; quantity: string; unit: string }> {
+  const map = new Map<string, { ingredientId: string; quantity: string; unit: string }>();
+  const placeholders: typeof lines = [];
+  for (const l of lines) {
+    if (!l.ingredientId) {
+      placeholders.push(l);
+      continue;
+    }
+    const unitKey = (l.unit || 'G').toUpperCase();
+    const key = `${l.ingredientId}::${unitKey}`;
+    const qty = parseFloat(l.quantity) || 0;
+    const existing = map.get(key);
+    if (existing) {
+      const sum = (parseFloat(existing.quantity) || 0) + qty;
+      existing.quantity = String(parseFloat(sum.toFixed(6)));
+    } else {
+      map.set(key, { ingredientId: l.ingredientId, quantity: String(qty), unit: unitKey });
+    }
+  }
+  return [...map.values(), ...placeholders];
+}
+
 // Calculate recipe cost for a pre-ready item from its recipe + ingredient costs
 function calcPreReadyCost(item: PreReadyItem, ingredients: Ingredient[]): { recipeCost: number; yieldQty: number; costPerUnit: number } | null {
   if (!item.recipe || item.recipe.items.length === 0) return null;
@@ -177,17 +208,29 @@ export default function PreReadyPage() {
     ...menuItems.map((m) => ({ id: m.id, name: m.name, type: 'menu' as const })),
   ];
 
+  // Last-copied source id, used to flash a "Copied" indicator on the
+  // picker row so admin can stack multiple sources without wondering
+  // whether the click registered.
+  const [lastCopiedPR, setLastCopiedPR] = useState<string | null>(null);
+  const flashCopiedPR = (id: string) => {
+    setLastCopiedPR(id);
+    window.setTimeout(() => setLastCopiedPR((cur) => (cur === id ? null : cur)), 1200);
+  };
+
   const handlePRCopyFromPreReady = (sourceId: string) => {
     const pr = items.find((p) => p.id === sourceId);
     if (pr?.recipe?.items) {
-      setRecipeLines(pr.recipe.items.map((i) => ({
+      // APPEND-AND-DEDUPE — never replace the working list, sum
+      // quantities for any ingredient already present in the same
+      // unit. Picker stays open so admin can stack copies.
+      const incoming = pr.recipe.items.map((i) => ({
         ingredientId: i.ingredientId,
         quantity: String(i.quantity),
         unit: (i as any).unit ?? i.ingredient?.unit ?? 'G',
-      })));
+      }));
+      setRecipeLines((cur) => mergeRecipeLines([...cur, ...incoming]));
+      flashCopiedPR(sourceId);
     }
-    setShowCopyFromPR(false);
-    setCopySearchPR('');
     setIngSearch({});
     setCsvErrorsPR({});
   };
@@ -196,15 +239,15 @@ export default function PreReadyPage() {
     try {
       const r = await api.get<Recipe>(`/recipes/menu-item/${sourceId}`);
       if (r && r.items) {
-        setRecipeLines(r.items.map((i) => ({
+        const incoming = r.items.map((i) => ({
           ingredientId: i.ingredientId,
           quantity: String(i.quantity),
           unit: i.unit ?? 'G',
-        })));
+        }));
+        setRecipeLines((cur) => mergeRecipeLines([...cur, ...incoming]));
+        flashCopiedPR(sourceId);
       }
     } catch { /* no recipe */ }
-    setShowCopyFromPR(false);
-    setCopySearchPR('');
     setIngSearch({});
     setCsvErrorsPR({});
   };
@@ -983,13 +1026,15 @@ Fried Onion,500,G,Oil,100,ML`;
           </div>
         </div>
       )}
-      {/* Copy from existing recipe modal */}
+      {/* Copy from existing recipe modal — additive: tapping a source
+          merges its lines into the working recipe (sums any duplicate
+          ingredient by id+unit). Modal stays open for stacking. */}
       {showCopyFromPR && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]" onClick={() => setShowCopyFromPR(false)}>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]" onClick={() => { setShowCopyFromPR(false); setLastCopiedPR(null); }}>
           <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-[#2A2A2A]">
               <h2 className="font-display text-lg text-white tracking-widest">COPY RECIPE FROM</h2>
-              <p className="text-[#666] font-body text-xs mt-1">Select an item to copy its recipe ingredients.</p>
+              <p className="text-[#666] font-body text-xs mt-1">Tap a source to add its ingredients. Duplicate ingredients (same unit) are summed. Stack multiple sources, then click Done.</p>
               <input
                 value={copySearchPR}
                 onChange={(e) => setCopySearchPR(e.target.value)}
@@ -1001,22 +1046,30 @@ Fried Onion,500,G,Oil,100,ML`;
             <div className="flex-1 overflow-y-auto">
               {allCopySources
                 .filter((s) => !copySearchPR || s.name.toLowerCase().includes(copySearchPR.toLowerCase()))
-                .map((source) => (
-                  <button
-                    key={`${source.type}-${source.id}`}
-                    onClick={() => source.type === 'menu' ? void handlePRCopyFromMenu(source.id) : handlePRCopyFromPreReady(source.id)}
-                    className="w-full text-left px-5 py-3 border-b border-[#2A2A2A] hover:bg-[#1F1F1F] transition-colors"
-                  >
-                    <span className="text-white font-body text-sm">{source.name}</span>
-                    <span className="text-[#666] font-body text-xs ml-2">{source.type === 'preready' ? 'Pre-Ready' : 'Menu Item'}</span>
-                  </button>
-                ))}
+                .map((source) => {
+                  const justCopied = lastCopiedPR === source.id;
+                  return (
+                    <button
+                      key={`${source.type}-${source.id}`}
+                      onClick={() => source.type === 'menu' ? void handlePRCopyFromMenu(source.id) : handlePRCopyFromPreReady(source.id)}
+                      className={`w-full text-left px-5 py-3 border-b border-[#2A2A2A] transition-colors flex items-center justify-between gap-2 ${justCopied ? 'bg-[#4CAF50]/10' : 'hover:bg-[#1F1F1F]'}`}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="text-white font-body text-sm">{source.name}</span>
+                        <span className="text-[#666] font-body text-xs ml-2">{source.type === 'preready' ? 'Pre-Ready' : 'Menu Item'}</span>
+                      </span>
+                      {justCopied && (
+                        <span className="text-[#4CAF50] font-body text-[10px] tracking-widest uppercase whitespace-nowrap">✓ Copied</span>
+                      )}
+                    </button>
+                  );
+                })}
               {allCopySources.filter((s) => !copySearchPR || s.name.toLowerCase().includes(copySearchPR.toLowerCase())).length === 0 && (
                 <p className="px-5 py-8 text-center text-[#666] font-body text-sm">No items with recipes found.</p>
               )}
             </div>
             <div className="px-5 py-3 border-t border-[#2A2A2A]">
-              <button onClick={() => setShowCopyFromPR(false)} className="w-full bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2 transition-colors">Cancel</button>
+              <button onClick={() => { setShowCopyFromPR(false); setLastCopiedPR(null); }} className="w-full bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2 transition-colors">Done</button>
             </div>
           </div>
         </div>
