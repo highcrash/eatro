@@ -22,6 +22,8 @@ interface PublicMenu {
     imageUrl: string | null;
     categoryId: string;
     isAvailable: boolean;
+    isVariantParent?: boolean;
+    variants?: Array<{ id: string; name: string; price: number }>;
   }>;
 }
 
@@ -34,6 +36,8 @@ interface RecommendedItem {
   imageUrl: string | null;
   categoryId: string;
   categoryName?: string;
+  isVariantParent?: boolean;
+  variants?: Array<{ id: string; name: string; price: number }>;
 }
 
 interface Review {

@@ -3,6 +3,21 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.46 — website: carousel cards show variant price (no more ৳0) (2026-04-27)
+
+No Electron-shell changes. Rebundles apps/web only:
+
+- Variant parent shells (e.g. "Iced Mocha", "Latte") were
+  rendering as `BDT 0.00` on the homepage category carousels
+  because the parent itself carries no price — variants do.
+- The MenuCarousel now falls back to the cheapest variant's
+  price with a "From" prefix (matches the parent-card behaviour
+  shipped in v0.8.44). HomePage's PublicMenu interface was
+  extended to pass `isVariantParent` + `variants` through to
+  the carousel so the fallback engages.
+- Pure UI fix — no API change. Standalone items render
+  unchanged.
+
 ## 0.8.45 — website: Available Add-ons section on item detail (2026-04-27)
 
 No Electron-shell changes. Rebundles apps/web only:

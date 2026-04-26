@@ -8,6 +8,11 @@ export interface MenuItem {
   discountedPrice?: number;
   imageUrl: string | null;
   categoryId?: string;
+  /** Set on variant parent shells; the carousel falls back to the
+   *  cheapest variant's price + a "From" prefix when the parent's
+   *  own price is 0. */
+  isVariantParent?: boolean;
+  variants?: Array<{ id: string; name: string; price: number }>;
 }
 
 interface MenuCarouselProps {
@@ -57,6 +62,17 @@ export default function MenuCarousel({ items, onItemClick }: MenuCarouselProps) 
       >
         {items.map((item) => {
           const hasDiscount = item.discountedPrice != null && item.discountedPrice < item.price;
+          // Variant parents carry price=0 because the variants hold
+          // the actual price. Fall back to the cheapest variant's
+          // price + a "From" prefix so the carousel never reads ৳0.
+          const variants = Array.isArray(item.variants) ? item.variants : [];
+          const cheapestVariantPrice = variants.length > 0
+            ? variants.reduce((min, v) => Math.min(min, Number(v.price)), Number(variants[0].price))
+            : 0;
+          const isParentWithVariants = !!item.isVariantParent && variants.length > 0;
+          const displayPrice = isParentWithVariants && Number(item.price) === 0
+            ? cheapestVariantPrice
+            : Number(item.price);
           return (
             <button
               key={item.id}
@@ -92,10 +108,13 @@ export default function MenuCarousel({ items, onItemClick }: MenuCarouselProps) 
                   {hasDiscount ? (
                     <div className="flex items-baseline gap-2">
                       <span className="text-accent font-bold text-sm">{formatCurrency(item.discountedPrice!)}</span>
-                      <span className="text-muted text-xs line-through">{formatCurrency(Number(item.price))}</span>
+                      <span className="text-muted text-xs line-through">{formatCurrency(displayPrice)}</span>
                     </div>
                   ) : (
-                    <span className="text-accent font-bold text-sm">{formatCurrency(Number(item.price))}</span>
+                    <span className="text-accent font-bold text-sm">
+                      {isParentWithVariants && <span className="text-muted text-xs font-normal mr-1">From</span>}
+                      {formatCurrency(displayPrice)}
+                    </span>
                   )}
                   <svg className="w-4 h-4 text-muted group-hover/card:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
