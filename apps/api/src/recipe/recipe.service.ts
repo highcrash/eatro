@@ -32,6 +32,16 @@ export class RecipeService {
     });
     if (!menuItem) throw new NotFoundException(`Menu item ${menuItemId} not found`);
 
+    // Variant parent shells (Espresso → Single + Double) are pickers
+    // with no price and no recipe — each variant has its own recipe.
+    // Block at the API so a stale UI / direct curl can't create one
+    // by mistake; the deduction engine never reads parent recipes.
+    if ((menuItem as { isVariantParent?: boolean }).isVariantParent) {
+      throw new BadRequestException(
+        `"${menuItem.name}" is a variant parent — add the recipe to each variant (e.g. ${menuItem.name} – Single, ${menuItem.name} – Double) instead.`,
+      );
+    }
+
     // Block SUPPLY-category ingredients from recipe lines. Supplies
     // (parcel bags, cleaner, tissues) are tracked via the manual
     // "Record Usage" log on Inventory → Supplies, not via recipe

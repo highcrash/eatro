@@ -141,7 +141,8 @@ export default function RecipesPage() {
 
   // All existing recipes (menu items + pre-ready) for copy-from feature
   const allRecipeSources = [
-    ...menuItems.filter((m) => m.id !== selectedItemId).map((m) => ({ id: m.id, name: m.name, type: 'menu' as const })),
+    // Skip variant-parent shells — they have no recipe to copy from.
+    ...menuItems.filter((m) => m.id !== selectedItemId && !m.isVariantParent).map((m) => ({ id: m.id, name: m.name, type: 'menu' as const })),
     ...preReadyItems.filter((pr) => pr.recipe && pr.recipe.items.length > 0).map((pr) => ({ id: pr.id, name: `[PR] ${pr.name}`, type: 'preready' as const })),
   ];
 
@@ -421,6 +422,12 @@ Mango Lassi,Sugar,15,G`;
           <div className="flex-1 overflow-y-auto">
             {menuItems
               .filter((m) => !m.deletedAt && m.isAvailable !== false)
+              // Variant parent shells (e.g. "Espresso" with Single +
+              // Double underneath) are pickers — they have no price
+              // and never get sold directly. The recipe lives on each
+              // variant. Hiding them here stops admin from wasting
+              // time setting an unused parent recipe.
+              .filter((m) => !m.isVariantParent)
               .filter((m) => !categoryFilter || m.name.toLowerCase().includes(categoryFilter.toLowerCase()))
               .filter((m) => {
                 if (!ingredientFilter) return true;
