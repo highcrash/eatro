@@ -68,7 +68,12 @@ export default function RecipesPage() {
 
   const { data: menuItems = [] } = useQuery<MenuItem[]>({
     queryKey: ['menu-items'],
-    queryFn: () => api.get('/menu'),
+    // includeAddons=true so addons (Cheese Sauce, Garlic Nun, etc.)
+    // appear in the recipe-builder dropdown — the /menu endpoint
+    // defaults to isAddon=false because the website + POS grid hide
+    // them. Owner needs to attach recipes to addons just like any
+    // other menu item so stock + COGS deduct correctly.
+    queryFn: () => api.get('/menu?includeAddons=true'),
   });
 
   const { data: ingredients = [] } = useQuery<Ingredient[]>({

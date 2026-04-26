@@ -3,6 +3,21 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.26 — admin Recipes page surfaces addons (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin only:
+
+- Addons (Cheese Sauce, Garlic Nun, Extra Patty, etc.) now appear
+  in the **Admin → Recipes** menu-item dropdown so owner can
+  attach a recipe to each. The page was calling `/menu` without
+  `includeAddons=true`, so the API was silently filtering addons
+  out (same default the website + POS grid use to hide them).
+- Without this fix, addon recipes couldn't be authored at all —
+  cooked an off-by-stock-deduction bug where every selected addon
+  silently skipped its recipe deduction. With recipes wired up,
+  selecting an addon at the POS now correctly decrements its
+  ingredients via the existing engine in `RecipeService`.
+
 ## 1.0.25 — qr-order: parent categories only + scroll arrows (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/qr-order:
