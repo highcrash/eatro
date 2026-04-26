@@ -23,6 +23,16 @@ export class IngredientController {
     return this.ingredientService.getMovements(user.branchId, ingredientId);
   }
 
+  // Per-ingredient usage map across menu recipes + pre-ready recipes.
+  // Used by InventoryPage's "Unused" filter pill so admin can see what
+  // they're paying to stock but never selling. Pure read-only — no
+  // schema, no migration, no side effects.
+  @Get('usage')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  getUsage(@CurrentUser() user: JwtPayload) {
+    return this.ingredientService.getIngredientUsage(user.branchId);
+  }
+
   @Get(':id')
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {

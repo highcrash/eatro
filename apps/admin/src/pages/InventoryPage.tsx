@@ -235,7 +235,9 @@ export default function InventoryPage() {
   // tissues, cleaner) are non-recipe and tracked via the manual usage
   // log; the Supplies pill swaps the table to show their burn rate +
   // a "Record Usage" action instead of "Adjust Stock".
-  const [kindFilter, setKindFilter] = useState<'all' | 'recipe' | 'supply'>('all');
+  // 'unused' = items not referenced by any menu OR pre-ready recipe
+  // (with parent ↔ variant fan-out done server-side).
+  const [kindFilter, setKindFilter] = useState<'all' | 'recipe' | 'supply' | 'unused'>('all');
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterStock, setFilterStock] = useState('');
   const [showCSVUpload, setShowCSVUpload] = useState(false);
@@ -271,6 +273,20 @@ export default function InventoryPage() {
   });
   const usage30dById = new Map((suppliesReport?.rows ?? []).map((r) => [r.ingredientId, r] as const));
 
+  // Per-ingredient usage map across menu + pre-ready recipes. Loaded
+  // only when the Unused pill is active so we don't pay for the join
+  // on every page visit. Server fans variant ↔ parent so a recipe on
+  // the parent counts for all variants and vice versa.
+  const { data: usageMap } = useQuery<Record<string, { menu: number; preReady: number }>>({
+    queryKey: ['ingredient-usage'],
+    queryFn: () => api.get('/ingredients/usage'),
+    enabled: kindFilter === 'unused',
+  });
+  const isUsed = (ingredientId: string) => {
+    const u = usageMap?.[ingredientId];
+    return !!u && (u.menu > 0 || u.preReady > 0);
+  };
+
   const searchLower = searchText.trim().toLowerCase();
   const filteredIngredients = ingredients.filter((ing) => {
     if (searchLower) {
@@ -291,6 +307,16 @@ export default function InventoryPage() {
     if (filterCategory && ing.category !== filterCategory) return false;
     if (kindFilter === 'recipe' && ing.category === 'SUPPLY') return false;
     if (kindFilter === 'supply' && ing.category !== 'SUPPLY') return false;
+    if (kindFilter === 'unused') {
+      // SUPPLY items are non-recipe by design — exclude them so the
+      // list surfaces only items admin EXPECTED to be in a recipe.
+      if (ing.category === 'SUPPLY') return false;
+      // While the usage map is in-flight, hide every row to avoid a
+      // false "everything is unused" flash. The empty-state message
+      // covers this.
+      if (!usageMap) return false;
+      if (isUsed(ing.id)) return false;
+    }
     if (filterSupplier) {
       const hasSupplier = ing.suppliers?.some((s) => s.supplierId === filterSupplier) || ing.supplierId === filterSupplier;
       if (!hasSupplier) return false;
@@ -830,6 +856,7 @@ export default function InventoryPage() {
               { key: 'all', label: 'All Items' },
               { key: 'recipe', label: 'Recipe items' },
               { key: 'supply', label: 'Supplies' },
+              { key: 'unused', label: 'Unused' },
             ] as const).map((p) => (
               <button
                 key={p.key}
@@ -845,6 +872,9 @@ export default function InventoryPage() {
             ))}
             {kindFilter === 'supply' && (
               <p className="ml-3 text-[#666] font-body text-xs">Tissues, parcel bags, cleaner — not used in recipes</p>
+            )}
+            {kindFilter === 'unused' && (
+              <p className="ml-3 text-[#666] font-body text-xs">Ingredients not referenced by any menu OR pre-ready recipe — supplies excluded.</p>
             )}
           </div>
 
