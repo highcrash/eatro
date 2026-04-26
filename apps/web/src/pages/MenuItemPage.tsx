@@ -29,6 +29,21 @@ interface VariantSummary {
   spiceLevel?: string | null;
 }
 
+interface AddonOption {
+  id: string;
+  addonItemId: string;
+  sortOrder: number;
+  addon?: { id: string; name: string; price: number; isAvailable: boolean };
+}
+interface AddonGroup {
+  id: string;
+  name: string;
+  minPicks: number;
+  maxPicks: number;
+  sortOrder: number;
+  options: AddonOption[];
+}
+
 interface MenuItemDetail {
   id: string;
   name: string;
@@ -54,6 +69,10 @@ interface MenuItemDetail {
   isVariantParent?: boolean;
   variantParentId?: string | null;
   variants?: VariantSummary[];
+  /** Addon groups attached to this menu item (or its parent shell).
+   *  Customer site renders them informationally; ordering happens
+   *  via QR / POS where the picker enforces min / max. */
+  addonGroups?: AddonGroup[];
 }
 
 interface RecommendedItem {
@@ -130,6 +149,13 @@ export default function MenuItemPage() {
         prepTime: variantDetail.prepTime,
         spiceLevel: variantDetail.spiceLevel,
         ingredients: variantDetail.ingredients,
+        // Addons: prefer the variant's own groups when admin has
+        // attached them per-variant, else fall back to the parent
+        // shell's groups (the common case — admin attaches addons
+        // once on the shell and they apply to every variant).
+        addonGroups: (variantDetail.addonGroups && variantDetail.addonGroups.length > 0)
+          ? variantDetail.addonGroups
+          : item.addonGroups,
       }
     : item;
 
@@ -349,6 +375,55 @@ export default function MenuItemPage() {
                   <span className="text-xs text-muted text-center leading-tight">{ing.name}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Available add-ons — informational only on the website
+            (ordering happens via QR/POS where the picker enforces
+            min/max). Lists each addon group with its name + min/max
+            requirement, then the options inside with their price
+            markup. Falls through to the parent's groups when a
+            variant has none of its own. */}
+        {displayed?.addonGroups && displayed.addonGroups.length > 0 && (
+          <div className="mt-10">
+            <h2 className="font-display text-2xl tracking-wider mb-4">AVAILABLE ADD-ONS</h2>
+            <div className="space-y-4">
+              {displayed.addonGroups
+                .filter((g) => (g.options ?? []).some((o) => o.addon?.isAvailable !== false))
+                .map((group) => {
+                  const requirement = group.minPicks > 0
+                    ? `Pick ${group.minPicks === group.maxPicks ? group.minPicks : `${group.minPicks}–${group.maxPicks}`}`
+                    : group.maxPicks > 0
+                      ? `Optional · up to ${group.maxPicks}`
+                      : 'Optional';
+                  return (
+                    <div key={group.id} className="border border-border bg-card p-4">
+                      <div className="flex items-baseline justify-between mb-3">
+                        <h3 className="font-semibold text-text">{group.name}</h3>
+                        <span className="text-xs text-muted uppercase tracking-wider">{requirement}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {(group.options ?? [])
+                          .filter((o) => o.addon?.isAvailable !== false)
+                          .map((opt) => {
+                            const price = Number(opt.addon?.price ?? 0);
+                            return (
+                              <span
+                                key={opt.id}
+                                className="inline-flex items-baseline gap-2 bg-hover border border-border px-3 py-1.5 text-sm"
+                              >
+                                <span className="text-text">{opt.addon?.name ?? '—'}</span>
+                                {price > 0 && (
+                                  <span className="text-accent text-xs font-semibold">+{formatCurrency(price)}</span>
+                                )}
+                              </span>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         )}

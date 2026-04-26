@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.45 — website: Available Add-ons section on item detail (2026-04-27)
+
+No Electron-shell changes. Rebundles apps/web only:
+
+- Adds an **Available Add-ons** section to the customer item
+  detail page, between Key Ingredients and the Pieces / Prep
+  Time / Spice Level info cards. Each addon group shows its
+  name + min/max requirement ("Pick 2", "Optional · up to 1")
+  with chips for every option underneath ("Cheese Sauce
+  +৳50", "Bacon +৳80"). Informational only — ordering still
+  happens via QR / POS where the picker enforces the rules.
+- For variant parents the addon groups attached to the parent
+  shell flow through to every variant tab (the common admin
+  pattern: attach addons once on the shell). If admin
+  attaches per-variant addons, those override the parent's
+  for that variant.
+- API select already exposes addonGroups with their options +
+  hydrated addon detail, so this is a pure UI addition — no
+  schema, no migration, no payload change.
+
 ## 0.8.44 — website: parent-only menu cards + variant tabs on detail (2026-04-27)
 
 No Electron-shell changes. Rebundles apps/web + apps/api:
