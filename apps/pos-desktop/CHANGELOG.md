@@ -3,6 +3,19 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.39 — re-delete legacy apps/qr/ (DO component now removed) (2026-04-26)
+
+No Electron-shell changes. Repo cleanup:
+
+- Owner has removed the `qr` build component from DigitalOcean
+  App Platform, so the legacy `apps/qr/` workspace can finally
+  be deleted for good. All production traffic at `/qr` continues
+  to be served by `apps/qr-order/`.
+- This is the second attempt at the same cleanup; the first
+  (v0.8.33) broke the deploy because the DO config still
+  referenced the directory. v0.8.38 restored it; this version
+  re-removes it now that the DO config is clean.
+
 ## 0.8.38 — restore apps/qr/ to unblock DigitalOcean deploy (2026-04-26)
 
 No Electron-shell changes. Restoration:
