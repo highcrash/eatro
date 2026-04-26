@@ -13,7 +13,7 @@
     "dev:pos": "turbo run dev --filter=@restora/pos",
     "dev:admin": "turbo run dev --filter=@restora/admin",
     "dev:kds": "turbo run dev --filter=@restora/kds",
-    "dev:qr": "turbo run dev --filter=@restora/qr",
+    "dev:qr": "turbo run dev --filter=@restora/qr-order",
     "dev:web": "turbo run dev --filter=@restora/web",
     "dev:desktop": "turbo run dev --filter=@restora/pos-desktop",
     "build": "turbo run build",
