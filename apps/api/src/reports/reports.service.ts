@@ -376,14 +376,20 @@ export class ReportsService {
         purchaseOrder: { branchId, deletedAt: null },
         createdAt: { gte: dateFrom, lte: dateTo },
       },
-      include: { ingredient: { select: { id: true, name: true, unit: true } } },
+      // PurchaseOrderItem.unitCost is denominated in the supplier's
+      // PURCHASE unit, not the stock unit. We need both unit + purchase
+      // unit + purchaseUnitQty to render the column truthfully and to
+      // derive a per-stock-unit price if the UI wants one.
+      include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true } } },
       orderBy: { createdAt: 'desc' },
     });
 
     interface PriceAgg {
       ingredientId: string;
       ingredientName: string;
-      unit: string;
+      stockUnit: string;
+      purchaseUnit: string;
+      purchaseUnitQty: number;
       prices: Set<number>;
       sum: number;
       min: number;
@@ -397,10 +403,18 @@ export class ReportsService {
       const id = r.ingredientId;
       let p = byIng.get(id);
       if (!p) {
+        const stockUnit = r.ingredient.unit;
+        // Fall back to stockUnit when admin never set a purchase unit
+        // — at least the displayed label is consistent with the cost
+        // figure (which equals per-stock-unit cost in that case).
+        const purchaseUnit = r.ingredient.purchaseUnit?.trim() || stockUnit;
+        const qty = r.ingredient.purchaseUnitQty?.toNumber() ?? 1;
         p = {
           ingredientId: id,
           ingredientName: r.ingredient.name,
-          unit: r.ingredient.unit,
+          stockUnit,
+          purchaseUnit,
+          purchaseUnitQty: qty > 0 ? qty : 1,
           prices: new Set(),
           sum: 0,
           min: cost,
@@ -421,7 +435,13 @@ export class ReportsService {
       .map((p) => ({
         ingredientId: p.ingredientId,
         ingredientName: p.ingredientName,
-        unit: p.unit,
+        // `unit` retained for backwards compat with any older client
+        // bundles that haven't reloaded; new fields below are the
+        // truthful labels.
+        unit: p.purchaseUnit,
+        stockUnit: p.stockUnit,
+        purchaseUnit: p.purchaseUnit,
+        purchaseUnitQty: p.purchaseUnitQty,
         distinctPrices: p.prices.size,
         minUnitCost: p.min,
         maxUnitCost: p.max,

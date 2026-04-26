@@ -3,6 +3,31 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.40 — Performance: Price Volatility shows correct unit (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin + apps/api +
+@restora/types:
+
+- The **Inventory Price Volatility** panel on Performance Report
+  was showing the wrong unit. The cost columns are denominated
+  in the supplier's PURCHASE unit (PACK / BOTTLE / KG bag) but
+  the Unit column was rendering the ingredient's STOCK unit
+  (G / ML / PCS). Result: a row would read "Soy Sauce —
+  Unit: ML — Latest: ৳450" implying ৳450 per ML, when it
+  actually meant ৳450 per BOTTLE.
+- Fix exposes `purchaseUnit`, `stockUnit`, and `purchaseUnitQty`
+  on each volatility row. The Unit column now shows the purchase
+  unit (the truth-aligned label), with a small grey "= 200 G"
+  hint underneath when the two units differ. The Latest cost
+  cell also gets a derived "৳2.25 / G" line so admin can sanity-
+  check both perspectives at once.
+- Print template gets the same treatment plus a "(prices per
+  purchase unit)" subheading so a printed PDF can't be
+  misread.
+- Pure read-only fix. No schema, no migration. Old field `unit`
+  is retained on the response (now aliased to purchaseUnit) so
+  any cached client bundle continues to render without a crash.
+
 ## 0.8.39 — re-delete legacy apps/qr/ (DO component now removed) (2026-04-26)
 
 No Electron-shell changes. Repo cleanup:

@@ -65,14 +65,25 @@ export default function PerformanceReportPage() {
       <td class="r">${formatCurrency(Number(c.grossProfit))}</td>
       <td class="r">${c.marginPct == null ? '—' : c.marginPct.toFixed(1) + '%'}</td>
     </tr>`).join('');
-    const volRows = volatility.map((v, idx) => `<tr>
-      <td>${idx + 1}</td><td>${v.ingredientName}</td><td>${v.unit}</td>
-      <td class="r">${v.deliveries}</td>
-      <td class="r">${formatCurrency(Number(v.minUnitCost))}</td>
-      <td class="r">${formatCurrency(Number(v.avgUnitCost))}</td>
-      <td class="r">${formatCurrency(Number(v.maxUnitCost))}</td>
-      <td class="r">${formatCurrency(Number(v.latestUnitCost))}</td>
-    </tr>`).join('');
+    const volRows = volatility.map((v, idx) => {
+      // Costs are per PURCHASE unit; show that explicitly so the
+      // print doesn't mislead the reader the same way the screen
+      // used to.
+      const purchaseUnit = (v as any).purchaseUnit ?? v.unit;
+      const stockUnit = (v as any).stockUnit ?? v.unit;
+      const purchaseUnitQty = Number((v as any).purchaseUnitQty ?? 1) || 1;
+      const unitLabel = purchaseUnit && stockUnit && purchaseUnit.toUpperCase() !== stockUnit.toUpperCase()
+        ? `${purchaseUnit} (= ${purchaseUnitQty} ${stockUnit})`
+        : purchaseUnit;
+      return `<tr>
+        <td>${idx + 1}</td><td>${v.ingredientName}</td><td>${unitLabel}</td>
+        <td class="r">${v.deliveries}</td>
+        <td class="r">${formatCurrency(Number(v.minUnitCost))}</td>
+        <td class="r">${formatCurrency(Number(v.avgUnitCost))}</td>
+        <td class="r">${formatCurrency(Number(v.maxUnitCost))}</td>
+        <td class="r">${formatCurrency(Number(v.latestUnitCost))}</td>
+      </tr>`;
+    }).join('');
     w.document.write(`<html><head><title>Performance Report</title><style>
       *{margin:0;padding:0;box-sizing:border-box}body{font-family:'DM Sans',Arial,sans-serif;font-size:11px;color:#111;padding:20px}
       h1{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:2px;margin-bottom:4px}
@@ -89,8 +100,8 @@ export default function PerformanceReportPage() {
       <table><thead><tr><th>#</th><th>Item</th><th>Category</th><th class="r">Qty</th><th class="r">Revenue</th><th class="r">COGS</th><th class="r">Gross</th><th class="r">Margin</th></tr></thead><tbody>${itemRows}</tbody></table>
       <h2>By Category</h2>
       <table><thead><tr><th>#</th><th>Category</th><th class="r">Qty</th><th class="r">Revenue</th><th class="r">COGS</th><th class="r">Gross</th><th class="r">Margin</th></tr></thead><tbody>${catRows}</tbody></table>
-      <h2>Inventory Price Volatility</h2>
-      <table><thead><tr><th>#</th><th>Ingredient</th><th>Unit</th><th class="r">Deliveries</th><th class="r">Min</th><th class="r">Avg</th><th class="r">Max</th><th class="r">Latest</th></tr></thead><tbody>${volRows}</tbody></table>
+      <h2>Inventory Price Volatility <span style="font-size:9px;font-weight:400;color:#666;letter-spacing:0">(prices per purchase unit)</span></h2>
+      <table><thead><tr><th>#</th><th>Ingredient</th><th>Per Unit</th><th class="r">Deliveries</th><th class="r">Min</th><th class="r">Avg</th><th class="r">Max</th><th class="r">Latest</th></tr></thead><tbody>${volRows}</tbody></table>
       <script>window.onload=function(){window.print();}<\/script>
     </body></html>`);
     w.document.close();
@@ -237,14 +248,18 @@ export default function PerformanceReportPage() {
           </table>
         )}
 
-        {/* Inventory Price Volatility */}
+        {/* Inventory Price Volatility — costs below are PER PURCHASE
+            UNIT (PACK / BOTTLE / KG bag), not per stock unit. The
+            small grey row beneath the latest cost shows the derived
+            per-stock-unit price when the two units differ, so admin
+            can sanity-check both views at once. */}
         {tab === 'volatility' && (
           <table className="w-full text-sm font-body">
             <thead>
               <tr className="text-left text-xs text-[#999] tracking-widest uppercase border-b border-[#2A2A2A]">
                 <th className="px-4 py-3 font-medium">#</th>
                 <th className="px-4 py-3 font-medium">Ingredient</th>
-                <th className="px-4 py-3 font-medium">Unit</th>
+                <th className="px-4 py-3 font-medium">Per Unit</th>
                 <th className="px-4 py-3 font-medium text-right">Deliveries</th>
                 <th className="px-4 py-3 font-medium text-right">Min</th>
                 <th className="px-4 py-3 font-medium text-right">Avg</th>
@@ -261,16 +276,36 @@ export default function PerformanceReportPage() {
                 const avg = Number(v.avgUnitCost);
                 const trendUp = avg > 0 && latest > avg * 1.05;
                 const trendDown = avg > 0 && latest < avg * 0.95;
+                // Prefer the new explicit fields; fall back to the
+                // legacy `unit` for any cached bundle that hasn't
+                // reloaded yet.
+                const purchaseUnit = (v as any).purchaseUnit ?? v.unit;
+                const stockUnit = (v as any).stockUnit ?? v.unit;
+                const purchaseUnitQty = Number((v as any).purchaseUnitQty ?? 1) || 1;
+                const showStockHint = stockUnit && purchaseUnit && stockUnit.toUpperCase() !== purchaseUnit.toUpperCase() && purchaseUnitQty > 0;
+                const latestPerStock = showStockHint ? latest / purchaseUnitQty : null;
                 return (
                   <tr key={v.ingredientId} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
                     <td className="px-4 py-2.5 text-[#666] text-xs">{idx + 1}</td>
                     <td className="px-4 py-2.5 text-white text-sm">{v.ingredientName}</td>
-                    <td className="px-4 py-2.5 text-[#999] text-xs">{v.unit}</td>
+                    <td className="px-4 py-2.5 text-[#999] text-xs">
+                      {purchaseUnit}
+                      {showStockHint && (
+                        <span className="block text-[10px] text-[#666] mt-0.5">= {purchaseUnitQty} {stockUnit}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-right text-[#999] text-xs">{v.deliveries}</td>
                     <td className="px-4 py-2.5 text-right text-green-500 text-xs">{formatCurrency(Number(v.minUnitCost))}</td>
                     <td className="px-4 py-2.5 text-right text-[#999] text-xs">{formatCurrency(avg)}</td>
                     <td className="px-4 py-2.5 text-right text-[#D62B2B] text-xs">{formatCurrency(Number(v.maxUnitCost))}</td>
-                    <td className="px-4 py-2.5 text-right text-white text-xs font-medium">{formatCurrency(latest)}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className="text-white text-xs font-medium">{formatCurrency(latest)}</span>
+                      {latestPerStock !== null && (
+                        <span className="block text-[10px] text-[#666] mt-0.5">
+                          {formatCurrency(latestPerStock)} / {stockUnit}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5">
                       {trendUp ? <span className="inline-flex items-center gap-1 text-[#D62B2B] text-xs"><TrendingUp size={12} /> Up</span>
                         : trendDown ? <span className="inline-flex items-center gap-1 text-green-500 text-xs"><TrendingDown size={12} /> Down</span>
