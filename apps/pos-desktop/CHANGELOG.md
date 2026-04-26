@@ -3,6 +3,22 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.43 — admin Menu: addon names inline on each parent row (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin only:
+
+- Replaces the opaque `+A • 2` count badge on each menu row with
+  **inline chips listing every attached addon by name** — admin
+  can see at a glance that "Burger" carries `Cheese Sauce`,
+  `Extra Patty`, `Bacon`, and `BBQ Sauce` without opening the
+  Addon Groups dialog.
+- Each chip is hover-titled with its addon group ("Sides" /
+  "Sauces" / etc.) so admin can tell which group a particular
+  addon belongs to.
+- Long lists cap at 6 chips with a `+N more` tail (also hover-
+  titled with the full overflow list) so a parent with 30 addon
+  options doesn't blow the row layout out.
+
 ## 0.8.42 — admin Menu: bulk move-to-category (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin only:

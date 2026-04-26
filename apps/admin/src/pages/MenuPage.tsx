@@ -1244,8 +1244,47 @@ export default function MenuPage() {
                     {item.isVariantParent && <span className="ml-2 text-[10px] font-medium tracking-widest uppercase text-[#FFA726] border border-[#FFA726] px-1.5 py-0.5">PARENT • {item.variants?.length ?? 0}</span>}
                     {item.variantParentId && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#FFA726] border border-[#2A2A2A] px-1.5 py-0.5">VARIANT</span>}
                     {item.isAddon && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#CE93D8] border border-[#CE93D8] px-1.5 py-0.5">ADDON</span>}
-                    {(item.addonGroups?.length ?? 0) > 0 && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#CE93D8] border border-[#2A2A2A] px-1.5 py-0.5">+A • {item.addonGroups!.length}</span>}
                     {(item.linkedItems?.length ?? 0) > 0 && <span className="ml-1 text-[10px] font-medium tracking-widest uppercase text-[#999] border border-[#2A2A2A] px-1.5 py-0.5">LINKED</span>}
+                    {/* Addon chips — list each attached addon's name
+                        inline so admin sees at a glance which addons
+                        a parent menu item carries. Tooltip on each
+                        chip shows the group name (Sides / Sauces /
+                        etc). Capped at 6 with a "+N more" tail to
+                        keep the row from blowing out on items with
+                        a long combined option list. */}
+                    {(() => {
+                      const groups = item.addonGroups ?? [];
+                      if (groups.length === 0) return null;
+                      const chips: Array<{ key: string; name: string; group: string }> = [];
+                      for (const g of groups) {
+                        for (const opt of (g.options ?? [])) {
+                          const name = opt.addon?.name;
+                          if (!name) continue;
+                          chips.push({ key: opt.id, name, group: g.name });
+                        }
+                      }
+                      const visible = chips.slice(0, 6);
+                      const overflow = chips.length - visible.length;
+                      return (
+                        <span className="ml-1 inline-flex items-center gap-1 align-middle flex-wrap">
+                          <span className="text-[9px] font-medium tracking-widest uppercase text-[#CE93D8]">+A</span>
+                          {visible.map((c) => (
+                            <span
+                              key={c.key}
+                              title={`Addon group: ${c.group}`}
+                              className="text-[10px] font-body text-[#CE93D8] bg-[#CE93D8]/10 border border-[#CE93D8]/30 px-1.5 py-0.5 rounded-sm"
+                            >
+                              {c.name}
+                            </span>
+                          ))}
+                          {overflow > 0 && (
+                            <span className="text-[10px] font-body text-[#999]" title={chips.slice(6).map((c) => c.name).join(', ')}>
+                              +{overflow} more
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-5 py-3 text-[#999]">{item.category?.name ?? '--'}</td>
                   <td className={`px-5 py-3 ${sectionId ? 'text-white' : 'text-[#666]'}`}>{sectionName}</td>
