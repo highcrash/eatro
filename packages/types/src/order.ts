@@ -306,11 +306,29 @@ export interface PerformanceCategoryRow {
  * Inventory price-volatility row — surfaces ingredients whose
  * PurchaseOrderItem.unitCost has shifted across deliveries in the period.
  * Filtered to ≥ 2 distinct prices to keep the noise low.
+ *
+ * IMPORTANT: `min/max/avg/latestUnitCost` are cost per PURCHASE unit
+ * (PACK / BOTTLE / KG bag — what the supplier billed), NOT per stock
+ * unit (G / ML / PCS — what recipes consume). The earlier version of
+ * this row only carried `unit` (the stock unit) which made the display
+ * look like "৳450 / ML" — wildly wrong. `purchaseUnit` + `stockUnit` +
+ * `purchaseUnitQty` are now exposed so the UI can label the column as
+ * "per PACK" and optionally derive the per-stock-unit cost.
  */
 export interface InventoryPriceVolatilityRow {
   ingredientId: string;
   ingredientName: string;
+  /** @deprecated alias of stockUnit, kept for backwards compatibility. */
   unit: string;
+  /** Stock / recipe unit (G, ML, PCS — what recipes consume). */
+  stockUnit: string;
+  /** Supplier's billing unit (PACK, BOTTLE, KG bag). The cost columns
+   *  are denominated in this. Falls back to stockUnit when admin never
+   *  set a purchase unit. */
+  purchaseUnit: string;
+  /** Stock-units per 1 purchase-unit (e.g. 1 PACK = 200 G → 200). Used
+   *  to derive a per-stock-unit cost in the UI when needed. */
+  purchaseUnitQty: number;
   distinctPrices: number;
   minUnitCost: MoneyAmount;
   maxUnitCost: MoneyAmount;
