@@ -3,6 +3,27 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.37 — Pre-Ready picker: dedupe "[PR] X" double-listing (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin only:
+
+- The Pre-Ready recipe builder's ingredient picker was showing
+  every pre-ready item TWICE — once from the Ingredient table
+  (the auto-mirrored `[PR] <name>` row with itemCode `PR-XXXXXX`)
+  and once from the PreReadyItem table itself. Same display name,
+  no real duplicate in the database — the dropdown was just
+  concatenating two sources. Confused admin into thinking they
+  had duplicate inventory.
+- Now we hide the PreReadyItem entry whenever its mirror
+  ingredient (`name === "[PR] <pr.name>"`) is already in the
+  ingredient list — which is the normal case since v0.x.x
+  auto-creates the mirror on pre-ready creation. The remaining
+  ingredient row carries the cost + itemCode + stock and is the
+  only one that was ever selectable anyway.
+- Pure UX cleanup. No schema, no migration. Selecting the
+  pre-ready row was already blocked by the matcher; this just
+  stops it appearing.
+
 ## 0.8.36 — admin Recipes + Pre-Ready: additive "Copy from" (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin only:
