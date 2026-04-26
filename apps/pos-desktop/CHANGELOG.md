@@ -3,6 +3,21 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.29 — Recipes page: "Missing recipes only" filter (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin only:
+
+- New **"Missing recipes only"** toggle on the Recipes page
+  (under the existing search + ingredient filter). Click to
+  collapse the menu-item list to only items that don't have a
+  recipe authored yet. Click again to clear.
+- Lets owner spot-check what's still owed at a glance — items
+  missing a recipe never deduct stock or show real food cost,
+  so they were silently slipping through. Detection uses the
+  existing `getAllCosts` map (which emits one entry per recipe
+  in DB, even when total cost is zero), so it's accurate even
+  for recipes whose ingredients all cost ৳0.
+
 ## 1.0.28 — Recipes page hides variant parent shells (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin + apps/api:
