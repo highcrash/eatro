@@ -772,6 +772,7 @@ export default function MenuPage() {
   const [menuSearch, setMenuSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkSectionId, setBulkSectionId] = useState<string>('');
+  const [bulkCategoryId, setBulkCategoryId] = useState<string>('');
   const [bulkStatus, setBulkStatus] = useState<string | null>(null);
   const [csvOpen, setCsvOpen] = useState(false);
   const [csvRows, setCsvRows] = useState<{ categoryName: string; name: string; price: number; description: string; tags: string; kitchenSection: string }[]>([]);
@@ -811,6 +812,24 @@ export default function MenuPage() {
       setBulkSectionId('');
     },
     onError: (err: Error) => setBulkStatus(err.message || 'Failed to assign'),
+  });
+
+  // Bulk move-to-category — same fan-out pattern as bulkAssignSection.
+  // /menu/:id already accepts categoryId, so no new endpoint needed.
+  const bulkMoveCategory = useMutation({
+    mutationFn: async (categoryId: string) => {
+      const ids = Array.from(selectedIds);
+      await Promise.all(ids.map((id) => api.patch(`/menu/${id}`, { categoryId })));
+      return ids.length;
+    },
+    onSuccess: (count) => {
+      void qc.invalidateQueries({ queryKey: ['menu'] });
+      setBulkStatus(`Moved ${count} item${count === 1 ? '' : 's'}`);
+      setTimeout(() => setBulkStatus(null), 2500);
+      setSelectedIds(new Set());
+      setBulkCategoryId('');
+    },
+    onError: (err: Error) => setBulkStatus(err.message || 'Failed to move'),
   });
 
   const topCategories = categories.filter((c) => !c.parentId);
@@ -1089,16 +1108,55 @@ export default function MenuPage() {
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className="bg-[#1A1A1A] border border-[#D62B2B] px-5 py-3 flex items-center gap-4 mb-2">
-          <span className="text-white font-body text-sm font-medium">
-            {selectedIds.size} selected
-          </span>
-          <div className="flex items-center gap-2 ml-auto">
-            <label className="text-[10px] font-body tracking-widest uppercase text-[#999]">Kitchen Section</label>
+        <div className="bg-[#1A1A1A] border border-[#D62B2B] px-5 py-3 mb-2 space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-white font-body text-sm font-medium">
+              {selectedIds.size} selected
+            </span>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase px-2"
+            >
+              Clear
+            </button>
+          </div>
+
+          {/* Action row 1: Move to category. Lists every parent + sub-
+              category with the parent name prefixed on subs so admin
+              picks the right destination at a glance. */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="text-[10px] font-body tracking-widest uppercase text-[#999] w-32">Move to Category</label>
+            <select
+              value={bulkCategoryId}
+              onChange={(e) => setBulkCategoryId(e.target.value)}
+              className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] flex-1 min-w-[200px]"
+            >
+              <option value="">— Pick a category —</option>
+              {topCategories.map((parent) => (
+                <optgroup key={parent.id} label={parent.name}>
+                  <option value={parent.id}>{parent.name}</option>
+                  {(parent.children ?? []).map((sub) => (
+                    <option key={sub.id} value={sub.id}>{parent.name} → {sub.name}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <button
+              onClick={() => bulkMoveCategory.mutate(bulkCategoryId)}
+              disabled={!bulkCategoryId || bulkMoveCategory.isPending}
+              className="bg-[#D62B2B] hover:bg-[#F03535] text-white px-4 py-2 font-body font-medium text-sm transition-colors disabled:opacity-40"
+            >
+              {bulkMoveCategory.isPending ? 'Moving…' : 'Move'}
+            </button>
+          </div>
+
+          {/* Action row 2: Kitchen section assignment (existing). */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="text-[10px] font-body tracking-widest uppercase text-[#999] w-32">Kitchen Section</label>
             <select
               value={bulkSectionId}
               onChange={(e) => setBulkSectionId(e.target.value)}
-              className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+              className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] flex-1 min-w-[200px]"
             >
               <option value="">— Pick —</option>
               <option value="__NONE__">None (default kitchen)</option>
@@ -1112,12 +1170,6 @@ export default function MenuPage() {
               className="bg-[#D62B2B] hover:bg-[#F03535] text-white px-4 py-2 font-body font-medium text-sm transition-colors disabled:opacity-40"
             >
               {bulkAssignSection.isPending ? 'Assigning…' : 'Apply'}
-            </button>
-            <button
-              onClick={() => setSelectedIds(new Set())}
-              className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase px-3"
-            >
-              Clear
             </button>
           </div>
         </div>
