@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.30 — Inventory: "Unused" pill surfaces dead-stock ingredients (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin + apps/api:
+
+- New **Unused** pill on Inventory's filter row (next to All / Recipe
+  items / Supplies). Shows ingredients that are NOT referenced by
+  any menu recipe AND not by any pre-ready recipe — i.e. items the
+  branch is paying to stock but never selling.
+- **Variant ↔ parent fan-out** done server-side: a recipe linking
+  the parent counts every variant as used; a recipe linking a
+  specific brand variant counts the parent as used too. So a parent
+  whose only usage is via one variant still drops out of the Unused
+  list correctly.
+- **SUPPLY items excluded** from the Unused view by design — they're
+  expected to be non-recipe (tracked via Inventory → Supplies).
+- New endpoint `GET /ingredients/usage` returns
+  `Record<ingredientId, { menu: number; preReady: number }>`. Pure
+  read query — no schema, no migration, no side effects on
+  payments / stock / accounts.
+
 ## 0.8.29 — website Menu category nav: scroll arrows + edge fade (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/web only:

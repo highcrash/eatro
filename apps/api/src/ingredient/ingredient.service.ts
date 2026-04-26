@@ -55,6 +55,64 @@ export class IngredientService {
     });
   }
 
+  /**
+   * Per-ingredient usage map across menu recipes + pre-ready recipes
+   * for the "Unused" Inventory filter. Variant ↔ parent fan-out:
+   *   - A recipe linking the parent marks all variants as used
+   *     (deduction is FIFO across variants — see RecipeService).
+   *   - A recipe linking a variant marks the parent as used too
+   *     (otherwise the parent would always look "unused" because
+   *     recipes typically reference one specific brand).
+   * Returns one row per ingredient (parents + variants), so the UI
+   * can render either by scanning any ID.
+   */
+  async getIngredientUsage(branchId: string): Promise<Record<string, { menu: number; preReady: number }>> {
+    const [ingredients, recipeItems, preReadyItems] = await Promise.all([
+      this.prisma.ingredient.findMany({
+        where: { branchId, deletedAt: null },
+        select: { id: true, parentId: true },
+      }),
+      this.prisma.recipeItem.findMany({
+        where: { ingredient: { branchId } },
+        select: { ingredientId: true },
+      }),
+      this.prisma.preReadyRecipeItem.findMany({
+        where: { ingredient: { branchId } },
+        select: { ingredientId: true },
+      }),
+    ]);
+
+    // Build the parent → variants index so we can fan out usage.
+    const variantsByParent = new Map<string, string[]>();
+    const parentByVariant = new Map<string, string>();
+    for (const ing of ingredients) {
+      if (ing.parentId) {
+        const arr = variantsByParent.get(ing.parentId) ?? [];
+        arr.push(ing.id);
+        variantsByParent.set(ing.parentId, arr);
+        parentByVariant.set(ing.id, ing.parentId);
+      }
+    }
+
+    const usage: Record<string, { menu: number; preReady: number }> = {};
+    const bump = (ingredientId: string, kind: 'menu' | 'preReady') => {
+      if (!usage[ingredientId]) usage[ingredientId] = { menu: 0, preReady: 0 };
+      usage[ingredientId][kind] += 1;
+    };
+    const recordUsage = (ingredientId: string, kind: 'menu' | 'preReady') => {
+      bump(ingredientId, kind);
+      // Fan out: if this is a parent, also count every variant as used.
+      const variants = variantsByParent.get(ingredientId);
+      if (variants) for (const v of variants) bump(v, kind);
+      // If this is a variant, also count the parent as used.
+      const parent = parentByVariant.get(ingredientId);
+      if (parent) bump(parent, kind);
+    };
+    for (const ri of recipeItems) recordUsage(ri.ingredientId, 'menu');
+    for (const pi of preReadyItems) recordUsage(pi.ingredientId, 'preReady');
+    return usage;
+  }
+
   async findOne(id: string, branchId: string) {
     const ingredient = await this.prisma.ingredient.findFirst({
       where: { id, branchId, deletedAt: null },
