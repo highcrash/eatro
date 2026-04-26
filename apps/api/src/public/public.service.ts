@@ -226,6 +226,10 @@ export class PublicService {
               select: {
                 // Omit quantity + unit so competitors can't reverse-engineer
                 // portioning. Customers see the ingredient list only.
+                // websiteDisplayName overrides `name` on the public payload
+                // when set — admin uses this to show better-reading names
+                // to customers (e.g. "Aromatic Garlic" instead of internal
+                // "Garlic Powder") without renaming the inventory record.
                 ingredient: { select: { id: true, name: true, imageUrl: true, showOnWebsite: true } },
               },
             },
@@ -235,19 +239,38 @@ export class PublicService {
     });
     if (!item) return null;
 
+    // Pull websiteDisplayName via raw SQL so the endpoint works even
+    // when the generated Prisma client is older than the column. The
+    // result is keyed by ingredient id so we can splice it onto each
+    // recipe ingredient below.
+    const ingredientIds = ((item as any).recipe?.items ?? []).map((ri: any) => ri.ingredient.id);
+    const displayNames = ingredientIds.length > 0
+      ? await this.prisma.$queryRaw<Array<{ id: string; websiteDisplayName: string | null }>>`
+          SELECT "id", "websiteDisplayName" FROM "ingredients"
+          WHERE "id" = ANY(${ingredientIds}::text[])
+        `
+      : [];
+    const displayNameById = new Map<string, string | null>(displayNames.map((r) => [r.id, r.websiteDisplayName]));
+
     // Apply discount
     const [itemWithDiscount] = await this.applyDiscounts(branchId, [item]);
 
     // Filter ingredients by showOnWebsite. Quantity + unit are intentionally
     // stripped — exposing them lets competitors copy recipes. Admin-set
     // "pieces" on MenuItem is already the customer-facing portioning hint.
+    // Server-side websiteDisplayName fallback: any non-empty alias replaces
+    // the inventory `name`, so the website + qr-order code can keep
+    // reading `ingredient.name` unchanged.
     const ingredients = (item as any).recipe?.items
       ?.filter((ri: any) => ri.ingredient.showOnWebsite)
-      .map((ri: any) => ({
-        id: ri.ingredient.id,
-        name: ri.ingredient.name,
-        imageUrl: ri.ingredient.imageUrl,
-      })) ?? [];
+      .map((ri: any) => {
+        const alias = displayNameById.get(ri.ingredient.id);
+        return {
+          id: ri.ingredient.id,
+          name: alias && alias.trim() ? alias : ri.ingredient.name,
+          imageUrl: ri.ingredient.imageUrl,
+        };
+      }) ?? [];
 
     // Strip the raw recipe object — only the filtered `ingredients` array
     // should be visible on the public detail endpoint.

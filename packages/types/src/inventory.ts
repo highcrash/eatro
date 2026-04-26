@@ -64,6 +64,13 @@ export interface Ingredient {
   sku: string | null;
   imageUrl: string | null;
   showOnWebsite: boolean;
+  /** Optional alias rendered to customers on the website menu in
+   *  place of `name` (e.g. internal "Garlic Powder" → "Aromatic
+   *  Garlic"). null = fall back to `name`. Server-side fallback is
+   *  applied by the public menu endpoint, so callers reading
+   *  `ingredient.name` from public payloads already see the right
+   *  thing — this field is here for the admin form to edit. */
+  websiteDisplayName?: string | null;
   variants?: Ingredient[];
   parent?: Ingredient | null;
   // Relations
@@ -173,6 +180,9 @@ export interface CreateIngredientDto {
   purchaseUnit?: string;
   purchaseUnitQty?: number;
   costPerPurchaseUnit?: number;
+  /** Customer-facing alias rendered on the website menu in place of
+   *  `name`. Empty / null = fall back to the real name. */
+  websiteDisplayName?: string | null;
 }
 
 export interface UpdateIngredientDto {
@@ -187,6 +197,8 @@ export interface UpdateIngredientDto {
   purchaseUnit?: string;
   purchaseUnitQty?: number;
   costPerPurchaseUnit?: number;
+  /** See CreateIngredientDto.websiteDisplayName. */
+  websiteDisplayName?: string | null;
 }
 
 export interface CreateVariantDto {

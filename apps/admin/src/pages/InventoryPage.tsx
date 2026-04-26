@@ -211,9 +211,12 @@ interface IngredientForm {
   costPerPurchaseUnit: string;
   showOnWebsite: boolean;
   ingredientImageUrl: string;
+  // Customer-facing alias rendered on the website menu instead of
+  // `name`. Empty string = use the real name.
+  websiteDisplayName: string;
 }
 
-const emptyIngForm: IngredientForm = { name: '', unit: 'G', minimumStock: '0', costPerUnit: '0', supplierId: '', supplierIds: [], itemCode: '', category: 'RAW', purchaseUnit: '', purchaseUnitQty: '1', costPerPurchaseUnit: '0', showOnWebsite: true, ingredientImageUrl: '' };
+const emptyIngForm: IngredientForm = { name: '', unit: 'G', minimumStock: '0', costPerUnit: '0', supplierId: '', supplierIds: [], itemCode: '', category: 'RAW', purchaseUnit: '', purchaseUnitQty: '1', costPerPurchaseUnit: '0', showOnWebsite: true, ingredientImageUrl: '', websiteDisplayName: '' };
 
 interface AdjustForm {
   quantity: string;
@@ -410,6 +413,9 @@ export default function InventoryPage() {
         costPerPurchaseUnit: Math.round((parseFloat(data.costPerPurchaseUnit) || 0) * 100),
         showOnWebsite: data.showOnWebsite,
         imageUrl: data.ingredientImageUrl || null,
+        // Trim to null so the public-menu fallback engages cleanly
+        // when admin clears the alias.
+        websiteDisplayName: data.websiteDisplayName.trim() || null,
       };
       const result = editingIng
         ? await api.patch<{ id: string }>(`/ingredients/${editingIng.id}`, payload)
@@ -683,6 +689,7 @@ export default function InventoryPage() {
       costPerPurchaseUnit: String(Number(ing.costPerPurchaseUnit ?? 0) / 100),
       showOnWebsite: (ing as any).showOnWebsite ?? true,
       ingredientImageUrl: (ing as any).imageUrl ?? '',
+      websiteDisplayName: (ing as any).websiteDisplayName ?? '',
     });
     setShowIngDialog(true);
   };
@@ -1298,6 +1305,16 @@ export default function InventoryPage() {
                     onChange={(e) => setIngForm((f) => ({ ...f, showOnWebsite: e.target.checked }))} className="accent-[#D62B2B]" />
                   Show ingredient name on website menu pages
                 </label>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Website Display Name (optional)</label>
+                  <input
+                    value={ingForm.websiteDisplayName}
+                    onChange={(e) => setIngForm((f) => ({ ...f, websiteDisplayName: e.target.value }))}
+                    placeholder={ingForm.name ? `Defaults to "${ingForm.name}"` : 'Customer-facing alias, e.g. Aromatic Garlic'}
+                    className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
+                  />
+                  <p className="text-[10px] text-[#666] font-body">Shown to customers on the website menu in place of the inventory name. Leave empty to use the real name.</p>
+                </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Ingredient Image (square, for website)</label>
                   {ingForm.ingredientImageUrl && (

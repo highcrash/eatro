@@ -3,6 +3,31 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.41 — QR addon-aware quick-add + website ingredient alias (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin + apps/api +
+apps/qr-order + @restora/types:
+
+- **QR menu `+` button now respects addons.** Tapping the small
+  quick-add button on a card whose menu item has at least one
+  addon group routes to the item detail page (which already runs
+  the addon picker) instead of silently adding the base item to
+  cart. Plain items add directly as before.
+- **Ingredient website display name.** New optional alias on each
+  Ingredient — admin sets it on the InventoryPage edit dialog
+  (under the "Show on website" checkbox). When set, the public
+  website menu (and the qr-order item page) shows the alias in
+  place of the inventory name. Empty falls back to the real name
+  so existing items render unchanged. Use case: hide internal
+  cataloguing names like "Garlic Powder" behind a customer-
+  friendly "Aromatic Garlic" without renaming the inventory row
+  (which would break recipes + reports).
+- **Migration** `20260426190000_add_ingredient_website_display_name`
+  is pure additive (single nullable TEXT column on `ingredients`).
+  Server-side fallback engages whether or not the field is set,
+  so live render stays identical until admin opts in per
+  ingredient.
+
 ## 0.8.40 — Performance: Price Volatility shows correct unit (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin + apps/api +

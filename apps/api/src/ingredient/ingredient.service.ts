@@ -291,7 +291,7 @@ export class IngredientService {
     // target it. If the admin left itemCode blank, mint a unique one.
     const itemCode = dto.itemCode?.trim() || await generateUniqueCode(this.prisma, branchId, 'itemCode');
 
-    return this.prisma.ingredient.create({
+    const created = await this.prisma.ingredient.create({
       data: {
         branchId,
         name: dto.name,
@@ -311,6 +311,21 @@ export class IngredientService {
       },
       include: this.ingredientInclude,
     });
+
+    // websiteDisplayName landed in the DB after generateUniqueCode +
+    // friends, so the generated Prisma client may be stale on a fresh
+    // local checkout. $executeRaw bypasses the generated type — same
+    // pattern branding.service uses for its qrGate columns.
+    if (dto.websiteDisplayName !== undefined && dto.websiteDisplayName !== null) {
+      const trimmed = String(dto.websiteDisplayName).trim();
+      await this.prisma.$executeRaw`
+        UPDATE "ingredients"
+        SET "websiteDisplayName" = ${trimmed || null}
+        WHERE "id" = ${created.id}
+      `;
+    }
+
+    return created;
   }
 
   async update(id: string, branchId: string, dto: UpdateIngredientDto & { brandName?: string; packSize?: string | null; piecesPerPack?: number | null; sku?: string | null }) {
@@ -338,6 +353,18 @@ export class IngredientService {
       ...((dto as any).imageUrl !== undefined ? { imageUrl: (dto as any).imageUrl } : {}),
       ...((dto as any).showOnWebsite !== undefined ? { showOnWebsite: (dto as any).showOnWebsite } : {}),
     };
+
+    // websiteDisplayName: written via raw SQL so this works against a
+    // stale generated Prisma client (column was added after the API
+    // first compiled in some local checkouts). Trim to null so the
+    // public fallback engages cleanly when admin clears the field.
+    if (dto.websiteDisplayName !== undefined) {
+      const trimmed = typeof dto.websiteDisplayName === 'string' ? dto.websiteDisplayName.trim() : '';
+      const next = trimmed ? trimmed : null;
+      await this.prisma.$executeRaw`
+        UPDATE "ingredients" SET "websiteDisplayName" = ${next} WHERE "id" = ${id}
+      `;
+    }
 
     // When the admin changes the per-purchase-unit price (or the number of
     // stock units per purchase unit) and didn't also pass an explicit
