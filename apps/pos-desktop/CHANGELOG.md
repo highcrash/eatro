@@ -3,6 +3,25 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.32 — restore apps/qr/ to unblock DigitalOcean deploy (2026-04-26)
+
+No Electron-shell changes. Restoration:
+
+- DigitalOcean App Platform still has a `qr` build component
+  pointing at `apps/qr/`. Deleting the directory in v1.0.27
+  broke the deploy pipeline (Build Error: Non-Zero Exit on the
+  `qr` job). Restored the legacy `apps/qr/` workspace from git
+  history so the build job has something to compile again.
+- The legacy bundle is **not used in production** — Caddy still
+  routes `/qr` → `apps/qr-order/`, the codecanyon packager only
+  ships `qr-order`, and zero application code imports from
+  `@restora/qr`. The restored bundle just satisfies the existing
+  DO build component.
+- **TODO for owner:** in DigitalOcean → App Platform settings,
+  remove the `qr` build component (and its `apps/qr/` source
+  path) so the legacy app can be deleted again on the next
+  cleanup pass. Until that's done, the directory has to stay.
+
 ## 1.0.31 — Pre-Ready picker: dedupe "[PR] X" double-listing (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin only:
