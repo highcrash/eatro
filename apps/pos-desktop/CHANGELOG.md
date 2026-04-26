@@ -3,6 +3,25 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.31 — qr-order: parent categories only + scroll arrows (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/qr-order:
+
+- The QR menu pill row now shows **only top-level (parent)
+  categories**. Sub-categories no longer appear as their own pills,
+  matching the website behaviour.
+- Tapping a parent category lists items from the parent **and every
+  sub-category beneath it** — previously a parent like "Beverages"
+  with only sub-categories (Tea / Coffee / Juices) returned an
+  empty grid.
+- The pill row gets **chevron buttons + edge fades** when the
+  category list overflows the screen width (common on phones with
+  6+ categories). Touch swipe still works as before; chevrons hide
+  themselves once you've scrolled to that edge.
+- The "All" view sections also fold sub-category items under their
+  parent so customers see "Beverages → all drinks together"
+  instead of three separate sections.
+
 ## 0.8.30 — Inventory: "Unused" pill surfaces dead-stock ingredients (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin + apps/api:
