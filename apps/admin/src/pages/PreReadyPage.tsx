@@ -308,10 +308,23 @@ export default function PreReadyPage() {
     e.target.value = '';
   };
 
-  // Merge ingredients + pre-ready items into a single selectable list
+  // Merge ingredients + pre-ready items into a single selectable list.
+  // A pre-ready item is only added if its auto-mirrored ingredient
+  // (name === "[PR] <pr.name>") DOESN'T already appear in the
+  // ingredient list — which it almost always does, since createItem
+  // auto-creates the mirror. Without this dedupe the picker shows the
+  // same logical thing twice ("[PR] PG Basic Mayo" once from the
+  // Ingredient table, once from PreReadyItem) and admin gets confused
+  // about which to pick. Selecting the pre-ready row was already
+  // blocked by the matcher (only `type === 'ingredient'` binds), so
+  // hiding it is purely UX cleanup with zero behaviour change.
+  const ingredientNameSet = new Set(ingredients.map((i) => i.name.toLowerCase()));
   const allSelectableItems = [
     ...ingredients.map((i) => ({ id: i.id, name: i.name, unit: i.unit, itemCode: (i as any).itemCode ?? null, type: 'ingredient' as const })),
-    ...items.filter((pr) => pr.id !== showRecipe?.id).map((pr) => ({ id: `preready:${pr.id}`, name: `[PR] ${pr.name}`, unit: pr.unit, itemCode: null, type: 'preready' as const })),
+    ...items
+      .filter((pr) => pr.id !== showRecipe?.id)
+      .filter((pr) => !ingredientNameSet.has(`[pr] ${pr.name}`.toLowerCase()))
+      .map((pr) => ({ id: `preready:${pr.id}`, name: `[PR] ${pr.name}`, unit: pr.unit, itemCode: null, type: 'preready' as const })),
   ];
 
   const createItemMut = useMutation({
