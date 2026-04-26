@@ -3,6 +3,39 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.44 — website: parent-only menu cards + variant tabs on detail (2026-04-27)
+
+No Electron-shell changes. Rebundles apps/web + apps/api:
+
+- **Menu grid hides individual variants.** The customer site
+  used to render every variant of a parent (e.g. Hargao Prawn
+  + Hargao Chicken) as separate cards. Now only the parent
+  shell + standalones appear in the grid; variants surface as
+  tabs on the parent's detail page.
+- **Variant tiles on the parent card.** When a card is a
+  parent, it shows a tile strip beneath the price with each
+  variant's name + price differential vs the cheapest
+  ("Single ৳350 · Double +৳100 · Triple +৳200"). Cap at 4
+  visible tiles with "+N more" tail. The card price reads
+  "From ৳350" so customers know the spread starts there.
+- **Variant tabs on the detail page.** Opening a parent shows
+  a tab strip directly under the name. Clicking a tab swaps
+  the hero image, description, price (with discount handling),
+  tags, key ingredients, and pieces / prep time / spice level
+  info cards in place. Defaults to the cheapest variant on
+  load. Standalone items render unchanged.
+- **API:** `PUBLIC_MENU_ITEM_SELECT` now exposes
+  `isVariantParent`, `variantParentId`, and a lightweight
+  `variants[]` array (id, name, price, image, pieces, etc.)
+  on each menu payload. The `getMenu` filter flips from
+  `isVariantParent: false` to `variantParentId: null` so
+  parents + standalones come through and individual variants
+  stay hidden until tapped.
+- **Live-safe.** Pure read-only API change — no schema, no
+  migration. Older cached client bundles continue to render
+  their existing fields without crashing; only the new
+  variant tile strip is gated on the new `variants` field.
+
 ## 0.8.43 — admin Menu: addon names inline on each parent row (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin only:

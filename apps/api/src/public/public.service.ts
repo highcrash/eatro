@@ -31,6 +31,30 @@ const PUBLIC_MENU_ITEM_SELECT = {
   pieces: true,
   prepTime: true,
   spiceLevel: true,
+  // Variant flags so the website can render the right UI:
+  //   - isVariantParent + non-empty variants[] → render variant tabs
+  //   - variantParentId !== null → this is a child variant
+  // Public payload only exposes the booleans + child id list; admins
+  // never see the full picker-shell internals on the customer site.
+  isVariantParent: true,
+  variantParentId: true,
+  variants: {
+    where: { deletedAt: null, isAvailable: true },
+    orderBy: { sortOrder: 'asc' as const },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      description: true,
+      price: true,
+      imageUrl: true,
+      tags: true,
+      pieces: true,
+      prepTime: true,
+      spiceLevel: true,
+      sortOrder: true,
+    },
+  },
   // Addon groups + their options. The QR / website needs this to
   // render the "pick a side / sauce" UI that POS has. Addon items
   // themselves are filtered out of the standalone menu (isAddon=false
@@ -173,10 +197,14 @@ export class PublicService {
       isAvailable: true,
       deletedAt: null,
       websiteVisible: true,
-      // Variant parent shells are non-sellable picker placeholders;
-      // never expose them on the public site / QR feed. The shell's
-      // child variants flow through as standalone items here.
-      isVariantParent: false, isAddon: false,
+      isAddon: false,
+      // Show parents + standalones in the grid; hide individual
+      // variants — the website renders them as tabs on the parent's
+      // detail page so customers see "Hargao" once with a Prawn /
+      // Chicken switcher instead of two separate cards. Standalones
+      // (no parent) and variant parents both have variantParentId =
+      // null, so this filter keeps both.
+      variantParentId: null,
     };
     if (hiddenItemIds.length > 0) itemWhere.id = { notIn: hiddenItemIds };
 

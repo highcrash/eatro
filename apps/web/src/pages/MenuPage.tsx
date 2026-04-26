@@ -19,6 +19,18 @@ function Chevron({ dir }: { dir: 'left' | 'right' }) {
 
 function ItemCard({ it, navigate }: { it: any; navigate: (path: string) => void }) {
   const hasDiscount = it.discountedPrice != null && it.discountedPrice < it.price;
+  // Variant parents carry a `variants` array (id, name, price, …).
+  // We render compact tiles below the card price showing each variant
+  // with its price differential vs the cheapest ("+৳100"), so the
+  // customer sees the spread without having to open the detail page.
+  const variants: Array<{ id: string; name: string; price: number }> = Array.isArray(it.variants) ? it.variants : [];
+  const sortedVariants = variants
+    .slice()
+    .sort((a, b) => Number(a.price) - Number(b.price));
+  const baseVariantPrice = sortedVariants[0]?.price ?? 0;
+  const isVariantParent = !!it.isVariantParent && sortedVariants.length > 0;
+  // For variant parents the displayed price = cheapest variant.
+  const displayPrice = isVariantParent && Number(it.price) === 0 ? baseVariantPrice : Number(it.price);
   return (
     <button
       onClick={() => navigate(`/menu/${it.slug || it.id}`)}
@@ -43,12 +55,39 @@ function ItemCard({ it, navigate }: { it: any; navigate: (path: string) => void 
           {hasDiscount ? (
             <>
               <span className="text-accent font-bold">{formatCurrency(it.discountedPrice!)}</span>
-              <span className="text-muted text-xs line-through">{formatCurrency(Number(it.price))}</span>
+              <span className="text-muted text-xs line-through">{formatCurrency(displayPrice)}</span>
             </>
           ) : (
-            <span className="text-accent font-bold">{formatCurrency(Number(it.price))}</span>
+            <span className="text-accent font-bold">
+              {isVariantParent && <span className="text-muted text-xs font-normal mr-1">From</span>}
+              {formatCurrency(displayPrice)}
+            </span>
           )}
         </div>
+        {/* Variant tiles — name + price diff on the parent card. */}
+        {isVariantParent && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {sortedVariants.slice(0, 4).map((v) => {
+              const diff = Number(v.price) - Number(baseVariantPrice);
+              return (
+                <span
+                  key={v.id}
+                  className="text-[11px] font-medium text-text bg-hover border border-border px-2 py-0.5"
+                >
+                  {v.name}{' '}
+                  <span className="text-muted">
+                    {diff <= 0 ? formatCurrency(Number(v.price)) : `+${formatCurrency(diff)}`}
+                  </span>
+                </span>
+              );
+            })}
+            {sortedVariants.length > 4 && (
+              <span className="text-[11px] font-medium text-muted px-2 py-0.5">
+                +{sortedVariants.length - 4} more
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </button>
   );
@@ -68,6 +107,9 @@ interface PublicMenu {
     imageUrl: string | null;
     categoryId: string;
     isAvailable: boolean;
+    isVariantParent?: boolean;
+    variantParentId?: string | null;
+    variants?: Array<{ id: string; name: string; price: number; imageUrl?: string | null }>;
   }>;
 }
 
