@@ -3,6 +3,23 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.33 — delete legacy apps/qr (qr-order is the only QR app) (2026-04-26)
+
+No Electron-shell changes. Repo cleanup:
+
+- Removes the **legacy `apps/qr/`** workspace entirely. The
+  customer QR-ordering app has lived at `apps/qr-order/` since the
+  last rollout — production already routes `/qr` to qr-order via
+  Caddy and the codecanyon packager already only ships qr-order.
+  The stale `apps/qr/` was a footgun: I accidentally edited it
+  earlier this week and the user had to re-test to find the fix
+  hadn't landed in production.
+- Repoints the root `pnpm dev:qr` script at `@restora/qr-order` so
+  developers can't pick the wrong dev server again.
+- No code anywhere imports from `@restora/qr` (verified by grep
+  before deletion). Caddy + the packager + every changelog entry
+  already names qr-order.
+
 ## 0.8.32 — admin Recipes page surfaces addons (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin only:
