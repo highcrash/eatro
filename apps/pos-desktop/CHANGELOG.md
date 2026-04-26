@@ -3,6 +3,21 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.42 — admin Menu: bulk move-to-category (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin only:
+
+- The bulk action bar on **Admin → Menu** (visible whenever ≥1
+  row is checked) gets a second action: **Move to Category**.
+  Pick a destination from the dropdown (parents listed first,
+  sub-categories grouped under their parent as `Parent → Sub`),
+  hit **Move**, and every selected item is reassigned in
+  parallel. Same fan-out PATCH pattern as the existing Kitchen
+  Section assignment — no new endpoint needed.
+- The bar restructures so each action is its own row with a
+  fixed-width label, keeping both pickers readable on smaller
+  admin viewports.
+
 ## 0.8.41 — QR addon-aware quick-add + website ingredient alias (2026-04-26)
 
 No Electron-shell changes. Rebundles apps/admin + apps/api +
