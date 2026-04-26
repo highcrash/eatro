@@ -3,6 +3,21 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.34 — Recipes page hides variant parent shells (2026-04-26)
+
+No Electron-shell changes. Rebundles apps/admin + apps/api:
+
+- **Variant parent shells** (e.g. an "Espresso" picker that fans
+  out to Espresso – Single + Espresso – Double) **no longer
+  appear** in the Recipes menu-item dropdown OR the "copy-from"
+  source list. Parents are pickers — they have no price, never
+  get sold directly, and the deduction engine reads each
+  variant's recipe at order time. Cluttering the list with them
+  let admin set unused recipes that did nothing.
+- Server-side guard added: `POST /recipes/menu-item/:id` now
+  throws `400` if the target is a variant parent, with a clear
+  message pointing admin at the variant rows instead.
+
 ## 0.8.33 — delete legacy apps/qr (qr-order is the only QR app) (2026-04-26)
 
 No Electron-shell changes. Repo cleanup:
