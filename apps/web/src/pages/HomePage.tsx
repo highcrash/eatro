@@ -135,6 +135,20 @@ export default function HomePage() {
         description={(content as any)?.seoHomeDescription || `${siteName} — Fine dining restaurant with fusion cuisine. View our menu, book a table.`}
         keywords={(content as any)?.seoHomeKeywords || 'restaurant, fine dining, reservation, menu'}
         image={(content as any)?.seoOgImage || content?.heroImageUrl || undefined}
+        jsonLd={{
+          '@context': 'https://schema.org',
+          '@type': 'Restaurant',
+          name: siteName,
+          url: typeof window !== 'undefined' ? window.location.origin : undefined,
+          description: (content as any)?.seoHomeDescription || `${siteName} — Fine dining restaurant with fusion cuisine.`,
+          image: (content as any)?.seoOgImage || content?.heroImageUrl || undefined,
+          telephone: branding?.phone || undefined,
+          email: branding?.email || undefined,
+          address: branding?.address ? { '@type': 'PostalAddress', streetAddress: branding.address } : undefined,
+          servesCuisine: ['Fusion', 'Continental'],
+          priceRange: '$$',
+          sameAs: [branding?.facebookUrl, branding?.instagramUrl].filter(Boolean),
+        }}
       />
       {/* ================================================================ */}
       {/*  1. HERO                                                          */}
