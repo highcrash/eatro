@@ -218,6 +218,10 @@ model Branch {
   preReadyBatches     PreReadyBatch[]
   supplierPayments    SupplierPayment[]
   supplierAdjustments SupplierAdjustment[]
+  creditors           Creditor[]
+  creditorBills       CreditorBill[]
+  creditorPayments    CreditorPayment[]
+  creditorAdjustments CreditorAdjustment[]
   leaveApplications   LeaveApplication[]
   workPeriods         WorkPeriod[]
   cookingStations     CookingStation[]
@@ -440,6 +444,9 @@ model Staff {
   productionOrdersApproved  ProductionOrder[]  @relation("ProductionApprover")
   supplierPayments          SupplierPayment[]  @relation("SupplierPaymentBy")
   supplierAdjustments       SupplierAdjustment[] @relation("SupplierAdjustmentBy")
+  creditorBills             CreditorBill[]     @relation("CreditorBillBy")
+  creditorPayments          CreditorPayment[]  @relation("CreditorPaymentBy")
+  creditorAdjustments       CreditorAdjustment[] @relation("CreditorAdjustmentBy")
   leaveApplications         LeaveApplication[] @relation("LeaveApplicant")
   leaveReviews              LeaveApplication[] @relation("LeaveReviewer")
   workPeriodsStarted        WorkPeriod[]       @relation("WorkPeriodStarter")
@@ -1224,6 +1231,17 @@ enum SupplierCategory {
   GENERAL
 }
 
+/// Type of non-supplier liability tracked under Liabilities (Creditors).
+/// UTILITY = electricity / gas / internet / water etc. LANDLORD = rent.
+/// BANK / INDIVIDUAL = loans owed. OTHER = catch-all.
+enum CreditorCategory {
+  UTILITY
+  LANDLORD
+  BANK
+  INDIVIDUAL
+  OTHER
+}
+
 enum IngredientCategory {
   RAW
   CLEANING
@@ -1356,6 +1374,110 @@ model SupplierPayment {
 
   @@index([branchId, supplierId])
   @@map("supplier_payments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LIABILITIES (CREDITORS) — non-supplier debts: utilities, rent, loans, etc.
+// Mirrors the Supplier ledger shape (opening balance + bills + payments +
+// adjustments) but lives in its own surface so purchasing reports stay
+// untouched. Each payment posts to a cash/bank Account and auto-mirrors
+// into Expense (category derived from creditor.defaultExpenseCategory).
+// ─────────────────────────────────────────────────────────────────────────────
+model Creditor {
+  id                     String           @id @default(cuid())
+  branchId               String
+  name                   String
+  category               CreditorCategory @default(OTHER)
+  contactName            String?
+  phone                  String?
+  email                  String?
+  address                String?
+  notes                  String?
+  /// Default Expense category posted when a payment is recorded
+  /// against this creditor (RENT / UTILITIES / MISCELLANEOUS / etc).
+  /// Reuses the existing ExpenseCategory enum.
+  defaultExpenseCategory ExpenseCategory  @default(MISCELLANEOUS)
+  openingBalance         Decimal          @default(0) @db.Decimal(14, 2)
+  totalDue               Decimal          @default(0) @db.Decimal(14, 2)
+  isActive               Boolean          @default(true)
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  deletedAt              DateTime?
+
+  branch      Branch               @relation(fields: [branchId], references: [id])
+  bills       CreditorBill[]
+  payments    CreditorPayment[]
+  adjustments CreditorAdjustment[]
+
+  @@index([branchId, isActive])
+  @@map("creditors")
+}
+
+/// One bill incurred by a creditor (e.g. "April electricity"). Increments
+/// Creditor.totalDue. NO cash account or Expense side effect — the bill is
+/// owed but not yet paid. Payments create the Expense + Account hit.
+model CreditorBill {
+  id           String    @id @default(cuid())
+  branchId     String
+  creditorId   String
+  description  String
+  amount       Decimal   @db.Decimal(14, 2)
+  billDate     DateTime  @default(now())
+  dueDate      DateTime?
+  notes        String?
+  recordedById String
+  createdAt    DateTime  @default(now())
+
+  branch     Branch   @relation(fields: [branchId], references: [id])
+  creditor   Creditor @relation(fields: [creditorId], references: [id])
+  recordedBy Staff    @relation("CreditorBillBy", fields: [recordedById], references: [id])
+
+  @@index([branchId, creditorId])
+  @@map("creditor_bills")
+}
+
+/// Payment against a creditor's outstanding balance. Decrements
+/// Creditor.totalDue, creates an Expense mirror with the creditor's
+/// defaultExpenseCategory, and debits the linked cash/bank Account
+/// via accountService.updateAccountForPayment.
+model CreditorPayment {
+  id            String   @id @default(cuid())
+  branchId      String
+  creditorId    String
+  amount        Decimal  @db.Decimal(14, 2)
+  paymentMethod String   @default("CASH")
+  reference     String?
+  notes         String?
+  paidById      String
+  createdAt     DateTime @default(now())
+
+  branch   Branch   @relation(fields: [branchId], references: [id])
+  creditor Creditor @relation(fields: [creditorId], references: [id])
+  paidBy   Staff    @relation("CreditorPaymentBy", fields: [paidById], references: [id])
+
+  @@index([branchId, creditorId])
+  @@map("creditor_payments")
+}
+
+/// Manual ledger correction. Pure ledger-only — adjusts Creditor.totalDue
+/// by the signed `amount`. Negative = reduce debt, positive = increase debt.
+/// Does NOT touch cash, does NOT create an Expense, does NOT post to Mushak.
+/// Mirrors SupplierAdjustment exactly.
+model CreditorAdjustment {
+  id           String   @id @default(cuid())
+  branchId     String
+  creditorId   String
+  amount       Decimal  @db.Decimal(14, 2)
+  reason       String
+  recordedById String
+  createdAt    DateTime @default(now())
+
+  branch     Branch   @relation(fields: [branchId], references: [id])
+  creditor   Creditor @relation(fields: [creditorId], references: [id])
+  recordedBy Staff    @relation("CreditorAdjustmentBy", fields: [recordedById], references: [id])
+
+  @@index([branchId, creditorId])
+  @@map("creditor_adjustments")
 }
 
 model Ingredient {

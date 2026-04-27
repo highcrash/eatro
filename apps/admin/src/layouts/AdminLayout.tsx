@@ -107,6 +107,8 @@ const NAV_GROUPS: Array<{
       { to: '/reports/mushak', icon: Receipt, label: 'Mushak Register', allowedRoles: OPERATIONAL_ROLES },
       { to: '/discounts', icon: BarChart2, label: 'Discounts & Coupons', allowedRoles: OPERATIONAL_ROLES },
       { to: '/expenses', icon: Receipt, label: 'Expenses', allowedRoles: OPERATIONAL_ROLES },
+      // Liabilities = utilities, rent, loans owed. Owner/Manager only.
+      { to: '/liabilities', icon: Receipt, label: 'Liabilities', allowedRoles: ['OWNER', 'MANAGER'] },
       // Accounts = money + ledger. Owner/Manager only.
       { to: '/accounts', icon: Landmark, label: 'Accounts', allowedRoles: ['OWNER', 'MANAGER'] },
     ],

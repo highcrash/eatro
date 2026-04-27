@@ -12,6 +12,7 @@ import { StaffModule } from './staff/staff.module';
 import { HealthModule } from './health/health.module';
 import { WsGatewayModule } from './ws-gateway/ws-gateway.module';
 import { SupplierModule } from './supplier/supplier.module';
+import { CreditorModule } from './creditor/creditor.module';
 import { IngredientModule } from './ingredient/ingredient.module';
 import { RecipeModule } from './recipe/recipe.module';
 import { PurchasingModule } from './purchasing/purchasing.module';
@@ -181,6 +182,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // Reservation System
     ReservationModule,
+
+    // Liabilities (Creditors) — utilities, rent, loans
+    CreditorModule,
   ],
 })
 export class AppModule {}
