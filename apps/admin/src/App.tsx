@@ -20,6 +20,7 @@ import PayrollPage from './pages/PayrollPage';
 import WastePage from './pages/WastePage';
 import ExpensesPage from './pages/ExpensesPage';
 import AccountsPage from './pages/AccountsPage';
+import LiabilitiesPage from './pages/LiabilitiesPage';
 import PreReadyPage from './pages/PreReadyPage';
 import LeavePage from './pages/LeavePage';
 import SettingsPage from './pages/SettingsPage';
@@ -85,6 +86,7 @@ export default function AdminApp() {
         <Route path="/waste" element={<WastePage />} />
         <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/accounts" element={<AccountsPage />} />
+        <Route path="/liabilities" element={<LiabilitiesPage />} />
         <Route path="/cooking-stations" element={<CookingStationsPage />} />
         <Route path="/branches" element={<BranchesPage />} />
         <Route path="/cashier-permissions" element={<CashierPermissionsPage />} />

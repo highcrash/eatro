@@ -19,6 +19,7 @@ export type CleanupScope =
   | 'menu-all'
   | 'pre-ready'
   | 'suppliers'
+  | 'creditors'
   | 'purchases'
   | 'returns'
   | 'customers'
@@ -180,6 +181,14 @@ export class CleanupService {
         break;
       }
 
+      case 'creditors': {
+        deleted.creditorAdjustments = (await p.creditorAdjustment.deleteMany({ where: { creditor: { branchId } } })).count;
+        deleted.creditorPayments = (await p.creditorPayment.deleteMany({ where: { creditor: { branchId } } })).count;
+        deleted.creditorBills = (await p.creditorBill.deleteMany({ where: { creditor: { branchId } } })).count;
+        deleted.creditors = (await p.creditor.deleteMany({ where })).count;
+        break;
+      }
+
       case 'purchases': {
         deleted.purchaseOrderItems = (await p.purchaseOrderItem.deleteMany({
           where: { purchaseOrder: { branchId } },
@@ -234,6 +243,13 @@ export class CleanupService {
         deleted.purchaseOrders = (await p.purchaseOrder.deleteMany({ where })).count;
         deleted.supplierAdjustments = (await p.supplierAdjustment.deleteMany({ where: { supplier: { branchId } } })).count;
         deleted.supplierPayments = (await p.supplierPayment.deleteMany({ where: { supplier: { branchId } } })).count;
+        // Liabilities (creditors): same chain — adjustments, payments,
+        // bills, then the creditor row itself stays so the directory
+        // survives a reset (mirrors how suppliers stay).
+        deleted.creditorAdjustments = (await p.creditorAdjustment.deleteMany({ where: { creditor: { branchId } } })).count;
+        deleted.creditorPayments = (await p.creditorPayment.deleteMany({ where: { creditor: { branchId } } })).count;
+        deleted.creditorBills = (await p.creditorBill.deleteMany({ where: { creditor: { branchId } } })).count;
+        await p.creditor.updateMany({ where, data: { totalDue: 0 } });
         deleted.expenses = (await p.expense.deleteMany({ where })).count;
         deleted.accountTransactions = (await p.accountTransaction.deleteMany({ where })).count;
         await p.account.updateMany({ where, data: { balance: 0 } });

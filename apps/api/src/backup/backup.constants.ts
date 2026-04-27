@@ -37,6 +37,7 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'customUnit', table: 'custom_units' },
   { accessor: 'account', table: 'accounts' },
   { accessor: 'supplier', table: 'suppliers' },
+  { accessor: 'creditor', table: 'creditors' },
   { accessor: 'device', table: 'devices' },
 
   // Tier 3 — payment config (depends on branch + account)
@@ -73,6 +74,9 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'stockMovement', table: 'stock_movements' },
   { accessor: 'supplierPayment', table: 'supplier_payments' },
   { accessor: 'supplierAdjustment', table: 'supplier_adjustments' },
+  { accessor: 'creditorBill', table: 'creditor_bills' },
+  { accessor: 'creditorPayment', table: 'creditor_payments' },
+  { accessor: 'creditorAdjustment', table: 'creditor_adjustments' },
   { accessor: 'wasteLog', table: 'waste_logs' },
 
   // Tier 7 — discounts & reservation

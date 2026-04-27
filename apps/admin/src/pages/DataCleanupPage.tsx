@@ -19,6 +19,7 @@ type Scope =
   | 'menu-all'
   | 'pre-ready'
   | 'suppliers'
+  | 'creditors'
   | 'purchases'
   | 'returns'
   | 'customers'
@@ -103,6 +104,12 @@ const SECTIONS: Section[] = [
     title: 'Suppliers',
     actions: [
       { scope: 'suppliers', label: 'Delete all suppliers', desc: 'Removes suppliers and their payments, ledger adjustments, ingredient links.' },
+    ],
+  },
+  {
+    title: 'Liabilities',
+    actions: [
+      { scope: 'creditors', label: 'Delete all creditors', desc: 'Removes creditors (utilities, landlords, banks, individual lenders) and their bills, payments, and ledger adjustments.' },
     ],
   },
   {
