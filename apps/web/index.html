@@ -3,19 +3,47 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0D0D0D" />
+
+    <!-- Default SEO. Per-route pages overwrite these via useDocumentSeo()
+         so each URL has its own title, description, canonical, and OG tags. -->
     <title>EATRO — Where Flavor Takes The Lead</title>
-    <meta name="description" content="Fine dining restaurant with fusion cuisine. View our menu, book a table, and experience unforgettable flavors." />
+    <meta name="description" content="EATRO — fine dining restaurant with fusion cuisine in Bangladesh. View our menu, book a table, and experience unforgettable flavors." />
+    <meta name="keywords" content="EATRO, Bangladesh restaurant, fine dining, fusion cuisine, menu, reservation, chef's special, Dhaka dining" />
     <meta name="robots" content="index, follow" />
+    <meta name="author" content="EATRO" />
+
+    <link rel="canonical" href="https://eatrobd.com/" />
+
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="EATRO" />
-    <meta property="og:title" content="" />
-    <meta property="og:description" content="" />
-    <meta property="og:url" content="" />
-    <meta property="og:image" content="" />
+    <meta property="og:title" content="EATRO — Where Flavor Takes The Lead" />
+    <meta property="og:description" content="Fine dining restaurant with fusion cuisine. View our menu, book a table, and experience unforgettable flavors." />
+    <meta property="og:url" content="https://eatrobd.com/" />
+    <meta property="og:image" content="https://eatrobd.com/og-image.jpg" />
+    <meta property="og:locale" content="en_US" />
+
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="" />
-    <meta name="twitter:description" content="" />
-    <meta name="twitter:image" content="" />
+    <meta name="twitter:title" content="EATRO — Where Flavor Takes The Lead" />
+    <meta name="twitter:description" content="Fine dining restaurant with fusion cuisine. View our menu, book a table, and experience unforgettable flavors." />
+    <meta name="twitter:image" content="https://eatrobd.com/og-image.jpg" />
+
+    <!-- Restaurant JSON-LD. Branch-specific fields are filled in at
+         runtime by the SEO hook once /public/branding loads, but the
+         baseline below makes a fresh crawl already meaningful. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Restaurant",
+      "name": "EATRO",
+      "url": "https://eatrobd.com",
+      "description": "Fine dining restaurant with fusion cuisine.",
+      "servesCuisine": ["Fusion", "Continental"],
+      "priceRange": "$$",
+      "address": { "@type": "PostalAddress", "addressCountry": "BD" }
+    }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300;1,9..40,400&family=Playfair+Display:ital,wght@0,400;0,600;1,400;1,600&display=swap" rel="stylesheet" />

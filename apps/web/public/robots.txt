@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+
+# Internal surfaces — no public content for crawlers.
+Disallow: /admin
+Disallow: /pos
+Disallow: /qr
+Disallow: /qr-order
+Disallow: /api/
+Disallow: /uploads/
+
+Sitemap: https://eatrobd.com/sitemap.xml

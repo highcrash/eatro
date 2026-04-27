@@ -205,6 +205,20 @@ export default function MenuItemPage() {
         title={itemTitle}
         description={itemDesc}
         image={heroImage || undefined}
+        type="product"
+        jsonLd={{
+          '@context': 'https://schema.org',
+          '@type': 'MenuItem',
+          name: item.name,
+          description: itemDesc,
+          image: heroImage || undefined,
+          offers: seoPrice > 0 ? {
+            '@type': 'Offer',
+            price: (Number(seoPrice) / 100).toFixed(2),
+            priceCurrency: 'BDT',
+            availability: 'https://schema.org/InStock',
+          } : undefined,
+        }}
       />
       {/* Hero image header */}
       <section className="relative h-[50vh] md:h-[60vh] min-h-[400px] overflow-hidden bg-card">
