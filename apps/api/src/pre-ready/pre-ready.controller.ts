@@ -32,8 +32,18 @@ export class PreReadyController {
 
   @Patch('items/:id')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  updateItem(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { name?: string; minimumStock?: number }) {
+  updateItem(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { name?: string; minimumStock?: number; unit?: string }) {
     return this.preReadyService.updateItem(id, user.branchId, dto);
+  }
+
+  // Surfaces the menu recipes that reference this pre-ready's `[PR]`
+  // mirror ingredient. UI uses it on the edit dialog so admin can see
+  // which recipes need their unit / quantity re-entered before
+  // changing the pre-ready's unit.
+  @Get('items/:id/menu-recipes')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  getMenuRecipesUsing(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.preReadyService.getMenuRecipesUsingPreReady(id, user.branchId);
   }
 
   @Delete('items/:id')

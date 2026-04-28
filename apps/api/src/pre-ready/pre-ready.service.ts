@@ -70,15 +70,124 @@ export class PreReadyService {
     return item;
   }
 
-  async updateItem(id: string, branchId: string, dto: { name?: string; minimumStock?: number }) {
-    await this.findOneItem(id, branchId);
-    return this.prisma.preReadyItem.update({
-      where: { id },
-      data: {
-        ...(dto.name ? { name: dto.name } : {}),
-        ...(dto.minimumStock !== undefined ? { minimumStock: dto.minimumStock } : {}),
+  async updateItem(id: string, branchId: string, dto: { name?: string; minimumStock?: number; unit?: string }) {
+    const item = await this.findOneItem(id, branchId);
+
+    // Unit change is destructive on the meaning of every Decimal that
+    // counts the item. Gate it behind "every on-hand source is zero +
+    // no active production orders" before letting it through.
+    let unitChanged = false;
+    if (dto.unit && dto.unit !== item.unit) {
+      // 1. Pre-Ready item's own currentStock
+      if (item.currentStock.toNumber() > 0) {
+        throw new BadRequestException(`Cannot change unit: ${item.name} has ${item.currentStock.toNumber()} ${item.unit} on hand. Set pre-ready stock to 0 first (Data Cleanup → Set all pre-ready stock to 0).`);
+      }
+      // 2. Live batches (remainingQty > 0). Closed batches stay as
+      //    historical rows in their original unit — that's acceptable.
+      const liveBatches = await this.prisma.preReadyBatch.count({
+        where: { branchId, preReadyItemId: id, remainingQty: { gt: 0 } },
+      });
+      if (liveBatches > 0) {
+        throw new BadRequestException(`Cannot change unit: ${liveBatches} batch(es) still have remaining stock. Use the live batches up or clear them via Data Cleanup → Delete made batches only.`);
+      }
+      // 3. The mirrored [PR] Ingredient's currentStock
+      const mirrorName = `[PR] ${item.name}`;
+      const mirror = await this.prisma.ingredient.findFirst({
+        where: { branchId, name: mirrorName, deletedAt: null },
+      });
+      if (mirror && mirror.currentStock.toNumber() > 0) {
+        throw new BadRequestException(`Cannot change unit: the inventory mirror "${mirrorName}" still has ${mirror.currentStock.toNumber()} ${mirror.unit} on hand.`);
+      }
+      // 4. No active production orders — completing one after the
+      //    flip would write batches with mixed-unit interpretation.
+      const activeProductions = await this.prisma.productionOrder.count({
+        where: { branchId, preReadyItemId: id, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+      });
+      if (activeProductions > 0) {
+        throw new BadRequestException(`Cannot change unit: ${activeProductions} active production order(s) carry quantity in ${item.unit}. Cancel or complete them first.`);
+      }
+      unitChanged = true;
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.preReadyItem.update({
+        where: { id },
+        data: {
+          ...(dto.name ? { name: dto.name } : {}),
+          ...(dto.minimumStock !== undefined ? { minimumStock: dto.minimumStock } : {}),
+          ...(unitChanged ? { unit: dto.unit as any } : {}),
+        },
+      });
+
+      // Keep the [PR] mirror Ingredient in lock-step with whatever
+      // changed here — name, unit, or both. Backfills the mirror for
+      // pre-ready items that pre-date the auto-mirror code in
+      // createItem. Pure idempotent.
+      const newName = updated.name;
+      const newUnit = updated.unit;
+      const newMirrorName = `[PR] ${newName}`;
+      // Find the mirror by either the new or old name (rename safety).
+      const oldMirrorName = `[PR] ${item.name}`;
+      let mirror = await tx.ingredient.findFirst({
+        where: { branchId, name: { in: [newMirrorName, oldMirrorName] }, deletedAt: null },
+      });
+      if (!mirror) {
+        // Backfill — old item that never got a mirror because it was
+        // created before the auto-mirror code shipped.
+        mirror = await tx.ingredient.create({
+          data: {
+            branchId,
+            name: newMirrorName,
+            unit: newUnit,
+            category: 'OTHER',
+            currentStock: 0,
+            minimumStock: 0,
+            costPerUnit: updated.costPerUnit,
+            itemCode: `PR-${updated.id.slice(-6).toUpperCase()}`,
+          },
+        });
+      } else if (mirror.name !== newMirrorName || mirror.unit !== newUnit) {
+        await tx.ingredient.update({
+          where: { id: mirror.id },
+          data: { name: newMirrorName, unit: newUnit as any },
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  /** List menu recipes that reference the pre-ready item's mirror
+   *  ingredient. Returned to the UI on the unit-change dialog so admin
+   *  can review which recipes need their RecipeItem.unit / quantity
+   *  re-entered after a unit flip. Pure read. */
+  async getMenuRecipesUsingPreReady(id: string, branchId: string) {
+    const item = await this.findOneItem(id, branchId);
+    const mirrorName = `[PR] ${item.name}`;
+    const mirror = await this.prisma.ingredient.findFirst({
+      where: { branchId, name: mirrorName, deletedAt: null },
+      select: { id: true, unit: true },
+    });
+    if (!mirror) return { mirrorUnit: null, recipes: [] };
+    const recipeItems = await this.prisma.recipeItem.findMany({
+      where: { ingredientId: mirror.id, recipe: { menuItem: { branchId, deletedAt: null } } },
+      select: {
+        id: true,
+        quantity: true,
+        unit: true,
+        recipe: { select: { menuItem: { select: { id: true, name: true } } } },
       },
     });
+    return {
+      mirrorUnit: mirror.unit,
+      recipes: recipeItems.map((r) => ({
+        recipeItemId: r.id,
+        menuItemId: r.recipe.menuItem.id,
+        menuItemName: r.recipe.menuItem.name,
+        quantity: r.quantity.toNumber(),
+        unit: r.unit,
+      })),
+    };
   }
 
   async removeItem(id: string, branchId: string) {
