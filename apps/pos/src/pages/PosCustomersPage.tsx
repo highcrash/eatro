@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, UserPlus, Phone, Mail, X } from 'lucide-react';
+import { Search, UserPlus, Phone, Mail, X, Pencil } from 'lucide-react';
 
 import { formatCurrency, formatDateTime } from '@restora/utils';
 import { api } from '../lib/api';
@@ -23,6 +23,13 @@ export default function PosCustomersPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [newCust, setNewCust] = useState({ name: '', phone: '', email: '' });
   const [error, setError] = useState('');
+
+  // Inline edit dialog. Cashier can fix typos in name / phone / email
+  // without needing the admin panel; the API still rejects phone
+  // collisions inside the same branch.
+  const [editing, setEditing] = useState<Customer | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', phone: '', email: '' });
+  const [editError, setEditError] = useState('');
 
   const { data: customers = [] } = useQuery<Customer[]>({
     queryKey: ['pos-customers'],
@@ -55,6 +62,20 @@ export default function PosCustomersPage() {
       setSelectedId(c.id);
     },
     onError: (e: Error) => setError(e.message),
+  });
+
+  const updateMut = useMutation({
+    mutationFn: (data: { id: string; name: string; phone: string; email: string }) =>
+      api.patch<Customer>(`/customers/${data.id}`, {
+        name: data.name,
+        phone: data.phone,
+        email: data.email || null,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pos-customers'] });
+      setEditing(null);
+    },
+    onError: (e: Error) => setEditError(e.message),
   });
 
   return (
@@ -113,19 +134,29 @@ export default function PosCustomersPage() {
           </div>
         ) : (
           <div className="max-w-2xl">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-20 h-20 rounded-theme bg-theme-accent-soft flex items-center justify-center">
+            <div className="flex items-start gap-4 mb-6">
+              <div className="w-20 h-20 rounded-theme bg-theme-accent-soft flex items-center justify-center flex-shrink-0">
                 <span className="font-theme-display text-3xl text-theme-accent">
                   {(selected.name || '?').charAt(0).toUpperCase()}
                 </span>
               </div>
-              <div>
+              <div className="flex-1">
                 <h2 className="font-theme-display text-3xl text-theme-text">{selected.name || 'Unnamed'}</h2>
                 <div className="flex flex-col gap-1 mt-1 text-sm font-theme-body text-theme-text-muted">
                   <span className="flex items-center gap-2"><Phone size={12} /> {selected.phone}</span>
                   {selected.email && <span className="flex items-center gap-2"><Mail size={12} /> {selected.email}</span>}
                 </div>
               </div>
+              <button
+                onClick={() => {
+                  setEditing(selected);
+                  setEditForm({ name: selected.name ?? '', phone: selected.phone ?? '', email: selected.email ?? '' });
+                  setEditError('');
+                }}
+                className="flex items-center gap-1.5 bg-theme-surface-alt border border-theme-border text-theme-text-muted hover:text-theme-text hover:border-theme-accent px-3 py-1.5 rounded-theme text-xs font-theme-body transition-colors"
+              >
+                <Pencil size={12} /> Edit
+              </button>
             </div>
 
             <div className="grid grid-cols-3 gap-4 mb-6">
@@ -140,6 +171,33 @@ export default function PosCustomersPage() {
           </div>
         )}
       </div>
+
+      {/* Edit modal */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-theme-surface w-[420px] rounded-theme shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-theme-border">
+              <h3 className="font-theme-display text-xl text-theme-text">Edit Customer</h3>
+              <button onClick={() => setEditing(null)} className="text-theme-text-muted hover:text-theme-text">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6 space-y-3">
+              <Field label="Name" value={editForm.name} onChange={(v) => setEditForm({ ...editForm, name: v })} />
+              <Field label="Phone *" value={editForm.phone} onChange={(v) => setEditForm({ ...editForm, phone: v })} />
+              <Field label="Email" value={editForm.email} onChange={(v) => setEditForm({ ...editForm, email: v })} />
+              {editError && <p className="text-xs text-theme-danger font-theme-body">{editError}</p>}
+              <button
+                disabled={!editForm.name.trim() || !editForm.phone.trim() || updateMut.isPending}
+                onClick={() => { setEditError(''); updateMut.mutate({ id: editing.id, ...editForm }); }}
+                className="w-full bg-theme-accent hover:bg-theme-accent-hover text-white py-2.5 rounded-theme font-theme-body font-medium text-sm transition-colors disabled:opacity-50"
+              >
+                {updateMut.isPending ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add modal */}
       {showAdd && (

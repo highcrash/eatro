@@ -161,6 +161,60 @@ export class CustomerService {
     return { total: items.length, created, updated, skipped, results };
   }
 
+  /** POS + admin: rename / re-phone / re-email a customer. Phone must
+   *  stay unique inside the branch — surfaces a friendly 400 instead of
+   *  letting Prisma's P2002 bubble up as a 500. Doesn't touch
+   *  isActive / totalOrders / totalSpent — those are derived. */
+  async updateCustomer(
+    id: string,
+    branchId: string,
+    dto: { name?: string; phone?: string; email?: string | null },
+  ) {
+    const existing = await this.findOne(id, branchId);
+
+    const data: Record<string, unknown> = {};
+    if (dto.name !== undefined) {
+      const name = String(dto.name).trim();
+      if (!name) throw new BadRequestException('Name cannot be empty');
+      data.name = name;
+    }
+    if (dto.phone !== undefined) {
+      const phone = String(dto.phone).replace(/[^\d+]/g, '').trim();
+      if (!phone || phone.replace(/[^\d]/g, '').length < 8) {
+        throw new BadRequestException('Invalid phone number');
+      }
+      if (phone !== existing.phone) {
+        const collision = await this.prisma.customer.findUnique({
+          where: { branchId_phone: { branchId, phone } },
+        });
+        if (collision && collision.id !== id) {
+          throw new BadRequestException(`Another customer in this branch already uses ${phone}`);
+        }
+        data.phone = phone;
+      }
+    }
+    if (dto.email !== undefined) {
+      const email = dto.email == null ? null : String(dto.email).trim() || null;
+      data.email = email;
+    }
+    if (Object.keys(data).length === 0) return existing;
+
+    return this.prisma.customer.update({ where: { id }, data });
+  }
+
+  /** Admin soft-delete. Sets isActive=false so the customer disappears
+   *  from POS + admin lists but historical orders, reviews, and SMS
+   *  logs keep their FK link. No hard delete — losing the customerId
+   *  on an Order would orphan its review and break the customer's
+   *  lifetime-spend ledger. */
+  async deleteCustomer(id: string, branchId: string) {
+    await this.findOne(id, branchId);
+    return this.prisma.customer.update({
+      where: { id },
+      data: { isActive: false },
+    });
+  }
+
   async assignToOrder(orderId: string, branchId: string, customerId: string | null) {
     if (customerId) {
       const customer = await this.findOne(customerId, branchId);

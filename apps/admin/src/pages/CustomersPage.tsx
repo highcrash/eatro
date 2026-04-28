@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, X, Star, Upload, MessageSquare, Download } from 'lucide-react';
+import { Search, X, Star, Upload, MessageSquare, Download, Pencil, Trash2 } from 'lucide-react';
 
 import { formatCurrency, formatDateTime } from '@restora/utils';
 import { api } from '../lib/api';
@@ -58,6 +58,13 @@ export default function CustomersPage() {
   const [csvResult, setCsvResult] = useState<{ total: number; created: number; updated: number; skipped: number; results: Array<{ phone: string; status: string; reason?: string }> } | null>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
 
+  // Edit / delete dialog state. `editing` carries the in-progress form;
+  // `deleting` carries the customer the admin is about to soft-delete
+  // (kept around so the confirm prompt can show the name).
+  const [editing, setEditing] = useState<Customer | null>(null);
+  const [editForm, setEditForm] = useState<{ name: string; phone: string; email: string }>({ name: '', phone: '', email: '' });
+  const [deleting, setDeleting] = useState<Customer | null>(null);
+
   const { data: templates = [] } = useQuery<SmsTemplate[]>({
     queryKey: ['sms', 'templates'],
     queryFn: () => api.get('/sms/templates'),
@@ -69,6 +76,30 @@ export default function CustomersPage() {
     onSuccess: (data) => {
       setCsvResult(data);
       void qc.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+
+  const updateMut = useMutation({
+    mutationFn: (data: { id: string; name: string; phone: string; email: string }) =>
+      api.patch<Customer>(`/customers/${data.id}`, {
+        name: data.name,
+        phone: data.phone,
+        email: data.email || null,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['customers'] });
+      void qc.invalidateQueries({ queryKey: ['customer-detail'] });
+      setEditing(null);
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/customers/${id}`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['customers'] });
+      setDeleting(null);
+      // If the removed customer was open in the detail modal, close it.
+      setSelectedId((cur) => (cur === deleting?.id ? null : cur));
     },
   });
 
@@ -229,11 +260,12 @@ export default function CustomersPage() {
               <th className="px-5 py-3 font-medium text-right"><SortBtn field="totalSpent" label="Total Spent" /></th>
               <th className="px-5 py-3 font-medium"><SortBtn field="lastVisit" label="Last Visit" /></th>
               <th className="px-5 py-3 font-medium">Joined</th>
+              <th className="px-5 py-3 font-medium text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={8} className="px-5 py-8 text-center text-[#999]">No customers found</td></tr>
+              <tr><td colSpan={9} className="px-5 py-8 text-center text-[#999]">No customers found</td></tr>
             ) : filtered.map((c) => (
               <tr key={c.id} className={`border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F] ${selectedId === c.id ? 'bg-[#1F1F1F]' : ''}`}>
                 <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
@@ -255,6 +287,25 @@ export default function CustomersPage() {
                 <td className="px-5 py-3 text-right text-white">{formatCurrency(Number(c.totalSpent))}</td>
                 <td className="px-5 py-3 text-[#999] text-xs">{c.lastVisit ? formatDateTime(c.lastVisit) : '—'}</td>
                 <td className="px-5 py-3 text-[#999] text-xs">{new Date(c.createdAt).toLocaleDateString()}</td>
+                <td className="px-5 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => {
+                      setEditing(c);
+                      setEditForm({ name: c.name ?? '', phone: c.phone ?? '', email: c.email ?? '' });
+                    }}
+                    className="text-[#999] hover:text-white p-1.5 mr-1"
+                    title="Edit customer"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    onClick={() => setDeleting(c)}
+                    className="text-[#666] hover:text-[#F03535] p-1.5"
+                    title="Delete customer"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -352,6 +403,88 @@ export default function CustomersPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit customer dialog. Phone is mutable but the API rejects
+          collisions inside the same branch with a friendly 400. */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => !updateMut.isPending && setEditing(null)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-display text-xl text-white tracking-widest">EDIT CUSTOMER</h3>
+              <button onClick={() => setEditing(null)} className="text-[#999] hover:text-white"><X size={16} /></button>
+            </div>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Name</label>
+                <input
+                  value={editForm.name}
+                  onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                  className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Phone *</label>
+                <input
+                  value={editForm.phone}
+                  onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
+                  className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Email</label>
+                <input
+                  value={editForm.email}
+                  onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                  className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                />
+              </div>
+            </div>
+            {updateMut.error && (
+              <p className="text-[#F03535] text-xs font-body mt-3">{(updateMut.error as Error).message}</p>
+            )}
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setEditing(null)} disabled={updateMut.isPending} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5">Cancel</button>
+              <button
+                onClick={() => updateMut.mutate({ id: editing.id, ...editForm })}
+                disabled={!editForm.name.trim() || !editForm.phone.trim() || updateMut.isPending}
+                className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2.5 disabled:opacity-50"
+              >
+                {updateMut.isPending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirm. Soft delete on the server — historical orders
+          and reviews keep their customerId, so totals stay accurate;
+          the row just disappears from POS + admin lists. */}
+      {deleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => !deleteMut.isPending && setDeleting(null)}>
+          <div className="bg-[#161616] border border-[#F03535] w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-display text-xl text-[#F03535] tracking-widest mb-3">DELETE CUSTOMER</h3>
+            <p className="text-[#DDD] font-body text-sm mb-2">
+              Remove <span className="text-white font-medium">{deleting.name || 'Unnamed'}</span> ({deleting.phone}) from this branch?
+            </p>
+            <p className="text-[#999] font-body text-xs mb-5">
+              Past orders and reviews stay intact and continue to count toward branch totals — only the customer entry itself is hidden.
+            </p>
+            {deleteMut.error && (
+              <p className="text-[#F03535] text-xs font-body mb-3">{(deleteMut.error as Error).message}</p>
+            )}
+            <div className="flex gap-3">
+              <button onClick={() => setDeleting(null)} disabled={deleteMut.isPending} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5">Cancel</button>
+              <button
+                onClick={() => deleteMut.mutate(deleting.id)}
+                disabled={deleteMut.isPending}
+                className="flex-1 bg-[#F03535] hover:bg-[#D62B2B] text-white font-body text-sm py-2.5 disabled:opacity-50"
+              >
+                {deleteMut.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}
