@@ -695,13 +695,16 @@ export default function InventoryPage() {
   };
   const closeIngDialog = () => { setShowIngDialog(false); setEditingIng(null); };
 
-  const openAdjust = (ing: Ingredient) => {
+  const openAdjust = (ing: Ingredient, forceType?: AdjustForm['type']) => {
     setAdjusting(ing);
     // Supplies default to OPERATIONAL_USE since the cashier almost
     // always opens this dialog to record "we used 12 bags today".
+    // The "Adjust" button on SUPPLY rows passes forceType='ADJUSTMENT'
+    // so admins who need to bump stock up/down arbitrarily (counted
+    // wrong, received off-PO, etc.) land on the right default.
     setAdjustForm({
       quantity: '0',
-      type: ing.category === 'SUPPLY' ? 'OPERATIONAL_USE' : 'ADJUSTMENT',
+      type: forceType ?? (ing.category === 'SUPPLY' ? 'OPERATIONAL_USE' : 'ADJUSTMENT'),
       notes: '',
     });
   };
@@ -1030,6 +1033,18 @@ export default function InventoryPage() {
                             }`}
                           >
                             {ing.category === 'SUPPLY' ? 'Record Usage' : 'Adjust'}
+                          </button>
+                        )}
+                        {/* SUPPLY items get an extra Adjust button alongside
+                            Record Usage — for the rarer "I miscounted" /
+                            "received without a PO" path that needs a free-
+                            form ± delta rather than a usage drawdown. */}
+                        {!hasVars && ing.category === 'SUPPLY' && (
+                          <button
+                            onClick={() => openAdjust(ing, 'ADJUSTMENT')}
+                            className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors"
+                          >
+                            Adjust
                           </button>
                         )}
                         <button onClick={() => openEditIng(ing)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Edit</button>
