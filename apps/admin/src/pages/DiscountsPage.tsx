@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, X, Search } from 'lucide-react';
-import type { MenuItem } from '@restora/types';
+import { Plus, Pencil, Trash2, X, Search, ChevronRight } from 'lucide-react';
+import type { MenuItem, MenuCategory } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
 
@@ -21,9 +21,144 @@ const SCOPE_LABELS: Record<string, string> = { ALL_ITEMS: 'All Items', SPECIFIC_
 const DAYS = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 
 // ─── Item Selector ───────────────────────────────────────────────────────────
-function ItemSelector({ menuItems, selected, onChange }: { menuItems: MenuItem[]; selected: string[]; onChange: (ids: string[]) => void }) {
+// Category-grouped checkbox tree. Each category row carries a tri-state
+// checkbox: empty (no items selected), filled (all items selected), or
+// indeterminate (some items selected). Toggling the parent toggles every
+// item *currently visible* under it (so a search-filtered category only
+// flips the matching items, not the hidden ones — admin doesn't get
+// surprised by off-screen selections changing).
+function CategoryCheckbox({ state, onChange, label, count }: {
+  state: 'none' | 'some' | 'all';
+  onChange: (next: 'all' | 'none') => void;
+  label: string;
+  count: number;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = state === 'some';
+  }, [state]);
+  return (
+    <label className="flex items-center gap-2 px-2.5 py-1.5 bg-[#161616] hover:bg-[#1F1F1F] cursor-pointer text-xs font-body text-white">
+      <input
+        ref={ref}
+        type="checkbox"
+        checked={state === 'all'}
+        onChange={(e) => onChange(e.target.checked ? 'all' : 'none')}
+      />
+      <ChevronRight size={11} className="text-[#666]" />
+      <span className="font-medium tracking-wide uppercase">{label}</span>
+      <span className="text-[#555] ml-auto">{count}</span>
+    </label>
+  );
+}
+
+function ItemSelector({ menuItems, categories, selected, onChange }: {
+  menuItems: MenuItem[];
+  categories: MenuCategory[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
   const [search, setSearch] = useState('');
-  const filtered = search.trim() ? menuItems.filter((m) => m.name.toLowerCase().includes(search.toLowerCase())) : menuItems;
+  const q = search.trim().toLowerCase();
+
+  // Group items by their direct categoryId, but show each top-level
+  // category as a section that includes items from every sub-category
+  // under it (so admin doesn't have to tick "Drinks → Cold" + "Drinks
+  // → Hot" separately when "Drinks" is the conceptual group).
+  const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
+  const rootIdFor = (catId: string): string => {
+    const seen = new Set<string>();
+    let cur = categoryById.get(catId);
+    while (cur && cur.parentId && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      const next = categoryById.get(cur.parentId);
+      if (!next) break;
+      cur = next;
+    }
+    return cur?.id ?? catId;
+  };
+
+  // groups: rootCategoryId → MenuItem[], plus a synthetic "uncategorised"
+  // bucket for items whose categoryId doesn't resolve.
+  const groups = useMemo(() => {
+    const m = new Map<string, MenuItem[]>();
+    for (const item of menuItems) {
+      const root = rootIdFor(item.categoryId);
+      const arr = m.get(root) ?? [];
+      arr.push(item);
+      m.set(root, arr);
+    }
+    // Sort groups by category sortOrder + name; sort items alphabetically.
+    const sorted: Array<{ id: string; name: string; items: MenuItem[] }> = [];
+    for (const [id, items] of m.entries()) {
+      const cat = categoryById.get(id);
+      sorted.push({ id, name: cat?.name ?? 'Uncategorised', items: [...items].sort((a, b) => a.name.localeCompare(b.name)) });
+    }
+    return sorted.sort((a, b) => {
+      const av = categoryById.get(a.id)?.sortOrder ?? 999;
+      const bv = categoryById.get(b.id)?.sortOrder ?? 999;
+      if (av !== bv) return av - bv;
+      return a.name.localeCompare(b.name);
+    });
+  }, [menuItems, categoryById]);
+
+  // Apply search filter inside each group; drop empty groups so the
+  // tree collapses naturally as the user types.
+  const visibleGroups = useMemo(() => {
+    if (!q) return groups;
+    return groups
+      .map((g) => ({ ...g, items: g.items.filter((m) => m.name.toLowerCase().includes(q)) }))
+      .filter((g) => g.items.length > 0 || g.name.toLowerCase().includes(q));
+  }, [groups, q]);
+
+  // Track which groups are user-collapsed. Default: all expanded.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleCollapse = (id: string) => {
+    setCollapsed((c) => {
+      const n = new Set(c);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+
+  const selSet = useMemo(() => new Set(selected), [selected]);
+  const toggleItem = (id: string, on: boolean) => {
+    onChange(on ? [...selected, id] : selected.filter((x) => x !== id));
+  };
+
+  // Bulk toggle every visible (search-filtered) item under a group.
+  const toggleGroup = (groupItems: MenuItem[], next: 'all' | 'none') => {
+    const groupIds = groupItems.map((i) => i.id);
+    if (next === 'all') {
+      const merged = new Set(selected);
+      for (const id of groupIds) merged.add(id);
+      onChange(Array.from(merged));
+    } else {
+      const groupSet = new Set(groupIds);
+      onChange(selected.filter((id) => !groupSet.has(id)));
+    }
+  };
+
+  // Top-level "Select all visible" — handy after a search narrows the list.
+  const totalVisible = visibleGroups.reduce((s, g) => s + g.items.length, 0);
+  const visibleSelected = visibleGroups.reduce(
+    (s, g) => s + g.items.filter((i) => selSet.has(i.id)).length,
+    0,
+  );
+  const allState: 'none' | 'some' | 'all' =
+    visibleSelected === 0 ? 'none' : visibleSelected === totalVisible ? 'all' : 'some';
+  const toggleAllVisible = (next: 'all' | 'none') => {
+    const allIds = visibleGroups.flatMap((g) => g.items.map((i) => i.id));
+    if (next === 'all') {
+      const merged = new Set(selected);
+      for (const id of allIds) merged.add(id);
+      onChange(Array.from(merged));
+    } else {
+      const allSet = new Set(allIds);
+      onChange(selected.filter((id) => !allSet.has(id)));
+    }
+  };
+
   return (
     <div>
       <div className="relative mb-2">
@@ -31,16 +166,51 @@ function ItemSelector({ menuItems, selected, onChange }: { menuItems: MenuItem[]
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search items..."
           className="w-full bg-[#0D0D0D] border border-[#2A2A2A] pl-8 pr-3 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B] placeholder:text-[#555]" />
       </div>
-      <div className="max-h-[150px] overflow-auto border border-[#2A2A2A] bg-[#0D0D0D]">
-        {filtered.map((m) => (
-          <label key={m.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#161616] cursor-pointer text-xs font-body text-[#999]">
-            <input type="checkbox" checked={selected.includes(m.id)} onChange={(e) => {
-              if (e.target.checked) onChange([...selected, m.id]);
-              else onChange(selected.filter((id) => id !== m.id));
-            }} />
-            {m.name} <span className="text-[#555] ml-auto">{formatCurrency(Number(m.price))}</span>
-          </label>
-        ))}
+      <div className="max-h-[260px] overflow-auto border border-[#2A2A2A] bg-[#0D0D0D]">
+        {totalVisible > 0 && (
+          <CategoryCheckbox
+            state={allState}
+            onChange={toggleAllVisible}
+            label={q ? `All (${totalVisible} visible)` : 'Select all'}
+            count={totalVisible}
+          />
+        )}
+        {visibleGroups.map((g) => {
+          const groupSelectedCount = g.items.filter((i) => selSet.has(i.id)).length;
+          const state: 'none' | 'some' | 'all' =
+            groupSelectedCount === 0 ? 'none' : groupSelectedCount === g.items.length ? 'all' : 'some';
+          const isCollapsed = collapsed.has(g.id);
+          return (
+            <div key={g.id} className="border-t border-[#1F1F1F] first:border-0">
+              <div
+                className="flex items-center"
+                onClick={(e) => {
+                  // Clicking the row body (not the checkbox) toggles collapse.
+                  if ((e.target as HTMLElement).tagName !== 'INPUT') {
+                    toggleCollapse(g.id);
+                  }
+                }}
+              >
+                <CategoryCheckbox
+                  state={state}
+                  onChange={(next) => toggleGroup(g.items, next)}
+                  label={g.name}
+                  count={g.items.length}
+                />
+              </div>
+              {!isCollapsed && g.items.map((m) => (
+                <label key={m.id} className="flex items-center gap-2 pl-9 pr-3 py-1.5 hover:bg-[#161616] cursor-pointer text-xs font-body text-[#999]">
+                  <input type="checkbox" checked={selSet.has(m.id)} onChange={(e) => toggleItem(m.id, e.target.checked)} />
+                  {m.name}
+                  <span className="text-[#555] ml-auto">{formatCurrency(Number(m.price))}</span>
+                </label>
+              ))}
+            </div>
+          );
+        })}
+        {visibleGroups.length === 0 && (
+          <p className="px-3 py-4 text-center text-[10px] font-body text-[#555]">No items match "{search}"</p>
+        )}
       </div>
       {selected.length > 0 && <p className="text-[10px] text-[#666] mt-1">{selected.length} item{selected.length > 1 ? 's' : ''} selected</p>}
     </div>
@@ -48,7 +218,7 @@ function ItemSelector({ menuItems, selected, onChange }: { menuItems: MenuItem[]
 }
 
 // ─── Discount Dialog ─────────────────────────────────────────────────────────
-function DiscountDialog({ initial, menuItems, onClose, onSave }: { initial?: Discount; menuItems: MenuItem[]; onClose: () => void; onSave: (d: any) => void }) {
+function DiscountDialog({ initial, menuItems, categories, onClose, onSave }: { initial?: Discount; menuItems: MenuItem[]; categories: MenuCategory[]; onClose: () => void; onSave: (d: any) => void }) {
   const [name, setName] = useState(initial?.name ?? '');
   const [type, setType] = useState(initial?.type ?? 'PERCENTAGE');
   const [value, setValue] = useState(initial ? String(type === 'FLAT' ? Number(initial.value) / 100 : initial.value) : '');
@@ -91,7 +261,7 @@ function DiscountDialog({ initial, menuItems, onClose, onSave }: { initial?: Dis
             <option value="ALL_EXCEPT">All Items Except</option>
           </select>
         </div>
-        {scope !== 'ALL_ITEMS' && <ItemSelector menuItems={menuItems} selected={targets} onChange={setTargets} />}
+        {scope !== 'ALL_ITEMS' && <ItemSelector menuItems={menuItems} categories={categories} selected={targets} onChange={setTargets} />}
         <div className="flex gap-3 pt-2">
           <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
           <button onClick={handleSave} disabled={!name || !value} className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40">Save</button>
@@ -102,7 +272,7 @@ function DiscountDialog({ initial, menuItems, onClose, onSave }: { initial?: Dis
 }
 
 // ─── Coupon Dialog ───────────────────────────────────────────────────────────
-function CouponDialog({ initial, menuItems, onClose, onSave }: { initial?: Coupon; menuItems: MenuItem[]; onClose: () => void; onSave: (d: any) => void }) {
+function CouponDialog({ initial, menuItems, categories, onClose, onSave }: { initial?: Coupon; menuItems: MenuItem[]; categories: MenuCategory[]; onClose: () => void; onSave: (d: any) => void }) {
   const [code, setCode] = useState(initial?.code ?? '');
   const [name, setName] = useState(initial?.name ?? '');
   const [type, setType] = useState(initial?.type ?? 'PERCENTAGE');
@@ -162,7 +332,7 @@ function CouponDialog({ initial, menuItems, onClose, onSave }: { initial?: Coupo
             <option value="ALL_EXCEPT">All Items Except</option>
           </select>
         </div>
-        {scope !== 'ALL_ITEMS' && <ItemSelector menuItems={menuItems} selected={targets} onChange={setTargets} />}
+        {scope !== 'ALL_ITEMS' && <ItemSelector menuItems={menuItems} categories={categories} selected={targets} onChange={setTargets} />}
         <div className="flex gap-3 pt-2">
           <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
           <button onClick={handleSave} disabled={!code || !name || !value} className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40">Save</button>
@@ -265,6 +435,7 @@ export default function DiscountsPage() {
   const [menuDiscDialog, setMenuDiscDialog] = useState<{ open: boolean; item?: MenuItemDiscount }>({ open: false });
 
   const { data: menuItems = [] } = useQuery<MenuItem[]>({ queryKey: ['menu'], queryFn: () => api.get('/menu') });
+  const { data: categories = [] } = useQuery<MenuCategory[]>({ queryKey: ['menu-categories'], queryFn: () => api.get('/menu/categories') });
   const { data: discounts = [] } = useQuery<Discount[]>({ queryKey: ['discounts'], queryFn: () => api.get('/discounts') });
   const { data: coupons = [] } = useQuery<Coupon[]>({ queryKey: ['coupons'], queryFn: () => api.get('/discounts/coupons') });
   const { data: menuDiscounts = [] } = useQuery<MenuItemDiscount[]>({ queryKey: ['menu-discounts'], queryFn: () => api.get('/discounts/menu-discounts') });
@@ -429,8 +600,8 @@ export default function DiscountsPage() {
         </div>
       )}
 
-      {discountDialog.open && <DiscountDialog initial={discountDialog.item} menuItems={menuItems} onClose={() => setDiscountDialog({ open: false })} onSave={(d) => saveDiscount.mutate(d)} />}
-      {couponDialog.open && <CouponDialog initial={couponDialog.item} menuItems={menuItems} onClose={() => setCouponDialog({ open: false })} onSave={(d) => saveCoupon.mutate(d)} />}
+      {discountDialog.open && <DiscountDialog initial={discountDialog.item} menuItems={menuItems} categories={categories} onClose={() => setDiscountDialog({ open: false })} onSave={(d) => saveDiscount.mutate(d)} />}
+      {couponDialog.open && <CouponDialog initial={couponDialog.item} menuItems={menuItems} categories={categories} onClose={() => setCouponDialog({ open: false })} onSave={(d) => saveCoupon.mutate(d)} />}
       {menuDiscDialog.open && <MenuDiscountDialog initial={menuDiscDialog.item} menuItems={menuItems} onClose={() => setMenuDiscDialog({ open: false })} onSave={(d) => saveMenuDisc.mutate(d)} />}
     </div>
   );
