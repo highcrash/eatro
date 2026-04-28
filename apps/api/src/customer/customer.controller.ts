@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Query, Body, Param, UseGuards, Headers, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Query, Body, Param, UseGuards, Headers, BadRequestException } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -111,5 +111,24 @@ export class CustomerController {
     @Body() dto: { orderId: string; customerId: string | null },
   ) {
     return this.customerService.assignToOrder(dto.orderId, user.branchId, dto.customerId);
+  }
+
+  // Edit name / phone / email. POS + admin can both call. Backend
+  // guards against phone collisions inside the branch.
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { name?: string; phone?: string; email?: string | null },
+  ) {
+    return this.customerService.updateCustomer(id, user.branchId, dto);
+  }
+
+  // Soft delete. Admin only — historical orders + reviews keep their
+  // customerId link; the row is just hidden from POS / admin lists.
+  @Delete(':id')
+  @Roles('OWNER', 'MANAGER')
+  remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.customerService.deleteCustomer(id, user.branchId);
   }
 }
