@@ -69,6 +69,10 @@ function offlineUnsupported(method: string, path: string): boolean {
     if (path === '/customers') return true;
     if (path === '/customers/assign-order') return true;
   }
+  // Customer rename/contact edit needs server-side phone-uniqueness
+  // check inside the branch, so queuing offline would silently swallow
+  // collisions and surface as a sync error later. Reject up front.
+  if ((method === 'PATCH' || method === 'DELETE') && /^\/customers\/[^/]+$/.test(path)) return true;
   return false;
 }
 
