@@ -40,13 +40,14 @@ export default function MenuPage() {
   const { items: cart, addItem } = useCartStore();
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
 
-  // Wrap addItem for the FoodCard + button. Items with addon groups
-  // need the addon picker (otherwise the cashier loses required-pick
-  // state + the addon's price markup); we route to the item detail
-  // page which already runs the picker. Plain items add directly.
+  // Wrap addItem for the FoodCard + button. Items with addon groups OR
+  // variants need the picker — addons for required-pick state + price
+  // markup; variants because the parent shell carries price=0 and the
+  // real price lives on the chosen variant. Plain items add directly.
   const handleQuickAdd = (item: MenuItem) => {
     const groups = ((item as any).addonGroups ?? []).filter((g: any) => (g.options ?? []).length > 0);
-    if (groups.length > 0) {
+    const isVariantParent = !!(item as any).isVariantParent && Array.isArray((item as any).variants) && (item as any).variants.length > 0;
+    if (groups.length > 0 || isVariantParent) {
       void navigate(`/item/${item.id}`);
       return;
     }
@@ -307,6 +308,18 @@ export default function MenuPage() {
 function FoodCard({ item, onAdd, onTap }: { item: MenuItem; onAdd: (item: MenuItem) => void; onTap: () => void }) {
   const tags = item.tags ? item.tags.split(',').map((t) => t.trim()).filter(Boolean) : [];
 
+  // Variant parent shells carry price=0 because variants hold the real
+  // price. Fall back to the cheapest variant + a "From" prefix so the
+  // card never reads ৳0. Mirrors website MenuCarousel behaviour.
+  const variants = Array.isArray((item as any).variants) ? (item as any).variants as Array<{ price: number }> : [];
+  const isVariantParent = !!(item as any).isVariantParent && variants.length > 0;
+  const cheapestVariantPrice = variants.length > 0
+    ? variants.reduce((min, v) => Math.min(min, Number(v.price)), Number(variants[0].price))
+    : 0;
+  const displayPrice = isVariantParent && Number(item.price) === 0
+    ? cheapestVariantPrice
+    : Number(item.price);
+
   return (
     <div className="bg-[#1A1A1A] border border-[#2A2A2A] overflow-hidden" onClick={onTap}>
       {/* Image */}
@@ -336,7 +349,10 @@ function FoodCard({ item, onAdd, onTap }: { item: MenuItem; onAdd: (item: MenuIt
             ))}
           </div>
         )}
-        <p className="font-display text-base text-white tracking-wide mt-1.5">{formatCurrency(item.price)}</p>
+        <p className="font-display text-base text-white tracking-wide mt-1.5">
+          {isVariantParent && <span className="text-[10px] text-[#888] font-body font-normal mr-1">From</span>}
+          {formatCurrency(displayPrice)}
+        </p>
       </div>
     </div>
   );
