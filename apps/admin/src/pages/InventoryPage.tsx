@@ -1013,7 +1013,14 @@ export default function InventoryPage() {
                           : ing.supplier?.name ?? '—'}
                       </td>
                       <td className="px-4 py-3 flex gap-2 flex-wrap">
-                        {!ing.hasVariants && (
+                        {/* Use hasVars (flag AND non-empty variants) so a
+                            parent that lost all its variant children — or
+                            a regular non-variant item — still gets the
+                            Adjust button. The original check on the raw
+                            flag stranded orphaned-parent rows with no way
+                            to fix their stock. Same gate for Variants
+                            below so admin can re-add children. */}
+                        {!hasVars && (
                           <button
                             onClick={() => openAdjust(ing)}
                             className={`font-body text-xs tracking-widest uppercase transition-colors ${
@@ -1026,7 +1033,7 @@ export default function InventoryPage() {
                           </button>
                         )}
                         <button onClick={() => openEditIng(ing)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Edit</button>
-                        {!ing.hasVariants && !ing.parentId && (
+                        {!hasVars && !ing.parentId && (
                           <button onClick={() => { if (confirm(`Convert "${ing.name}" to a parent with variants?`)) convertToParentMut.mutate(ing.id); }} className="text-[#FFA726] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Variants</button>
                         )}
                         {ing.isActive && Number(ing.currentStock) === 0 && !hasVars && (
