@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.41 — POS: edit customer name/phone/email (2026-04-28)
+
+No Electron-shell changes. Rebundles apps/pos only:
+
+- Cashier can now edit a customer's name, phone, or email
+  inline from the POS Customers page — pencil button on the
+  detail panel header opens a small modal with the same three
+  fields used by the Add dialog.
+- Phone collisions inside the same branch surface as a
+  friendly inline error ("Another customer in this branch
+  already uses 0171…"), not a generic 500.
+- Delete is intentionally admin-only (admin panel) — POS
+  doesn't get the destructive op. Cashiers manage typos +
+  contact updates without leaving POS.
+- api-proxy hardening: PATCH and DELETE on /customers/:id are
+  now in the offlineUnsupported list — they need server-side
+  validation (phone uniqueness, FK guard on delete), so we
+  reject with a clean OFFLINE_UNSUPPORTED instead of queuing
+  the mutation to fail later.
+
 ## 1.0.40 — website: carousel cards show variant price (no more ৳0) (2026-04-27)
 
 No Electron-shell changes. Rebundles apps/web only:
