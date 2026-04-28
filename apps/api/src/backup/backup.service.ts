@@ -2,17 +2,52 @@ import { Injectable, Logger, BadRequestException, NotFoundException, Unauthorize
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import { promises as fs } from 'fs';
-import { createReadStream } from 'fs';
+import { Readable } from 'stream';
 import { join } from 'path';
 import { gzip as gzipCb, gunzip as gunzipCb } from 'zlib';
 import { promisify } from 'util';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { BACKUP_MODELS, BACKUP_FILE_VERSION } from './backup.constants';
 
 const gzip = promisify(gzipCb);
 const gunzip = promisify(gunzipCb);
 
-// Stored outside /uploads so they are NEVER served publicly by the static handler.
+// Best-effort local disk cache. Container filesystems on hosts like
+// DigitalOcean App Platform are ephemeral, so the DB column on
+// BackupRecord is the source of truth — disk is just a convenience
+// for local dev. Writes that fail (read-only fs, no space) are
+// swallowed; reads fall back to the DB column.
 const BACKUP_DIR = join(process.cwd(), 'apps', 'api', 'backups');
+
+// ─── DO Spaces (S3-compatible) — secondary backup location ──────────────────
+// Same SPACES_* env vars as the upload module. Backups upload with
+// ACL=private (sensitive data — full DB dump including staff hashes).
+// Read order is DB → Spaces → disk so a single store going dark doesn't
+// kill recovery. Spaces upload failure is logged but never aborts the
+// backup — the DB copy is the source of truth.
+const SPACES_BUCKET = process.env.SPACES_BUCKET ?? '';
+const SPACES_KEY = process.env.SPACES_KEY ?? '';
+const SPACES_SECRET = process.env.SPACES_SECRET ?? '';
+const SPACES_REGION = process.env.SPACES_REGION ?? 'sgp1';
+const SPACES_ENDPOINT = process.env.SPACES_ENDPOINT ?? `https://${SPACES_REGION}.digitaloceanspaces.com`;
+const SPACES_BACKUP_PREFIX = process.env.SPACES_BACKUP_PREFIX ?? 'backups';
+const spacesEnabled = Boolean(SPACES_BUCKET && SPACES_KEY && SPACES_SECRET);
+const spacesClient: S3Client | null = spacesEnabled
+  ? new S3Client({
+      region: SPACES_REGION,
+      endpoint: SPACES_ENDPOINT,
+      forcePathStyle: false,
+      credentials: { accessKeyId: SPACES_KEY, secretAccessKey: SPACES_SECRET },
+    })
+  : null;
+
+async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer));
+  }
+  return Buffer.concat(chunks);
+}
 
 @Injectable()
 export class BackupService {
@@ -24,6 +59,66 @@ export class BackupService {
 
   private async ensureDir() {
     await fs.mkdir(BACKUP_DIR, { recursive: true });
+  }
+
+  /** Best-effort write to local disk — failure is non-fatal because the
+   *  payload also lives in the DB. Used so local dev still gets a file
+   *  on disk for inspection / manual download. */
+  private async tryWriteDisk(filename: string, buf: Buffer) {
+    try {
+      await this.ensureDir();
+      await fs.writeFile(join(BACKUP_DIR, filename), buf);
+    } catch (e) {
+      this.logger.warn(`Disk cache write failed for ${filename}: ${(e as Error).message} (DB copy is the source of truth)`);
+    }
+  }
+
+  /** Best-effort upload to DO Spaces. Returns the object key on success
+   *  so the caller can persist it on the BackupRecord; null on failure
+   *  (logged) — the DB column is still the source of truth. ACL=private
+   *  because backups contain full branch data including password hashes. */
+  private async tryUploadSpaces(filename: string, buf: Buffer): Promise<string | null> {
+    if (!spacesClient) return null;
+    const key = `${SPACES_BACKUP_PREFIX}/${filename}`;
+    try {
+      await spacesClient.send(new PutObjectCommand({
+        Bucket: SPACES_BUCKET,
+        Key: key,
+        Body: buf,
+        ContentType: 'application/gzip',
+        ACL: 'private',
+      }));
+      return key;
+    } catch (e) {
+      this.logger.warn(`Spaces upload failed for ${filename}: ${(e as Error).message} (DB copy is the source of truth)`);
+      return null;
+    }
+  }
+
+  /** Pull a backup back from Spaces. Returns null if Spaces is not
+   *  configured, the key is missing, or the fetch fails — caller falls
+   *  back to disk in that case. */
+  private async tryReadSpaces(spacesKey: string | null): Promise<Buffer | null> {
+    if (!spacesClient || !spacesKey) return null;
+    try {
+      const out = await spacesClient.send(new GetObjectCommand({ Bucket: SPACES_BUCKET, Key: spacesKey }));
+      if (!out.Body) return null;
+      return await streamToBuffer(out.Body as NodeJS.ReadableStream);
+    } catch (e) {
+      this.logger.warn(`Spaces read failed for ${spacesKey}: ${(e as Error).message}`);
+      return null;
+    }
+  }
+
+  /** Best-effort delete from Spaces — never throws so a stale-key
+   *  delete doesn't block removing the BackupRecord row. */
+  private async tryDeleteSpaces(spacesKey: string | null) {
+    if (!spacesClient || !spacesKey) return;
+    try {
+      await spacesClient.send(new DeleteObjectCommand({ Bucket: SPACES_BUCKET, Key: spacesKey }));
+    } catch (e) {
+      this.logger.warn(`Spaces delete failed for ${spacesKey}: ${(e as Error).message}`);
+    }
   }
 
   /* ── LIST ─────────────────────────────────────────────────────── */
@@ -97,8 +192,13 @@ export class BackupService {
 
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `backup-${type.toLowerCase()}-${ts}.json.gz`;
-    const fullPath = join(BACKUP_DIR, filename);
-    await fs.writeFile(fullPath, compressed);
+    // Triple-store: DB column (source of truth) + DO Spaces (durable
+    // off-host) + local disk (best-effort dev convenience). Both extras
+    // can fail independently without blocking the backup itself.
+    const [, spacesKey] = await Promise.all([
+      this.tryWriteDisk(filename, compressed),
+      this.tryUploadSpaces(filename, compressed),
+    ]);
 
     const record = await this.prisma.backupRecord.create({
       data: {
@@ -106,6 +206,8 @@ export class BackupService {
         fileUrl: `backups/${filename}`,
         sizeBytes: compressed.length,
         type,
+        data: compressed,
+        spacesKey: spacesKey ?? null,
         createdById: createdById ?? null,
       },
     });
@@ -118,8 +220,6 @@ export class BackupService {
   /** Persist an uploaded .json.gz file as a BackupRecord (type UPLOAD).
    *  Validates the file is a readable gzipped JSON backup before saving. */
   async storeUploadedFile(file: Express.Multer.File, createdById?: string) {
-    await this.ensureDir();
-
     // Quick validation — must decompress and parse, and have our expected shape.
     try {
       const decompressed = await gunzip(file.buffer);
@@ -134,8 +234,10 @@ export class BackupService {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
     const filename = `backup-upload-${ts}-${safeName}`;
-    const fullPath = join(BACKUP_DIR, filename);
-    await fs.writeFile(fullPath, file.buffer);
+    const [, spacesKey] = await Promise.all([
+      this.tryWriteDisk(filename, file.buffer),
+      this.tryUploadSpaces(filename, file.buffer),
+    ]);
 
     const record = await this.prisma.backupRecord.create({
       data: {
@@ -143,6 +245,8 @@ export class BackupService {
         fileUrl: `backups/${filename}`,
         sizeBytes: file.buffer.length,
         type: 'UPLOAD',
+        data: file.buffer,
+        spacesKey: spacesKey ?? null,
         createdById: createdById ?? null,
       },
     });
@@ -167,19 +271,45 @@ export class BackupService {
   async deleteBackup(id: string) {
     const rec = await this.prisma.backupRecord.findUnique({ where: { id } });
     if (!rec) throw new NotFoundException('Backup not found');
+    // Best-effort cleanup of disk + Spaces; failures don't block the
+    // DB row removal so a stale key doesn't strand the record.
     const fullPath = join(BACKUP_DIR, rec.filename);
     await fs.unlink(fullPath).catch(() => { /* file already gone */ });
+    await this.tryDeleteSpaces((rec as { spacesKey?: string | null }).spacesKey ?? null);
     await this.prisma.backupRecord.delete({ where: { id } });
     return { success: true };
   }
 
   /* ── DOWNLOAD PATH ────────────────────────────────────────────── */
+  /** Read order: DB column → DO Spaces → local disk. Survives losing
+   *  any single store. The DB column is preferred (cheapest, lowest
+   *  latency); Spaces and disk only consulted when the DB copy is
+   *  null (legacy rows or pre-migration data). */
   async getDownloadStream(id: string) {
     const rec = await this.prisma.backupRecord.findUnique({ where: { id } });
     if (!rec) throw new NotFoundException('Backup not found');
-    const fullPath = join(BACKUP_DIR, rec.filename);
-    await fs.access(fullPath).catch(() => { throw new NotFoundException('Backup file missing on disk'); });
-    return { stream: createReadStream(fullPath), filename: rec.filename, sizeBytes: rec.sizeBytes };
+
+    const recExt = rec as { data?: Buffer | null; spacesKey?: string | null };
+    const dataBuf: Buffer | null = recExt.data ?? null;
+    if (dataBuf) {
+      return { stream: Readable.from(dataBuf), filename: rec.filename, sizeBytes: dataBuf.length };
+    }
+
+    const fromSpaces = await this.tryReadSpaces(recExt.spacesKey ?? null);
+    if (fromSpaces) {
+      return { stream: Readable.from(fromSpaces), filename: rec.filename, sizeBytes: fromSpaces.length };
+    }
+
+    // Legacy disk fallback — rows created before the data column
+    // shipped. On ephemeral hosts these are effectively orphans after
+    // any container restart.
+    try {
+      const fullPath = join(BACKUP_DIR, rec.filename);
+      const buf = await fs.readFile(fullPath);
+      return { stream: Readable.from(buf), filename: rec.filename, sizeBytes: rec.sizeBytes };
+    } catch {
+      throw new NotFoundException('Backup file unavailable in DB, Spaces, or local disk. Create a new backup.');
+    }
   }
 
   /* ── RESTORE ──────────────────────────────────────────────────── */
@@ -199,7 +329,23 @@ export class BackupService {
     if (opts.recordId) {
       const rec = await this.prisma.backupRecord.findUnique({ where: { id: opts.recordId } });
       if (!rec) throw new NotFoundException('Backup not found');
-      compressed = await fs.readFile(join(BACKUP_DIR, rec.filename));
+      const recExt = rec as { data?: Buffer | null; spacesKey?: string | null };
+      const dataBuf = recExt.data ?? null;
+      if (dataBuf) {
+        compressed = dataBuf;
+      } else {
+        const fromSpaces = await this.tryReadSpaces(recExt.spacesKey ?? null);
+        if (fromSpaces) {
+          compressed = fromSpaces;
+        } else {
+          // Final disk fallback for rows that pre-date both DB + Spaces.
+          try {
+            compressed = await fs.readFile(join(BACKUP_DIR, rec.filename));
+          } catch {
+            throw new NotFoundException('Backup file unavailable in DB, Spaces, or local disk. Upload the .json.gz file instead.');
+          }
+        }
+      }
     } else if (opts.uploadedFile) {
       compressed = opts.uploadedFile.buffer;
     } else {

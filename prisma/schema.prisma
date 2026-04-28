@@ -1963,7 +1963,19 @@ model BackupRecord {
   filename    String
   fileUrl     String
   sizeBytes   Int
-  type        String   @default("MANUAL") // MANUAL | AUTO
+  type        String   @default("MANUAL") // MANUAL | AUTO | UPLOAD
+  /// Gzipped backup payload stored in Postgres so downloads survive
+  /// container restarts on ephemeral-disk hosts (DigitalOcean App
+  /// Platform, etc.). Disk copy is still written best-effort for local
+  /// dev convenience but the DB column is the source of truth.
+  /// Nullable so rows created before the migration can still be listed
+  /// (download will 404 for those — they were already gone from disk).
+  data        Bytes?
+  /// Object-storage key when a copy was successfully uploaded to
+  /// DigitalOcean Spaces. Read order is DB → Spaces → disk so we
+  /// survive losing either store. Null when Spaces is not configured
+  /// or the upload failed (the DB copy is still authoritative).
+  spacesKey   String?
   createdAt   DateTime @default(now())
   createdById String?
 
