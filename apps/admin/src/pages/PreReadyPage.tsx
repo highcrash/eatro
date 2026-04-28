@@ -126,7 +126,7 @@ export default function PreReadyPage() {
     });
   };
   const [editingItem, setEditingItem] = useState<PreReadyItem | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', minimumStock: '0' });
+  const [editForm, setEditForm] = useState({ name: '', minimumStock: '0', unit: 'PCS' });
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRows, setBulkRows] = useState<{ preReadyItemName: string; yieldQuantity?: number; yieldUnit?: string; ingredientName: string; quantity: number; unit?: string }[]>([]);
@@ -361,8 +361,15 @@ export default function PreReadyPage() {
     mutationFn: () => api.patch(`/pre-ready/items/${editingItem!.id}`, {
       name: editForm.name || undefined,
       minimumStock: parseFloat(editForm.minimumStock),
+      // Only include unit when admin actually changed it — unchanged
+      // units skip the strict gates on the server side.
+      ...(editingItem && editForm.unit !== editingItem.unit ? { unit: editForm.unit } : {}),
     }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['pre-ready-items'] }); setEditingItem(null); },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pre-ready-items'] });
+      void qc.invalidateQueries({ queryKey: ['ingredients'] });
+      setEditingItem(null);
+    },
   });
 
   const recalcCostMut = useMutation({
@@ -511,7 +518,7 @@ Fried Onion,500,G,Oil,100,ML`;
 
   const openEditItem = (item: PreReadyItem) => {
     setEditingItem(item);
-    setEditForm({ name: item.name, minimumStock: String(Number(item.minimumStock)) });
+    setEditForm({ name: item.name, minimumStock: String(Number(item.minimumStock)), unit: item.unit });
   };
 
   const handleDeleteItem = (item: PreReadyItem) => {
@@ -770,33 +777,16 @@ Fried Onion,500,G,Oil,100,ML`;
       )}
 
       {/* Edit Item Dialog */}
-      {editingItem && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setEditingItem(null)}>
-          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="font-display text-xl text-white tracking-widest mb-6">EDIT ITEM</h2>
-            <div className="space-y-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-[#666] text-xs font-body tracking-widest uppercase">Name</label>
-                <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-[#666] text-xs font-body tracking-widest uppercase">Minimum Stock</label>
-                <input type="number" step="0.01" value={editForm.minimumStock} onChange={(e) => setEditForm((f) => ({ ...f, minimumStock: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-[#666] text-xs font-body tracking-widest uppercase">Unit</label>
-                <input value={editingItem.unit} disabled className="bg-[#0D0D0D] border border-[#2A2A2A] text-[#666] px-3 py-2 text-sm font-body cursor-not-allowed" />
-                <p className="text-[#666] font-body text-xs">Unit cannot be changed after creation.</p>
-              </div>
-            </div>
-            {updateItemMut.error && <p className="text-[#F03535] text-xs font-body mt-2">{(updateItemMut.error as Error).message}</p>}
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setEditingItem(null)} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
-              <button onClick={() => updateItemMut.mutate()} disabled={!editForm.name || updateItemMut.isPending} className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2.5 transition-colors disabled:opacity-50">{updateItemMut.isPending ? 'Saving\u2026' : 'Save'}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {editingItem && <EditItemDialog
+        item={editingItem}
+        form={editForm}
+        setForm={setEditForm}
+        units={UNITS}
+        saving={updateItemMut.isPending}
+        error={updateItemMut.error as Error | null}
+        onCancel={() => setEditingItem(null)}
+        onSave={() => updateItemMut.mutate()}
+      />}
 
       {/* Recipe Editor Dialog */}
       {showRecipe && (
@@ -1207,6 +1197,123 @@ Fried Onion,500,G,Oil,100,ML`;
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Edit Item Dialog ─────────────────────────────────────────────
+//
+// Unit on a pre-ready item is destructive to change — every Decimal
+// that counts the item (currentStock, batch qty, mirror Ingredient
+// stock, active production-order qty) is denominated in the unit.
+// Server gates the change behind "every on-hand source is zero +
+// no active production orders". The UI surfaces:
+//   - the live stock so admin can see why the unit is locked,
+//   - a list of menu recipes that reference the [PR] mirror
+//     ingredient so admin knows what they need to re-edit after
+//     flipping unit (recipe quantities are in their own unit and
+//     don't auto-translate).
+function EditItemDialog({
+  item,
+  form,
+  setForm,
+  units,
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  item: PreReadyItem;
+  form: { name: string; minimumStock: string; unit: string };
+  setForm: React.Dispatch<React.SetStateAction<{ name: string; minimumStock: string; unit: string }>>;
+  units: string[];
+  saving: boolean;
+  error: Error | null;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const stockOnHand = Number(item.currentStock ?? 0);
+  const liveBatches = (item.batches ?? []).filter((b) => Number(b.remainingQty) > 0).length;
+  const unitLocked = stockOnHand > 0 || liveBatches > 0;
+  const unitChanged = form.unit !== item.unit;
+
+  // Pulled lazily — only when admin actually intends to change the
+  // unit, since the warning is only relevant in that case.
+  const { data: menuRecipes } = useQuery<{ mirrorUnit: string | null; recipes: Array<{ recipeItemId: string; menuItemId: string; menuItemName: string; quantity: number; unit: string }> }>({
+    queryKey: ['pre-ready-menu-recipes', item.id],
+    queryFn: () => api.get(`/pre-ready/items/${item.id}/menu-recipes`),
+    enabled: unitChanged,
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={onCancel}>
+      <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md p-6 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <h2 className="font-display text-xl text-white tracking-widest mb-6">EDIT ITEM</h2>
+        <div className="space-y-4">
+          <div className="flex flex-col gap-1">
+            <label className="text-[#666] text-xs font-body tracking-widest uppercase">Name</label>
+            <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[#666] text-xs font-body tracking-widest uppercase">Minimum Stock</label>
+            <input type="number" step="0.01" value={form.minimumStock} onChange={(e) => setForm((f) => ({ ...f, minimumStock: e.target.value }))} className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[#666] text-xs font-body tracking-widest uppercase">Unit</label>
+            {unitLocked ? (
+              <>
+                <input value={item.unit} disabled className="bg-[#0D0D0D] border border-[#2A2A2A] text-[#666] px-3 py-2 text-sm font-body cursor-not-allowed" />
+                <p className="text-[#FFA726] font-body text-xs">
+                  Unit is locked because{' '}
+                  {stockOnHand > 0 && <>currentStock = {stockOnHand} {item.unit}</>}
+                  {stockOnHand > 0 && liveBatches > 0 && ' and '}
+                  {liveBatches > 0 && <>{liveBatches} batch{liveBatches > 1 ? 'es have' : ' has'} remaining stock</>}
+                  . Run <strong>Data Cleanup → Set all pre-ready stock to 0</strong> (or use up the stock) before changing the unit.
+                </p>
+              </>
+            ) : (
+              <select
+                value={form.unit}
+                onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}
+                className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+              >
+                {units.map((u) => <option key={u} value={u}>{u}</option>)}
+              </select>
+            )}
+          </div>
+        </div>
+
+        {/* Menu-recipe impact warning. The [PR] mirror ingredient's
+            unit flips with the pre-ready unit, so any menu recipe
+            line that says "use 50 G of [PR] Sauce" still has its
+            qty in G — admin must re-enter the line in the new unit
+            (or rely on a unit conversion that probably doesn't
+            exist for this pre-ready). */}
+        {unitChanged && menuRecipes && menuRecipes.recipes.length > 0 && (
+          <div className="mt-4 bg-[#1A1A1A] border border-[#FFA726] p-3">
+            <p className="text-[#FFA726] font-body text-xs font-medium uppercase tracking-widest mb-2">
+              {menuRecipes.recipes.length} menu recipe{menuRecipes.recipes.length > 1 ? 's' : ''} use{menuRecipes.recipes.length > 1 ? '' : 's'} this pre-ready
+            </p>
+            <p className="text-[#999] font-body text-[11px] mb-2">
+              Their RecipeItem qty is denominated in {menuRecipes.mirrorUnit ?? '(unknown)'}. After changing the unit you should re-edit each one so the deduction math stays correct:
+            </p>
+            <ul className="text-[#DDD] font-body text-xs space-y-0.5 max-h-32 overflow-auto">
+              {menuRecipes.recipes.map((r) => (
+                <li key={r.recipeItemId} className="flex justify-between">
+                  <span>{r.menuItemName}</span>
+                  <span className="text-[#666]">{r.quantity} {r.unit}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {error && <p className="text-[#F03535] text-xs font-body mt-2">{error.message}</p>}
+        <div className="flex gap-3 mt-6">
+          <button onClick={onCancel} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
+          <button onClick={onSave} disabled={!form.name || saving} className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2.5 transition-colors disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
     </div>
   );
 }
