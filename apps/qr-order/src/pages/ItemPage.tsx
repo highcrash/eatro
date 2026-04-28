@@ -29,12 +29,31 @@ export default function ItemPage() {
   const [notes, setNotes] = useState('');
   const [removed, setRemoved] = useState<Set<string>>(new Set());
 
+  // Fetch the item directly by id. The list endpoint hides variant
+  // children + addon items, so falling through `data.items.find()`
+  // gave a perpetual black "Loading…" screen for any variant child
+  // (or any item the cached list hadn't loaded yet). The single-item
+  // endpoint always resolves it.
+  const { data: itemFetched, isLoading: itemLoading, isError: itemError } = useQuery<MenuItem | null>({
+    queryKey: ['qr-menu-item', branchId, itemId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/public/menu/${branchId || 'default'}/item/${itemId}`));
+      if (!res.ok) return null;
+      return (await res.json()) as MenuItem;
+    },
+    enabled: !!itemId && !!branchId,
+  });
+
+  // Still pull the menu list so the cart count + nav header behave
+  // exactly like before (no breaking changes to the rest of this page).
   const { data } = useQuery<{ categories: unknown[]; items: MenuItem[] }>({
     queryKey: ['qr-menu', branchId],
     queryFn: async () => {
       const res = await fetch(apiUrl(`/public/menu/${branchId || 'default'}`));
+      if (!res.ok) throw new Error('Menu fetch failed');
       return res.json();
     },
+    enabled: !!branchId,
   });
 
   // Branch settings — drives whether the customer sees the structured
@@ -50,7 +69,10 @@ export default function ItemPage() {
   });
   const allowSelfRemove = !!settings?.qrAllowSelfRemoveIngredients;
 
-  const item = data?.items.find((m) => m.id === itemId);
+  // Single-item endpoint is authoritative. Fall back to the cached
+  // list only if the dedicated fetch returned nothing AND the list
+  // happens to have the row (rare race).
+  const item = itemFetched ?? data?.items.find((m) => m.id === itemId);
 
   // Recipe lookup (only fetched when self-remove is on). Uses the same
   // public endpoint pattern; falls back gracefully when the endpoint
@@ -85,8 +107,20 @@ export default function ItemPage() {
   }, [picks]);
 
   if (!item) {
+    // Still fetching — show loader. If both fetches finished and
+    // nothing came back (404 / deleted / wrong branch), surface a
+    // clear message + a back button so the user isn't trapped on a
+    // black "Loading…" screen forever.
+    if (itemLoading) {
+      return (
+        <div className="flex items-center justify-center h-screen bg-[#0D0D0D] text-sm text-[#666] font-body">Loading…</div>
+      );
+    }
     return (
-      <div className="flex items-center justify-center h-screen bg-[#0D0D0D] text-sm text-[#666] font-body">Loading…</div>
+      <div className="flex flex-col items-center justify-center h-screen bg-[#0D0D0D] text-sm text-[#666] font-body gap-4 px-6 text-center">
+        <p>{itemError ? 'Could not load this item.' : 'This item is no longer available.'}</p>
+        <button onClick={() => void navigate('/menu')} className="bg-[#C8FF00] text-[#0D0D0D] px-5 py-2 font-medium">Back to menu</button>
+      </div>
     );
   }
 
