@@ -18,6 +18,8 @@ export type CleanupScope =
   | 'menu-items'
   | 'menu-all'
   | 'pre-ready'
+  | 'production-orders'
+  | 'pre-ready-batches'
   | 'suppliers'
   | 'creditors'
   | 'purchases'
@@ -171,6 +173,23 @@ export class CleanupService {
         deleted.productionOrders = (await p.productionOrder.deleteMany({ where })).count;
         deleted.preReadyRecipes = (await p.preReadyRecipe.deleteMany({ where: { preReadyItem: { branchId } } })).count;
         deleted.preReadyItems = (await p.preReadyItem.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'production-orders': {
+        // Production order log only — pre-ready items, recipes, and
+        // batches stay. Stock figures are not rewound (matches the
+        // shape of waste-logs / stock-movements scopes).
+        deleted.productionOrders = (await p.productionOrder.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'pre-ready-batches': {
+        // Made-batch ledger only. Pre-ready items + recipes survive.
+        // Note: stock-on-hand of pre-ready items is computed from
+        // remainingQty across batches, so wiping batches effectively
+        // zeros pre-ready stock — that's the point of this scope.
+        deleted.preReadyBatches = (await p.preReadyBatch.deleteMany({ where })).count;
         break;
       }
 
