@@ -18,6 +18,7 @@ type Scope =
   | 'menu-items'
   | 'menu-all'
   | 'pre-ready'
+  | 'pre-ready-stock-zero'
   | 'production-orders'
   | 'pre-ready-batches'
   | 'suppliers'
@@ -101,8 +102,9 @@ const SECTIONS: Section[] = [
   {
     title: 'Pre-Ready',
     actions: [
+      { scope: 'pre-ready-stock-zero', label: 'Set all pre-ready stock to 0', desc: 'Zeros currentStock on every pre-ready item and clears the made-batch ledger so on-hand stays consistent. Items + recipes + production-order log survive.' },
       { scope: 'production-orders', label: 'Delete production orders only', desc: 'Clears the production-order request log. Pre-ready items, recipes, and batches stay intact.' },
-      { scope: 'pre-ready-batches', label: 'Delete made batches only', desc: 'Clears the made-batch ledger. Pre-ready items + recipes stay, but on-hand pre-ready stock effectively goes to zero (it is computed from batch remainingQty).' },
+      { scope: 'pre-ready-batches', label: 'Delete made batches only', desc: 'Clears the made-batch ledger. Pre-ready items + recipes stay, but on-hand stock derived from batches drops accordingly.' },
       { scope: 'pre-ready', label: 'Delete all pre-ready data', desc: 'Removes pre-ready items, recipes, production orders, and batches.', danger: true },
     ],
   },
