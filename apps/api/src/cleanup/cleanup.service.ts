@@ -26,6 +26,7 @@ export type CleanupScope =
   | 'attendance'
   | 'payroll'
   | 'sms-logs'
+  | 'waste-logs'
   | 'reset-all';
 
 @Injectable()
@@ -224,6 +225,14 @@ export class CleanupService {
       case 'sms-logs': {
         // Templates stay — they're the admin's saved message bodies, not history.
         deleted.smsLogs = (await p.smsLog.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'waste-logs': {
+        // WasteLog rows only — ingredient stock figures are not rewound,
+        // matching how stock-movements cleanup leaves currentStock alone.
+        // Use 'inventory-all' or 'reset-all' if a deeper wipe is needed.
+        deleted.wasteLogs = (await p.wasteLog.deleteMany({ where })).count;
         break;
       }
 

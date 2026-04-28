@@ -26,6 +26,7 @@ type Scope =
   | 'attendance'
   | 'payroll'
   | 'sms-logs'
+  | 'waste-logs'
   | 'reset-all';
 
 interface Action {
@@ -71,6 +72,7 @@ const SECTIONS: Section[] = [
     actions: [
       { scope: 'stock-zero', label: 'Set all stock to 0', desc: 'Keeps ingredients but zeroes their stock and clears movements.' },
       { scope: 'stock-movements', label: 'Delete stock movements only', desc: 'Removes movement history; stock totals stay.' },
+      { scope: 'waste-logs', label: 'Delete all waste logs', desc: 'Clears the waste log history. Ingredient stock totals are NOT rewound — same behaviour as the stock-movements cleanup.' },
       { scope: 'inventory-all', label: 'Delete all inventory', desc: 'Removes ingredients, recipes, pre-ready recipes, movements, waste logs.', danger: true },
     ],
   },
