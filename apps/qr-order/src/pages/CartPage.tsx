@@ -16,7 +16,12 @@ export default function CartPage() {
   const setActiveOrder = useSessionStore((s) => s.setActiveOrder);
   const [submitting, setSubmitting] = useState(false);
 
-  const { items, removeItem, updateQuantity, clearCart } = useCartStore();
+  const { items: rawItems, removeItem, updateQuantity, clearCart } = useCartStore();
+  // sessionStorage can carry stale entries from older app versions
+  // (e.g. one whose menuItem snapshot got malformed by a JSON shape
+  // change). Skip those so a single bad row doesn't crash the page
+  // on render — the symptom was a black/blank cart screen.
+  const items = rawItems.filter((c) => c && c.menuItem && typeof c.menuItem.id === 'string');
   const subtotal = items.reduce((s, c) => {
     const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
     return s + (Number(c.menuItem.price) + addonsTotal) * c.quantity;

@@ -59,13 +59,22 @@ export default function OrderStatusPage() {
     if (orderId) setActiveOrder(orderId);
   }, [orderId, setActiveOrder]);
 
-  const { data: order } = useQuery<QrOrder>({
+  const { data: order, isError, error: queryError } = useQuery<QrOrder>({
     queryKey: ['order-status', orderId],
     queryFn: async () => {
       const res = await fetch(apiUrl(`/orders/qr/${orderId}/status`));
-      return res.json() as Promise<QrOrder>;
+      // Throw on non-OK so React Query keeps `data` undefined and the
+      // loading state holds. Without this, a 404 body (e.g. order was
+      // voided) leaks in as the "successful" payload and downstream
+      // accesses to order.items / order.status crash to a blank page.
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`Order status ${res.status}: ${body || 'not found'}`);
+      }
+      return (await res.json()) as QrOrder;
     },
     refetchInterval: 3000,
+    retry: 1,
   });
 
   // Clear active order when cancelled/voided
@@ -75,6 +84,15 @@ export default function OrderStatusPage() {
     }
   }, [order?.status, setActiveOrder]);
 
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-[#0D0D0D] text-sm text-[#666] font-body gap-4 px-6 text-center">
+        <p>Could not load this order — it may have been voided or removed.</p>
+        <p className="text-xs text-[#444]">{(queryError as Error)?.message ?? ''}</p>
+        <button onClick={() => void navigate('/menu')} className="bg-[#C8FF00] text-[#0D0D0D] px-5 py-2 font-medium">Back to menu</button>
+      </div>
+    );
+  }
   if (!order) return (
     <div className="flex items-center justify-center h-screen bg-[#0D0D0D] text-sm text-[#666] font-body">Loading…</div>
   );
