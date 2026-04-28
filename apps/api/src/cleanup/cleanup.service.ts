@@ -18,6 +18,7 @@ export type CleanupScope =
   | 'menu-items'
   | 'menu-all'
   | 'pre-ready'
+  | 'pre-ready-stock-zero'
   | 'production-orders'
   | 'pre-ready-batches'
   | 'suppliers'
@@ -186,10 +187,17 @@ export class CleanupService {
 
       case 'pre-ready-batches': {
         // Made-batch ledger only. Pre-ready items + recipes survive.
-        // Note: stock-on-hand of pre-ready items is computed from
-        // remainingQty across batches, so wiping batches effectively
-        // zeros pre-ready stock — that's the point of this scope.
         deleted.preReadyBatches = (await p.preReadyBatch.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'pre-ready-stock-zero': {
+        // Mirror of the ingredient 'stock-zero' scope: zero the
+        // currentStock column on every PreReadyItem AND clear the
+        // batch ledger so the two on-hand sources stay consistent.
+        // Items + recipes + production-order log survive.
+        deleted.preReadyBatches = (await p.preReadyBatch.deleteMany({ where })).count;
+        await p.preReadyItem.updateMany({ where, data: { currentStock: 0 } });
         break;
       }
 
