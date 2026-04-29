@@ -156,6 +156,15 @@ export default function ItemPage() {
 
   const handleAdd = () => {
     if (!canAdd) return;
+    // Add-to-cart is the trigger for customer sign-in. Browsing the
+    // menu + opening item detail is open; the moment a guest commits
+    // to ordering we route them through OTP login and bring them
+    // back here on success.
+    const customer = useSessionStore.getState().customer;
+    if (!customer) {
+      void navigate(`/login?next=${encodeURIComponent(`/item/${itemId}`)}`);
+      return;
+    }
     // When self-remove is on, fold the removed-ingredient names into
     // the line's notes field — server still respects the
     // qrAllowSelfRemoveIngredients toggle, but kitchen sees a clear

@@ -20,6 +20,7 @@ export default function MenuPage() {
   const branchName = useSessionStore((s) => s.branchName);
   const tableNumber = useSessionStore((s) => s.tableNumber);
   const activeOrderId = useSessionStore((s) => s.activeOrderId);
+  const customer = useSessionStore((s) => s.customer);
 
   const [search, setSearch] = useState('');
   const [activeCat, setActiveCat] = useState<string | null>(null);
@@ -44,7 +45,13 @@ export default function MenuPage() {
   // variants need the picker — addons for required-pick state + price
   // markup; variants because the parent shell carries price=0 and the
   // real price lives on the chosen variant. Plain items add directly.
+  // Add-to-cart is gated on customer login: if no customer is in the
+  // session yet, route through /login first and come back to /menu.
   const handleQuickAdd = (item: MenuItem) => {
+    if (!customer) {
+      void navigate(`/login?next=${encodeURIComponent('/menu')}`);
+      return;
+    }
     const groups = ((item as any).addonGroups ?? []).filter((g: any) => (g.options ?? []).length > 0);
     const isVariantParent = !!(item as any).isVariantParent && Array.isArray((item as any).variants) && (item as any).variants.length > 0;
     if (groups.length > 0 || isVariantParent) {

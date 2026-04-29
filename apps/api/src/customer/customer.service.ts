@@ -2,6 +2,35 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
 
+/** Bangladesh phone normaliser. Accepts:
+ *    01910202020   (11-digit local with leading 0)
+ *    +8801910202020 (E.164)
+ *    8801910202020 (without +)
+ *    1910202020   (10-digit no leading 0)
+ *  Always returns the canonical local 11-digit form (`01XXXXXXXXX`).
+ *  Returns null if the input can't be coerced to a valid BD mobile. */
+export function normalizeBdPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  // Strip everything except digits and a leading +.
+  let cleaned = String(raw).trim().replace(/[\s-()]/g, '');
+  if (cleaned.startsWith('+')) cleaned = cleaned.slice(1);
+  cleaned = cleaned.replace(/[^\d]/g, '');
+  if (!cleaned) return null;
+
+  // Drop the country code if present (880).
+  if (cleaned.startsWith('880') && cleaned.length >= 12) {
+    cleaned = cleaned.slice(3);
+  }
+  // 10-digit form (without leading 0) → prepend 0.
+  if (cleaned.length === 10 && cleaned.startsWith('1')) {
+    cleaned = '0' + cleaned;
+  }
+  // BD mobile MUST be 11 digits, start with 01, and the third digit
+  // must be 3-9 (operator prefix). Reject otherwise.
+  if (!/^01[3-9]\d{8}$/.test(cleaned)) return null;
+  return cleaned;
+}
+
 @Injectable()
 export class CustomerService {
   // In-memory OTP store for customer auth
@@ -12,23 +41,49 @@ export class CustomerService {
     private readonly smsService: SmsService,
   ) {}
 
+  /** Find a customer by any phone format. Falls back to a digit-suffix
+   *  match so legacy rows stored as +8801XXXXX or 01XXXXX both resolve
+   *  to the same person. Returns the first match (DB has a unique on
+   *  branchId+phone, but format drift across imports means there can
+   *  be aliases). */
+  private async findCustomerByPhone(branchId: string, normalized: string) {
+    // Fast path — exact match on normalized form.
+    const exact = await this.prisma.customer.findUnique({
+      where: { branchId_phone: { branchId, phone: normalized } },
+    });
+    if (exact) return exact;
+    // Suffix match — legacy rows might be stored as +8801XXXXX or
+    // 8801XXXXX. The last 10 digits (without leading 0) are the
+    // distinguishing tail; match on that.
+    const tail = normalized.slice(1); // drop leading 0 → 1XXXXXXXXX
+    return this.prisma.customer.findFirst({
+      where: { branchId, phone: { endsWith: tail } },
+    });
+  }
+
   // ─── Auth (public endpoints for QR) ────────────────────────────────────────
 
   async requestOtp(branchId: string, phone: string) {
-    if (!phone || phone.length < 8) throw new BadRequestException('Invalid phone number');
+    const normalized = normalizeBdPhone(phone);
+    if (!normalized) {
+      throw new BadRequestException('Enter a valid Bangladesh mobile number (e.g. 01XXXXXXXXX).');
+    }
 
     const otp = String(Math.floor(100000 + Math.random() * 900000));
-    const key = `${branchId}:${phone}`;
+    const key = `${branchId}:${normalized}`;
     this.otpStore.set(key, { otp, expiresAt: new Date(Date.now() + 5 * 60 * 1000), branchId });
 
-    const sent = await this.smsService.sendSms(branchId, phone, `Your login OTP: ${otp}. Valid for 5 minutes.`);
+    const sent = await this.smsService.sendSms(branchId, normalized, `Your login OTP: ${otp}. Valid for 5 minutes.`);
 
     // In dev mode, return OTP if SMS not sent
-    return { sent, ...(sent ? {} : { otp }) };
+    return { sent, phone: normalized, ...(sent ? {} : { otp }) };
   }
 
   async verifyOtp(branchId: string, phone: string, inputOtp: string) {
-    const key = `${branchId}:${phone}`;
+    const normalized = normalizeBdPhone(phone);
+    if (!normalized) throw new BadRequestException('Enter a valid Bangladesh mobile number.');
+
+    const key = `${branchId}:${normalized}`;
     const stored = this.otpStore.get(key);
 
     if (!stored) throw new BadRequestException('No OTP found. Please request a new one.');
@@ -37,18 +92,62 @@ export class CustomerService {
 
     this.otpStore.delete(key);
 
-    // Find or create customer
-    let customer = await this.prisma.customer.findUnique({
-      where: { branchId_phone: { branchId, phone } },
-    });
-
-    if (!customer) {
-      customer = await this.prisma.customer.create({
-        data: { branchId, phone, name: 'Customer' },
-      });
+    // Match the customer across phone-format variants. If the row is
+    // there but stored in a non-normalized form, return it without
+    // overwriting the existing phone — the front-end displays the name
+    // we have on file.
+    const existing = await this.findCustomerByPhone(branchId, normalized);
+    if (existing) {
+      return {
+        customer: existing,
+        // Surface the convention so the UI can decide whether to show
+        // an empty name field (Walk-in default) vs greet by name.
+        isWalkIn: existing.name === 'Walk-in',
+        isNew: false,
+      };
     }
 
-    return { customer };
+    // Brand-new customer. Defer creation until the front-end posts a
+    // name (required) so we don't pollute the directory with rows that
+    // never finished signup. Return a sentinel so the UI knows to ask
+    // for name + email.
+    return {
+      customer: null,
+      isNew: true,
+      phone: normalized,
+    };
+  }
+
+  /** Brand-new customer signup, called after OTP verification when
+   *  no row was found for the phone. Name is required; email is
+   *  optional. Phone must be normalized server-side. */
+  async createFromQr(branchId: string, dto: { phone: string; name: string; email?: string }) {
+    const normalized = normalizeBdPhone(dto.phone);
+    if (!normalized) throw new BadRequestException('Enter a valid Bangladesh mobile number.');
+    const name = dto.name?.trim();
+    if (!name) throw new BadRequestException('Name is required');
+
+    // Race-guard: another request may have created the row between
+    // verifyOtp and now. Return the existing match instead of failing
+    // on the unique constraint.
+    const existing = await this.findCustomerByPhone(branchId, normalized);
+    if (existing) {
+      // Fill in missing fields if previously a Walk-in placeholder.
+      const patches: { name?: string; email?: string } = {};
+      if (!existing.name || existing.name === 'Walk-in') patches.name = name;
+      if (dto.email && !existing.email) patches.email = dto.email.trim();
+      if (Object.keys(patches).length === 0) return existing;
+      return this.prisma.customer.update({ where: { id: existing.id }, data: patches });
+    }
+
+    return this.prisma.customer.create({
+      data: {
+        branchId,
+        phone: normalized,
+        name,
+        email: dto.email?.trim() || null,
+      },
+    });
   }
 
   async updateProfile(customerId: string, data: { name?: string; email?: string }) {
