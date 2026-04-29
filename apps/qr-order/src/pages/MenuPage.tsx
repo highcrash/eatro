@@ -315,17 +315,44 @@ export default function MenuPage() {
 function FoodCard({ item, onAdd, onTap }: { item: MenuItem; onAdd: (item: MenuItem) => void; onTap: () => void }) {
   const tags = item.tags ? item.tags.split(',').map((t) => t.trim()).filter(Boolean) : [];
 
-  // Variant parent shells carry price=0 because variants hold the real
-  // price. Fall back to the cheapest variant + a "From" prefix so the
-  // card never reads ৳0. Mirrors website MenuCarousel behaviour.
+  // Two cases collapse a card's nominal `price` to ৳0:
+  //   (a) Variant parent — price lives on the children, parent shell
+  //       carries 0. Fall back to the cheapest variant.
+  //   (b) Item priced 0 with required addons — the real price is
+  //       `0 + cheapest required addon`. Show "From <that>".
+  // Either way, when the displayed number is bumped up from the bare
+  // `item.price`, we render a "From" prefix so the customer doesn't
+  // think they're paying that exact amount.
   const variants = Array.isArray((item as any).variants) ? (item as any).variants as Array<{ price: number }> : [];
   const isVariantParent = !!(item as any).isVariantParent && variants.length > 0;
   const cheapestVariantPrice = variants.length > 0
     ? variants.reduce((min, v) => Math.min(min, Number(v.price)), Number(variants[0].price))
     : 0;
-  const displayPrice = isVariantParent && Number(item.price) === 0
-    ? cheapestVariantPrice
-    : Number(item.price);
+
+  // Sum the cheapest required pick from each REQUIRED addon group
+  // (minPicks > 0). Optional groups don't push the floor up.
+  const addonGroups = Array.isArray((item as any).addonGroups) ? (item as any).addonGroups as Array<{
+    minPicks: number;
+    options: Array<{ addon?: { price: number; isAvailable: boolean } }>;
+  }> : [];
+  const requiredAddonFloor = addonGroups.reduce((acc, g) => {
+    if (!g || g.minPicks <= 0) return acc;
+    const available = (g.options ?? []).filter((o) => o.addon?.isAvailable !== false);
+    if (available.length === 0) return acc;
+    const cheapest = available.reduce(
+      (min, o) => Math.min(min, Number(o.addon?.price ?? 0)),
+      Number(available[0].addon?.price ?? 0),
+    );
+    return acc + cheapest * g.minPicks;
+  }, 0);
+
+  const basePrice = Number(item.price);
+  const variantFloor = isVariantParent ? cheapestVariantPrice : 0;
+  const computedFloor = (variantFloor || basePrice) + requiredAddonFloor;
+  // Show "From" whenever the computed floor is HIGHER than the bare
+  // item.price — that's the signal that picks affect the actual price.
+  const showFromPrefix = computedFloor > basePrice;
+  const displayPrice = computedFloor > 0 ? computedFloor : basePrice;
 
   return (
     <div className="bg-[#1A1A1A] border border-[#2A2A2A] overflow-hidden" onClick={onTap}>
@@ -357,7 +384,7 @@ function FoodCard({ item, onAdd, onTap }: { item: MenuItem; onAdd: (item: MenuIt
           </div>
         )}
         <p className="font-display text-base text-white tracking-wide mt-1.5">
-          {isVariantParent && <span className="text-[10px] text-[#888] font-body font-normal mr-1">From</span>}
+          {showFromPrefix && <span className="text-[10px] text-[#888] font-body font-normal mr-1">From</span>}
           {formatCurrency(displayPrice)}
         </p>
       </div>

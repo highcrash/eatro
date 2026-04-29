@@ -91,8 +91,11 @@ export const useCartStore = create<CartStore>()(
       clearCart: () => set({ items: [] }),
     }),
     {
+      // localStorage so a refresh / accidental tab close doesn't wipe
+      // the in-progress cart. Each browser device has its own
+      // localStorage so cross-customer leakage isn't a concern.
       name: 'restora-qr-cart-v2',
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage),
     },
   ),
 );

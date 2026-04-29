@@ -327,6 +327,36 @@ export class QrOrderController {
     return { customerId: customer.id, customerName: customer.name, customerPhone: customer.phone };
   }
 
+  /**
+   * Public QR-flow table transfer. Used when a customer who already has
+   * an active order rescans a *different* table — we move the existing
+   * order to the new table instead of creating a new one. Gated on
+   * customerId match: only the customer who owns the order can move
+   * it (the orderId is a guess-resistant cuid; layering customerId
+   * on top is defence-in-depth so a leaked URL can't relocate someone
+   * else's order). The underlying service emits the standard
+   * `order:updated` + `table:updated` WS events so the POS / KDS
+   * picks up the move automatically.
+   */
+  @Post('qr/:id/move-table')
+  async moveTableQr(
+    @Param('id') id: string,
+    @Headers('x-branch-id') branchId: string,
+    @Body() dto: { tableId: string; customerId: string },
+    @Req() req: Request,
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    if (!dto.tableId || !dto.customerId) throw new BadRequestException('tableId + customerId required');
+    await this.ensureGateOpen(branchId, req);
+    const order = await this.prisma.order.findFirst({ where: { id, branchId, deletedAt: null } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.customerId !== dto.customerId) {
+      throw new BadRequestException('This order does not belong to the signed-in customer');
+    }
+    if (order.tableId === dto.tableId) return order; // no-op rescan of same table
+    return this.orderService.moveTable(id, branchId, dto.tableId);
+  }
+
   @Post('qr/:id/items')
   async addItems(
     @Param('id') id: string,

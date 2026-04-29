@@ -33,16 +33,22 @@ export const useSessionStore = create<SessionStore>()(
       tableNumber: '',
       activeOrderId: null,
       customer: null,
-      // A new QR scan implies a new session — drop any stale customer
-      // from the previous diner. `setSession` is the only place this
-      // happens; SetActiveOrder + SetCustomer leave it alone.
-      setSession: (data) => set({ ...data, customer: null }),
+      // QR scans now PRESERVE the customer (and the activeOrderId) by
+      // default — the same customer often rescans across the night
+      // (e.g. moves to a different table). TableEntry handles the
+      // table-transfer + active-order rehydration on top of this.
+      // Different customers = different devices = different localStorage
+      // keys per device, so cross-customer leakage isn't a concern.
+      setSession: (data) => set({ ...data }),
       setActiveOrder: (orderId) => set({ activeOrderId: orderId }),
       setCustomer: (c) => set({ customer: c }),
     }),
     {
+      // localStorage so the session + login + active order survive a
+      // page refresh and tab close. sessionStorage was losing them on
+      // every reload, which forced the customer to re-login mid-meal.
       name: 'restora-qr-session',
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage),
     },
   ),
 );
