@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { useAuthStore } from '../store/auth.store';
 import BrandingSection from './settings/BrandingSection';
 import ThemingSection from './settings/ThemingSection';
+import TipsoiSettingsSection from './settings/TipsoiSettingsSection';
 import { useStockUnits } from '../lib/units';
 
 interface UnitConversion {
@@ -25,7 +26,8 @@ type TabKey =
   | 'reservations'
   | 'notifications'
   | 'units'
-  | 'qr';
+  | 'qr'
+  | 'attendance';
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'restaurant', label: 'Restaurant' },
@@ -35,6 +37,7 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'payments', label: 'Payments' },
   { key: 'reservations', label: 'Reservations' },
   { key: 'notifications', label: 'Notifications' },
+  { key: 'attendance', label: 'Attendance' },
   { key: 'units', label: 'Units' },
   { key: 'qr', label: 'QR Ordering' },
 ];
@@ -342,6 +345,8 @@ export default function SettingsPage() {
       {tab === 'reservations' && <ReservationSettingsSection />}
 
       {tab === 'notifications' && <SmsSettingsSection isOwner={isOwner} />}
+
+      {tab === 'attendance' && <TipsoiSettingsSection isOwner={isOwner} />}
 
       {tab === 'units' && (
         <>

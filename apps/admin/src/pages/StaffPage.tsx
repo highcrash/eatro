@@ -14,6 +14,13 @@ interface Staff {
   isActive: boolean;
   canAccessPos: boolean;
   hireDate: string;
+  // Tipsoi attendance fields. Optional everywhere — empty means "use
+  // branch defaults" for shift / grace / half-day cutoff.
+  tipsoiPersonId?: string | null;
+  shiftStart?: string | null;
+  shiftEnd?: string | null;
+  lateGraceMinutes?: number | null;
+  halfDayAfterMinutes?: number | null;
 }
 
 interface CustomRoleLite {
@@ -36,7 +43,19 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
     password: '',
     isActive: initial?.isActive ?? true,
     canAccessPos: initial?.canAccessPos ?? true,
+    // Attendance / Tipsoi fields
+    tipsoiPersonId: initial?.tipsoiPersonId ?? '',
+    shiftStart: initial?.shiftStart ?? '',
+    shiftEnd: initial?.shiftEnd ?? '',
+    lateGraceMinutes: initial?.lateGraceMinutes != null ? String(initial.lateGraceMinutes) : '',
+    halfDayAfterMinutes: initial?.halfDayAfterMinutes != null ? String(initial.halfDayAfterMinutes) : '',
   });
+  // "Use custom shift" toggle — collapsed by default. Auto-expands when
+  // ANY shift override field is already set on the existing staff row.
+  const [showShift, setShowShift] = useState(
+    !!(initial?.shiftStart || initial?.shiftEnd ||
+       initial?.lateGraceMinutes != null || initial?.halfDayAfterMinutes != null),
+  );
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
 
   // Custom roles the admin may assign. Filter to ones whose baseRole
@@ -56,7 +75,24 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
         phone: form.phone || undefined,
         role: form.role,
         customRoleId: form.customRoleId || null,
+        // Tipsoi person identifier — empty string clears it.
+        tipsoiPersonId: form.tipsoiPersonId.trim() || null,
       };
+      // Per-staff shift override fields. Sent only when the toggle is
+      // on; sending them as null (when toggle is off) clears any
+      // previously-set override so the staff member falls back to the
+      // branch default rule.
+      if (showShift) {
+        dto.shiftStart = form.shiftStart.trim() || null;
+        dto.shiftEnd = form.shiftEnd.trim() || null;
+        dto.lateGraceMinutes = form.lateGraceMinutes.trim() ? parseInt(form.lateGraceMinutes, 10) : null;
+        dto.halfDayAfterMinutes = form.halfDayAfterMinutes.trim() ? parseInt(form.halfDayAfterMinutes, 10) : null;
+      } else {
+        dto.shiftStart = null;
+        dto.shiftEnd = null;
+        dto.lateGraceMinutes = null;
+        dto.halfDayAfterMinutes = null;
+      }
       if (form.password) dto.password = form.password;
       dto.canAccessPos = form.canAccessPos;
       if (initial) {
@@ -131,6 +167,60 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
               placeholder={initial ? '••••••' : 'password123'}
               className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
           </div>
+          {/* ─── Attendance / Tipsoi ───────────────────────────────────── */}
+          <div className="border-t border-[#2A2A2A] pt-4">
+            <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999] mb-2">Attendance</p>
+            <div>
+              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">
+                Tipsoi Person Identifier <span className="text-[#555] normal-case tracking-normal">(optional)</span>
+              </label>
+              <input value={form.tipsoiPersonId} onChange={(e) => set('tipsoiPersonId', e.target.value)}
+                placeholder="e.g. Ahmed-1234"
+                className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white font-mono" />
+              <p className="text-[10px] text-[#555] mt-1">
+                From your Tipsoi device dashboard's people list. Without this, the hourly sync won't write attendance for this staff.
+              </p>
+            </div>
+            <label className="flex items-start gap-2 text-sm font-body text-[#999] mt-3">
+              <input type="checkbox" checked={showShift} onChange={(e) => setShowShift(e.target.checked)} className="mt-0.5" />
+              <span>
+                Use custom shift schedule
+                <span className="block text-[10px] text-[#666] mt-0.5">
+                  Override the branch default attendance rules (Settings → Attendance) for this staff. Leave a field blank to fall back to the branch default for that one rule.
+                </span>
+              </span>
+            </label>
+            {showShift && (
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-[#999] font-body block mb-1">Shift start (24h)</label>
+                  <input type="time" value={form.shiftStart} onChange={(e) => set('shiftStart', e.target.value)}
+                    className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm text-white font-body outline-none focus:border-[#D62B2B]" />
+                </div>
+                <div>
+                  <label className="text-xs text-[#999] font-body block mb-1">Shift end (24h)</label>
+                  <input type="time" value={form.shiftEnd} onChange={(e) => set('shiftEnd', e.target.value)}
+                    placeholder="end (may cross midnight)"
+                    className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm text-white font-body outline-none focus:border-[#D62B2B]" />
+                </div>
+                <div>
+                  <label className="text-xs text-[#999] font-body block mb-1">Late grace (minutes)</label>
+                  <input type="number" min={0} max={240} value={form.lateGraceMinutes}
+                    onChange={(e) => set('lateGraceMinutes', e.target.value)}
+                    placeholder="e.g. 20"
+                    className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm text-white font-body outline-none focus:border-[#D62B2B]" />
+                </div>
+                <div>
+                  <label className="text-xs text-[#999] font-body block mb-1">Half-day cutoff (minutes)</label>
+                  <input type="number" min={0} max={720} value={form.halfDayAfterMinutes}
+                    onChange={(e) => set('halfDayAfterMinutes', e.target.value)}
+                    placeholder="e.g. 120"
+                    className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm text-white font-body outline-none focus:border-[#D62B2B]" />
+                </div>
+              </div>
+            )}
+          </div>
+
           {initial && (
             <label className="flex items-center gap-2 text-sm font-body text-[#999]">
               <input type="checkbox" checked={form.isActive} onChange={(e) => set('isActive', e.target.checked)} />

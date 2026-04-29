@@ -13,7 +13,15 @@ export class StaffService {
   findAll(branchId: string) {
     return this.prisma.staff.findMany({
       where: { branchId, deletedAt: null },
-      select: { id: true, name: true, email: true, role: true, customRoleId: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, createdAt: true },
+      select: {
+        id: true, name: true, email: true, role: true, customRoleId: true, phone: true,
+        isActive: true, canAccessPos: true, hireDate: true, createdAt: true,
+        // Tipsoi + per-staff shift overrides surfaced for the admin
+        // StaffPage / AttendancePage. Optional everywhere — frontend
+        // shows them as "(branch default)" placeholders when null.
+        tipsoiPersonId: true, shiftStart: true, shiftEnd: true,
+        lateGraceMinutes: true, halfDayAfterMinutes: true,
+      },
       orderBy: { name: 'asc' },
     });
   }

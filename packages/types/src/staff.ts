@@ -17,6 +17,17 @@ export interface StaffMember extends AuditFields {
   canAccessPos: boolean;
   hireDate: Date;
   monthlySalary?: number | null;
+  /** Tipsoi person_identifier (e.g. "Ahmed-1234"). Optional — staff
+   *  who never clock in (Owner, Advisor) leave this blank. */
+  tipsoiPersonId?: string | null;
+  /** Per-staff shift overrides — HH:mm 24h, branch local time. Empty =
+   *  fall back to BranchSetting.attendanceShiftStart / shiftEnd. */
+  shiftStart?: string | null;
+  shiftEnd?: string | null;
+  /** Per-staff late + half-day overrides (minutes after shiftStart).
+   *  Null = fall back to BranchSetting defaults. */
+  lateGraceMinutes?: number | null;
+  halfDayAfterMinutes?: number | null;
 }
 
 export interface CreateStaffDto {
@@ -28,6 +39,11 @@ export interface CreateStaffDto {
   customRoleId?: string | null;
   hireDate?: string;
   canAccessPos?: boolean;
+  tipsoiPersonId?: string | null;
+  shiftStart?: string | null;
+  shiftEnd?: string | null;
+  lateGraceMinutes?: number | null;
+  halfDayAfterMinutes?: number | null;
 }
 
 export interface UpdateStaffDto extends Partial<Omit<CreateStaffDto, 'password'>> {

@@ -1,5 +1,6 @@
 export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'HALF_DAY' | 'PAID_LEAVE' | 'SICK_LEAVE' | 'FESTIVAL_LEAVE';
 export type PayrollStatus = 'DRAFT' | 'APPROVED' | 'PAID';
+export type AttendanceSource = 'MANUAL' | 'TIPSOI';
 
 export interface Attendance {
   id: string;
@@ -10,6 +11,18 @@ export interface Attendance {
   clockOut: Date | null;
   status: AttendanceStatus;
   notes: string | null;
+  /** Where this row's status came from. Manual marks always win
+   *  against subsequent Tipsoi syncs. */
+  source: AttendanceSource;
+  /** True when an admin has hand-set this row. The Tipsoi sync skips
+   *  rows with this flag. Cleared by the Restore-from-Tipsoi action. */
+  manualOverride: boolean;
+  /** First clock event from the device on this shift date (separate
+   *  from the admin-editable clockIn). */
+  syncedClockIn: Date | null;
+  syncedClockOut: Date | null;
+  /** Tipsoi log uid that produced syncedClockIn. */
+  syncedFromUid: string | null;
   createdAt: Date;
   updatedAt: Date;
   staff?: {
@@ -17,6 +30,16 @@ export interface Attendance {
     name: string;
     role: string;
   };
+}
+
+export interface TipsoiSyncResult {
+  branchId: string;
+  range: { from: string; to: string };
+  scanned: number;
+  created: number;
+  updated: number;
+  skippedByOverride: number;
+  errors: string[];
 }
 
 export interface Payroll {

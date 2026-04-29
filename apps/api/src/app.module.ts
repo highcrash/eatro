@@ -13,6 +13,7 @@ import { HealthModule } from './health/health.module';
 import { WsGatewayModule } from './ws-gateway/ws-gateway.module';
 import { SupplierModule } from './supplier/supplier.module';
 import { CreditorModule } from './creditor/creditor.module';
+import { TipsoiModule } from './tipsoi/tipsoi.module';
 import { IngredientModule } from './ingredient/ingredient.module';
 import { RecipeModule } from './recipe/recipe.module';
 import { PurchasingModule } from './purchasing/purchasing.module';
@@ -169,6 +170,10 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // Liabilities (Creditors) — utilities, rent, loans
     CreditorModule,
+
+    // Tipsoi attendance integration — hourly sync of biometric clock
+    // events into Attendance rows + branch/per-staff shift rules.
+    TipsoiModule,
   ],
 })
 export class AppModule {}
