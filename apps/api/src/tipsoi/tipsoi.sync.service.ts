@@ -42,25 +42,57 @@ function shiftDurationMinutes(start: string, end: string): number {
   return e > s ? e - s : (24 * 60) - s + e;
 }
 
-/** Format a Date in branch-local-time as "YYYY-MM-DD HH:mm:ss" for
- *  the Tipsoi /logs query string. We don't have a TZ database in
- *  scope; treat server clock as branch local (matches how the rest
- *  of the project stores attendance dates as @db.Date without TZ).
+/**
+ * Tipsoi exchanges timestamps as bare "YYYY-MM-DD HH:mm:ss" strings
+ * with no timezone marker — they're branch-local wall-clock times
+ * (BD restaurants → Asia/Dhaka, +06:00). The previous helpers used
+ * `getFullYear()` / `new Date(y, mo, d, h, mi, s)` which read/write
+ * in the SERVER process's local TZ. DigitalOcean App Platform runs
+ * in UTC, so every timestamp drifted by exactly the branch's offset
+ * — sync windows missed recent logs and rows landed under the
+ * wrong shiftDate. Now everything goes through the branch's
+ * `Branch.timezone` column (default `Asia/Dhaka`).
  */
-function formatTipsoiTime(d: Date): string {
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-  );
+
+/** Compute the offset of the named timezone from UTC at instant `at`,
+ *  in minutes (positive = ahead of UTC). Asia/Dhaka has no DST so
+ *  this is +360 year-round; we still compute per-instant so future
+ *  zones with DST behave correctly. */
+function tzOffsetMinutes(tz: string, at: Date): number {
+  // Round-trip the same instant through two ICU formatters and
+  // diff them: the difference between "this instant rendered in tz"
+  // and "this instant rendered in UTC" IS the offset.
+  const local = new Date(at.toLocaleString('en-US', { timeZone: tz }));
+  const utc = new Date(at.toLocaleString('en-US', { timeZone: 'UTC' }));
+  return Math.round((local.getTime() - utc.getTime()) / 60000);
 }
 
-/** "YYYY-MM-DD HH:mm:ss" → Date. Tipsoi has no TZ on the wire; we
- *  parse as local-time, matching the project convention. */
-function parseTipsoiTime(s: string): Date {
+/** Render `d` as branch-local "YYYY-MM-DD HH:mm:ss". Used both for
+ *  outgoing query strings to Tipsoi /logs and for any log we display. */
+function formatTipsoiTime(d: Date, tz: string): string {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+  // en-CA renders hour as "24" at midnight on some platforms; force "00".
+  const hh = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')} ${hh}:${get('minute')}:${get('second')}`;
+}
+
+/** Parse a Tipsoi "YYYY-MM-DD HH:mm:ss" wall-clock as a real Date
+ *  instant. The literal numbers are interpreted in branch-local
+ *  time; we back out the branch's UTC offset to land on the right
+ *  global instant. */
+function parseTipsoiTime(s: string, tz: string): Date {
   const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/.exec(s.trim());
   if (!m) return new Date(s); // best-effort
-  return new Date(
+  // Treat the literal numbers as if they were UTC, then subtract the
+  // branch's offset to get the actual instant.
+  const asUtc = Date.UTC(
     Number(m[1]),
     Number(m[2]) - 1,
     Number(m[3]),
@@ -68,11 +100,31 @@ function parseTipsoiTime(s: string): Date {
     Number(m[5]),
     Number(m[6]),
   );
+  const offsetMin = tzOffsetMinutes(tz, new Date(asUtc));
+  return new Date(asUtc - offsetMin * 60_000);
 }
 
-/** Truncate a Date to 00:00 local-time of the same calendar day. */
-function startOfDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+/** Branch-local hour-of-day + date components for an instant. */
+function branchLocalParts(d: Date, tz: string): { y: number; mo: number; day: number; h: number; mi: number } {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(d);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? '0');
+  return { y: get('year'), mo: get('month'), day: get('day'), h: get('hour') === 24 ? 0 : get('hour'), mi: get('minute') };
+}
+
+/** Instant that corresponds to 00:00 branch-local on the date that
+ *  contains `d`. Used for date-bucket math (shiftDate, ABSENT-fill
+ *  iteration). */
+function startOfDay(d: Date, tz: string): Date {
+  const p = branchLocalParts(d, tz);
+  const utcGuess = Date.UTC(p.y, p.mo - 1, p.day, 0, 0, 0);
+  const offsetMin = tzOffsetMinutes(tz, new Date(utcGuess));
+  return new Date(utcGuess - offsetMin * 60_000);
 }
 
 /**
@@ -85,20 +137,17 @@ function startOfDay(d: Date): Date {
  * who arrive early). The calendar date of that anchor is the shift
  * date.
  */
-function resolveShiftDate(loggedAt: Date, shiftStartMinutes: number): Date {
-  const t = loggedAt.getHours() * 60 + loggedAt.getMinutes();
+function resolveShiftDate(loggedAt: Date, shiftStartMinutes: number, tz: string): Date {
+  // Time-of-day in BRANCH-LOCAL time. Reading server-local
+  // getHours()/getMinutes() (the previous bug) shifted overnight-
+  // crossing logs into the wrong day on UTC servers.
+  const local = branchLocalParts(loggedAt, tz);
+  const t = local.h * 60 + local.mi;
   // Allow up to 4h before shiftStart to count as the same shift
   // (e.g. staff arrives at 11:00 for a 15:00 shift to set up).
   const windowStart = (shiftStartMinutes - 240 + 1440) % 1440;
-  // If shiftStart > windowStart (no wrap), today's window is
-  // [windowStart..shiftStart..shiftStart+duration]. Otherwise we're
-  // crossing midnight in the leeway; treat the previous calendar day
-  // as the anchor when t is in the early-morning leeway slice.
-  const sameDay = startOfDay(loggedAt);
+  const sameDay = startOfDay(loggedAt, tz);
   const prevDay = new Date(sameDay.getTime() - 24 * 60 * 60 * 1000);
-  // Heuristic: if the log time-of-day is before the shift's
-  // windowStart (and the shift is an evening/night shift), bin to
-  // the previous calendar date.
   if (shiftStartMinutes >= 12 * 60) {
     // afternoon/night shifts: any log earlier than `shiftStart - 4h`
     // belongs to the previous date.
@@ -150,6 +199,15 @@ export class TipsoiSyncService {
       return result;
     }
 
+    // Branch timezone — used everywhere we touch wall-clock time. The
+    // default mirrors the Prisma column default (`Asia/Dhaka`) so a
+    // branch without an explicit timezone still behaves correctly.
+    const branchRow = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { timezone: true },
+    });
+    const tz = branchRow?.timezone || 'Asia/Dhaka';
+
     // Active staff with a Tipsoi person mapping.
     const staffList = await this.prisma.staff.findMany({
       where: { branchId, isActive: true, deletedAt: null, tipsoiPersonId: { not: null } },
@@ -166,7 +224,9 @@ export class TipsoiSyncService {
     }
 
     // Pull logs. Over-fetch by 12h on each side to pick up overnight
-    // shifts that span the window boundary.
+    // shifts that span the window boundary. Window strings are
+    // formatted in BRANCH-LOCAL time so Tipsoi (which uses local
+    // wall-clock without a TZ marker) returns the right slice.
     const fetchStart = new Date(fromDate.getTime() - 12 * 60 * 60 * 1000);
     const fetchEnd = new Date(toDate.getTime() + 12 * 60 * 60 * 1000);
     let logs: TipsoiLog[];
@@ -174,8 +234,8 @@ export class TipsoiSyncService {
       logs = await this.client.fetchLogs({
         apiUrl: settings.tipsoiApiUrl,
         apiToken: settings.tipsoiApiToken,
-        start: formatTipsoiTime(fetchStart),
-        end: formatTipsoiTime(fetchEnd),
+        start: formatTipsoiTime(fetchStart, tz),
+        end: formatTipsoiTime(fetchEnd, tz),
       });
     } catch (e) {
       const msg = (e as Error).message;
@@ -185,17 +245,18 @@ export class TipsoiSyncService {
     }
     result.scanned = logs.length;
 
-    // Group logs by (staffId, shiftDate).
+    // Group logs by (staffId, shiftDate). Every wall-clock op flows
+    // through `tz` so server UTC vs branch BD doesn't skew results.
     type Bucket = { staffId: string; shiftDate: Date; logs: { uid: string; loggedAt: Date }[]; spec: ShiftSpec };
     const buckets = new Map<string, Bucket>();
     for (const log of logs) {
       const staff = byPersonId.get(log.person_identifier);
       if (!staff) continue; // log for an unmapped person — skip silently
       const spec: ShiftSpec = this.specFor(staff, settings);
-      const loggedAt = parseTipsoiTime(log.logged_time);
-      const shiftDate = resolveShiftDate(loggedAt, spec.startMinutes);
+      const loggedAt = parseTipsoiTime(log.logged_time, tz);
+      const shiftDate = resolveShiftDate(loggedAt, spec.startMinutes, tz);
       // Drop logs whose shift date falls outside the requested range.
-      if (shiftDate < startOfDay(fromDate) || shiftDate > startOfDay(toDate)) continue;
+      if (shiftDate < startOfDay(fromDate, tz) || shiftDate > startOfDay(toDate, tz)) continue;
       const key = `${staff.id}:${shiftDate.toISOString().slice(0, 10)}`;
       let bucket = buckets.get(key);
       if (!bucket) {
@@ -213,10 +274,13 @@ export class TipsoiSyncService {
         const earliest = bucket.logs[0];
         const latest = bucket.logs[bucket.logs.length - 1];
 
-        // Status from clockIn vs spec.
+        // Status from clockIn vs spec. Use BRANCH-LOCAL hour/minute,
+        // not server-local — otherwise a 15:30 BD clock-in reads as
+        // 09:30 on a UTC server and incorrectly looks "early" (or
+        // worse: bins to the wrong day).
+        const localClockIn = branchLocalParts(earliest.loggedAt, tz);
         const minutesAfterStart =
-          (earliest.loggedAt.getHours() * 60 + earliest.loggedAt.getMinutes()) -
-          bucket.spec.startMinutes;
+          (localClockIn.h * 60 + localClockIn.mi) - bucket.spec.startMinutes;
         // Normalise — overnight shift may produce a negative if staff
         // clocked in *just before* shiftStart (e.g. 14:55 for a 15:00
         // shift). Anything ≤ grace counts as PRESENT.
@@ -276,7 +340,7 @@ export class TipsoiSyncService {
     // NO logs and NO existing row, AND the shiftDate is in the past,
     // create an ABSENT row. Today is left blank (admin sees a gap).
     try {
-      await this.fillAbsentRows(branchId, staffList, fromDate, toDate, buckets);
+      await this.fillAbsentRows(branchId, staffList, fromDate, toDate, buckets, tz);
     } catch (e) {
       errors.push(`absent-fill: ${(e as Error).message}`);
     }
@@ -318,12 +382,17 @@ export class TipsoiSyncService {
     fromDate: Date,
     toDate: Date,
     bucketsByKey: Map<string, { staffId: string; shiftDate: Date }>,
+    tz: string,
   ): Promise<void> {
-    const today = startOfDay(new Date());
+    // "Today" means today in branch-local time. On a UTC server in
+    // BD's late-night hours that's a different calendar date than
+    // server-local — we'd otherwise either premature-ABSENT today's
+    // shift or skip yesterday's shift.
+    const today = startOfDay(new Date(), tz);
     const dates: Date[] = [];
     for (
-      let d = startOfDay(fromDate);
-      d <= startOfDay(toDate);
+      let d = startOfDay(fromDate, tz);
+      d <= startOfDay(toDate, tz);
       d = new Date(d.getTime() + 24 * 60 * 60 * 1000)
     ) {
       // Only fill dates strictly in the past — today's not-yet-clocked
