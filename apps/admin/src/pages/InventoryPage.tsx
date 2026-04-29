@@ -1412,16 +1412,24 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Adjust Stock Dialog (also doubles as Record Usage for SUPPLY) */}
-      {adjusting && (
+      {/* Adjust Stock Dialog (also doubles as Record Usage for SUPPLY).
+          The dialog mode follows the form's `type`, NOT the item's
+          category — so SUPPLY rows opened via the Adjust button (which
+          forces type=ADJUSTMENT) get the same ± UX as a regular
+          ingredient. Without this, the Record-Usage labels stayed put
+          and admins were typing positive deltas thinking they'd
+          increment but seeing decrement-style copy. */}
+      {adjusting && (() => {
+        const isUsage = adjustForm.type === 'OPERATIONAL_USE';
+        return (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setAdjusting(null)}>
           <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="font-display text-xl text-white tracking-widest mb-1">
-              {adjusting.category === 'SUPPLY' ? 'RECORD USAGE' : 'ADJUST STOCK'}
+              {isUsage ? 'RECORD USAGE' : 'ADJUST STOCK'}
             </h2>
             <p className="text-[#999] font-body text-sm mb-6">{adjusting.name} — Current: {Number(adjusting.currentStock).toFixed(2)} {adjusting.unit}</p>
             <div className="space-y-4">
-              {adjusting.category !== 'SUPPLY' && (
+              {!isUsage && (
                 <div className="flex flex-col gap-1">
                   <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Type</label>
                   <select
@@ -1432,12 +1440,15 @@ export default function InventoryPage() {
                     <option value="PURCHASE">Purchase (add stock)</option>
                     <option value="ADJUSTMENT">Adjustment (±)</option>
                     <option value="WASTE">Waste (remove)</option>
+                    {adjusting.category === 'SUPPLY' && (
+                      <option value="OPERATIONAL_USE">Operational Use (record usage)</option>
+                    )}
                   </select>
                 </div>
               )}
               <div className="flex flex-col gap-1">
                 <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">
-                  {adjusting.category === 'SUPPLY'
+                  {isUsage
                     ? `Used quantity in ${adjusting.unit}`
                     : `Quantity (${adjustForm.type === 'PURCHASE' ? '+' : adjustForm.type === 'WASTE' ? '−' : '±'}) in ${adjusting.unit}`}
                 </label>
@@ -1448,9 +1459,13 @@ export default function InventoryPage() {
                   className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
                 />
                 <p className="text-[#666] text-xs font-body">
-                  {adjusting.category === 'SUPPLY'
+                  {isUsage
                     ? 'Enter how many units were used. Stock will decrement automatically.'
-                    : 'Use negative for ADJUSTMENT to reduce stock.'}
+                    : adjustForm.type === 'PURCHASE'
+                      ? 'Positive only — stock increments by this amount.'
+                      : adjustForm.type === 'WASTE'
+                        ? 'Positive only — stock decrements by this amount.'
+                        : 'Positive adds stock, negative reduces. Use ADJUSTMENT for miscount fixes / opening-balance corrections.'}
                 </p>
               </div>
               <div className="flex flex-col gap-1">
@@ -1477,7 +1492,8 @@ export default function InventoryPage() {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Variant Add/Edit Dialog */}
       {variantDialog && (
