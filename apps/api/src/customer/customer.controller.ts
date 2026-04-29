@@ -38,6 +38,19 @@ export class CustomerPublicController {
     return this.customerService.updateProfile(dto.customerId, { name: dto.name, email: dto.email });
   }
 
+  /** Brand-new customer signup after OTP verify when no row matched
+   *  the phone. Name required, email optional. Public endpoint —
+   *  branch comes from the x-branch-id header same as the rest of
+   *  the QR auth flow. */
+  @Post('auth/signup')
+  signup(
+    @Headers('x-branch-id') branchId: string,
+    @Body() dto: { phone: string; name: string; email?: string },
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    return this.customerService.createFromQr(branchId, dto);
+  }
+
   @Post('auth/active-order')
   getActiveOrder(
     @Headers('x-branch-id') branchId: string,
