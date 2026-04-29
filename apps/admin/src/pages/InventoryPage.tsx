@@ -232,6 +232,12 @@ export default function InventoryPage() {
   const [ingForm, setIngForm] = useState<IngredientForm>(emptyIngForm);
   const [adjusting, setAdjusting] = useState<Ingredient | null>(null);
   const [adjustForm, setAdjustForm] = useState<AdjustForm>({ quantity: '0', type: 'ADJUSTMENT', notes: '' });
+  // Correct-movement dialog. Owner sees a wrong SALE deduction (recipe
+  // typo deducted "10 KG" instead of "10 G") and edits the recorded
+  // quantity here. Server delta-rebalances Ingredient.currentStock in
+  // the same transaction, so admin doesn't need a follow-up Adjust.
+  const [correctingMov, setCorrectingMov] = useState<StockMovement | null>(null);
+  const [correctForm, setCorrectForm] = useState<{ quantity: string; reason: string }>({ quantity: '0', reason: '' });
   const [searchText, setSearchText] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   // Recipe vs Supply pill filter. SUPPLY-category items (parcel bags,
@@ -445,6 +451,21 @@ export default function InventoryPage() {
       void qc.invalidateQueries({ queryKey: ['supplies-30d'] });
       void qc.invalidateQueries({ queryKey: ['supplies-report'] });
       setAdjusting(null);
+    },
+  });
+
+  const correctMovementMutation = useMutation({
+    mutationFn: (data: { id: string; quantity: number; reason?: string }) =>
+      api.post(`/ingredients/movements/${data.id}/correct`, {
+        quantity: data.quantity,
+        reason: data.reason,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ingredients'] });
+      void qc.invalidateQueries({ queryKey: ['stock-movements'] });
+      void qc.invalidateQueries({ queryKey: ['supplies-30d'] });
+      void qc.invalidateQueries({ queryKey: ['supplies-report'] });
+      setCorrectingMov(null);
     },
   });
 
@@ -707,6 +728,11 @@ export default function InventoryPage() {
       type: forceType ?? (ing.category === 'SUPPLY' ? 'OPERATIONAL_USE' : 'ADJUSTMENT'),
       notes: '',
     });
+  };
+
+  const openCorrectMovement = (m: StockMovement) => {
+    setCorrectingMov(m);
+    setCorrectForm({ quantity: String(Number(m.quantity)), reason: '' });
   };
 
   const movTypeColor: Record<string, string> = {
@@ -1170,13 +1196,17 @@ export default function InventoryPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[#2A2A2A]">
-                    {['Date', 'Ingredient', 'Type', 'Qty', 'Notes'].map((h) => (
+                    {['Date', 'Ingredient', 'Type', 'Qty', 'Notes', 'Actions'].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredMovements.map((m) => (
+                  {filteredMovements.map((m) => {
+                    const wasCorrected = !!(m as { correctedAt?: string | null }).correctedAt;
+                    const fromQty = (m as { correctedFromQuantity?: number | null }).correctedFromQuantity;
+                    const correctionReason = (m as { correctionReason?: string | null }).correctionReason;
+                    return (
                     <tr key={m.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
                       <td className="px-4 py-3 text-[#999] font-body text-xs">{new Date(m.createdAt).toLocaleString()}</td>
                       <td className="px-4 py-3 text-white font-body text-sm">{m.ingredient?.name ?? m.ingredientId}</td>
@@ -1187,12 +1217,30 @@ export default function InventoryPage() {
                         <span className={`font-body text-sm font-medium ${Number(m.quantity) >= 0 ? 'text-[#4CAF50]' : 'text-[#D62B2B]'}`}>
                           {Number(m.quantity) >= 0 ? '+' : ''}{Number(m.quantity).toFixed(4)}
                         </span>
+                        {wasCorrected && fromQty != null && (
+                          <span
+                            className="ml-2 font-body text-[10px] tracking-widest uppercase px-1.5 py-0.5 bg-[#FFA726]/15 text-[#FFA726]"
+                            title={`Corrected from ${Number(fromQty).toFixed(4)}${correctionReason ? ` — ${correctionReason}` : ''}`}
+                          >
+                            CORRECTED
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-[#666] font-body text-xs">{m.notes ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => openCorrectMovement(m as StockMovement)}
+                          className="text-[#999] hover:text-[#FFA726] font-body text-xs tracking-widest uppercase transition-colors"
+                          title="Edit this movement's recorded quantity (recipe-typo recovery)"
+                        >
+                          Correct
+                        </button>
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {filteredMovements.length === 0 && (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-[#666] font-body text-sm">
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-[#666] font-body text-sm">
                       {movements.length === 0 ? 'No movements yet.' : 'No movements match the filters.'}
                     </td></tr>
                   )}
@@ -1503,6 +1551,103 @@ export default function InventoryPage() {
           onClose={() => setVariantDialog(null)}
         />
       )}
+
+      {/* Correct-Movement Dialog. Edits a stock-movement's recorded
+          quantity post-hoc when a recipe typo deducted the wrong
+          amount. Server delta-rebalances Ingredient.currentStock in
+          the same transaction so admin doesn't need a follow-up
+          Adjust. The original quantity is preserved on the row
+          (correctedFromQuantity) for audit. */}
+      {correctingMov && (() => {
+        const oldQty = Number(correctingMov.quantity);
+        const newQty = parseFloat(correctForm.quantity);
+        const validNumber = Number.isFinite(newQty);
+        const sameSign = !validNumber || oldQty === 0 || newQty === 0 || Math.sign(oldQty) === Math.sign(newQty);
+        const noChange = validNumber && newQty === oldQty;
+        const ingName = correctingMov.ingredient?.name ?? correctingMov.ingredientId;
+        const unit = (correctingMov as { ingredient?: { unit?: string } }).ingredient?.unit ?? '';
+        return (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setCorrectingMov(null)}>
+            <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+              <h2 className="font-display text-xl text-white tracking-widest mb-1">CORRECT MOVEMENT</h2>
+              <p className="text-[#999] font-body text-sm mb-1">{ingName}</p>
+              <p className="text-[#FFA726] font-body text-[11px] mb-4">
+                Use this when a recipe typo deducted the wrong amount (e.g. 10 KG instead of 10 G). Stock will rebalance automatically.
+              </p>
+
+              <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 mb-4">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <p className="text-[#666] font-body text-[9px] tracking-widest uppercase mb-1">Recorded</p>
+                    <p className="font-display text-white text-base">{oldQty.toFixed(4)} {unit}</p>
+                  </div>
+                  <div>
+                    <p className="text-[#666] font-body text-[9px] tracking-widest uppercase mb-1">Correction</p>
+                    <p className={`font-display text-base ${validNumber && !noChange ? (newQty - oldQty > 0 ? 'text-[#4CAF50]' : 'text-[#FFA726]') : 'text-[#666]'}`}>
+                      {validNumber && !noChange
+                        ? `${newQty - oldQty > 0 ? '+' : ''}${(newQty - oldQty).toFixed(4)}`
+                        : '—'}
+                    </p>
+                    <p className="text-[8px] text-[#555] mt-0.5">stock delta</p>
+                  </div>
+                  <div>
+                    <p className="text-[#666] font-body text-[9px] tracking-widest uppercase mb-1">Will Become</p>
+                    <p className="font-display text-white text-base">{validNumber ? newQty.toFixed(4) : '—'} {unit}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Corrected quantity</label>
+                  <input
+                    type="number" step="0.0001"
+                    value={correctForm.quantity}
+                    onChange={(e) => setCorrectForm((f) => ({ ...f, quantity: e.target.value }))}
+                    className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#FFA726] transition-colors"
+                  />
+                  <p className="text-[10px] text-[#555] mt-0.5">
+                    Must keep the same sign as the original ({oldQty < 0 ? 'negative — stock OUT' : 'positive — stock IN'}). To flip the direction, use the regular Adjust action.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Reason (optional)</label>
+                  <input
+                    value={correctForm.reason}
+                    onChange={(e) => setCorrectForm((f) => ({ ...f, reason: e.target.value }))}
+                    placeholder="e.g. Recipe typo — was set to 10 KG instead of 10 G"
+                    className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#FFA726] transition-colors"
+                  />
+                </div>
+              </div>
+
+              {!sameSign && validNumber && (
+                <p className="text-[#F03535] text-xs font-body mt-3">
+                  Corrected quantity must have the same sign as the original.
+                </p>
+              )}
+              {correctMovementMutation.error && (
+                <p className="text-[#F03535] text-xs font-body mt-3">{(correctMovementMutation.error as Error).message}</p>
+              )}
+
+              <div className="flex gap-3 mt-5">
+                <button onClick={() => setCorrectingMov(null)} className="flex-1 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2.5 transition-colors">Cancel</button>
+                <button
+                  onClick={() => correctMovementMutation.mutate({
+                    id: correctingMov.id,
+                    quantity: newQty,
+                    reason: correctForm.reason.trim() || undefined,
+                  })}
+                  disabled={!validNumber || !sameSign || noChange || correctMovementMutation.isPending}
+                  className="flex-1 bg-[#FFA726] hover:bg-[#FFB74D] text-black font-body text-sm py-2.5 transition-colors disabled:opacity-50"
+                >
+                  {correctMovementMutation.isPending ? 'Correcting…' : 'Apply Correction'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

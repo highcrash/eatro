@@ -23,6 +23,22 @@ export class IngredientController {
     return this.ingredientService.getMovements(user.branchId, ingredientId);
   }
 
+  /** Correct a stock-movement's recorded quantity post-hoc. Used when
+   *  a recipe typo (e.g. "10 KG" instead of "10 G") deducted the wrong
+   *  amount from stock — admin enters the correct quantity, the
+   *  delta rebalances `Ingredient.currentStock`, and reports
+   *  automatically pick up the new value. The original quantity is
+   *  preserved on the row in `correctedFromQuantity` for audit. */
+  @Post('movements/:id/correct')
+  @Roles('OWNER', 'MANAGER')
+  correctMovement(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { quantity: number; reason?: string },
+  ) {
+    return this.ingredientService.correctMovement(id, user.branchId, dto);
+  }
+
   // Per-ingredient usage map across menu recipes + pre-ready recipes.
   // Used by InventoryPage's "Unused" filter pill so admin can see what
   // they're paying to stock but never selling. Pure read-only — no
