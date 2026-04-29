@@ -62,9 +62,26 @@ export default function AttendancePage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['attendance', selectedDate] }),
   });
 
-  const getStaffStatus = (staffId: string): AttendanceStatus | null => {
+  /** Drop the manual override on a row and let Tipsoi repopulate it.
+   *  Surfaced as the "↻ Restore" button on rows where admin has
+   *  hand-marked the status. */
+  const clearOverrideMutation = useMutation({
+    mutationFn: (staffId: string) =>
+      api.post('/attendance/clear-override', { staffId, date: selectedDate }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['attendance', selectedDate] }),
+  });
+
+  const getStaffRow = (staffId: string): Attendance | null => {
     const record = attendance.find((a) => a.staffId === staffId);
-    return record?.status ?? null;
+    return (record as Attendance | undefined) ?? null;
+  };
+
+  /** Format a clock event as h:mm AM/PM for the cell. */
+  const fmtTime = (iso: string | Date | null): string => {
+    if (!iso) return '';
+    const d = typeof iso === 'string' ? new Date(iso) : iso;
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   };
 
   const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -110,14 +127,15 @@ export default function AttendancePage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[#2A2A2A]">
-                  {['Staff', 'Role', 'Status', 'Mark Attendance'].map((h) => (
+                  {['Staff', 'Role', 'Status', 'Clock In', 'Source', 'Mark Attendance'].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {staff.map((s) => {
-                  const status = getStaffStatus(s.id);
+                  const row = getStaffRow(s.id);
+                  const status = row?.status ?? null;
                   return (
                     <tr key={s.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
                       <td className="px-4 py-3 text-white font-body text-sm">{s.name}</td>
@@ -131,8 +149,33 @@ export default function AttendancePage() {
                           <span className="text-[#2A2A2A] font-body text-xs">—</span>
                         )}
                       </td>
+                      <td className="px-4 py-3 text-[#999] font-body text-xs">
+                        {row?.clockIn ? fmtTime(row.clockIn as unknown as Date) : <span className="text-[#2A2A2A]">—</span>}
+                        {row?.clockOut && (
+                          <span className="text-[#666] ml-2">→ {fmtTime(row.clockOut as unknown as Date)}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
-                        <div className="flex gap-1 flex-wrap">
+                        {row?.manualOverride ? (
+                          <span title="Admin hand-set this row — Tipsoi sync skips it. Click ↻ to restore."
+                            className="font-body text-[10px] tracking-widest uppercase px-2 py-0.5 bg-[#D62B2B]/20 text-[#F03535]">
+                            Override
+                          </span>
+                        ) : row?.source === 'TIPSOI' ? (
+                          <span title="Imported from Tipsoi"
+                            className="font-body text-[10px] tracking-widest uppercase px-2 py-0.5 bg-[#FFA726]/20 text-[#FFA726]">
+                            Tipsoi
+                          </span>
+                        ) : row ? (
+                          <span title="Marked manually" className="font-body text-[10px] tracking-widest uppercase px-2 py-0.5 bg-[#2A2A2A] text-[#999]">
+                            Manual
+                          </span>
+                        ) : (
+                          <span className="text-[#2A2A2A] font-body text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1 flex-wrap items-center">
                           {STATUS_OPTIONS.map((opt) => (
                             <button
                               key={opt.value}
@@ -148,13 +191,23 @@ export default function AttendancePage() {
                               {opt.short}
                             </button>
                           ))}
+                          {row?.manualOverride && (
+                            <button
+                              onClick={() => clearOverrideMutation.mutate(s.id)}
+                              disabled={clearOverrideMutation.isPending}
+                              title="Drop the manual override and re-pull this row from Tipsoi"
+                              className="px-2 py-1 font-body text-[10px] tracking-widest uppercase bg-[#FFA726]/20 text-[#FFA726] hover:bg-[#FFA726]/30 transition-colors"
+                            >
+                              ↻ Restore
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
                   );
                 })}
                 {staff.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-[#666] font-body text-sm">No active staff.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-[#666] font-body text-sm">No active staff.</td></tr>
                 )}
               </tbody>
             </table>

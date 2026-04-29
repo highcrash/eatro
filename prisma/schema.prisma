@@ -306,6 +306,29 @@ model BranchSetting {
   tableTimerStartToDoneMin   Int? @default(40)
   tableTimerServedToClearMin Int? @default(35)
 
+  // ── Tipsoi attendance integration (Phase: HR) ──
+  /// When true, hourly cron pulls Tipsoi /api/v1/logs and writes
+  /// Attendance rows. Default off — existing branches keep their
+  /// manual flow until admin opts in.
+  tipsoiEnabled              Boolean   @default(false)
+  /// Tipsoi API token. Plain text (same convention as smsApiKey on
+  /// this same model). Masked in non-OWNER responses.
+  tipsoiApiToken             String?
+  tipsoiApiUrl               String    @default("https://api-inovace360.com")
+  tipsoiLastSyncAt           DateTime?
+  /// Last sync outcome: "OK" or "ERROR: <message>". Surfaced in the
+  /// HR Settings tab so admin can spot a bad token.
+  tipsoiLastSyncStatus       String?
+  /// Branch default shift in HH:mm 24h. Per-staff overrides on Staff
+  /// take precedence. Defaults reflect a typical 10am–10pm restaurant.
+  attendanceShiftStart       String    @default("10:00")
+  attendanceShiftEnd         String    @default("22:00")
+  /// Minutes after shiftStart before a clock-in is counted as LATE.
+  attendanceLateGraceMinutes Int       @default(30)
+  /// Minutes after shiftStart before a clock-in is counted as HALF_DAY
+  /// (i.e. the cutoff between LATE and HALF_DAY). Default 180 = 3h.
+  attendanceHalfDayAfterMinutes Int    @default(180)
+
   branch Branch @relation(fields: [branchId], references: [id])
 
   @@map("branch_settings")
@@ -424,6 +447,20 @@ model Staff {
   canAccessPos  Boolean   @default(true)
   hireDate      DateTime  @default(now())
   monthlySalary Decimal?  @db.Decimal(14, 2)
+  /// Tipsoi `person_identifier` (e.g. "Ahmed-1234"). Optional — Owner
+  /// / Advisor roles that don't clock in don't need a device account.
+  /// Sync drops logs whose person_identifier doesn't map here.
+  tipsoiPersonId        String?
+  /// Per-staff shift overrides in HH:mm 24h, branch local time. Null
+  /// → falls back to BranchSetting.attendanceShiftStart / shiftEnd.
+  /// shiftEnd may cross midnight (e.g. 15:00 → 01:00 for a bar shift).
+  shiftStart            String?
+  shiftEnd              String?
+  /// Per-staff late + half-day overrides in minutes after shiftStart.
+  /// Null → falls back to BranchSetting.attendanceLateGraceMinutes /
+  /// attendanceHalfDayAfterMinutes.
+  lateGraceMinutes      Int?
+  halfDayAfterMinutes   Int?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
@@ -1672,6 +1709,13 @@ enum AttendanceStatus {
   FESTIVAL_LEAVE
 }
 
+/// Where a row's status came from. MANUAL = admin clicked it (always
+/// wins over sync). TIPSOI = computed from a Tipsoi /api/v1/logs event.
+enum AttendanceSource {
+  MANUAL
+  TIPSOI
+}
+
 enum PayrollStatus {
   DRAFT
   APPROVED
@@ -1687,6 +1731,22 @@ model Attendance {
   clockOut  DateTime?
   status    AttendanceStatus @default(PRESENT)
   notes     String?
+  /// Where this row's status came from. Admin marks set MANUAL +
+  /// manualOverride=true so the next Tipsoi sync skips the row.
+  source    AttendanceSource @default(MANUAL)
+  /// True when an admin has hand-set this row. The Tipsoi sync skips
+  /// rows with this flag — clearing it (Restore from Tipsoi button)
+  /// re-enables overwrites.
+  manualOverride Boolean    @default(false)
+  /// First clock event observed by the device on this shift date.
+  /// Distinct from clockIn (which is admin-editable) — used to compute
+  /// LATE / HALF_DAY against the staff's effective shiftStart even
+  /// when admin later edits clockIn.
+  syncedClockIn  DateTime?
+  syncedClockOut DateTime?
+  /// Tipsoi log uid that produced syncedClockIn. Guards against
+  /// re-importing the same event (idempotency on sync re-runs).
+  syncedFromUid  String?
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 

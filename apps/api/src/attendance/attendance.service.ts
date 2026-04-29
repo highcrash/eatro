@@ -1,10 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import type { MarkAttendanceDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { TipsoiSyncService } from '../tipsoi/tipsoi.sync.service';
 
 @Injectable()
 export class AttendanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tipsoiSync: TipsoiSyncService,
+  ) {}
 
   findAll(branchId: string, date?: string, staffId?: string) {
     return this.prisma.attendance.findMany({
@@ -19,6 +23,10 @@ export class AttendanceService {
     });
   }
 
+  /** Manual mark from the AttendancePage. Always stamps source=MANUAL
+   *  + manualOverride=true so the next Tipsoi sync skips this row.
+   *  Admin clears the override via clearOverride() to re-enable
+   *  Tipsoi-driven updates for that day. */
   async mark(branchId: string, dto: MarkAttendanceDto) {
     return this.prisma.attendance.upsert({
       where: { staffId_date: { staffId: dto.staffId, date: new Date(dto.date) } },
@@ -30,13 +38,41 @@ export class AttendanceService {
         clockIn: dto.clockIn ? new Date(dto.clockIn) : null,
         clockOut: dto.clockOut ? new Date(dto.clockOut) : null,
         notes: dto.notes ?? null,
+        source: 'MANUAL',
+        manualOverride: true,
       },
       update: {
         status: dto.status,
         clockIn: dto.clockIn ? new Date(dto.clockIn) : null,
         clockOut: dto.clockOut ? new Date(dto.clockOut) : null,
         notes: dto.notes ?? null,
+        source: 'MANUAL',
+        manualOverride: true,
       },
+      include: { staff: { select: { id: true, name: true, role: true } } },
+    });
+  }
+
+  /** Drop the manual-override flag on a single (staff, date) row and
+   *  immediately re-fetch from Tipsoi so the row repopulates with
+   *  whatever the device says. Used by the "Restore from Tipsoi"
+   *  button on the AttendancePage. */
+  async clearOverride(branchId: string, staffId: string, date: string) {
+    const target = new Date(date);
+    const row = await this.prisma.attendance.findUnique({
+      where: { staffId_date: { staffId, date: target } },
+    });
+    if (!row) throw new NotFoundException('Attendance row not found');
+    await this.prisma.attendance.update({
+      where: { id: row.id },
+      data: { manualOverride: false },
+    });
+    // Resync this single (staff, date). Errors here are logged inside
+    // the sync service and stamped onto BranchSetting; we surface the
+    // post-sync row regardless so the UI re-renders.
+    await this.tipsoiSync.syncOne(branchId, staffId, target).catch(() => { /* logged in sync service */ });
+    return this.prisma.attendance.findUnique({
+      where: { staffId_date: { staffId, date: target } },
       include: { staff: { select: { id: true, name: true, role: true } } },
     });
   }

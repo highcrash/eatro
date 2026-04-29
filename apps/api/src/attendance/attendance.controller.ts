@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -24,6 +24,15 @@ export class AttendanceController {
   @Post()
   mark(@CurrentUser() user: JwtPayload, @Body() dto: MarkAttendanceDto) {
     return this.attendanceService.mark(user.branchId, dto);
+  }
+
+  /** Drop the manual-override flag on (staff, date) and re-pull from
+   *  Tipsoi for that single row. Surfaced as the "Restore from Tipsoi"
+   *  button on the admin AttendancePage. */
+  @Post('clear-override')
+  clearOverride(@CurrentUser() user: JwtPayload, @Body() dto: { staffId: string; date: string }) {
+    if (!dto.staffId || !dto.date) throw new BadRequestException('staffId + date required');
+    return this.attendanceService.clearOverride(user.branchId, dto.staffId, dto.date);
   }
 
   @Get('summary')
