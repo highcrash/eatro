@@ -576,13 +576,23 @@ function AddItemsOverlay({
             {newItemCart.length === 0 ? (
               <p className="text-center text-theme-text-muted text-xs py-6">Tap items to add</p>
             ) : (
-              newItemCart.map((line) => {
+              newItemCart.map((line, idx) => {
                 const { menuItem, quantity, notes, removedNames, addons } = line;
                 const key = cartLineKey(line);
                 const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
                 const unitPrice = Number(menuItem.price) + addonsTotal;
+                // React key uses the array index, NOT cartLineKey,
+                // because cartLineKey embeds `notes`. Without this,
+                // every keystroke in the note input rebuilt the
+                // row's React key → React unmounted the input →
+                // focus dumped to <body> → next keystroke got
+                // hijacked into the menu searchbar by the global
+                // keydown handler. Index is stable while editing
+                // notes (cart isn't reordered mid-keystroke). The
+                // inner `key` variable still carries cartLineKey
+                // for state-mutation lookups (setNewItemCart).
                 return (
-                <div key={key} className="bg-theme-bg rounded-theme p-3">
+                <div key={idx} className="bg-theme-bg rounded-theme p-3">
                   <div className="flex items-start gap-2">
                     <span className="w-7 h-7 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center text-xs font-bold shrink-0">
                       {quantity}
@@ -2275,13 +2285,16 @@ function NewOrderView({
               Tap items to add
             </div>
           ) : (
-            cart.map((line) => {
+            cart.map((line, idx) => {
               const { menuItem, quantity, notes, removedNames, addons } = line;
               const key = cartLineKey(line);
               const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
               const unitPrice = Number(menuItem.price) + addonsTotal;
+              // See the new-item overlay's matching comment — React key
+              // uses the array index so a notes edit doesn't rebuild
+              // the row and bounce focus onto the menu searchbar.
               return (
-              <div key={key} className="bg-theme-bg rounded-theme p-3">
+              <div key={idx} className="bg-theme-bg rounded-theme p-3">
                 <div className="flex items-start gap-2">
                   <span className="w-7 h-7 rounded-full bg-theme-surface border border-theme-border flex items-center justify-center text-xs font-bold shrink-0">
                     {quantity}
