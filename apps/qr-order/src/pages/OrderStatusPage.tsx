@@ -54,6 +54,23 @@ export default function OrderStatusPage() {
   const navigate = useNavigate();
   const setActiveOrder = useSessionStore((s) => s.setActiveOrder);
 
+  // ─── ALL HOOKS ABOVE THE CONDITIONAL RETURNS ──────────────────────
+  // Earlier this component had useState + useQueryClient calls placed
+  // AFTER `if (!order) return Loading…`, which violated Rules of Hooks —
+  // the cold render had fewer hooks than the post-load render and React
+  // crashed the tree to a blank screen. Hoisted them all above so the
+  // hook count stays constant across renders.
+  const qc = useQueryClient();
+  const branchId = useSessionStore((s) => s.branchId);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginName, setLoginName] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
+
   // Persist this orderId as the active order
   useEffect(() => {
     if (orderId) setActiveOrder(orderId);
@@ -118,17 +135,6 @@ export default function OrderStatusPage() {
       </div>
     );
   }
-
-  const qc = useQueryClient();
-  const branchId = useSessionStore((s) => s.branchId);
-  const [removingId, setRemovingId] = useState<string | null>(null);
-  const [couponCode, setCouponCode] = useState('');
-  const [couponError, setCouponError] = useState<string | null>(null);
-  const [couponBusy, setCouponBusy] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [loginPhone, setLoginPhone] = useState('');
-  const [loginName, setLoginName] = useState('');
-  const [loginBusy, setLoginBusy] = useState(false);
 
   const hasCustomer = !!order.customerId;
   const hasCoupon = !!order.couponCode;
