@@ -70,11 +70,25 @@ export default function OrderStatusPage() {
   const [loginPhone, setLoginPhone] = useState('');
   const [loginName, setLoginName] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
+  // One-shot toast surfaced from TableEntry when a rescan-driven
+  // table transfer was refused (409). sessionStorage handoff lets us
+  // cross the route boundary without a global toast lib.
+  const [toast, setToast] = useState<string | null>(null);
 
   // Persist this orderId as the active order
   useEffect(() => {
     if (orderId) setActiveOrder(orderId);
   }, [orderId, setActiveOrder]);
+
+  useEffect(() => {
+    const t = sessionStorage.getItem('qr-toast');
+    if (t) {
+      setToast(t);
+      sessionStorage.removeItem('qr-toast');
+      const timer = setTimeout(() => setToast(null), 6000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   const { data: order, isError, error: queryError } = useQuery<QrOrder>({
     queryKey: ['order-status', orderId],
@@ -226,6 +240,16 @@ export default function OrderStatusPage() {
         </div>
         <div className="w-9" />
       </div>
+
+      {/* Soft-fail toast surfaced when a TableEntry scan tried to
+          relocate this order to an occupied table. Auto-dismisses
+          after 6s; tap × to clear immediately. */}
+      {toast && (
+        <div className="mx-5 mt-3 bg-[#FFA726]/15 border border-[#FFA726]/40 px-4 py-3 flex items-start gap-3">
+          <p className="text-xs font-body text-[#FFA726] flex-1">{toast}</p>
+          <button onClick={() => setToast(null)} className="text-[#FFA726] hover:text-white text-xs font-body">×</button>
+        </div>
+      )}
 
       {/* Order progress */}
       <div className="px-5 mb-5">

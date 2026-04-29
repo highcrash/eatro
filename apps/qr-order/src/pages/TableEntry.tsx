@@ -97,29 +97,66 @@ export default function TableEntry() {
       });
 
       // 4. If there's an active order AND the scanned table differs
-      //    from the order's current table, transfer the order. We
-      //    only do this for orders the logged-in customer owns
-      //    (server gates on customerId match too).
-      if (activeOrderId && customer && activeOrderTableId && activeOrderTableId !== table.id) {
+      //    from the order's current table, try to transfer the order.
+      //    Server gates this on customerId match AND destination-table
+      //    availability (409 when another diner's order is already
+      //    sitting there). On 409 we soft-fail — keep the customer on
+      //    their EXISTING table rather than clobber the occupant.
+      const tryMove = async (orderId: string): Promise<{ moved: boolean; tableConflict: boolean; conflictMsg?: string }> => {
         try {
-          await fetch(apiUrl(`/orders/qr/${activeOrderId}/move-table`), {
+          const res = await fetch(apiUrl(`/orders/qr/${orderId}/move-table`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-branch-id': table.branchId },
-            body: JSON.stringify({ tableId: table.id, customerId: customer.id }),
+            body: JSON.stringify({ tableId: table.id, customerId: customer!.id }),
           });
-        } catch { /* server failure shouldn't block the customer from seeing their order */ }
+          if (res.status === 409) {
+            const body = await res.json().catch(() => null) as { message?: string } | null;
+            return { moved: false, tableConflict: true, conflictMsg: body?.message };
+          }
+          return { moved: res.ok, tableConflict: false };
+        } catch {
+          return { moved: false, tableConflict: false };
+        }
+      };
+
+      let tableConflict = false;
+      let conflictMsg: string | undefined;
+      if (activeOrderId && customer && activeOrderTableId && activeOrderTableId !== table.id) {
+        const r = await tryMove(activeOrderId);
+        tableConflict = r.tableConflict;
+        conflictMsg = r.conflictMsg;
       } else if (activeOrderId && previousTableId && previousTableId !== table.id && customer) {
         // Edge case: server didn't return the order (transient) but we
         // know the local session jumped tables AND there's a logged-in
         // customer. Try to move anyway — server will no-op the same-
         // table case.
+        const r = await tryMove(activeOrderId);
+        tableConflict = r.tableConflict;
+        conflictMsg = r.conflictMsg;
+      }
+
+      // If the move was refused because the new table is occupied,
+      // bounce the session BACK to the customer's original tableId so
+      // they don't see "Table 4" in the header while their order is
+      // still actually on Table 7. Setting session twice in a row is
+      // fine — second call wins.
+      if (tableConflict && activeOrderTableId) {
+        // Re-query the (now-known) original table to keep tableNumber
+        // accurate on the header.
         try {
-          await fetch(apiUrl(`/orders/qr/${activeOrderId}/move-table`), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-branch-id': table.branchId },
-            body: JSON.stringify({ tableId: table.id, customerId: customer.id }),
-          });
-        } catch { /* same as above — non-fatal */ }
+          const res = await fetch(apiUrl(`/public/table/${activeOrderTableId}`));
+          if (res.ok) {
+            const t = (await res.json()) as TableInfo;
+            setSession({
+              tableId: t.id,
+              branchId: t.branchId,
+              branchName: t.branchName,
+              tableNumber: t.tableNumber,
+            });
+          }
+        } catch { /* if this lookup fails, the wrong tableNumber is shown but the order is still correct */ }
+        // Surface the reason to the customer on the next page.
+        if (conflictMsg) sessionStorage.setItem('qr-toast', conflictMsg);
       }
 
       setActiveOrder(activeOrderId);
