@@ -1614,6 +1614,16 @@ model StockMovement {
   notes        String?
   orderId      String?            // reference for SALE/VOID_RETURN movements
   staffId      String?            // who performed ADJUSTMENT/WASTE
+  /// When admin corrected the recorded quantity post-hoc (e.g. recipe
+  /// said 10 KG instead of 10 G — the SALE row deducted the wrong
+  /// amount). `quantity` is updated to the corrected value, the
+  /// original value is preserved in `correctedFromQuantity` for
+  /// audit, and `Ingredient.currentStock` is rebalanced by the delta
+  /// in the same transaction. Reports keep summing `quantity` as
+  /// before — they automatically see the corrected number.
+  correctedAt           DateTime?
+  correctedFromQuantity Decimal?           @db.Decimal(14, 4)
+  correctionReason      String?
   createdAt    DateTime           @default(now())
 
   // Relations

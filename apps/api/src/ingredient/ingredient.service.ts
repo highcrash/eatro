@@ -852,4 +852,93 @@ export class IngredientService {
       take: 200,
     });
   }
+
+  /**
+   * Correct a stock-movement's recorded quantity. Used when a recipe
+   * typo (10 KG instead of 10 G) caused a SALE row to deduct way
+   * more than it should have. Admin enters the correct quantity:
+   *
+   *   1. Compute delta = oldQty − newQty (signed; positive when the
+   *      original over-deducted, negative when it under-deducted).
+   *   2. Update the StockMovement row in place — set quantity=newQty,
+   *      stamp correctedAt + correctedFromQuantity + correctionReason
+   *      so the audit trail shows what changed and why. Reports keep
+   *      summing `quantity` and now see the corrected number.
+   *   3. Increment Ingredient.currentStock by delta in the same
+   *      transaction so on-hand stock stays accurate without admin
+   *      having to fire a separate ADJUSTMENT.
+   *   4. Sync the parent ingredient's aggregated stock if this
+   *      ingredient is a variant child.
+   *
+   * Bounds: newQty must have the SAME SIGN as the original (you can't
+   * flip a SALE deduction into a stock IN). Empty/zero is allowed —
+   * effectively voids the movement's stock effect.
+   */
+  async correctMovement(
+    id: string,
+    branchId: string,
+    dto: { quantity: number; reason?: string },
+  ) {
+    if (!Number.isFinite(dto.quantity)) {
+      throw new BadRequestException('quantity must be a finite number');
+    }
+    const mv = await this.prisma.stockMovement.findFirst({
+      where: { id, branchId },
+      include: { ingredient: { select: { id: true, parentId: true } } },
+    });
+    if (!mv) throw new NotFoundException('Stock movement not found');
+
+    const oldQty = mv.quantity.toNumber();
+    const newQty = dto.quantity;
+    // Sign-preservation guard. A SALE row carries a negative quantity
+    // (stock OUT). Admin shouldn't be able to flip that to positive
+    // and accidentally inflate stock; if they need that, they should
+    // use the regular Adjust action.
+    if (oldQty !== 0 && newQty !== 0 && Math.sign(oldQty) !== Math.sign(newQty)) {
+      throw new BadRequestException(
+        'Corrected quantity must have the same sign as the original. Use Adjust to add stock back.',
+      );
+    }
+    if (newQty === oldQty) return mv; // no-op
+
+    // delta = how much stock the OLD movement over-removed (or under-
+    // removed if positive). currentStock += delta puts the difference
+    // back. Example: SALE row was -10000, admin corrects to -10 →
+    // delta = -10000 − (-10) = -9990 → wait, that's the wrong sign.
+    //
+    // Walk through it again. currentStock was decremented by 10000
+    // when the SALE fired. We want to UN-decrement 9990 (the over-
+    // deduction) so the new effect is just -10. So we ADD 9990 to
+    // currentStock, i.e. increment by (oldQty - newQty) when both
+    // are negative: -10000 - (-10) = -9990 → that's a NEGATIVE 9990.
+    // currentStock += -9990 would make it WORSE.
+    //
+    // Correct formula: delta = newQty − oldQty.
+    //   newQty = -10, oldQty = -10000 → delta = -10 - (-10000) = 9990.
+    //   currentStock += 9990 → puts the over-deducted amount back. ✓
+    const delta = newQty - oldQty;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.stockMovement.update({
+        where: { id },
+        data: {
+          quantity: newQty,
+          correctedAt: new Date(),
+          correctedFromQuantity: oldQty,
+          correctionReason: dto.reason?.trim() || null,
+        },
+        include: { ingredient: true },
+      });
+      await tx.ingredient.update({
+        where: { id: mv.ingredientId },
+        data: { currentStock: { increment: delta } },
+      });
+      if (mv.ingredient.parentId) {
+        await this.syncParentStock(mv.ingredient.parentId, tx);
+      }
+      return row;
+    });
+
+    return updated;
+  }
 }
