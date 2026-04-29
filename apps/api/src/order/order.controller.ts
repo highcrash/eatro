@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Headers, BadRequestException, ForbiddenException, NotFoundException, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Headers, BadRequestException, ForbiddenException, NotFoundException, ConflictException, Req } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Request } from 'express';
 
@@ -330,13 +330,24 @@ export class QrOrderController {
   /**
    * Public QR-flow table transfer. Used when a customer who already has
    * an active order rescans a *different* table — we move the existing
-   * order to the new table instead of creating a new one. Gated on
-   * customerId match: only the customer who owns the order can move
-   * it (the orderId is a guess-resistant cuid; layering customerId
-   * on top is defence-in-depth so a leaked URL can't relocate someone
-   * else's order). The underlying service emits the standard
+   * order to the new table instead of creating a new one.
+   *
+   * Two guards layered on top of the bare endpoint:
+   *
+   *   1. **customerId match** — only the customer who owns the order
+   *      can relocate it. The orderId is a guess-resistant cuid;
+   *      layering customerId on top is defence-in-depth so a leaked
+   *      URL can't relocate someone else's order.
+   *
+   *   2. **destination-table availability** — refuse with 409 when
+   *      another active order is already sitting on the target table.
+   *      Without this, a logged-in customer rescanning the wrong
+   *      table would clobber another diner's table assignment in
+   *      the POS view.
+   *
+   * The underlying OrderService.moveTable emits the standard
    * `order:updated` + `table:updated` WS events so the POS / KDS
-   * picks up the move automatically.
+   * picks up the move automatically once the guards pass.
    */
   @Post('qr/:id/move-table')
   async moveTableQr(
@@ -354,6 +365,30 @@ export class QrOrderController {
       throw new BadRequestException('This order does not belong to the signed-in customer');
     }
     if (order.tableId === dto.tableId) return order; // no-op rescan of same table
+
+    // Refuse when the destination table already has an active order
+    // (anything not PAID / VOID / CANCELLED). The 409 lets the QR
+    // client soft-fail and keep the customer on their existing table.
+    const occupant = await this.prisma.order.findFirst({
+      where: {
+        branchId,
+        tableId: dto.tableId,
+        deletedAt: null,
+        // Open / in-progress / completed-but-not-cleared. PAID + VOID
+        // + REFUNDED orders no longer hold the table.
+        status: { notIn: ['PAID', 'VOID', 'REFUNDED'] },
+        NOT: { id },
+      },
+      select: { id: true, orderNumber: true },
+    });
+    if (occupant) {
+      throw new ConflictException({
+        message: 'That table already has an active order. Ask staff to clear it before moving your order here.',
+        code: 'TABLE_OCCUPIED',
+        occupantOrderNumber: occupant.orderNumber,
+      });
+    }
+
     return this.orderService.moveTable(id, branchId, dto.tableId);
   }
 

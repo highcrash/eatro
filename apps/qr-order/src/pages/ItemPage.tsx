@@ -28,6 +28,11 @@ export default function ItemPage() {
   const [picks, setPicks] = useState<Map<string, CartAddon>>(new Map());
   const [notes, setNotes] = useState('');
   const [removed, setRemoved] = useState<Set<string>>(new Set());
+  // Variant tab selection. When the loaded item is a parent shell with
+  // variants, default to the cheapest so the page never opens with the
+  // parent's price=0 placeholder visible. The chosen variant becomes
+  // the actual line that goes into the cart.
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
 
   // Fetch the item directly by id. The list endpoint hides variant
   // children + addon items, so falling through `data.items.find()`
@@ -74,6 +79,57 @@ export default function ItemPage() {
   // happens to have the row (rare race).
   const item = itemFetched ?? data?.items.find((m) => m.id === itemId);
 
+  // Variant handling. Parent shells expose `variants[]` with at least
+  // {id, name, price, imageUrl}. We render them as a tab strip; the
+  // chosen variant becomes the cart line. If the customer hasn't
+  // picked anything yet, default to the cheapest so the price display
+  // is meaningful (parent's own price is 0).
+  const variantList = useMemo(() => {
+    const v = (item as { isVariantParent?: boolean; variants?: Array<{ id: string; name: string; price: number; imageUrl?: string | null }> } | undefined)?.variants;
+    if (!Array.isArray(v) || v.length === 0) return [];
+    return [...v].sort((a, b) => Number(a.price) - Number(b.price));
+  }, [item]);
+  const isVariantParent = !!(item as { isVariantParent?: boolean } | undefined)?.isVariantParent && variantList.length > 0;
+  // Auto-pick cheapest as soon as variants load.
+  if (isVariantParent && !selectedVariantId && variantList[0]) {
+    // Setting state during render is intentional here — same pattern
+    // the website's MenuItemPage uses. Wrapped in the if-guard so it
+    // only fires once per item change.
+    queueMicrotask(() => setSelectedVariantId(variantList[0].id));
+  }
+  // Fetch the selected variant's full detail so its imageUrl /
+  // description / addons drive the page once the customer taps a tab.
+  const { data: variantDetail } = useQuery<MenuItem | null>({
+    queryKey: ['qr-menu-item', branchId, selectedVariantId],
+    queryFn: async () => {
+      if (!selectedVariantId) return null;
+      const res = await fetch(apiUrl(`/public/menu/${branchId || 'default'}/item/${selectedVariantId}`));
+      if (!res.ok) return null;
+      return (await res.json()) as MenuItem;
+    },
+    enabled: !!selectedVariantId && isVariantParent,
+  });
+
+  /** "displayed" overlays the chosen variant's swappable bits
+   *  (imageUrl, description, price, addonGroups) on top of the parent
+   *  so identity (category, SEO) stays anchored to the parent while
+   *  the visible content reflects the active variant. Standalone
+   *  items: displayed === item. */
+  const displayed = (isVariantParent && variantDetail)
+    ? {
+        ...item!,
+        imageUrl: variantDetail.imageUrl ?? item!.imageUrl,
+        description: variantDetail.description ?? item!.description,
+        price: variantDetail.price,
+        // Variant addon groups override parent's when set; otherwise
+        // fall back to the parent shell's groups (the common case —
+        // admin attaches addons once on the parent).
+        addonGroups: (variantDetail as { addonGroups?: unknown[] }).addonGroups && Array.isArray((variantDetail as { addonGroups?: unknown[] }).addonGroups) && ((variantDetail as { addonGroups?: unknown[] }).addonGroups as unknown[]).length > 0
+          ? (variantDetail as { addonGroups: NonNullable<MenuItem['addonGroups']> }).addonGroups
+          : item!.addonGroups,
+      } as MenuItem
+    : item;
+
   // Recipe lookup (only fetched when self-remove is on). Uses the same
   // public endpoint pattern; falls back gracefully when the endpoint
   // is missing or the menu item has no recipe.
@@ -92,8 +148,8 @@ export default function ItemPage() {
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
 
   const groups = useMemo(
-    () => (item?.addonGroups ?? []).filter((g) => g.options.length > 0),
-    [item],
+    () => (displayed?.addonGroups ?? []).filter((g) => g.options.length > 0),
+    [displayed],
   );
 
   const picksByGroup = useMemo(() => {
@@ -124,11 +180,21 @@ export default function ItemPage() {
     );
   }
 
-  const tags = item.tags ? item.tags.split(',').map((t) => t.trim()).filter(Boolean) : [];
+  const tags = (displayed?.tags ?? item.tags) ? (displayed?.tags ?? item.tags!).split(',').map((t) => t.trim()).filter(Boolean) : [];
   const addonsTotal = [...picks.values()].reduce((s, p) => s + p.price, 0);
-  const unitPrice = Number(item.price) + addonsTotal;
+  // Use the chosen variant's price when this is a variant parent.
+  // Falls back to the parent's `item.price` for standalone items.
+  // While the variant detail is still in-flight, lean on the
+  // lightweight `variants[]` entry from the menu list so the
+  // displayed price is never ৳0 + addons for a variant parent.
+  const variantBasePrice = isVariantParent
+    ? Number((variantList.find((v) => v.id === selectedVariantId)?.price) ?? variantList[0]?.price ?? item.price)
+    : Number(displayed?.price ?? item.price);
+  const unitPrice = variantBasePrice + addonsTotal;
   const unmet = groups.filter((g) => (picksByGroup.get(g.id)?.length ?? 0) < g.minPicks);
-  const canAdd = unmet.length === 0;
+  // Block add-to-cart on a variant parent until a variant is picked.
+  const variantUnpicked = isVariantParent && !selectedVariantId;
+  const canAdd = unmet.length === 0 && !variantUnpicked;
 
   const togglePick = (g: { id: string; name: string; maxPicks: number }, addon: { id: string; name: string; price: number }) => {
     const k = `${g.id}:${addon.id}`;
@@ -177,7 +243,20 @@ export default function ItemPage() {
       const prefix = removedNames.join(' • ');
       combinedNotes = combinedNotes ? `${prefix} | ${combinedNotes}` : prefix;
     }
-    addItem(item, {
+    // For variant parents, push the SELECTED VARIANT (not the parent
+    // shell) into the cart — the parent has price=0 and the kitchen
+    // ticket needs the variant's id + name. Use the loaded
+    // variantDetail when ready; fall back to a light shape built from
+    // the parent's `variants[]` so a tap-Add-fast click still works
+    // before the variant detail fetch resolves.
+    const cartItem: MenuItem = (() => {
+      if (!isVariantParent || !selectedVariantId) return item;
+      if (variantDetail) return variantDetail;
+      const lite = variantList.find((v) => v.id === selectedVariantId);
+      if (!lite) return item;
+      return { ...item, id: lite.id, name: lite.name, price: lite.price, imageUrl: lite.imageUrl ?? item.imageUrl };
+    })();
+    addItem(cartItem, {
       addons: picks.size > 0 ? [...picks.values()] : undefined,
       notes: combinedNotes || undefined,
       quantity: qty,
@@ -207,8 +286,8 @@ export default function ItemPage() {
 
       {/* Hero image */}
       <div className="aspect-square bg-[#111] overflow-hidden">
-        {item.imageUrl ? (
-          <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+        {(displayed?.imageUrl ?? item.imageUrl) ? (
+          <img src={(displayed?.imageUrl ?? item.imageUrl) as string} alt={item.name} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-6xl opacity-20">
             {item.type === 'BEVERAGE' ? '🥤' : '🍽️'}
@@ -220,8 +299,35 @@ export default function ItemPage() {
       <div className="px-5 py-5">
         <h1 className="font-display text-3xl text-white tracking-wider">{item.name}</h1>
 
-        {item.description && (
-          <p className="text-sm text-[#888] font-body mt-2 leading-relaxed">{item.description}</p>
+        {/* Variant tabs — visible only on parent shells. Tapping a tab
+            swaps image / description / price / addons to the chosen
+            variant. Defaults to the cheapest on first render. */}
+        {isVariantParent && (
+          <div className="mt-4 flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            {variantList.map((v) => {
+              const active = v.id === selectedVariantId;
+              return (
+                <button
+                  key={v.id}
+                  onClick={() => setSelectedVariantId(v.id)}
+                  className={`flex-shrink-0 px-3 py-2 text-xs font-body whitespace-nowrap transition-colors border ${
+                    active
+                      ? 'bg-[#C8FF00] text-[#0D0D0D] border-[#C8FF00]'
+                      : 'bg-[#1A1A1A] text-[#999] border-[#2A2A2A] hover:text-white'
+                  }`}
+                >
+                  <span className="font-medium">{v.name}</span>
+                  <span className={`ml-1.5 text-[10px] ${active ? 'text-[#0D0D0D]' : 'text-[#666]'}`}>
+                    {formatCurrency(Number(v.price))}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {(displayed?.description ?? item.description) && (
+          <p className="text-sm text-[#888] font-body mt-3 leading-relaxed">{displayed?.description ?? item.description}</p>
         )}
 
         {/* Tags */}
@@ -239,7 +345,7 @@ export default function ItemPage() {
         <div className="mt-6 border-t border-[#2A2A2A] pt-5">
           <p className="font-display text-2xl text-white tracking-wider">{formatCurrency(unitPrice)}</p>
           {addonsTotal > 0 && (
-            <p className="text-[11px] text-[#888] font-body mt-1">Base {formatCurrency(item.price)} + addons {formatCurrency(addonsTotal)}</p>
+            <p className="text-[11px] text-[#888] font-body mt-1">Base {formatCurrency(variantBasePrice)} + addons {formatCurrency(addonsTotal)}</p>
           )}
         </div>
 
