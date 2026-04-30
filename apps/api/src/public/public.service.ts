@@ -263,6 +263,35 @@ export class PublicService {
         where: itemWhere, orderBy: { sortOrder: 'asc' },
         select: {
           ...PUBLIC_MENU_ITEM_SELECT,
+          // Override the variants select so each variant ALSO carries
+          // its own addonGroups[]. Some restaurants attach addons
+          // per-variant (e.g. "Latte Regular" + "Latte Large" each
+          // have their own Special-addons group); without this, the
+          // print page rendered variants without addons. Falls back
+          // to parent.addonGroups in the UI when a variant has none.
+          variants: {
+            where: { deletedAt: null, isAvailable: true },
+            orderBy: { sortOrder: 'asc' as const },
+            select: {
+              id: true, name: true, slug: true, description: true,
+              price: true, imageUrl: true, tags: true, pieces: true,
+              prepTime: true, spiceLevel: true, sortOrder: true,
+              addonGroups: {
+                where: { deletedAt: null },
+                orderBy: { sortOrder: 'asc' as const },
+                select: {
+                  id: true, name: true, minPicks: true, maxPicks: true, sortOrder: true,
+                  options: {
+                    orderBy: { sortOrder: 'asc' as const },
+                    select: {
+                      id: true, addonItemId: true, sortOrder: true,
+                      addon: { select: { id: true, name: true, price: true, isAvailable: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
           recipe: {
             select: {
               items: {

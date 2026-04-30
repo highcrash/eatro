@@ -43,6 +43,10 @@ interface PrintVariant {
   id: string;
   name: string;
   price: number;
+  // Variants may carry their OWN addonGroups when admin attached
+  // addons per-variant (instead of at the parent level). Print page
+  // prefers variant addons; falls back to parent's when this is empty.
+  addonGroups?: PrintAddonGroup[];
 }
 interface PrintMenuItem {
   id: string;
@@ -440,8 +444,19 @@ export default function MenuPrintPage() {
                   <div className="mp-grid">
                     {items.map((item) => {
                 const hasVariants = item.isVariantParent && item.variants && item.variants.length > 0;
-                const addonGroups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
-                const hasAddons = addonGroups.length > 0;
+                const parentAddonGroups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
+                // Per-variant fallback: when admin attached addons to
+                // each variant separately, prefer those; otherwise use
+                // the parent's addonGroups.
+                const addonGroupsFor = (v: PrintVariant): PrintAddonGroup[] => {
+                  const own = (v.addonGroups ?? []).filter((g) => g.options.length > 0);
+                  return own.length > 0 ? own : parentAddonGroups;
+                };
+                const variantHasAddons =
+                  hasVariants &&
+                  item.variants!.some((v) => addonGroupsFor(v).length > 0);
+                const addonGroups = parentAddonGroups; // alias for the no-variants render path
+                const hasAddons = variantHasAddons || parentAddonGroups.length > 0;
 
                 // Item-level price: variant parents show "from X+" of
                 // the cheapest variant. Variants are also listed below
@@ -482,32 +497,35 @@ export default function MenuPrintPage() {
                              of addon groups under the description. */}
                       {hasVariants && hasAddons && (
                         <div className="mp-variant-cols">
-                          {item.variants!.map((v) => (
-                            <div key={v.id} className="mp-variant-col">
-                              <div className="mp-variant-row">
-                                <span className="mp-variant-name">{v.name}</span>
-                                <span className="mp-variant-price">
-                                  {formatCurrency(Number(v.price))}
-                                </span>
-                              </div>
-                              {addonGroups.map((g) => (
-                                <div key={g.id} className="mp-addon-group">
-                                  <span className="mp-addon-label">{g.name}: </span>
-                                  <span className="mp-addon-list">
-                                    {g.options
-                                      .filter((o) => o.addon.isAvailable !== false)
-                                      .map((o) => {
-                                        const p = Number(o.addon.price ?? 0);
-                                        return p > 0
-                                          ? `${o.addon.name} +${formatCurrency(p)}`
-                                          : o.addon.name;
-                                      })
-                                      .join(', ')}
+                          {item.variants!.map((v) => {
+                            const groups = addonGroupsFor(v);
+                            return (
+                              <div key={v.id} className="mp-variant-col">
+                                <div className="mp-variant-row">
+                                  <span className="mp-variant-name">{v.name}</span>
+                                  <span className="mp-variant-price">
+                                    {formatCurrency(Number(v.price))}
                                   </span>
                                 </div>
-                              ))}
-                            </div>
-                          ))}
+                                {groups.map((g) => (
+                                  <div key={g.id} className="mp-addon-group">
+                                    <span className="mp-addon-label">{g.name}: </span>
+                                    <span className="mp-addon-list">
+                                      {g.options
+                                        .filter((o) => o.addon.isAvailable !== false)
+                                        .map((o) => {
+                                          const p = Number(o.addon.price ?? 0);
+                                          return p > 0
+                                            ? `${o.addon.name} +${formatCurrency(p)}`
+                                            : o.addon.name;
+                                        })
+                                        .join(', ')}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
 
