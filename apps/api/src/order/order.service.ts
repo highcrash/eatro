@@ -1215,6 +1215,34 @@ export class OrderService {
     return updated;
   }
 
+  /**
+   * Customer-side note update — same write as updateItemNotes but with
+   * a gate that blocks edits once the cashier accepts the order. Mirrors
+   * cancelItemByCustomer's "PENDING order OR PENDING_APPROVAL item"
+   * window, so the kitchen never sees a note flip mid-prep.
+   */
+  async updateItemNotesByCustomer(orderId: string, itemId: string, branchId: string, notes: string) {
+    const order = await this.findOne(orderId, branchId);
+    const item = order.items.find((i) => i.id === itemId);
+    if (!item) throw new NotFoundException('Item not found');
+    if (item.voidedAt) throw new BadRequestException('Item already cancelled');
+    const canEdit = order.status === 'PENDING' || item.kitchenStatus === 'PENDING_APPROVAL';
+    if (!canEdit) throw new BadRequestException('This item can no longer be edited');
+
+    await this.prisma.orderItem.update({
+      where: { id: itemId },
+      data: { notes: (notes ?? '').trim() || null },
+    });
+
+    const updated = await this.prisma.order.findFirstOrThrow({
+      where: { id: orderId },
+      include: { items: true, payments: true },
+    });
+
+    this.ws.emitToBranch(branchId, 'order:updated', updated);
+    return updated;
+  }
+
   async moveItemToTable(orderId: string, itemId: string, branchId: string, targetTableId: string) {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') {

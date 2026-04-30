@@ -251,6 +251,36 @@ export class QrOrderController {
     };
   }
 
+  /**
+   * Active-order lookup by table — drives the cross-device rescan
+   * scenario: Customer A places an order at Table 5, Customer B at the
+   * same table scans the QR code, and B's app should show A's running
+   * order instead of a fresh empty cart. Returns null when the table
+   * has no open order so the client falls through to the empty-cart
+   * flow. PAID / VOID / REFUNDED orders no longer hold the table.
+   *
+   * Public — no auth required (anyone scanning the table's QR is
+   * implicitly at the table).
+   */
+  @Get('qr/by-table/:tableId')
+  async getActiveOrderByTable(
+    @Param('tableId') tableId: string,
+    @Headers('x-branch-id') branchId: string,
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    const order = await this.prisma.order.findFirst({
+      where: {
+        branchId,
+        tableId,
+        deletedAt: null,
+        status: { notIn: ['PAID', 'VOID', 'REFUNDED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, orderNumber: true, status: true, tableNumber: true, customerId: true },
+    });
+    return order ?? null;
+  }
+
   @Get('qr/:id/status')
   async getOrderStatus(@Param('id') id: string) {
     const order = await this.prisma.order.findFirst({
@@ -457,7 +487,8 @@ export class QrOrderController {
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
-    return this.orderService.updateItemNotes(id, itemId, branchId, dto.notes);
+    // Customer-gated variant — blocks edits once the cashier accepts.
+    return this.orderService.updateItemNotesByCustomer(id, itemId, branchId, dto.notes);
   }
 
   @Post('qr/:id/remove-coupon')
