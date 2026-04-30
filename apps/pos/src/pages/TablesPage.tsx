@@ -419,6 +419,37 @@ export default function TablesPage() {
     return m;
   }, [pendingOrders, activeOrders]);
 
+  // Count of active orders per table — used to flag "+N" on tables
+  // where a duplicate QR order has stacked on top of an existing one,
+  // so the cashier knows there's more than one to recover. The
+  // OrderPage's TableOrderPicker handles the actual recovery.
+  const ordersPerTable = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const o of [...pendingOrders, ...activeOrders]) {
+      if (!o.tableId) continue;
+      m.set(o.tableId, (m.get(o.tableId) ?? 0) + 1);
+    }
+    return m;
+  }, [pendingOrders, activeOrders]);
+
+  // All currently-open orders for the branch, used by the "Open
+  // Orders" recovery modal. Includes orders without a tableId
+  // (TAKEAWAY / QR_ONLINE without a table assignment).
+  const allOpenOrders = useMemo(() => {
+    const merged = [...pendingOrders, ...activeOrders];
+    // De-dupe by id (a status flip mid-poll could put the same order
+    // in both buckets briefly).
+    const byId = new Map<string, Order>();
+    for (const o of merged) byId.set(o.id, o);
+    return Array.from(byId.values()).sort((a, b) => {
+      const da = new Date(a.createdAt).getTime();
+      const db = new Date(b.createdAt).getTime();
+      return db - da;
+    });
+  }, [pendingOrders, activeOrders]);
+
+  const [showOpenOrders, setShowOpenOrders] = useState(false);
+
   // Branch-configurable timer thresholds — fall back to defaults when
   // unset. Settings update is rare so the staleness here is fine.
   const { data: branchSettings } = useQuery<{
@@ -641,12 +672,99 @@ export default function TablesPage() {
           </>
         )}
         <button
+          onClick={() => setShowOpenOrders(true)}
+          className="text-xs font-semibold text-theme-text-muted hover:text-theme-accent transition-colors flex items-center gap-1"
+          title="See every active order in the branch — useful when a duplicate QR order has hidden the original behind it."
+        >
+          Open Orders
+          {allOpenOrders.length > 0 && (
+            <span className="bg-theme-accent text-white text-[10px] font-bold px-1.5 rounded-theme">
+              {allOpenOrders.length}
+            </span>
+          )}
+        </button>
+        <button
           onClick={() => void navigate('/reports/sales')}
           className="text-xs font-semibold text-theme-text-muted hover:text-theme-accent transition-colors"
         >
           Reports
         </button>
       </header>
+
+      {/* Recovery modal — every active order in the branch, click to
+          jump straight to it. Designed for the case where two QR
+          orders ended up on the same table and the original was
+          hidden by the more recent one (or any other case where a
+          cashier needs to recall an order outside the tables grid). */}
+      {showOpenOrders && (
+        <div
+          className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center p-6 overflow-auto"
+          onClick={() => setShowOpenOrders(false)}
+        >
+          <div
+            className="bg-theme-surface border border-theme-border rounded-theme w-full max-w-2xl mt-12 p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-lg text-theme-text">Open Orders ({allOpenOrders.length})</h2>
+              <button
+                onClick={() => setShowOpenOrders(false)}
+                className="text-theme-text-muted hover:text-theme-text"
+              >
+                ×
+              </button>
+            </div>
+            {allOpenOrders.length === 0 ? (
+              <p className="text-sm text-theme-text-muted py-8 text-center">No active orders right now.</p>
+            ) : (
+              <div className="space-y-2 max-h-[60vh] overflow-auto">
+                {allOpenOrders.map((o) => {
+                  const orderType = (o as { type?: string }).type ?? 'DINE_IN';
+                  const status = (o as { status?: string }).status ?? '—';
+                  const items = ((o as { items?: { voidedAt?: string | null }[] }).items ?? []).filter((i) => !i.voidedAt);
+                  const total = Number((o as { totalAmount?: number }).totalAmount ?? 0);
+                  const elapsed = o.createdAt ? Math.round((Date.now() - new Date(o.createdAt).getTime()) / 60000) : 0;
+                  const elapsedLabel = elapsed >= 60 ? `${Math.floor(elapsed / 60)}h ${elapsed % 60}m` : `${elapsed}m`;
+                  const tableLabel = (o as { tableNumber?: string | null }).tableNumber || (orderType === 'TAKEAWAY' ? 'Takeaway' : '—');
+                  return (
+                    <button
+                      key={o.id}
+                      onClick={() => {
+                        setShowOpenOrders(false);
+                        void navigate(`/order?orderId=${o.id}`);
+                      }}
+                      className="w-full text-left bg-theme-bg border border-theme-border hover:border-theme-accent transition-colors p-3 grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-theme"
+                    >
+                      <div className="font-bold text-theme-text text-sm tabular-nums w-20">
+                        {tableLabel}
+                      </div>
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs text-theme-text">
+                            #{(o as { orderNumber?: string }).orderNumber ?? o.id.slice(-6)}
+                          </span>
+                          <span className="text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 bg-theme-hover text-theme-text-muted rounded-theme">
+                            {status}
+                          </span>
+                          {orderType === 'QR_ONLINE' && (
+                            <span className="text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 bg-blue-500/15 text-blue-400 rounded-theme">QR</span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-theme-text-muted">
+                          {items.length} {items.length === 1 ? 'item' : 'items'} · {elapsedLabel} ago
+                        </div>
+                      </div>
+                      <div className="font-bold text-theme-text text-sm">
+                        ৳{(total / 100).toFixed(0)}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Grid */}
       <div className="flex-1 overflow-auto p-6">
@@ -738,6 +856,15 @@ export default function TablesPage() {
                     'bg-theme-info text-white'
                   }`}>
                     {badgeType === 'qr' ? 'QR ORDER' : badgeType === 'items' ? 'NEW ITEMS' : '💰 BILL'}
+                  </div>
+                )}
+                {/* Multi-order badge — flagged when a duplicate order
+                    has stacked on top of an existing one. The cashier
+                    will see a picker on tap (OrderPage's TableOrderPicker)
+                    and can recover whichever order they need. */}
+                {(ordersPerTable.get(table.id) ?? 0) > 1 && (
+                  <div className="absolute bottom-3 right-2 z-10 text-[10px] font-theme-body font-bold px-1.5 py-0.5 tracking-wider uppercase rounded-theme bg-purple-600 text-white">
+                    +{(ordersPerTable.get(table.id) ?? 0) - 1} more
                   </div>
                 )}
                 {/* Floating options button — easier touch target than the
