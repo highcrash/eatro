@@ -3,6 +3,20 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.43 — POS: recover hidden orders when a table has more than one (2026-04-30)
+
+No Electron-shell changes. Rebundles apps/pos only:
+
+- When two QR orders ended up on the same table the cashier
+  could only ever see the newest one — Order A still existed
+  in the DB but the table view silently picked Order B and
+  left A unreachable. Three new affordances close the gap:
+  a TableOrderPicker on OrderPage when a table has >1 active
+  order; a "+N more" badge on tables in the grid; and a
+  branch-wide Open Orders modal accessible from the Tables
+  header. From any of them the cashier can jump straight to
+  any active order to continue, take payment, or void.
+
 ## 1.0.42 — POS: print KOT when cashier accepts a QR order (2026-04-30)
 
 No Electron-shell changes. Rebundles apps/pos only:
