@@ -3,6 +3,19 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.46 — POS: cash-account transfers now reconcile correctly (2026-05-01)
+
+No Electron-shell changes. Rebundles apps/pos only:
+
+- The Balance Reconciliation table on the End-of-Day report was
+  off by every inter-account transfer (cash → bKash etc.) — the
+  expected balance ignored transfer-in / transfer-out, so cashiers
+  saw bogus discrepancies even when actual closing cash matched.
+  The expected formula now picks up a per-account signed net
+  transfer term, and a new ±Transfer column on both the screen
+  and printed Z-report shows the move. Reviews tile on website
+  also fixed (was reading old rating/comment fields).
+
 ## 1.0.45 — POS: Mushak Register Serial # + SD column on Sales Report (2026-05-01)
 
 No Electron-shell changes. Rebundles apps/pos only:
