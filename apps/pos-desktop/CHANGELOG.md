@@ -3,6 +3,35 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.48 — POS: print KOT when cashier accepts a QR order (2026-04-30)
+
+No Electron-shell changes. Rebundles apps/pos only:
+
+- Regular POS orders auto-printed the kitchen ticket on placement,
+  but QR orders silently never printed because the cashier-accept
+  mutation didn't trigger the print path. Cashiers were having to
+  re-print manually for every QR order. The accept handler in
+  ActiveOrderView now invokes the same kitchen-ticket helper the
+  create-order flow uses, no-op'ing when the branch has KDS turned
+  on (the screen handles it instead).
+
+Bundled along the way (no behavior change to the desktop shell):
+
+- /menu-print: A4 printable menu page on the website with light/
+  dark toggle, per-page category title repetition, variant + addon
+  rendering, ingredient pills capped at 2 lines.
+- Inventory: stock movements now server-paginated (full history
+  searchable; default 200 rows/page, max 500).
+- Tipsoi attendance: shiftDate now stored as UTC-midnight matching
+  the branch-local calendar date so the date column doesn't drift
+  one day behind on UTC servers.
+- Supplier receive flow: receipt-level extra fees (delivery,
+  freight) write their own Expense rows at receive time, supplier
+  ledger UI breaks down items / fees / discount / net payable.
+- QR-order: cross-device active-order rescan, editable per-item
+  notes while still PENDING, "Ask for Bill" button, optional
+  "Review your order" page (login required).
+
 ## 0.8.47 — POS: edit customer name/phone/email (2026-04-28)
 
 No Electron-shell changes. Rebundles apps/pos only:
