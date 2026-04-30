@@ -543,7 +543,15 @@ export class OrderService {
     const phone = order.customer?.phone ?? order.customerPhone;
     if (!phone) return;
 
-    const amount = Number(order.totalAmount ?? 0).toFixed(2).replace(/\.00$/, '');
+    // totalAmount is stored in PAISA (project-wide convention — see
+    // packages/utils/src/currency.ts). The SMS template's "{{amount}}"
+    // is meant to be the human-friendly Taka figure, so divide by 100
+    // and format with thousands separators. Strip trailing ".00" for
+    // whole-taka amounts to keep the message terse.
+    const amountTaka = Number(order.totalAmount ?? 0) / 100;
+    const amount = amountTaka
+      .toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      .replace(/\.00$/, '');
     const method = (order.payments ?? [])
       .map((p) => (p.method ?? 'cash').toLowerCase())
       .filter((v, i, a) => a.indexOf(v) === i)
