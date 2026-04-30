@@ -314,6 +314,27 @@ export default function MenuPrintPage() {
         }
         .menu-print-root[data-theme="dark"] .mp-addon-list { color: #CCC; }
 
+        /* Variant + addons combo: each variant gets its own column
+           with the price up top + the addon groups repeated below.
+           auto-fit so 3+ variants wrap to a second row instead of
+           squeezing into too-narrow columns. */
+        .mp-variant-cols {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+          gap: 6px 10px;
+          margin-top: 6px;
+        }
+        .mp-variant-col {
+          font-size: 10.5px;
+          line-height: 1.35;
+        }
+        .mp-variant-col .mp-variant-row {
+          padding: 0 0 3px;
+          margin-bottom: 3px;
+          border-bottom: 1px dotted rgba(214,43,43,0.35);
+        }
+        .mp-variant-col .mp-addon-group { font-size: 10px; }
+
         /* Key ingredients — flat inline text + tiny image. Capped to
            2 visible lines via -webkit-line-clamp (proper line-boundary
            clipping, doesn't slice characters mid-letter). */
@@ -452,7 +473,45 @@ export default function MenuPrintPage() {
                         <p className="mp-desc">{item.description}</p>
                       ) : null}
 
-                      {hasVariants && (
+                      {/* Three render modes, mutually exclusive:
+                           - variants + addons → side-by-side variant
+                             columns, each with the addon groups
+                             repeated underneath.
+                           - variants only → vertical name/price list.
+                           - addons only (no variants) → single block
+                             of addon groups under the description. */}
+                      {hasVariants && hasAddons && (
+                        <div className="mp-variant-cols">
+                          {item.variants!.map((v) => (
+                            <div key={v.id} className="mp-variant-col">
+                              <div className="mp-variant-row">
+                                <span className="mp-variant-name">{v.name}</span>
+                                <span className="mp-variant-price">
+                                  {formatCurrency(Number(v.price))}
+                                </span>
+                              </div>
+                              {addonGroups.map((g) => (
+                                <div key={g.id} className="mp-addon-group">
+                                  <span className="mp-addon-label">{g.name}: </span>
+                                  <span className="mp-addon-list">
+                                    {g.options
+                                      .filter((o) => o.addon.isAvailable !== false)
+                                      .map((o) => {
+                                        const p = Number(o.addon.price ?? 0);
+                                        return p > 0
+                                          ? `${o.addon.name} +${formatCurrency(p)}`
+                                          : o.addon.name;
+                                      })
+                                      .join(', ')}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {hasVariants && !hasAddons && (
                         <div className="mp-variants">
                           {item.variants!.map((v) => (
                             <div key={v.id} className="mp-variant-row">
@@ -465,7 +524,7 @@ export default function MenuPrintPage() {
                         </div>
                       )}
 
-                      {hasAddons && (
+                      {!hasVariants && hasAddons && (
                         <div className="mp-addons">
                           {addonGroups.map((g) => (
                             <div key={g.id} className="mp-addon-group">
@@ -475,7 +534,6 @@ export default function MenuPrintPage() {
                                   .filter((o) => o.addon.isAvailable !== false)
                                   .map((o) => {
                                     const p = Number(o.addon.price ?? 0);
-                                    // Free addon (price 0) → show name only.
                                     return p > 0
                                       ? `${o.addon.name} +${formatCurrency(p)}`
                                       : o.addon.name;
