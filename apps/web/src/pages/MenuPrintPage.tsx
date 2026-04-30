@@ -14,17 +14,36 @@ import { useBranding, getActiveBranchId } from '../lib/cms';
  * `showOnWebsite=false` — all enforced server-side by the
  * `/public/menu-print/:branchId` endpoint).
  *
- * Layout: 2-column CSS grid. Each item card has `break-inside: avoid`
- * so an item's image / name / description / ingredients / price never
- * split across pages. Categories ALSO use `break-inside: avoid`
- * (best-effort — long categories will still break, but only between
- * card boundaries).
+ * v2 mockup notes:
+ *   - Subcategories are merged under their top-level parent so admins
+ *     don't see "Appetizer" then "Appetizer / Snacks" as two sections.
+ *   - Variants render as a vertical price list under the item name.
+ *   - Addon groups render once per item (in dark/light text, no chips),
+ *     with "+price" suffixed; free addons (price 0) show name only.
+ *   - Page background extends to all four edges in dark mode (the A4
+ *     margins are achieved with internal padding, NOT @page margin —
+ *     otherwise the printer leaves white strips around the dark page).
  *
- * Theme: a local light/dark toggle. We don't touch the global
+ * Theme: local light/dark toggle. We don't touch the global
  * `body.dark` / `body.light` class so the user's site-wide preference
  * isn't disturbed when they bounce back to the website.
  */
 
+interface PrintAddon {
+  id: string;
+  addonItemId: string;
+  addon: { id: string; name: string; price: number; isAvailable: boolean };
+}
+interface PrintAddonGroup {
+  id: string;
+  name: string;
+  options: PrintAddon[];
+}
+interface PrintVariant {
+  id: string;
+  name: string;
+  price: number;
+}
 interface PrintMenuItem {
   id: string;
   name: string;
@@ -35,7 +54,8 @@ interface PrintMenuItem {
   categoryId: string;
   isAvailable: boolean;
   isVariantParent?: boolean;
-  variants?: Array<{ id: string; name: string; price: number }>;
+  variants?: PrintVariant[];
+  addonGroups?: PrintAddonGroup[];
   keyIngredients: Array<{ id: string; name: string; imageUrl: string | null }>;
 }
 
@@ -54,28 +74,37 @@ export default function MenuPrintPage() {
 
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-  // Group items under their category. Subcategories surface as their
-  // own section — the print page is flat, not nested. Categories with
-  // zero visible items disappear so admins don't get an empty heading.
+  // Walk every item up to its TOP-LEVEL parent category, so subcategory
+  // items merge under the parent's heading. Edge case — if an item's
+  // category has been orphaned (parent hidden / deleted), it falls
+  // back to its own category id.
   const sections = useMemo(() => {
     if (!menu) return [];
-    const byCategory = new Map<string, PrintMenuItem[]>();
+    const byId = new Map<string, typeof menu.categories[number]>();
+    for (const c of menu.categories) byId.set(c.id, c);
+    const topParentFor = (catId: string): string => {
+      let cur = byId.get(catId);
+      if (!cur) return catId;
+      while (cur.parentId && byId.has(cur.parentId)) cur = byId.get(cur.parentId)!;
+      return cur.id;
+    };
+
+    const byTopParent = new Map<string, PrintMenuItem[]>();
     for (const item of menu.items) {
       if (!item.isAvailable) continue;
-      const arr = byCategory.get(item.categoryId) ?? [];
+      const topId = topParentFor(item.categoryId);
+      const arr = byTopParent.get(topId) ?? [];
       arr.push(item);
-      byCategory.set(item.categoryId, arr);
+      byTopParent.set(topId, arr);
     }
-    return menu.categories
-      .map((cat) => ({ category: cat, items: byCategory.get(cat.id) ?? [] }))
+
+    const topLevel = menu.categories
+      .filter((c) => !c.parentId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    return topLevel
+      .map((cat) => ({ category: cat, items: byTopParent.get(cat.id) ?? [] }))
       .filter((s) => s.items.length > 0);
   }, [menu]);
-
-  const printedAt = useMemo(() => {
-    return new Date().toLocaleDateString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-    });
-  }, []);
 
   const logoUrl = branding?.logoUrl
     ? branding.logoUrl.startsWith('http') || branding.logoUrl.startsWith('/')
@@ -85,11 +114,16 @@ export default function MenuPrintPage() {
 
   return (
     <div data-theme={theme} className="menu-print-root">
-      {/* Print + theme styles scoped to the page so site-wide CSS is
-          untouched. The :root rule sets the print page colour scheme,
-          and `.no-print` hides the toolbar at print time. */}
+      {/*
+        @page margin is ZERO so the page background extends to all
+        four edges (otherwise dark mode leaves white printer-margin
+        strips). The A4 white-space is recreated with .mp-page
+        internal padding instead.
+      */}
       <style>{`
-        @page { size: A4 portrait; margin: 12mm; }
+        @page { size: A4 portrait; margin: 0; }
+
+        html, body { background: #fff; }
 
         .menu-print-root {
           font-family: 'DM Sans', system-ui, sans-serif;
@@ -102,6 +136,8 @@ export default function MenuPrintPage() {
           background: #0D0D0D;
           color-scheme: dark;
         }
+        .menu-print-root[data-theme="dark"] body,
+        body:has(.menu-print-root[data-theme="dark"]) { background: #0D0D0D; }
 
         .mp-toolbar {
           position: sticky; top: 0; z-index: 10;
@@ -127,51 +163,37 @@ export default function MenuPrintPage() {
         .mp-btn:hover { opacity: 0.85; }
 
         .mp-page {
-          max-width: 794px; /* ~A4 width at 96dpi */
+          max-width: 210mm; /* A4 width */
           margin: 0 auto;
-          padding: 24px 28px 32px;
+          padding: 14mm 12mm 14mm; /* fakes the printer margin INSIDE the page so the dark/light bg fills to all four edges */
         }
 
         .mp-header {
           display: flex; align-items: center; justify-content: space-between;
           gap: 16px;
-          padding-bottom: 16px; margin-bottom: 20px;
+          padding-bottom: 14px; margin-bottom: 18px;
           border-bottom: 2px solid #111;
         }
         .menu-print-root[data-theme="dark"] .mp-header { border-bottom-color: #F2EDE6; }
-        .mp-brand { display: flex; align-items: center; gap: 14px; }
-        .mp-logo { width: 56px; height: 56px; object-fit: contain; }
-        .mp-brand-name {
-          font-family: 'Bebas Neue', sans-serif;
-          font-size: 28px; letter-spacing: 0.12em; line-height: 1;
-          margin: 0;
+        .mp-logo {
+          width: 64px; height: 64px; object-fit: contain;
         }
-        .mp-brand-sub {
-          font-size: 11px; color: #666; margin-top: 4px;
-          letter-spacing: 0.05em;
-        }
-        .menu-print-root[data-theme="dark"] .mp-brand-sub { color: #999; }
-        .mp-meta {
-          text-align: right;
-          font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
-          color: #666;
-        }
-        .menu-print-root[data-theme="dark"] .mp-meta { color: #999; }
         .mp-meta-title {
           font-family: 'Bebas Neue', sans-serif;
-          font-size: 22px; letter-spacing: 0.2em; color: #D62B2B;
-          margin-bottom: 2px;
+          font-size: 28px; letter-spacing: 0.22em;
+          color: #D62B2B;
+          line-height: 1;
         }
 
         .mp-category {
           break-inside: avoid;
           page-break-inside: avoid;
-          margin-bottom: 18px;
+          margin-bottom: 16px;
         }
         .mp-cat-title {
           font-family: 'Bebas Neue', sans-serif;
           font-size: 22px; letter-spacing: 0.18em;
-          margin: 18px 0 12px;
+          margin: 14px 0 10px;
           padding-bottom: 6px;
           border-bottom: 1px solid #D62B2B;
           color: #D62B2B;
@@ -180,7 +202,8 @@ export default function MenuPrintPage() {
         .mp-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 12px;
+          gap: 10px;
+          align-items: start;
         }
 
         .mp-card {
@@ -189,29 +212,26 @@ export default function MenuPrintPage() {
           display: grid;
           grid-template-columns: 80px 1fr;
           gap: 10px;
-          padding: 10px;
-          border: 1px solid #E8E6E3;
-          background: #FAFAF7;
+          padding: 8px 10px;
+          border-bottom: 1px solid #E8E6E3;
         }
         .menu-print-root[data-theme="dark"] .mp-card {
-          border-color: #2A2A2A;
-          background: #161616;
+          border-bottom-color: #2A2A2A;
         }
-        .mp-img {
+
+        .mp-img-wrap {
+          /* Neutral light background regardless of theme so plated food
+             photos with transparent edges don't sit on solid black. */
           width: 80px; height: 80px;
-          object-fit: cover;
-          background: #F2F1EE;
-        }
-        .menu-print-root[data-theme="dark"] .mp-img { background: #1F1F1F; }
-        .mp-img-empty {
-          width: 80px; height: 80px;
+          background: #FFFFFF;
           display: flex; align-items: center; justify-content: center;
+          overflow: hidden;
+        }
+        .mp-img { width: 100%; height: 100%; object-fit: cover; }
+        .mp-img-empty {
           font-size: 28px; opacity: 0.3;
-          background: #F2F1EE;
         }
-        .menu-print-root[data-theme="dark"] .mp-img-empty {
-          background: #1F1F1F;
-        }
+
         .mp-card-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
         .mp-card-head {
           display: flex; align-items: baseline; justify-content: space-between;
@@ -240,26 +260,50 @@ export default function MenuPrintPage() {
         }
         .menu-print-root[data-theme="dark"] .mp-desc { color: #BBB; }
 
-        .mp-pills {
-          display: flex; flex-wrap: wrap; gap: 4px;
-          margin-top: 4px;
+        /* Variants — vertical name : price list. */
+        .mp-variants { margin-top: 4px; }
+        .mp-variant-row {
+          display: flex; justify-content: space-between; align-items: baseline;
+          font-size: 11px;
+          padding: 1px 0;
         }
+        .mp-variant-name { color: inherit; opacity: 0.92; }
+        .mp-variant-price { color: #D62B2B; white-space: nowrap; font-weight: 600; }
+
+        /* Addon groups — text-only, no chips. */
+        .mp-addons { margin-top: 4px; }
+        .mp-addon-group { font-size: 10.5px; line-height: 1.4; }
+        .mp-addon-group + .mp-addon-group { margin-top: 2px; }
+        .mp-addon-label {
+          font-family: 'Bebas Neue', sans-serif;
+          letter-spacing: 0.1em; font-size: 10.5px;
+          color: #D62B2B;
+        }
+        .mp-addon-list {
+          color: #444;
+        }
+        .menu-print-root[data-theme="dark"] .mp-addon-list { color: #CCC; }
+
+        /* Key ingredients — flat text + tiny image, NO border / chip bg.
+           Capped to 2 lines via -webkit-line-clamp. */
+        .mp-pills {
+          display: flex; flex-wrap: wrap; gap: 6px 10px;
+          margin-top: 4px;
+          font-size: 10px;
+          line-height: 1.3;
+          color: #666;
+          max-height: 2.6em;
+          overflow: hidden;
+        }
+        .menu-print-root[data-theme="dark"] .mp-pills { color: #999; }
         .mp-pill {
           display: inline-flex; align-items: center; gap: 4px;
-          padding: 2px 6px;
-          border: 1px solid #D62B2B;
-          background: rgba(214,43,43,0.06);
-          font-size: 9.5px; letter-spacing: 0.04em;
-          color: #D62B2B;
-          line-height: 1.2;
-        }
-        .menu-print-root[data-theme="dark"] .mp-pill {
-          background: rgba(214,43,43,0.14);
         }
         .mp-pill-img {
           width: 14px; height: 14px;
           object-fit: cover;
           border-radius: 50%;
+          background: #fff;
         }
 
         .mp-empty {
@@ -269,11 +313,11 @@ export default function MenuPrintPage() {
 
         @media print {
           .no-print { display: none !important; }
-          .mp-page { padding: 0; max-width: none; }
           .mp-toolbar { display: none !important; }
-          .menu-print-root { background: ${theme === 'dark' ? '#0D0D0D' : '#fff'} !important; }
-          /* color-adjust: keeps the brand reds + image colors intact
-             when the printer would otherwise drop background fills */
+          /* Force the chosen theme's background to print to ALL edges. */
+          html, body, .menu-print-root {
+            background: ${theme === 'dark' ? '#0D0D0D' : '#FFFFFF'} !important;
+          }
           * {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
@@ -304,26 +348,15 @@ export default function MenuPrintPage() {
 
       {/* Printable area */}
       <div className="mp-page">
-        {/* Header */}
+        {/* Header — logo only on the left, "MENU" mark on the right.
+            Address / phone / date are intentionally omitted per owner direction. */}
         <div className="mp-header">
-          <div className="mp-brand">
+          <div>
             {logoUrl ? (
-              <img src={logoUrl} alt={branding?.name ?? ''} className="mp-logo" />
+              <img src={logoUrl} alt={branding?.name ?? 'Logo'} className="mp-logo" />
             ) : null}
-            <div>
-              <h1 className="mp-brand-name">{branding?.name ?? 'Menu'}</h1>
-              {branding?.address ? (
-                <div className="mp-brand-sub">{branding.address}</div>
-              ) : null}
-              {branding?.phone ? (
-                <div className="mp-brand-sub">{branding.phone}</div>
-              ) : null}
-            </div>
           </div>
-          <div className="mp-meta">
-            <div className="mp-meta-title">MENU</div>
-            <div>{printedAt}</div>
-          </div>
+          <div className="mp-meta-title">MENU</div>
         </div>
 
         {isLoading && <div className="mp-empty">Loading menu…</div>}
@@ -336,34 +369,75 @@ export default function MenuPrintPage() {
             <h2 className="mp-cat-title">{category.name}</h2>
             <div className="mp-grid">
               {items.map((item) => {
-                const price = item.discountedPrice ?? item.price;
-                // Variant parents have no own price — show the cheapest
-                // variant as a "from" price, mirroring MenuPage.tsx
-                // FoodCard logic.
-                const fromVariant =
-                  item.isVariantParent && item.variants && item.variants.length > 0
-                    ? Math.min(...item.variants.map((v) => Number(v.price)))
-                    : null;
-                const displayPrice = fromVariant ?? Number(price);
-                const priceLabel =
-                  fromVariant !== null
-                    ? `${formatCurrency(displayPrice)}+`
-                    : formatCurrency(displayPrice);
+                const hasVariants = item.isVariantParent && item.variants && item.variants.length > 0;
+                const addonGroups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
+                const hasAddons = addonGroups.length > 0;
+
+                // Item-level price: variant parents show "from X+" of
+                // the cheapest variant. Variants are also listed below
+                // explicitly so the customer sees the full range.
+                const baseFromVariant = hasVariants
+                  ? Math.min(...item.variants!.map((v) => Number(v.price)))
+                  : null;
+                const headPrice =
+                  baseFromVariant !== null
+                    ? `${formatCurrency(baseFromVariant)}+`
+                    : formatCurrency(Number(item.discountedPrice ?? item.price));
+
                 return (
                   <article key={item.id} className="mp-card">
-                    {item.imageUrl ? (
-                      <img src={item.imageUrl} alt={item.name} className="mp-img" />
-                    ) : (
-                      <div className="mp-img-empty">🍽️</div>
-                    )}
+                    <div className="mp-img-wrap">
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} alt={item.name} className="mp-img" />
+                      ) : (
+                        <span className="mp-img-empty">🍽️</span>
+                      )}
+                    </div>
                     <div className="mp-card-body">
                       <div className="mp-card-head">
                         <h3 className="mp-name">{item.name}</h3>
-                        <span className="mp-price">{priceLabel}</span>
+                        {!hasVariants && <span className="mp-price">{headPrice}</span>}
+                        {hasVariants && <span className="mp-price">{headPrice}</span>}
                       </div>
                       {item.description ? (
                         <p className="mp-desc">{item.description}</p>
                       ) : null}
+
+                      {hasVariants && (
+                        <div className="mp-variants">
+                          {item.variants!.map((v) => (
+                            <div key={v.id} className="mp-variant-row">
+                              <span className="mp-variant-name">{v.name}</span>
+                              <span className="mp-variant-price">
+                                {formatCurrency(Number(v.price))}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {hasAddons && (
+                        <div className="mp-addons">
+                          {addonGroups.map((g) => (
+                            <div key={g.id} className="mp-addon-group">
+                              <span className="mp-addon-label">{g.name}: </span>
+                              <span className="mp-addon-list">
+                                {g.options
+                                  .filter((o) => o.addon.isAvailable !== false)
+                                  .map((o) => {
+                                    const p = Number(o.addon.price ?? 0);
+                                    // Free addon (price 0) → show name only.
+                                    return p > 0
+                                      ? `${o.addon.name} +${formatCurrency(p)}`
+                                      : o.addon.name;
+                                  })
+                                  .join(', ')}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       {item.keyIngredients.length > 0 && (
                         <div className="mp-pills">
                           {item.keyIngredients.map((ing) => (
