@@ -40,12 +40,18 @@ interface RecommendedItem {
   variants?: Array<{ id: string; name: string; price: number }>;
 }
 
+// Public review payload — matches the schema the QR review form
+// posts (4 separate 1-5 scores, free-text notes). The website
+// derives a single average rating for the star row.
 interface Review {
   id: string;
-  customerName: string;
-  rating: number;
-  comment: string | null;
+  foodScore: number;
+  serviceScore: number;
+  atmosphereScore: number;
+  priceScore: number;
+  notes: string | null;
   createdAt: string;
+  customer: { name: string } | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -464,33 +470,41 @@ export default function HomePage() {
               REVIEWS
             </h2>
             <div className="flex gap-6 overflow-x-auto no-scrollbar pb-4">
-              {reviews.map((review) => (
-                <div
-                  key={review.id}
-                  className="flex-shrink-0 w-80 glass p-6"
-                >
-                  <div className="flex gap-1 mb-3">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <svg
-                        key={i}
-                        className={`w-4 h-4 ${i < review.rating ? 'text-accent' : 'text-border'}`}
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                      </svg>
-                    ))}
-                  </div>
-                  {review.comment && (
-                    <p className="text-sm text-text/80 leading-relaxed mb-4 line-clamp-4">
-                      &ldquo;{review.comment}&rdquo;
+              {reviews.map((review) => {
+                // Average the 4 sub-scores into a single 0-5 rating
+                // for the star row. Round to the nearest whole star —
+                // half-star fills aren't worth the extra SVG path here.
+                const avg = (review.foodScore + review.serviceScore + review.atmosphereScore + review.priceScore) / 4;
+                const rating = Math.round(avg);
+                const name = review.customer?.name?.trim() || 'Anonymous';
+                return (
+                  <div
+                    key={review.id}
+                    className="flex-shrink-0 w-80 glass p-6"
+                  >
+                    <div className="flex gap-1 mb-3">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <svg
+                          key={i}
+                          className={`w-4 h-4 ${i < rating ? 'text-accent' : 'text-border'}`}
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                        </svg>
+                      ))}
+                    </div>
+                    {review.notes && (
+                      <p className="text-sm text-text/80 leading-relaxed mb-4 line-clamp-4">
+                        &ldquo;{review.notes}&rdquo;
+                      </p>
+                    )}
+                    <p className="text-xs font-semibold text-accent uppercase tracking-wider">
+                      {name}
                     </p>
-                  )}
-                  <p className="text-xs font-semibold text-accent uppercase tracking-wider">
-                    {review.customerName}
-                  </p>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </section>
