@@ -4,6 +4,7 @@ import SiteLayout from './components/SiteLayout';
 import HomePage from './pages/HomePage';
 import MenuPage from './pages/MenuPage';
 import MenuItemPage from './pages/MenuItemPage';
+import MenuPrintPage from './pages/MenuPrintPage';
 import AboutPage from './pages/AboutPage';
 import ContactPage from './pages/ContactPage';
 import ReservationPage from './pages/ReservationPage';
@@ -32,6 +33,9 @@ export default function WebApp() {
     <>
     <ScrollToTop />
     <Routes>
+      {/* /menu-print is rendered WITHOUT SiteLayout — no nav, no footer,
+          so the printable A4 hardcopy stays clean. */}
+      <Route path="/menu-print" element={<MenuPrintPage />} />
       <Route element={<SiteLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/menu" element={<MenuPage />} />
