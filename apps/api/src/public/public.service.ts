@@ -225,6 +225,99 @@ export class PublicService {
     return { categories, items: itemsWithDiscount };
   }
 
+  /**
+   * Print-menu variant of `getMenu` — same visibility filters, but each
+   * item carries a small `keyIngredients[]` payload so the
+   * `/menu-print` page can render an A4 hardcopy with picture +
+   * ingredient pills without doing N+1 fetches.
+   *
+   * Quantities + units are intentionally OMITTED (same recipe
+   * confidentiality reasoning as `getMenuItem` — exposing portion
+   * sizes lets competitors clone the dish). We cap the list at
+   * `KEY_INGREDIENT_LIMIT` so a 20-ingredient curry doesn't blow out
+   * the print card.
+   */
+  async getMenuForPrint(branchId: string) {
+    const KEY_INGREDIENT_LIMIT = 5;
+
+    const content = await this.prisma.websiteContent.findUnique({ where: { branchId } });
+    const hiddenCatIds: string[] = content?.hiddenCategoryIds ? this.safeParseArray(content.hiddenCategoryIds) : [];
+    const hiddenItemIds: string[] = content?.hiddenItemIds ? this.safeParseArray(content.hiddenItemIds) : [];
+
+    const catWhere: any = {
+      branchId, isActive: true, deletedAt: null, websiteVisible: true,
+    };
+    if (hiddenCatIds.length > 0) catWhere.id = { notIn: hiddenCatIds };
+
+    const itemWhere: any = {
+      branchId, isAvailable: true, deletedAt: null,
+      websiteVisible: true, isAddon: false, variantParentId: null,
+    };
+    if (hiddenItemIds.length > 0) itemWhere.id = { notIn: hiddenItemIds };
+
+    const [categories, items] = await Promise.all([
+      this.prisma.menuCategory.findMany({
+        where: catWhere, orderBy: { sortOrder: 'asc' }, select: PUBLIC_CATEGORY_SELECT,
+      }),
+      this.prisma.menuItem.findMany({
+        where: itemWhere, orderBy: { sortOrder: 'asc' },
+        select: {
+          ...PUBLIC_MENU_ITEM_SELECT,
+          recipe: {
+            select: {
+              items: {
+                select: {
+                  ingredient: { select: { id: true, name: true, imageUrl: true, showOnWebsite: true } },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    // websiteDisplayName aliasing — same raw-SQL fallback as
+    // getMenuItem so the endpoint works against an older generated
+    // Prisma client too. Single round-trip across ALL ingredients.
+    const allIngredientIds = Array.from(new Set(
+      (items as any[]).flatMap((i) => (i.recipe?.items ?? []).map((ri: any) => ri.ingredient.id)),
+    ));
+    const aliasMap = await this.fetchIngredientDisplayNames(allIngredientIds);
+
+    const itemsWithDiscount = await this.applyDiscounts(branchId, items);
+
+    const enriched = (itemsWithDiscount as any[]).map((item) => {
+      const keyIngredients = (item.recipe?.items ?? [])
+        .filter((ri: any) => ri.ingredient.showOnWebsite)
+        .slice(0, KEY_INGREDIENT_LIMIT)
+        .map((ri: any) => {
+          const alias = aliasMap.get(ri.ingredient.id);
+          return {
+            id: ri.ingredient.id,
+            name: alias && alias.trim() ? alias : ri.ingredient.name,
+            imageUrl: ri.ingredient.imageUrl,
+          };
+        });
+      const { recipe: _drop, ...rest } = item;
+      return { ...rest, keyIngredients };
+    });
+
+    return { categories, items: enriched };
+  }
+
+  /** Fetch websiteDisplayName for a batch of ingredient ids via raw
+   *  SQL — the column was added to the schema after some local
+   *  Prisma clients were generated, so going through `$queryRaw`
+   *  keeps the endpoint usable on stale checkouts. */
+  private async fetchIngredientDisplayNames(ingredientIds: string[]): Promise<Map<string, string | null>> {
+    if (ingredientIds.length === 0) return new Map();
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; websiteDisplayName: string | null }>>`
+      SELECT "id", "websiteDisplayName" FROM "ingredients"
+      WHERE "id" = ANY(${ingredientIds}::text[])
+    `;
+    return new Map(rows.map((r) => [r.id, r.websiteDisplayName]));
+  }
+
   private safeParseArray(raw: string | null | undefined): string[] {
     if (!raw) return [];
     try {

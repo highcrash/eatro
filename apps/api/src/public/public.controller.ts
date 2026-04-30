@@ -45,6 +45,17 @@ export class PublicController {
     return this.publicService.getMenu(branchId);
   }
 
+  /**
+   * Print-friendly menu — same visibility filters as `/menu/:branchId`
+   * plus per-item `keyIngredients[]` (capped at 5, filtered by
+   * `Ingredient.showOnWebsite`, `websiteDisplayName` aliased). Drives
+   * the website's `/menu-print` A4 hardcopy page.
+   */
+  @Get('menu-print/:branchId')
+  getMenuForPrint(@Param('branchId') branchId: string) {
+    return this.publicService.getMenuForPrint(branchId);
+  }
+
   @Get('reviews/:branchId')
   getReviews(@Param('branchId') branchId: string) {
     return this.publicService.getReviews(branchId);

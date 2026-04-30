@@ -15,6 +15,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getMenu: <T>(branchId: string) => request<T>(`/public/menu/${branchId}`),
+  // Same shape as getMenu, plus per-item keyIngredients[] for the
+  // /menu-print A4 page. Capped server-side at 5 ingredients/item.
+  getMenuPrint: <T>(branchId: string) => request<T>(`/public/menu-print/${branchId}`),
   getBranches: <T>() => request<T>('/public/branches'),
   placeOrder: <T>(branchId: string, body: unknown) =>
     request<T>('/orders/qr', { method: 'POST', headers: { 'X-Branch-Id': branchId }, body: JSON.stringify(body) }),
