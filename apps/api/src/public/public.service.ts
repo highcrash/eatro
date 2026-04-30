@@ -95,7 +95,24 @@ const PUBLIC_CATEGORY_SELECT = {
 export class PublicService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Calculate discounted prices for menu items based on active MenuItemDiscounts */
+  /** Calculate discounted prices for menu items based on active MenuItemDiscounts.
+   *
+   * Two extra responsibilities beyond the obvious per-item lookup:
+   *
+   * 1. Apply discounts to nested `variants[]` too. Variant CHILDREN are
+   *    eligible for their own MenuItemDiscount rows (admin can offer
+   *    "20% off Latte Large" without touching Latte Regular), but the
+   *    public payload returns variants nested under the parent — they
+   *    never reach the top-level loop, so we recurse here.
+   *
+   * 2. Synthesize a parent-level discount from the variants for variant
+   *    parents whose own price is 0. Without this, a discount on a
+   *    variant child would render correctly inside the variant tab on
+   *    the detail page but the parent card on the menu grid would show
+   *    no discount badge (the parent's price=0 makes
+   *    `discountedPrice < price` false). When the parent itself has a
+   *    direct discount, that takes precedence.
+   */
   private async applyDiscounts<T extends { id: string; price: any }>(branchId: string, items: T[]): Promise<(T & { discountedPrice: number | null; discountType: string | null; discountValue: number | null })[]> {
     if (items.length === 0) return items.map((i) => ({ ...i, discountedPrice: null, discountType: null, discountValue: null }));
     const now = new Date();
@@ -113,23 +130,121 @@ export class PublicService {
       try { const days: string[] = JSON.parse(d.applicableDays); return days.includes(dayName); } catch { return true; }
     });
 
+    // Helper — apply a discount row to a price, return the discounted
+    // value. Pure compute, no branch/active-flag checks.
+    const applyOne = (price: number, d: { type: string; value: any }): number =>
+      d.type === 'FLAT'
+        ? Math.max(0, price - Number(d.value))
+        : Math.round(price * (1 - Number(d.value) / 100));
+
     return items.map((item) => {
-      const discount = activeDiscounts.find((d) => d.menuItemId === item.id);
-      if (!discount) return { ...item, discountedPrice: null, discountType: null, discountValue: null, discountEndDate: null, discountApplicableDays: null };
-      const price = Number(item.price);
-      const discountedPrice = discount.type === 'FLAT'
-        ? Math.max(0, price - Number(discount.value))
-        : Math.round(price * (1 - Number(discount.value) / 100));
+      const itemAny = item as unknown as { variants?: Array<{ id: string; price: any; [k: string]: unknown }> };
+
+      // (1) recurse into variants
+      let processedVariants: Array<{ id: string; price: any; discountedPrice?: number | null; discountType?: string | null; discountValue?: number | null }> | undefined;
+      if (Array.isArray(itemAny.variants) && itemAny.variants.length > 0) {
+        processedVariants = itemAny.variants.map((v) => {
+          const vDisc = activeDiscounts.find((d) => d.menuItemId === v.id);
+          if (!vDisc) return { ...v, discountedPrice: null, discountType: null, discountValue: null };
+          const vPrice = Number(v.price);
+          return {
+            ...v,
+            discountedPrice: applyOne(vPrice, vDisc),
+            discountType: vDisc.type,
+            discountValue: Number(vDisc.value),
+          };
+        });
+      }
+
+      // (2) parent-level discount lookup
+      const direct = activeDiscounts.find((d) => d.menuItemId === item.id);
       let applicableDays: string[] | null = null;
-      try { applicableDays = discount.applicableDays ? JSON.parse(discount.applicableDays) : null; } catch { /* */ }
+      if (direct) {
+        try { applicableDays = direct.applicableDays ? JSON.parse(direct.applicableDays) : null; } catch { /* */ }
+      }
+
+      // For variant parents with price=0, surface the cheapest variant's
+      // effective price as the parent-level price + discountedPrice so
+      // the menu grid can render "From ৳X (was ৳Y)" via the existing
+      // discountedPrice < price comparison. When the parent has its own
+      // direct discount, that wins; otherwise we synthesize from
+      // variants. Standalone items (no variants) skip this entirely.
+      const isVariantParent = !!processedVariants && Number(item.price) === 0;
+      if (isVariantParent && processedVariants) {
+        const ranked = [...processedVariants].sort((a, b) => {
+          const aE = (a.discountedPrice ?? Number(a.price));
+          const bE = (b.discountedPrice ?? Number(b.price));
+          return aE - bE;
+        });
+        const cheapest = ranked[0];
+        if (cheapest) {
+          const cheapestPrice = Number(cheapest.price);
+          const cheapestDiscPrice = cheapest.discountedPrice ?? null;
+          if (direct) {
+            // Parent-level discount wins; apply to the cheapest variant's
+            // base price so the card shows the parent discount, not the
+            // variant's.
+            return {
+              ...item,
+              variants: processedVariants as any,
+              price: cheapestPrice,
+              discountedPrice: applyOne(cheapestPrice, direct),
+              discountType: direct.type,
+              discountValue: Number(direct.value),
+              discountEndDate: direct.endDate.toISOString(),
+              discountApplicableDays: applicableDays,
+            } as any;
+          }
+          // No parent-level discount — fall back to the cheapest
+          // variant's discount (if any).
+          if (cheapestDiscPrice != null && cheapestDiscPrice < cheapestPrice) {
+            return {
+              ...item,
+              variants: processedVariants as any,
+              price: cheapestPrice,
+              discountedPrice: cheapestDiscPrice,
+              discountType: (cheapest as any).discountType ?? null,
+              discountValue: (cheapest as any).discountValue ?? null,
+              discountEndDate: null,
+              discountApplicableDays: null,
+            } as any;
+          }
+          // No discount anywhere — keep parent.price as-is so the
+          // existing "is this a variant parent?" check still works.
+          return {
+            ...item,
+            variants: processedVariants as any,
+            discountedPrice: null,
+            discountType: null,
+            discountValue: null,
+            discountEndDate: null,
+            discountApplicableDays: null,
+          } as any;
+        }
+      }
+
+      // Standalone (or variant-parent w/ non-zero price): direct lookup.
+      if (!direct) {
+        return {
+          ...item,
+          ...(processedVariants ? { variants: processedVariants as any } : {}),
+          discountedPrice: null,
+          discountType: null,
+          discountValue: null,
+          discountEndDate: null,
+          discountApplicableDays: null,
+        } as any;
+      }
+      const price = Number(item.price);
       return {
         ...item,
-        discountedPrice,
-        discountType: discount.type,
-        discountValue: Number(discount.value),
-        discountEndDate: discount.endDate.toISOString(),
+        ...(processedVariants ? { variants: processedVariants as any } : {}),
+        discountedPrice: applyOne(price, direct),
+        discountType: direct.type,
+        discountValue: Number(direct.value),
+        discountEndDate: direct.endDate.toISOString(),
         discountApplicableDays: applicableDays,
-      };
+      } as any;
     });
   }
 
