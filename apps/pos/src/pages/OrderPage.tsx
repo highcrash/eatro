@@ -950,6 +950,20 @@ function ActiveOrderView({
   const approveAllMut = useMutation({
     mutationFn: () => api.post<Order>(`/orders/${order.id}/approve-items`, {}),
     onSuccess: (updated) => {
+      // Print a kitchen ticket for the newly-approved items only.
+      // Without this, customers adding items via QR to an already-
+      // confirmed order would see their items reach the kitchen
+      // visually but the KOT printer never spat anything out — the
+      // chef had to read off the screen. Filter to the items that
+      // were PENDING_APPROVAL on the snapshot we saw before this
+      // mutation ran; reprinting cooked items would be confusing.
+      const previouslyPending = new Set(
+        order.items.filter((i) => i.kitchenStatus === 'PENDING_APPROVAL' && !i.voidedAt).map((i) => i.id),
+      );
+      const newlyApproved = updated.items.filter((i) => previouslyPending.has(i.id));
+      if (newlyApproved.length > 0) {
+        void maybePrintKitchenTicket({ ...updated, items: newlyApproved } as Order);
+      }
       setOrder(updated);
       void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
     },
@@ -965,7 +979,13 @@ function ActiveOrderView({
 
   const approveItemMut = useMutation({
     mutationFn: (itemId: string) => api.post<Order>(`/orders/${order.id}/items/${itemId}/approve`, {}),
-    onSuccess: (updated) => {
+    onSuccess: (updated, itemId) => {
+      // Single-item approval — print just that item so the chef sees
+      // exactly what was just released. Same reasoning as approveAllMut.
+      const justApproved = updated.items.filter((i) => i.id === itemId);
+      if (justApproved.length > 0) {
+        void maybePrintKitchenTicket({ ...updated, items: justApproved } as Order);
+      }
       setOrder(updated);
       void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
     },
