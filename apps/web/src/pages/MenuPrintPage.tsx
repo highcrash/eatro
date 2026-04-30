@@ -212,7 +212,7 @@ export default function MenuPrintPage() {
           display: grid;
           grid-template-columns: 80px 1fr;
           gap: 10px;
-          padding: 8px 10px;
+          padding: 10px 10px 14px; /* extra bottom padding so the last line of ingredients doesn't kiss the border */
           border-bottom: 1px solid #E8E6E3;
         }
         .menu-print-root[data-theme="dark"] .mp-card {
@@ -284,26 +284,33 @@ export default function MenuPrintPage() {
         }
         .menu-print-root[data-theme="dark"] .mp-addon-list { color: #CCC; }
 
-        /* Key ingredients — flat text + tiny image, NO border / chip bg.
-           Capped to 2 lines via -webkit-line-clamp. */
+        /* Key ingredients — flat inline text + tiny image. Capped to
+           2 visible lines via -webkit-line-clamp (proper line-boundary
+           clipping, doesn't slice characters mid-letter). */
         .mp-pills {
-          display: flex; flex-wrap: wrap; gap: 6px 10px;
-          margin-top: 4px;
-          font-size: 10px;
-          line-height: 1.3;
-          color: #666;
-          max-height: 2.6em;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
           overflow: hidden;
+          margin-top: 6px;
+          font-size: 10px;
+          line-height: 1.6;
+          color: #666;
         }
         .menu-print-root[data-theme="dark"] .mp-pills { color: #999; }
         .mp-pill {
-          display: inline-flex; align-items: center; gap: 4px;
+          display: inline;
+          white-space: nowrap;
+          margin-right: 10px;
         }
         .mp-pill-img {
-          width: 14px; height: 14px;
+          width: 12px; height: 12px;
           object-fit: cover;
           border-radius: 50%;
           background: #fff;
+          vertical-align: -2px;
+          margin-right: 3px;
+          display: inline-block;
         }
 
         .mp-empty {
