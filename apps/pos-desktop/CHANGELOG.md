@@ -3,6 +3,19 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.44 — POS: print KOT when approving customer-added items (2026-04-30)
+
+No Electron-shell changes. Rebundles apps/pos only:
+
+- When a customer adds items to a confirmed order from QR, the
+  cashier sees a "NEW ITEMS" badge and approves them. Approve
+  flipped the items from PENDING_APPROVAL to NEW so the kitchen
+  could see them, but never invoked the printer — chefs had to
+  read items off the screen, which broke station-by-station
+  routing. Now both Approve and Approve-All print a KOT with
+  ONLY the newly-approved items (already-cooking items aren't
+  reprinted).
+
 ## 1.0.43 — POS: recover hidden orders when a table has more than one (2026-04-30)
 
 No Electron-shell changes. Rebundles apps/pos only:
