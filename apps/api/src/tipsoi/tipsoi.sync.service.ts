@@ -117,14 +117,17 @@ function branchLocalParts(d: Date, tz: string): { y: number; mo: number; day: nu
   return { y: get('year'), mo: get('month'), day: get('day'), h: get('hour') === 24 ? 0 : get('hour'), mi: get('minute') };
 }
 
-/** Instant that corresponds to 00:00 branch-local on the date that
- *  contains `d`. Used for date-bucket math (shiftDate, ABSENT-fill
- *  iteration). */
-function startOfDay(d: Date, tz: string): Date {
+/** Date whose UTC year/month/day match the branch-local calendar date
+ *  containing `d`. `Attendance.date` is a Postgres `DATE` column —
+ *  Prisma serialises a JS Date to it using the UTC components, so
+ *  feeding it the *instant* of branch-local midnight (e.g.
+ *  2026-04-29T18:00Z for BD-midnight Apr 30) makes PG store "Apr 29",
+ *  which is the bug we're fixing. By returning a Date at UTC midnight
+ *  for the local Y/M/D, the stored DATE matches the admin's date
+ *  picker label. */
+function branchLocalDate(d: Date, tz: string): Date {
   const p = branchLocalParts(d, tz);
-  const utcGuess = Date.UTC(p.y, p.mo - 1, p.day, 0, 0, 0);
-  const offsetMin = tzOffsetMinutes(tz, new Date(utcGuess));
-  return new Date(utcGuess - offsetMin * 60_000);
+  return new Date(Date.UTC(p.y, p.mo - 1, p.day, 0, 0, 0));
 }
 
 /**
@@ -146,7 +149,7 @@ function resolveShiftDate(loggedAt: Date, shiftStartMinutes: number, tz: string)
   // Allow up to 4h before shiftStart to count as the same shift
   // (e.g. staff arrives at 11:00 for a 15:00 shift to set up).
   const windowStart = (shiftStartMinutes - 240 + 1440) % 1440;
-  const sameDay = startOfDay(loggedAt, tz);
+  const sameDay = branchLocalDate(loggedAt, tz);
   const prevDay = new Date(sameDay.getTime() - 24 * 60 * 60 * 1000);
   if (shiftStartMinutes >= 12 * 60) {
     // afternoon/night shifts: any log earlier than `shiftStart - 4h`
@@ -256,7 +259,7 @@ export class TipsoiSyncService {
       const loggedAt = parseTipsoiTime(log.logged_time, tz);
       const shiftDate = resolveShiftDate(loggedAt, spec.startMinutes, tz);
       // Drop logs whose shift date falls outside the requested range.
-      if (shiftDate < startOfDay(fromDate, tz) || shiftDate > startOfDay(toDate, tz)) continue;
+      if (shiftDate < branchLocalDate(fromDate, tz) || shiftDate > branchLocalDate(toDate, tz)) continue;
       const key = `${staff.id}:${shiftDate.toISOString().slice(0, 10)}`;
       let bucket = buckets.get(key);
       if (!bucket) {
@@ -388,11 +391,11 @@ export class TipsoiSyncService {
     // BD's late-night hours that's a different calendar date than
     // server-local — we'd otherwise either premature-ABSENT today's
     // shift or skip yesterday's shift.
-    const today = startOfDay(new Date(), tz);
+    const today = branchLocalDate(new Date(), tz);
     const dates: Date[] = [];
     for (
-      let d = startOfDay(fromDate, tz);
-      d <= startOfDay(toDate, tz);
+      let d = branchLocalDate(fromDate, tz);
+      d <= branchLocalDate(toDate, tz);
       d = new Date(d.getTime() + 24 * 60 * 60 * 1000)
     ) {
       // Only fill dates strictly in the past — today's not-yet-clocked
