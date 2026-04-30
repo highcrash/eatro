@@ -643,6 +643,36 @@ export default function SuppliersPage() {
                               ))}
                             </tbody>
                           </table>
+
+                          {/* Receipt-level extras — visibility for the
+                              delivery / freight / discount lines that
+                              netted into the PO's payable total. */}
+                          {((po.receiptExtraFees && po.receiptExtraFees.length > 0) || (po.receiptDiscount && po.receiptDiscount > 0)) && (
+                            <div className="mt-2 pt-2 border-t border-[#2A2A2A] space-y-1">
+                              {(po.itemsTotal !== undefined) && (
+                                <div className="flex justify-between text-[#666] font-body text-[11px]">
+                                  <span>Items subtotal</span>
+                                  <span>৳{(po.itemsTotal / 100).toFixed(2)}</span>
+                                </div>
+                              )}
+                              {(po.receiptExtraFees ?? []).map((f, idx) => (
+                                <div key={idx} className="flex justify-between text-[#FFA726] font-body text-[11px]">
+                                  <span>+ {f.label}</span>
+                                  <span>৳{(Number(f.amount) / 100).toFixed(2)}</span>
+                                </div>
+                              ))}
+                              {po.receiptDiscount !== undefined && po.receiptDiscount > 0 && (
+                                <div className="flex justify-between text-[#4CAF50] font-body text-[11px]">
+                                  <span>− Discount{po.receiptDiscountReason ? ` (${po.receiptDiscountReason})` : ''}</span>
+                                  <span>−৳{(po.receiptDiscount / 100).toFixed(2)}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between text-white font-body text-xs font-medium pt-1 border-t border-[#1F1F1F]">
+                                <span>Net payable</span>
+                                <span>৳{(po.total / 100).toFixed(2)}</span>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
