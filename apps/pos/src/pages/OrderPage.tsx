@@ -2560,7 +2560,17 @@ export default function OrderPage() {
     refetchInterval: 3000,
   });
 
-  const activeOrder = directOrder ?? tableOrders[0] ?? null;
+  // When a table has more than one active order (e.g. a QR customer
+  // placed Order A, then a second QR scan from a different device
+  // landed a brand new Order B on the same table), we used to silently
+  // pick the newest — Order A would disappear from the cashier's view
+  // even though it was still alive in the DB. Now we show a picker so
+  // the cashier can decide which order to continue.
+  const activeTableOrders = tableOrders.filter((o) => {
+    const s = (o as { status?: string }).status;
+    return s !== 'PAID' && s !== 'VOID' && s !== 'REFUNDED' && s !== 'CANCELLED';
+  });
+  const activeOrder = directOrder ?? (activeTableOrders.length === 1 ? activeTableOrders[0] : null);
   const goBack = () => void navigate('/tables');
 
   if ((tableId && loadingTable) || (orderId && loadingById)) {
@@ -2571,9 +2581,110 @@ export default function OrderPage() {
     );
   }
 
+  // Picker mode — multiple live orders on this table, no orderId pinned.
+  if (tableId && !orderId && activeTableOrders.length > 1) {
+    return (
+      <TableOrderPicker
+        tableNumber={tableNumber}
+        orders={activeTableOrders}
+        onPick={(id) => void navigate(`/order?orderId=${id}`)}
+        onNew={() => {/* allow creating a new order here too — uncommon, but possible */}}
+        onBack={goBack}
+      />
+    );
+  }
+
   if (activeOrder) {
     return <ActiveOrderView order={activeOrder} onBack={goBack} />;
   }
 
   return <NewOrderView tableId={tableId} tableNumber={tableNumber} onBack={goBack} />;
+}
+
+/**
+ * Multi-order picker for a table that has more than one active order.
+ * Shows each order's number, status, item count, total, and elapsed
+ * time. Cashier taps to open that specific order — the OrderPage then
+ * renders ActiveOrderView for the chosen one.
+ *
+ * This is the recovery path for the bug where a duplicate QR order
+ * would otherwise hide the original behind it. Both orders show here
+ * until they're paid/voided.
+ */
+function TableOrderPicker({ tableNumber, orders, onPick, onBack }: {
+  tableNumber: string;
+  orders: Order[];
+  onPick: (id: string) => void;
+  onNew: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <div className="flex flex-col h-full bg-theme-bg">
+      <div className="border-b border-theme-border px-6 py-4 flex items-center gap-4">
+        <button
+          onClick={onBack}
+          className="text-theme-text-muted hover:text-theme-text font-theme-body text-xs uppercase tracking-widest"
+        >
+          ← Tables
+        </button>
+        <div>
+          <h1 className="font-theme-display text-2xl text-theme-text tracking-widest">
+            TABLE {tableNumber}
+          </h1>
+          <p className="text-xs font-theme-body text-theme-text-muted mt-0.5">
+            {orders.length} active orders — pick one to continue
+          </p>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-3">
+        {orders.map((o) => {
+          const status = (o as { status?: string }).status ?? '—';
+          const items = ((o as { items?: { voidedAt?: string | null }[] }).items ?? []).filter((i) => !i.voidedAt);
+          const total = Number((o as { totalAmount?: number }).totalAmount ?? 0);
+          const created = (o as unknown as { createdAt?: string | Date }).createdAt;
+          const elapsed = created ? Math.round((Date.now() - new Date(created).getTime()) / 60000) : 0;
+          const elapsedLabel = elapsed >= 60 ? `${Math.floor(elapsed / 60)}h ${elapsed % 60}m` : `${elapsed}m`;
+          const billRequested = (o as { billRequested?: boolean }).billRequested === true;
+          const orderType = (o as { type?: string }).type ?? 'DINE_IN';
+          return (
+            <button
+              key={o.id}
+              onClick={() => onPick(o.id)}
+              className="w-full text-left bg-theme-card border border-theme-border hover:border-theme-accent transition-colors p-4 grid grid-cols-[1fr_auto] gap-3"
+            >
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm text-theme-text">
+                    #{(o as { orderNumber?: string }).orderNumber ?? o.id.slice(-6)}
+                  </span>
+                  <span className="text-[10px] font-theme-body uppercase tracking-widest px-2 py-0.5 bg-theme-hover text-theme-text-muted">
+                    {status}
+                  </span>
+                  {orderType === 'QR_ONLINE' && (
+                    <span className="text-[10px] font-theme-body uppercase tracking-widest px-2 py-0.5 bg-blue-500/15 text-blue-400">
+                      QR
+                    </span>
+                  )}
+                  {billRequested && (
+                    <span className="text-[10px] font-theme-body uppercase tracking-widest px-2 py-0.5 bg-yellow-500/15 text-yellow-400">
+                      Bill Requested
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs font-theme-body text-theme-text-muted">
+                  {items.length} {items.length === 1 ? 'item' : 'items'} · placed {elapsedLabel} ago
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-theme-display text-xl text-theme-text">
+                  {formatCurrency(total)}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
