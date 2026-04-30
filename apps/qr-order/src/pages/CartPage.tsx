@@ -14,9 +14,10 @@ export default function CartPage() {
   const branchId = useSessionStore((s) => s.branchId);
   const activeOrderId = useSessionStore((s) => s.activeOrderId);
   const setActiveOrder = useSessionStore((s) => s.setActiveOrder);
-  // Customer is set after OTP login. Add-to-cart is already gated on
-  // it — but the cart route itself can be hit directly via the cart
-  // bar, so guard the order submit too in case session expired.
+  // Customer is OPTIONAL — set after OTP login, used to auto-fill
+  // POS / link the order to the customer's lifetime spend ledger,
+  // and required for coupon redemption (gated server-side). Anonymous
+  // QR orders without a logged-in customer are still allowed.
   const customer = useSessionStore((s) => s.customer);
   const [submitting, setSubmitting] = useState(false);
 
@@ -47,10 +48,6 @@ export default function CartPage() {
   });
 
   const handleOrder = async () => {
-    if (!customer) {
-      void navigate(`/login?next=${encodeURIComponent('/cart')}`);
-      return;
-    }
     setSubmitting(true);
     try {
       const url = activeOrderId
@@ -61,11 +58,12 @@ export default function CartPage() {
         : {
             tableId: tableId ?? undefined,
             type: tableId ? 'DINE_IN' : 'TAKEAWAY',
-            // Identify the order with the logged-in customer so the
-            // POS Customer field auto-fills + lifetime totals stay
-            // accurate. Server resolves customerName / customerPhone
-            // from this in OrderService.createQrOrder.
-            customerId: customer.id,
+            // Attach the logged-in customer when available — POS
+            // Customer field auto-fills, lifetime spend ledger ties
+            // up. Optional: anonymous orders are still accepted, the
+            // server treats them as walk-in. Coupon redemption later
+            // will trigger the OTP login flow from OrderStatusPage.
+            ...(customer ? { customerId: customer.id } : {}),
             items: items.map(lineToDto),
           };
 
