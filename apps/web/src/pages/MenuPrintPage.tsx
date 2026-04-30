@@ -191,14 +191,25 @@ export default function MenuPrintPage() {
           line-height: 1;
         }
 
+        /* Each category is a real HTML table so its thead repeats at
+           the top of every printed page the category spans — the
+           browser treats display:table-header-group as a "repeat me
+           on page break" hint. Without this, a category that spilled
+           onto page 2 left the customer with no idea what section
+           they were reading. */
         .mp-category {
-          /* No break-inside: avoid here — categories should flow
-             naturally across pages. v2 had this set, which forced
-             every category to live on a single page; long ones (like
-             Appetizer) bumped to page 2 and left page 1 mostly
-             empty. Cards still keep their own break-inside:avoid so
-             individual items never split. */
+          width: 100%;
+          border-collapse: collapse;
           margin-bottom: 16px;
+          table-layout: fixed;
+        }
+        .mp-category thead { display: table-header-group; }
+        .mp-category tbody { display: table-row-group; }
+        .mp-category td, .mp-category th {
+          padding: 0;
+          border: none;
+          text-align: left;
+          vertical-align: top;
         }
         .mp-cat-title {
           font-family: 'Bebas Neue', sans-serif;
@@ -207,6 +218,7 @@ export default function MenuPrintPage() {
           padding-bottom: 6px;
           border-bottom: 1px solid #D62B2B;
           color: #D62B2B;
+          font-weight: normal;
         }
 
         .mp-grid {
@@ -389,10 +401,23 @@ export default function MenuPrintPage() {
         )}
 
         {sections.map(({ category, items }) => (
-          <section key={category.id} className="mp-category">
-            <h2 className="mp-cat-title">{category.name}</h2>
-            <div className="mp-grid">
-              {items.map((item) => {
+          // <table> + <thead> so the category title repeats at the
+          // top of every printed page when this category spans more
+          // than one page. The whole grid lives in a single <td> so
+          // the existing 2-column CSS-grid layout is preserved.
+          <table key={category.id} className="mp-category">
+            <thead>
+              <tr>
+                <th>
+                  <h2 className="mp-cat-title">{category.name}</h2>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div className="mp-grid">
+                    {items.map((item) => {
                 const hasVariants = item.isVariantParent && item.variants && item.variants.length > 0;
                 const addonGroups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
                 const hasAddons = addonGroups.length > 0;
@@ -478,8 +503,11 @@ export default function MenuPrintPage() {
                   </article>
                 );
               })}
-            </div>
-          </section>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         ))}
       </div>
     </div>
