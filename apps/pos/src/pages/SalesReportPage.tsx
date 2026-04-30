@@ -4,7 +4,7 @@ import { ArrowLeft, Printer, Wrench, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import type { CorrectPaymentDto, ItemsSoldReport } from '@restora/types';
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, renderMushakSlipHtml, type MushakSnapshot } from '@restora/utils';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/auth.store';
 
@@ -24,9 +24,14 @@ interface SalesOrder {
   items: SalesItem[];
   subtotal: number;
   discountAmount: number;
+  sdAmount: number;
   taxAmount: number;
   totalAmount: number;
   paymentMethod: string;
+  // Mushak 6.3 invoice — present once the branch is BIN-enabled and
+  // the order is PAID. The serial doubles as the Mushak Register
+  // Serial Number; clicking it reprints the invoice slip.
+  mushakInvoice: { id: string; serial: string; sdAmount: number } | null;
 }
 
 interface SalesData {
@@ -317,8 +322,33 @@ export default function SalesReportPage() {
   // Grand totals of displayed orders
   const grandSubtotal = displayOrders.reduce((s, o) => s + o.subtotal, 0);
   const grandDiscount = displayOrders.reduce((s, o) => s + o.discountAmount, 0);
+  const grandSd = displayOrders.reduce((s, o) => s + (o.sdAmount ?? 0), 0);
   const grandTax = displayOrders.reduce((s, o) => s + o.taxAmount, 0);
   const grandTotal = displayOrders.reduce((s, o) => s + o.totalAmount, 0);
+
+  // Open the Mushak 6.3 invoice slip for an order in a popup window so
+  // the cashier can reprint it. Hits the existing
+  // `/mushak/invoices/by-order/:orderId` endpoint, then renders the
+  // snapshot via the shared utility (same path RefundOrderDialog uses
+  // for its 6.8 credit-note slip).
+  const openMushakInvoice = async (orderId: string) => {
+    try {
+      const inv = await api.get<{ snapshot: MushakSnapshot } | null>(`/mushak/invoices/by-order/${orderId}`);
+      if (!inv?.snapshot) {
+        alert('Mushak invoice not found for this order.');
+        return;
+      }
+      const w = window.open('', '_blank', 'width=360,height=700');
+      if (!w) {
+        alert('Popup blocked. Allow popups to print the Mushak invoice.');
+        return;
+      }
+      w.document.write(renderMushakSlipHtml(inv.snapshot));
+      w.document.close();
+    } catch (e) {
+      alert(`Failed to load Mushak invoice: ${(e as Error).message}`);
+    }
+  };
 
   const handlePrint = () => {
     const el = printRef.current;
@@ -581,13 +611,15 @@ export default function SalesReportPage() {
               <thead>
                 <tr className="text-left">
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>#</th>
-                  <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Ref</th>
+                  {/* "Mushak Register Serial #" replaces the legacy short-code Ref. Clicking the value reprints the Mushak 6.3 invoice slip. */}
+                  <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Mushak Serial #</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>{isToday ? 'Time' : 'Date & Time'}</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Type</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Table</th>
-                  <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Items</th>
+                  {/* Items column intentionally hidden — register report only needs amounts. */}
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600, textAlign: 'right' }}>Subtotal</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600, textAlign: 'right' }}>Discount</th>
+                  <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600, textAlign: 'right' }}>SD</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600, textAlign: 'right' }}>VAT</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600, textAlign: 'right' }}>Total</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Payment</th>
@@ -600,7 +632,20 @@ export default function SalesReportPage() {
                 {displayOrders.map((order, idx) => (
                   <tr key={order.id}>
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10 }}>{idx + 1}</td>
-                    <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>{shortCode(order.id)}</td>
+                    <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>
+                      {order.mushakInvoice ? (
+                        <button
+                          onClick={() => void openMushakInvoice(order.id)}
+                          title="Reprint Mushak 6.3 invoice"
+                          className="text-theme-accent hover:underline"
+                          style={{ background: 'none', border: 0, padding: 0, fontFamily: 'monospace', letterSpacing: 1, cursor: 'pointer' }}
+                        >
+                          {order.mushakInvoice.serial}
+                        </button>
+                      ) : (
+                        <span style={{ color: '#999' }}>{shortCode(order.id)}</span>
+                      )}
+                    </td>
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10 }}>
                       {isToday ? formatTime(order.paidAt) : formatDateTime(order.paidAt)}
                     </td>
@@ -610,14 +655,14 @@ export default function SalesReportPage() {
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10 }}>
                       {order.tableNumber || '—'}
                     </td>
-                    <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 9, color: '#666' }}>
-                      {order.items.map((i) => `${i.quantity}× ${i.name}`).join(', ')}
-                    </td>
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, textAlign: 'right' }}>
                       {formatCurrency(order.subtotal)}
                     </td>
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, textAlign: 'right', color: order.discountAmount > 0 ? '#2e7d32' : '#666' }}>
                       {order.discountAmount > 0 ? `-${formatCurrency(order.discountAmount)}` : '—'}
+                    </td>
+                    <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, textAlign: 'right' }}>
+                      {(order.sdAmount ?? 0) > 0 ? formatCurrency(order.sdAmount) : '—'}
                     </td>
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, textAlign: 'right' }}>
                       {formatCurrency(order.taxAmount)}
@@ -638,10 +683,12 @@ export default function SalesReportPage() {
                     )}
                   </tr>
                 ))}
-                {/* Grand total row */}
+                {/* Grand total row — colSpan covers #, Mushak Serial,
+                    Time, Type, Table = 5 columns. Then Subtotal,
+                    Discount, SD, VAT, Total, Payment, (Fix). */}
                 {displayOrders.length > 0 && (
                   <tr>
-                    <td colSpan={6} style={{ borderTop: '2px solid #111', fontWeight: 600, fontSize: 11, paddingTop: 8, padding: '8px 4px' }}>
+                    <td colSpan={5} style={{ borderTop: '2px solid #111', fontWeight: 600, fontSize: 11, paddingTop: 8, padding: '8px 4px' }}>
                       GRAND TOTAL
                     </td>
                     <td style={{ borderTop: '2px solid #111', fontWeight: 600, fontSize: 11, paddingTop: 8, textAlign: 'right', padding: '8px 4px' }}>
@@ -649,6 +696,9 @@ export default function SalesReportPage() {
                     </td>
                     <td style={{ borderTop: '2px solid #111', fontWeight: 600, fontSize: 11, paddingTop: 8, textAlign: 'right', padding: '8px 4px', color: grandDiscount > 0 ? '#2e7d32' : undefined }}>
                       {grandDiscount > 0 ? `-${formatCurrency(grandDiscount)}` : '—'}
+                    </td>
+                    <td style={{ borderTop: '2px solid #111', fontWeight: 600, fontSize: 11, paddingTop: 8, textAlign: 'right', padding: '8px 4px' }}>
+                      {grandSd > 0 ? formatCurrency(grandSd) : '—'}
                     </td>
                     <td style={{ borderTop: '2px solid #111', fontWeight: 600, fontSize: 11, paddingTop: 8, textAlign: 'right', padding: '8px 4px' }}>
                       {formatCurrency(grandTax)}
