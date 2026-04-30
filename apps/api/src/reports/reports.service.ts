@@ -42,6 +42,14 @@ export class ReportsService {
       include: {
         items: { where: { voidedAt: null } },
         payments: true,
+        // Mushak 6.3 invoice (Bangladesh VAT register). When the branch
+        // is BIN-enabled, every paid order has one. Surface its serial
+        // + SD amount so the POS sales report can show the Mushak
+        // Register Serial Number column and let the cashier reprint the
+        // invoice slip with one click.
+        mushakInvoice: {
+          select: { id: true, serial: true, sdAmount: true },
+        },
       },
       orderBy: { paidAt: 'asc' },
     });
@@ -63,9 +71,13 @@ export class ReportsService {
         })),
         subtotal: Number(o.subtotal),
         discountAmount: Number(o.discountAmount),
+        sdAmount: o.mushakInvoice ? Number(o.mushakInvoice.sdAmount) : 0,
         taxAmount: Number(o.taxAmount),
         totalAmount: Number(o.totalAmount),
         paymentMethod: o.payments.map((p) => p.method).join(', ') || o.paymentMethod || 'N/A',
+        mushakInvoice: o.mushakInvoice
+          ? { id: o.mushakInvoice.id, serial: o.mushakInvoice.serial, sdAmount: Number(o.mushakInvoice.sdAmount) }
+          : null,
       })),
     };
   }
