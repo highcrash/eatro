@@ -19,8 +19,23 @@ export class IngredientController {
 
   @Get('movements')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  getMovements(@CurrentUser() user: JwtPayload, @Query('ingredientId') ingredientId?: string) {
-    return this.ingredientService.getMovements(user.branchId, ingredientId);
+  getMovements(
+    @CurrentUser() user: JwtPayload,
+    @Query('ingredientId') ingredientId?: string,
+    @Query('search') search?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.ingredientService.getMovements(user.branchId, {
+      ingredientId,
+      search,
+      from,
+      to,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
   }
 
   /** Correct a stock-movement's recorded quantity post-hoc. Used when
