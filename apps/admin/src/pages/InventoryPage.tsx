@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
@@ -256,9 +256,17 @@ export default function InventoryPage() {
   const stockCsvFileRef = useRef<HTMLInputElement>(null);
   const [expandedParent, setExpandedParent] = useState<string | null>(null);
   const [variantDialog, setVariantDialog] = useState<{ parent: Ingredient; variant?: Ingredient } | null>(null);
+  // Movements tab — server-paginated. The on-screen `movSearchInput`
+  // updates as the admin types; we debounce it into `movSearch` so the
+  // backend isn't hammered per keystroke. `movPage` + `movPageSize`
+  // drive the LIMIT/OFFSET; default 200/page strikes the balance the
+  // owner asked for (full history accessible, table stays snappy).
+  const [movSearchInput, setMovSearchInput] = useState('');
   const [movSearch, setMovSearch] = useState('');
   const [movFrom, setMovFrom] = useState('');
   const [movTo, setMovTo] = useState('');
+  const [movPage, setMovPage] = useState(1);
+  const [movPageSize, setMovPageSize] = useState(200);
 
   const { data: ingredients = [], isLoading } = useQuery<Ingredient[]>({
     queryKey: ['ingredients'],
@@ -383,26 +391,47 @@ export default function InventoryPage() {
     queryFn: () => api.get('/suppliers'),
   });
 
-  const { data: movements = [], isLoading: movLoading } = useQuery<StockMovement[]>({
-    queryKey: ['stock-movements'],
-    queryFn: () => api.get('/ingredients/movements'),
-    enabled: tab === 'movements',
-  });
+  // Debounce the search box so we don't fire a /movements request on
+  // every keystroke. 250ms feels instant while saving the API trip.
+  // Resetting to page 1 happens in the same effect — typing a new
+  // search shouldn't keep the user stranded on page 7 of the old set.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setMovSearch(movSearchInput);
+      setMovPage(1);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [movSearchInput]);
 
-  const filteredMovements = (() => {
-    const q = movSearch.trim().toLowerCase();
-    const fromMs = movFrom ? new Date(movFrom + 'T00:00:00').getTime() : null;
-    // "to" is inclusive — bump to end-of-day so a user typing today's
-    // date still sees today's movements without having to enter tomorrow.
-    const toMs = movTo ? new Date(movTo + 'T23:59:59.999').getTime() : null;
-    return movements.filter((m) => {
-      if (q && !(m.ingredient?.name?.toLowerCase().includes(q) || m.ingredientId.toLowerCase().includes(q))) return false;
-      const t = new Date(m.createdAt).getTime();
-      if (fromMs && t < fromMs) return false;
-      if (toMs && t > toMs) return false;
-      return true;
-    });
+  // Date-filter changes also reset to page 1 — same reasoning.
+  useEffect(() => { setMovPage(1); }, [movFrom, movTo, movPageSize]);
+
+  const movQs = (() => {
+    const params = new URLSearchParams();
+    params.set('page', String(movPage));
+    params.set('pageSize', String(movPageSize));
+    if (movSearch.trim()) params.set('search', movSearch.trim());
+    if (movFrom) params.set('from', movFrom);
+    if (movTo) params.set('to', movTo);
+    return params.toString();
   })();
+
+  const { data: movResp, isLoading: movLoading, isFetching: movFetching } = useQuery<{
+    rows: StockMovement[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }>({
+    queryKey: ['stock-movements', movQs],
+    queryFn: () => api.get(`/ingredients/movements?${movQs}`),
+    enabled: tab === 'movements',
+    placeholderData: (prev) => prev, // keep last page visible during refetch
+  });
+  const movements = movResp?.rows ?? [];
+  const movTotal = movResp?.total ?? 0;
+  const movTotalPages = Math.max(1, Math.ceil(movTotal / movPageSize));
+  const movFromIndex = movTotal === 0 ? 0 : (movPage - 1) * movPageSize + 1;
+  const movToIndex = Math.min(movPage * movPageSize, movTotal);
 
   const saveIngMutation = useMutation({
     mutationFn: async (data: IngredientForm) => {
@@ -1153,15 +1182,15 @@ export default function InventoryPage() {
 
       {/* Movements Tab */}
       {tab === 'movements' && (
-        movLoading ? <p className="text-[#666] font-body text-sm">Loading…</p> : (
-          <div className="space-y-3">
-            {/* Filters */}
+        <div className="space-y-3">
+            {/* Filters — search hits the server so admins can reach all
+                history regardless of how far back the entry sits. */}
             <div className="flex gap-3 items-end flex-wrap">
               <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
                 <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Search ingredient</label>
                 <input
                   type="text" placeholder="Type ingredient name…"
-                  value={movSearch} onChange={(e) => setMovSearch(e.target.value)}
+                  value={movSearchInput} onChange={(e) => setMovSearchInput(e.target.value)}
                   className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
                 />
               </div>
@@ -1179,16 +1208,32 @@ export default function InventoryPage() {
                   className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
                 />
               </div>
-              {(movSearch || movFrom || movTo) && (
+              <div className="flex flex-col gap-1">
+                <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Per page</label>
+                <select
+                  value={movPageSize}
+                  onChange={(e) => setMovPageSize(Number(e.target.value))}
+                  className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+                >
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={500}>500</option>
+                </select>
+              </div>
+              {(movSearchInput || movFrom || movTo) && (
                 <button
-                  onClick={() => { setMovSearch(''); setMovFrom(''); setMovTo(''); }}
+                  onClick={() => { setMovSearchInput(''); setMovSearch(''); setMovFrom(''); setMovTo(''); setMovPage(1); }}
                   className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-[#999] hover:text-white font-body text-xs tracking-widest uppercase px-3 py-2 transition-colors"
                 >
                   Clear
                 </button>
               )}
               <div className="flex items-center text-[#666] font-body text-xs ml-auto">
-                {filteredMovements.length} of {movements.length} movements
+                {movTotal === 0
+                  ? 'No movements'
+                  : `Showing ${movFromIndex.toLocaleString()}–${movToIndex.toLocaleString()} of ${movTotal.toLocaleString()}`}
+                {movFetching && <span className="ml-2 text-[#FFA726]">…</span>}
               </div>
             </div>
 
@@ -1202,53 +1247,109 @@ export default function InventoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredMovements.map((m) => {
-                    const wasCorrected = !!(m as { correctedAt?: string | null }).correctedAt;
-                    const fromQty = (m as { correctedFromQuantity?: number | null }).correctedFromQuantity;
-                    const correctionReason = (m as { correctionReason?: string | null }).correctionReason;
-                    return (
-                    <tr key={m.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
-                      <td className="px-4 py-3 text-[#999] font-body text-xs">{new Date(m.createdAt).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-white font-body text-sm">{m.ingredient?.name ?? m.ingredientId}</td>
-                      <td className="px-4 py-3">
-                        <span className={`font-body text-xs tracking-widest uppercase ${movTypeColor[m.type] ?? 'text-white'}`}>{m.type}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`font-body text-sm font-medium ${Number(m.quantity) >= 0 ? 'text-[#4CAF50]' : 'text-[#D62B2B]'}`}>
-                          {Number(m.quantity) >= 0 ? '+' : ''}{Number(m.quantity).toFixed(4)}
-                        </span>
-                        {wasCorrected && fromQty != null && (
-                          <span
-                            className="ml-2 font-body text-[10px] tracking-widest uppercase px-1.5 py-0.5 bg-[#FFA726]/15 text-[#FFA726]"
-                            title={`Corrected from ${Number(fromQty).toFixed(4)}${correctionReason ? ` — ${correctionReason}` : ''}`}
-                          >
-                            CORRECTED
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-[#666] font-body text-xs">{m.notes ?? '—'}</td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => openCorrectMovement(m as StockMovement)}
-                          className="text-[#999] hover:text-[#FFA726] font-body text-xs tracking-widest uppercase transition-colors"
-                          title="Edit this movement's recorded quantity (recipe-typo recovery)"
-                        >
-                          Correct
-                        </button>
-                      </td>
-                    </tr>
-                    );
-                  })}
-                  {filteredMovements.length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-[#666] font-body text-sm">
-                      {movements.length === 0 ? 'No movements yet.' : 'No movements match the filters.'}
-                    </td></tr>
+                  {movLoading && movements.length === 0 ? (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-[#666] font-body text-sm">Loading…</td></tr>
+                  ) : (
+                    <>
+                      {movements.map((m) => {
+                        const wasCorrected = !!(m as { correctedAt?: string | null }).correctedAt;
+                        const fromQty = (m as { correctedFromQuantity?: number | null }).correctedFromQuantity;
+                        const correctionReason = (m as { correctionReason?: string | null }).correctionReason;
+                        return (
+                        <tr key={m.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
+                          <td className="px-4 py-3 text-[#999] font-body text-xs">{new Date(m.createdAt).toLocaleString()}</td>
+                          <td className="px-4 py-3 text-white font-body text-sm">{m.ingredient?.name ?? m.ingredientId}</td>
+                          <td className="px-4 py-3">
+                            <span className={`font-body text-xs tracking-widest uppercase ${movTypeColor[m.type] ?? 'text-white'}`}>{m.type}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`font-body text-sm font-medium ${Number(m.quantity) >= 0 ? 'text-[#4CAF50]' : 'text-[#D62B2B]'}`}>
+                              {Number(m.quantity) >= 0 ? '+' : ''}{Number(m.quantity).toFixed(4)}
+                            </span>
+                            {wasCorrected && fromQty != null && (
+                              <span
+                                className="ml-2 font-body text-[10px] tracking-widest uppercase px-1.5 py-0.5 bg-[#FFA726]/15 text-[#FFA726]"
+                                title={`Corrected from ${Number(fromQty).toFixed(4)}${correctionReason ? ` — ${correctionReason}` : ''}`}
+                              >
+                                CORRECTED
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-[#666] font-body text-xs">{m.notes ?? '—'}</td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => openCorrectMovement(m as StockMovement)}
+                              className="text-[#999] hover:text-[#FFA726] font-body text-xs tracking-widest uppercase transition-colors"
+                              title="Edit this movement's recorded quantity (recipe-typo recovery)"
+                            >
+                              Correct
+                            </button>
+                          </td>
+                        </tr>
+                        );
+                      })}
+                      {movements.length === 0 && (
+                        <tr><td colSpan={6} className="px-4 py-8 text-center text-[#666] font-body text-sm">
+                          {movTotal === 0 && !movSearch && !movFrom && !movTo ? 'No movements yet.' : 'No movements match the filters.'}
+                        </td></tr>
+                      )}
+                    </>
                   )}
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination strip — disabled at the edges. Server returns
+                `total` so we know exactly how many pages exist. */}
+            {movTotal > movPageSize && (
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-[#666] font-body text-xs">
+                  Page {movPage.toLocaleString()} of {movTotalPages.toLocaleString()}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setMovPage(1)}
+                    disabled={movPage <= 1 || movFetching}
+                    className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-[#999] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed font-body text-xs tracking-widest uppercase px-3 py-2 transition-colors"
+                  >
+                    First
+                  </button>
+                  <button
+                    onClick={() => setMovPage((p) => Math.max(1, p - 1))}
+                    disabled={movPage <= 1 || movFetching}
+                    className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-[#999] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed font-body text-xs tracking-widest uppercase px-3 py-2 transition-colors"
+                  >
+                    Prev
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={movTotalPages}
+                    value={movPage}
+                    onChange={(e) => {
+                      const n = Math.max(1, Math.min(movTotalPages, Number(e.target.value) || 1));
+                      setMovPage(n);
+                    }}
+                    className="bg-[#161616] border border-[#2A2A2A] text-white px-2 py-2 text-sm font-body w-16 text-center focus:outline-none focus:border-[#D62B2B]"
+                  />
+                  <button
+                    onClick={() => setMovPage((p) => Math.min(movTotalPages, p + 1))}
+                    disabled={movPage >= movTotalPages || movFetching}
+                    className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-[#999] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed font-body text-xs tracking-widest uppercase px-3 py-2 transition-colors"
+                  >
+                    Next
+                  </button>
+                  <button
+                    onClick={() => setMovPage(movTotalPages)}
+                    disabled={movPage >= movTotalPages || movFetching}
+                    className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-[#999] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed font-body text-xs tracking-widest uppercase px-3 py-2 transition-colors"
+                  >
+                    Last
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )
       )}
 
       {/* Stock Report Tab */}

@@ -841,16 +841,68 @@ export class IngredientService {
     return { total: items.length, updated: updatedCount, skipped: skippedCount, results };
   }
 
-  async getMovements(branchId: string, ingredientId?: string) {
-    return this.prisma.stockMovement.findMany({
-      where: {
-        branchId,
-        ...(ingredientId ? { ingredientId } : {}),
-      },
-      include: { ingredient: true },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
+  /**
+   * Paginated stock-movement reader. The Movements tab can hold tens
+   * of thousands of rows on long-running installs (every SALE deducts
+   * one row per ingredient). The previous implementation fetched 200
+   * rows total and let the browser filter — search couldn't reach
+   * older history, and even 200 rows × 50 ingredients was wasteful
+   * on every tab switch.
+   *
+   * Returns `{ rows, total, page, pageSize }`. `search` matches the
+   * ingredient's name (case-insensitive substring) so admins can
+   * dial straight into "lemongrass" history regardless of how far
+   * back the entry sits. `from`/`to` bound by `createdAt` to keep
+   * date-bounded queries cheap.
+   */
+  async getMovements(
+    branchId: string,
+    opts: {
+      ingredientId?: string;
+      search?: string;
+      from?: string;
+      to?: string;
+      page?: number;
+      pageSize?: number;
+    } = {},
+  ) {
+    const pageSize = Math.min(Math.max(1, Number(opts.pageSize) || 200), 500);
+    const page = Math.max(1, Number(opts.page) || 1);
+    const skip = (page - 1) * pageSize;
+
+    const where: any = { branchId };
+    if (opts.ingredientId) where.ingredientId = opts.ingredientId;
+    if (opts.search && opts.search.trim()) {
+      where.ingredient = {
+        is: { name: { contains: opts.search.trim(), mode: 'insensitive' } },
+      };
+    }
+    if (opts.from || opts.to) {
+      where.createdAt = {};
+      if (opts.from) where.createdAt.gte = new Date(opts.from);
+      // `to` is inclusive — bump to end-of-day so the date picker's
+      // "April 30" returns rows logged up to 23:59:59.999.
+      if (opts.to) {
+        const t = new Date(opts.to);
+        t.setHours(23, 59, 59, 999);
+        where.createdAt.lte = t;
+      }
+    }
+
+    // findMany + count in parallel — the `total` powers the page
+    // counter so the UI knows when to disable Next.
+    const [rows, total] = await Promise.all([
+      this.prisma.stockMovement.findMany({
+        where,
+        include: { ingredient: true },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.stockMovement.count({ where }),
+    ]);
+
+    return { rows, total, page, pageSize };
   }
 
   /**
