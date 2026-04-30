@@ -817,10 +817,46 @@ function ActiveOrderView({
     },
   });
 
+  /**
+   * Print the kitchen ticket via the right transport for this device.
+   * Used by both the normal POS create-order flow AND the QR-accept
+   * flow (QR orders sit at PENDING until the cashier accepts; that
+   * acceptance is the moment the kitchen first sees the ticket).
+   * Defined as a function declaration so it's reachable from the
+   * mutations declared just below — `const` arrow form would TDZ.
+   */
+  async function maybePrintKitchenTicket(order: Order) {
+    // Only auto-print when KDS is disabled — otherwise the KDS screen handles it.
+    if (branchSettings && branchSettings.useKds) return;
+    // Desktop path — await the IPC so a printer failure actually surfaces
+    // instead of being swallowed into a fire-and-forget promise.
+    const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
+    if (desktopPrint) {
+      try {
+        const res = await desktopPrint(order);
+        if (!res?.ok) {
+          alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
+        }
+      } catch (err) {
+        alert(`Kitchen print failed: ${(err as Error).message}`);
+      }
+      return;
+    }
+    // Browser fallback — popup window + auto-print.
+    const ok = printKitchenTicketUtil(order as any);
+    if (!ok) {
+      alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
+    }
+  }
+
   const acceptOrderMut = useMutation({
     mutationFn: () => api.post<Order>(`/orders/${order.id}/accept`, {}),
     onSuccess: (updated) => {
       setOrder(updated);
+      // QR orders sit at PENDING until the cashier accepts them,
+      // so this is the moment the kitchen first sees the ticket.
+      // Without this call the KOT silently never prints.
+      void maybePrintKitchenTicket(updated);
       void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
       void queryClient.invalidateQueries({ queryKey: ['pending-orders'] });
     },
@@ -2052,36 +2088,32 @@ function NewOrderView({
     });
   };
 
-  const { data: branchSettings } = useBranchSettings();
+  const { data: newOrderBranchSettings } = useBranchSettings();
 
-  const maybePrintKitchenTicket = async (order: Order) => {
-    // Only auto-print when KDS is disabled — otherwise the KDS screen handles it.
-    if (branchSettings && branchSettings.useKds) return;
-    // Desktop path — await the IPC so a printer failure actually surfaces
-    // instead of being swallowed into a fire-and-forget promise.
+  // Local copy of the helper — NewOrderView is a separate function
+  // component so it can't see the one declared in ActiveOrderView.
+  // Same logic: skip when KDS is on, hit the desktop IPC if present,
+  // otherwise pop a print window in the browser.
+  async function maybePrintKitchenTicket(order: Order) {
+    if (newOrderBranchSettings && newOrderBranchSettings.useKds) return;
     const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
     if (desktopPrint) {
       try {
         const res = await desktopPrint(order);
-        if (!res?.ok) {
-          alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
-        }
+        if (!res?.ok) alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
       } catch (err) {
         alert(`Kitchen print failed: ${(err as Error).message}`);
       }
       return;
     }
-    // Browser fallback — popup window + auto-print.
     const ok = printKitchenTicketUtil(order as any);
-    if (!ok) {
-      alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
-    }
-  };
+    if (!ok) alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
+  }
 
   const createOrderMutation = useMutation({
     mutationFn: (dto: CreateOrderDto) => api.post<Order>('/orders', dto),
     onSuccess: (order) => {
-      maybePrintKitchenTicket(order);
+      void maybePrintKitchenTicket(order);
       void queryClient.invalidateQueries({ queryKey: ['tables'] });
       void queryClient.invalidateQueries({ queryKey: ['orders', 'table', tableId] });
       void navigate('/tables');
