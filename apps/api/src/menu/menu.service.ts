@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 
 import type { CreateMenuItemDto, UpdateMenuItemDto, CreateCustomMenuDto, UpsertAddonGroupDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
 
 const comboAndLinkedInclude = {
   category: true,
@@ -27,7 +28,10 @@ const comboAndLinkedInclude = {
 
 @Injectable()
 export class MenuService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly unitConversion: UnitConversionService,
+  ) {}
 
   findAll(branchId: string, includeCustom = false, includeAddons = false) {
     return this.prisma.menuItem.findMany({
@@ -406,37 +410,64 @@ export class MenuService {
   /**
    * Compute COGS for a recipe-line list using current ingredient costs.
    * Mirrors the performance-report cost engine (variant-fallback to the
-   * cheapest active variant when the parent has cost = 0). Result in paisa.
+   * cheapest active variant when the parent has cost = 0).
+   *
+   * Critical: each recipe line carries its own unit (e.g. recipe says
+   * "Salt 6 G" but the ingredient's stock unit is KG). `costPerUnit`
+   * is per STOCK unit, so multiplying the raw recipe quantity against
+   * costPerUnit without converting under-counts (or over-counts) by
+   * the conversion factor. Custom-menu inputs make this especially
+   * common — cashier types "1 KG" of an ingredient stocked in G and
+   * the COGS read 1/1000th of the real cost. Now every line goes
+   * through UnitConversionService.convert(branchId, qty, lineUnit,
+   * stockUnit) before the multiplication. Result in paisa.
    */
-  private async computeRecipeCogs(items: { ingredientId: string; quantity: number }[]): Promise<number> {
+  private async computeRecipeCogs(
+    branchId: string,
+    items: { ingredientId: string; quantity: number; unit?: string | null }[],
+  ): Promise<number> {
     if (items.length === 0) return 0;
     const ids = [...new Set(items.map((i) => i.ingredientId))];
     const ingredients = await this.prisma.ingredient.findMany({
       where: { id: { in: ids } },
-      select: { id: true, costPerUnit: true, hasVariants: true },
+      select: { id: true, costPerUnit: true, unit: true, hasVariants: true },
     });
     const byId = new Map(ingredients.map((i) => [i.id, i] as const));
 
-    const variantCache = new Map<string, number>();
-    const resolveCost = async (ingredientId: string): Promise<number> => {
+    const variantCache = new Map<string, { cost: number; unit: string }>();
+    const resolveCostAndUnit = async (ingredientId: string): Promise<{ cost: number; unit: string }> => {
       const ing = byId.get(ingredientId);
-      if (!ing) return 0;
+      if (!ing) return { cost: 0, unit: '' };
       const direct = ing.costPerUnit.toNumber();
-      if (direct > 0 || !ing.hasVariants) return direct;
+      if (direct > 0 || !ing.hasVariants) return { cost: direct, unit: ing.unit as unknown as string };
       if (variantCache.has(ingredientId)) return variantCache.get(ingredientId)!;
       const variants = await this.prisma.ingredient.findMany({
         where: { parentId: ingredientId, isActive: true, deletedAt: null },
-        select: { costPerUnit: true },
+        select: { costPerUnit: true, unit: true },
       });
-      const positives = variants.map((v) => v.costPerUnit.toNumber()).filter((c) => c > 0);
-      const cost = positives.length > 0 ? Math.min(...positives) : 0;
-      variantCache.set(ingredientId, cost);
-      return cost;
+      const positives = variants
+        .map((v) => ({ cost: v.costPerUnit.toNumber(), unit: v.unit as unknown as string }))
+        .filter((v) => v.cost > 0);
+      const picked = positives.length > 0
+        ? positives.reduce((a, b) => (a.cost <= b.cost ? a : b))
+        : { cost: 0, unit: ing.unit as unknown as string };
+      variantCache.set(ingredientId, picked);
+      return picked;
     };
 
     let total = 0;
     for (const it of items) {
-      total += (await resolveCost(it.ingredientId)) * it.quantity;
+      const { cost, unit: stockUnit } = await resolveCostAndUnit(it.ingredientId);
+      if (cost === 0) continue;
+      const lineUnit = (it.unit ?? '').trim().toUpperCase() || stockUnit;
+      // Convert the recipe-line quantity into the ingredient's stock
+      // unit. Same-unit short-circuits inside the service; truly
+      // incompatible units (e.g. G ↔ PCS) fall back to "use as-is" so
+      // the report still produces a number rather than crashing.
+      const qtyInStockUnit = lineUnit === stockUnit
+        ? it.quantity
+        : await this.unitConversion.convert(branchId, it.quantity, lineUnit, stockUnit);
+      total += cost * qtyInStockUnit;
     }
     return Math.round(total);
   }
@@ -472,8 +503,10 @@ export class MenuService {
     const merged = [...mergedMap.values()].filter((r) => r.quantity > 0);
     if (merged.length === 0) throw new BadRequestException('All recipe lines have zero quantity');
 
-    // Compute COGS using merged lines.
-    const cogs = await this.computeRecipeCogs(merged);
+    // Compute COGS using merged lines. The merged entries carry both
+    // quantity AND unit, so the helper can convert each line into the
+    // ingredient's stock unit before applying costPerUnit.
+    const cogs = await this.computeRecipeCogs(branchId, merged);
 
     // Margin policy from BranchSetting.
     const settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
