@@ -159,6 +159,9 @@ interface WorkPeriodSummary {
     expensesByAccount: Record<string, number>;
     supplierByAccount: Record<string, number>;
     salaryByAccount: Record<string, number>;
+    transferByAccount?: Record<string, number>;
+    transferInByAccount?: Record<string, number>;
+    transferOutByAccount?: Record<string, number>;
     expectedByAccount: Record<string, number>;
     closingByAccount: Record<string, number | null>;
     discrepancyByAccount: Record<string, number>;
@@ -208,10 +211,13 @@ function printEndOfDayReport(summary: WorkPeriodSummary) {
     const exp = b.expensesByAccount?.[acc.id] ?? 0;
     const sup = b.supplierByAccount?.[acc.id] ?? 0;
     const sal = b.salaryByAccount?.[acc.id] ?? 0;
+    const xfer = b.transferByAccount?.[acc.id] ?? 0;
     const expected = b.expectedByAccount?.[acc.id] ?? 0;
     const actual = b.closingByAccount?.[acc.id];
     const diff = actual != null ? expected - actual : 0;
     const diffStyle = diff !== 0 ? 'color:#D62B2B;font-weight:bold' : '';
+    const xferStyle = xfer > 0 ? 'color:#2e7d32' : xfer < 0 ? 'color:#D62B2B' : '';
+    const xferText = xfer === 0 ? '-' : `${xfer > 0 ? '+' : ''}${formatCurrency(xfer)}`;
     return `<tr>
       <td style="padding:2px 4px">${acc.name}</td>
       <td style="text-align:right;padding:2px 4px">${formatCurrency(opening)}</td>
@@ -219,6 +225,7 @@ function printEndOfDayReport(summary: WorkPeriodSummary) {
       <td style="text-align:right;padding:2px 4px">${formatCurrency(exp)}</td>
       <td style="text-align:right;padding:2px 4px">${formatCurrency(sup)}</td>
       <td style="text-align:right;padding:2px 4px">${formatCurrency(sal)}</td>
+      <td style="text-align:right;padding:2px 4px;${xferStyle}">${xferText}</td>
       <td style="text-align:right;padding:2px 4px;font-weight:bold">${formatCurrency(expected)}</td>
       <td style="text-align:right;padding:2px 4px">${actual != null ? formatCurrency(actual) : '-'}</td>
       <td style="text-align:right;padding:2px 4px;${diffStyle}">${actual != null ? formatCurrency(diff) : '-'}</td>
@@ -292,6 +299,7 @@ function printEndOfDayReport(summary: WorkPeriodSummary) {
         <th>-Expense</th>
         <th>-Supplier</th>
         <th>-Salary</th>
+        <th>±Transfer</th>
         <th>=Expected</th>
         <th>Actual</th>
         <th>Diff</th>

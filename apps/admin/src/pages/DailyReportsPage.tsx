@@ -37,6 +37,10 @@ interface WorkPeriodSummary {
     expensesByAccount: Record<string, number>;
     supplierByAccount: Record<string, number>;
     salaryByAccount: Record<string, number>;
+    /** Net inter-account transfer per account (positive = inflow, negative = outflow). */
+    transferByAccount?: Record<string, number>;
+    transferInByAccount?: Record<string, number>;
+    transferOutByAccount?: Record<string, number>;
     expectedByAccount: Record<string, number>;
     closingByAccount: Record<string, number | null>;
     discrepancyByAccount: Record<string, number>;
@@ -85,10 +89,13 @@ function printReport(summary: WorkPeriodSummary) {
     const exp = balances.expensesByAccount?.[acc.id] ?? 0;
     const sup = balances.supplierByAccount?.[acc.id] ?? 0;
     const sal = balances.salaryByAccount?.[acc.id] ?? 0;
+    const xfer = balances.transferByAccount?.[acc.id] ?? 0;
     const expected = balances.expectedByAccount?.[acc.id] ?? 0;
     const actual = balances.closingByAccount?.[acc.id];
     const diff = actual != null ? expected - actual : 0;
     const diffStyle = diff !== 0 ? 'color:#D62B2B;font-weight:bold' : '';
+    const xferStyle = xfer > 0 ? 'color:#2e7d32' : xfer < 0 ? 'color:#D62B2B' : '';
+    const xferText = xfer === 0 ? '—' : `${xfer > 0 ? '+' : ''}${formatCurrency(xfer)}`;
     return `<tr>
       <td>${acc.name}</td>
       <td style="text-align:right">${formatCurrency(opening)}</td>
@@ -96,6 +103,7 @@ function printReport(summary: WorkPeriodSummary) {
       <td style="text-align:right">${formatCurrency(exp)}</td>
       <td style="text-align:right">${formatCurrency(sup)}</td>
       <td style="text-align:right">${formatCurrency(sal)}</td>
+      <td style="text-align:right;${xferStyle}">${xferText}</td>
       <td style="text-align:right;font-weight:bold">${formatCurrency(expected)}</td>
       <td style="text-align:right">${actual != null ? formatCurrency(actual) : '—'}</td>
       <td style="text-align:right;${diffStyle}">${actual != null ? formatCurrency(diff) : '—'}</td>
@@ -145,9 +153,10 @@ function printReport(summary: WorkPeriodSummary) {
       <tr>
         <th>Account</th><th style="text-align:right">Opening</th><th style="text-align:right">+Sales</th>
         <th style="text-align:right">−Expense</th><th style="text-align:right">−Supplier</th><th style="text-align:right">−Salary</th>
+        <th style="text-align:right">±Transfer</th>
         <th style="text-align:right">=Expected</th><th style="text-align:right">Actual</th><th style="text-align:right">Diff</th>
       </tr>
-      ${reconRows || '<tr><td colspan="9" style="text-align:center;color:#999">No accounts</td></tr>'}
+      ${reconRows || '<tr><td colspan="10" style="text-align:center;color:#999">No accounts</td></tr>'}
     </table>
 
     ${consumedItems && consumedItems.length > 0 ? `
@@ -292,6 +301,7 @@ function ReportDetailModal({ wpId, onClose }: { wpId: string; onClose: () => voi
                         <td className="py-1.5 px-1 text-right">−Exp</td>
                         <td className="py-1.5 px-1 text-right">−Sup</td>
                         <td className="py-1.5 px-1 text-right">−Sal</td>
+                        <td className="py-1.5 px-1 text-right" title="Net inter-account transfers (Cash ↔ bKash etc.). Positive = inflow, Negative = outflow.">±Transfer</td>
                         <td className="py-1.5 px-1 text-right">=Expected</td>
                         <td className="py-1.5 px-1 text-right">Actual</td>
                         <td className="py-1.5 pl-1 text-right">Diff</td>
@@ -304,6 +314,7 @@ function ReportDetailModal({ wpId, onClose }: { wpId: string; onClose: () => voi
                         const exp = summary.balances.expensesByAccount?.[acc.id] ?? 0;
                         const sup = summary.balances.supplierByAccount?.[acc.id] ?? 0;
                         const sal = summary.balances.salaryByAccount?.[acc.id] ?? 0;
+                        const xfer = summary.balances.transferByAccount?.[acc.id] ?? 0;
                         const expected = summary.balances.expectedByAccount?.[acc.id] ?? 0;
                         const actual = summary.balances.closingByAccount?.[acc.id];
                         const diff = actual != null ? expected - actual : null;
@@ -315,6 +326,9 @@ function ReportDetailModal({ wpId, onClose }: { wpId: string; onClose: () => voi
                             <td className="py-1.5 px-1 text-right text-[#D62B2B]">{formatCurrency(exp)}</td>
                             <td className="py-1.5 px-1 text-right text-[#D62B2B]">{formatCurrency(sup)}</td>
                             <td className="py-1.5 px-1 text-right text-[#D62B2B]">{formatCurrency(sal)}</td>
+                            <td className={`py-1.5 px-1 text-right ${xfer > 0 ? 'text-[#4CAF50]' : xfer < 0 ? 'text-[#D62B2B]' : 'text-[#666]'}`}>
+                              {xfer === 0 ? '—' : `${xfer > 0 ? '+' : ''}${formatCurrency(xfer)}`}
+                            </td>
                             <td className="py-1.5 px-1 text-right text-white font-bold">{formatCurrency(expected)}</td>
                             <td className="py-1.5 px-1 text-right text-[#DDD9D3]">{actual != null ? formatCurrency(actual) : '—'}</td>
                             <td className={`py-1.5 pl-1 text-right font-bold ${diff === null ? 'text-[#666]' : diff === 0 ? 'text-[#4CAF50]' : 'text-[#D62B2B]'}`}>

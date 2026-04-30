@@ -295,10 +295,34 @@ export class WorkPeriodService {
       }
     }
 
+    // Inter-account transfers — pulled from AccountTransaction rows
+    // tagged TRANSFER. Each transfer creates two rows (one with
+    // negative amount on the source, one positive on the destination)
+    // so summing the signed amount per account yields the NET delta
+    // for that account. Without this, the expected balance was off
+    // by every transfer the cashier made between Cash and bKash
+    // during the day, mismatching the closing actuals.
+    const transferTxns = await this.prisma.accountTransaction.findMany({
+      where: { branchId, type: 'TRANSFER', createdAt: { gte: from, lte: to } },
+    });
+    const transferByAccount: Record<string, number> = {};
+    const transferInByAccount: Record<string, number> = {};
+    const transferOutByAccount: Record<string, number> = {};
+    for (const t of transferTxns) {
+      const amt = t.amount.toNumber();
+      transferByAccount[t.accountId] = (transferByAccount[t.accountId] ?? 0) + amt;
+      if (amt >= 0) {
+        transferInByAccount[t.accountId] = (transferInByAccount[t.accountId] ?? 0) + amt;
+      } else {
+        transferOutByAccount[t.accountId] = (transferOutByAccount[t.accountId] ?? 0) + Math.abs(amt);
+      }
+    }
+
     // Per-account expected balances
     const allAccountIds = new Set([
       ...Object.keys(openingByAccount),
       ...Object.values(methodToAccount),
+      ...Object.keys(transferByAccount),
     ]);
     const expectedByAccount: Record<string, number> = {};
     for (const accId of allAccountIds) {
@@ -307,7 +331,8 @@ export class WorkPeriodService {
         (salesByAccount[accId] ?? 0) -
         (expensesByAccount[accId] ?? 0) -
         (supplierByAccount[accId] ?? 0) -
-        (salaryByAccount[accId] ?? 0);
+        (salaryByAccount[accId] ?? 0) +
+        (transferByAccount[accId] ?? 0);
     }
 
     // Parse dynamic closing balances
@@ -372,6 +397,9 @@ export class WorkPeriodService {
       expensesByAccount,
       supplierByAccount,
       salaryByAccount,
+      transferByAccount,
+      transferInByAccount,
+      transferOutByAccount,
       expectedByAccount,
       closingByAccount,
       discrepancyByAccount,
