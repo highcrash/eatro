@@ -375,6 +375,44 @@ export class PurchasingService {
         });
       }
 
+      // Surface receipt-level extra fees (delivery, freight, labour…) as
+      // their own Expense rows so they show up in expense reports the
+      // moment goods are received — not buried inside a future
+      // "Supplier payment" FOOD_COST row. paymentMethod='CREDIT' flags
+      // them as accrued obligations rather than cash outflows; when
+      // the supplier is paid, makePayment() nets these out of its
+      // FOOD_COST entry so we don't double-count.
+      //
+      // Category heuristic: delivery/transport keywords → TRANSPORT,
+      // anything else → MISCELLANEOUS. The label is preserved in the
+      // description so reports group sensibly even at coarser granularity.
+      if (cleanedFees.length > 0) {
+        const supplierName = po.supplier?.name ?? 'Supplier';
+        const poTag = id.slice(-8).toUpperCase();
+        for (const fee of cleanedFees) {
+          const lower = fee.label.toLowerCase();
+          const category: 'TRANSPORT' | 'MISCELLANEOUS' =
+            /(deliver|freight|transport|shipping|courier|carriage)/.test(lower)
+              ? 'TRANSPORT'
+              : 'MISCELLANEOUS';
+          await tx.expense.create({
+            data: {
+              branchId,
+              category,
+              description: `${fee.label} — ${supplierName} (PO ${poTag})`,
+              amount: fee.amount,
+              paymentMethod: 'CREDIT',
+              reference: `PO-${id}`,
+              date: new Date(),
+              recordedById: staffId,
+              approvedById: staffId,
+              approvedAt: new Date(),
+              notes: 'Accrued at goods receipt — settles via supplier ledger payment.',
+            },
+          });
+        }
+      }
+
       // Persist the adjustment block on the PO so the supplier ledger,
       // PO detail page, and printed receipt can show what was billed.
       // Stored as paisa to stay consistent with item.unitCost.

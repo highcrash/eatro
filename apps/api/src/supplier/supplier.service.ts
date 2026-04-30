@@ -265,21 +265,40 @@ export class SupplierService {
     // Get supplier name for expense description
     const supplier = await this.prisma.supplier.findUnique({ where: { id: dto.supplierId }, select: { name: true } });
 
-    // Auto-create expense entry
+    // Auto-create expense entry. When the payment is linked to a PO
+    // that carried receipt-level extra fees (delivery, freight, etc.),
+    // those fees were already expensed at receive time as TRANSPORT /
+    // MISCELLANEOUS rows with paymentMethod='CREDIT' (see
+    // purchasing.service.receiveGoods). Net them out of THIS row so
+    // the same delivery charge isn't counted twice across reports.
+    let foodCostAmount = dto.amount;
+    if (dto.purchaseOrderId) {
+      const po = await this.prisma.purchaseOrder.findFirst({
+        where: { id: dto.purchaseOrderId, branchId },
+        select: { receiptExtraFees: true },
+      });
+      const fees = (po as unknown as { receiptExtraFees?: Array<{ amount: number }> | null } | null)?.receiptExtraFees;
+      if (Array.isArray(fees)) {
+        const accrued = fees.reduce((s, f) => s + (Number(f?.amount) > 0 ? Number(f.amount) : 0), 0);
+        foodCostAmount = Math.max(0, dto.amount - accrued);
+      }
+    }
     const method = dto.paymentMethod ?? 'CASH';
-    await this.prisma.expense.create({
-      data: {
-        branchId,
-        category: 'FOOD_COST',
-        description: `Supplier payment — ${supplier?.name ?? 'Unknown'}${dto.reference ? ` (Ref: ${dto.reference})` : ''}`,
-        amount: dto.amount,
-        paymentMethod: method,
-        date: new Date(),
-        recordedById: staffId,
-        approvedById: staffId,
-        approvedAt: new Date(),
-      },
-    });
+    if (foodCostAmount > 0) {
+      await this.prisma.expense.create({
+        data: {
+          branchId,
+          category: 'FOOD_COST',
+          description: `Supplier payment — ${supplier?.name ?? 'Unknown'}${dto.reference ? ` (Ref: ${dto.reference})` : ''}`,
+          amount: foodCostAmount,
+          paymentMethod: method,
+          date: new Date(),
+          recordedById: staffId,
+          approvedById: staffId,
+          approvedAt: new Date(),
+        },
+      });
+    }
 
     // Update linked account balance
     void this.accountService.updateAccountForPayment(branchId, method, dto.amount, 'EXPENSE', `Supplier payment — ${supplier?.name ?? 'Unknown'}`);
