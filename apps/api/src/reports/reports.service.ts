@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
 
 export interface DateRange {
   from: Date;
@@ -8,7 +9,10 @@ export interface DateRange {
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly unitConversion: UnitConversionService,
+  ) {}
 
   async getSalesDetail(branchId: string, from?: string, to?: string) {
     const now = new Date();
@@ -267,18 +271,31 @@ export class ReportsService {
 
     // Variant-fallback cost lookup. Cache cheapest-variant cost per parent
     // so the per-item pass doesn't re-query for repeated ingredients.
-    const variantCostCache = new Map<string, number>();
-    const resolveCost = async (ingredientId: string, parentCost: number, hasVariants: boolean): Promise<number> => {
-      if (parentCost > 0 || !hasVariants) return parentCost;
+    // Returns both the cost AND the stock unit it's denominated in —
+    // recipe lines may differ from the ingredient's stock unit (e.g.
+    // recipe "Salt 6 G" vs ingredient stocked in KG), so we need the
+    // unit to convert before multiplying.
+    const variantCostCache = new Map<string, { cost: number; unit: string }>();
+    const resolveCostAndUnit = async (
+      ingredientId: string,
+      parentCost: number,
+      parentUnit: string,
+      hasVariants: boolean,
+    ): Promise<{ cost: number; unit: string }> => {
+      if (parentCost > 0 || !hasVariants) return { cost: parentCost, unit: parentUnit };
       if (variantCostCache.has(ingredientId)) return variantCostCache.get(ingredientId)!;
       const variants = await this.prisma.ingredient.findMany({
         where: { parentId: ingredientId, isActive: true, deletedAt: null },
-        select: { costPerUnit: true },
+        select: { costPerUnit: true, unit: true },
       });
-      const positives = variants.map((v) => v.costPerUnit.toNumber()).filter((c) => c > 0);
-      const cost = positives.length > 0 ? Math.min(...positives) : 0;
-      variantCostCache.set(ingredientId, cost);
-      return cost;
+      const positives = variants
+        .map((v) => ({ cost: v.costPerUnit.toNumber(), unit: v.unit as unknown as string }))
+        .filter((v) => v.cost > 0);
+      const picked = positives.length > 0
+        ? positives.reduce((a, b) => (a.cost <= b.cost ? a : b))
+        : { cost: 0, unit: parentUnit };
+      variantCostCache.set(ingredientId, picked);
+      return picked;
     };
 
     interface ItemAgg {
@@ -311,17 +328,29 @@ export class ReportsService {
       agg.quantity += oi.quantity;
       agg.revenue += oi.totalPrice.toNumber();
 
-      // Per-unit recipe cost — sum(recipeItem.qty × ingredient.costPerUnit).
-      // Note: we don't apply unit conversions here. Recipes that store the
-      // recipe-line in the ingredient's native unit (the common case) are
-      // exact; mismatched units return an under-counted cost rather than
-      // a hard failure, which is the right tradeoff for a report.
+      // Per-unit recipe cost — sum(recipeItem.qty × ingredient.costPerUnit),
+      // with unit conversion. RecipeItem.unit may differ from
+      // Ingredient.unit (e.g. recipe specifies "6 G" of an ingredient
+      // stocked in KG); without conversion we'd report 1/1000th of the
+      // real COGS for that line. Custom-menu items make this especially
+      // common — cashier types whatever unit feels natural.
       if (mi.recipe) {
         let unitCost = 0;
         for (const ri of mi.recipe.items) {
           const ing = ri.ingredient;
-          const cost = await resolveCost(ing.id, ing.costPerUnit.toNumber(), ing.hasVariants ?? false);
-          unitCost += ri.quantity.toNumber() * cost;
+          const ingStockUnit = (ing.unit as unknown as string) ?? '';
+          const { cost, unit: stockUnit } = await resolveCostAndUnit(
+            ing.id,
+            ing.costPerUnit.toNumber(),
+            ingStockUnit,
+            ing.hasVariants ?? false,
+          );
+          if (cost === 0) continue;
+          const recipeUnit = (ri.unit as unknown as string) ?? stockUnit;
+          const qtyInStockUnit = recipeUnit === stockUnit
+            ? ri.quantity.toNumber()
+            : await this.unitConversion.convert(branchId, ri.quantity.toNumber(), recipeUnit, stockUnit);
+          unitCost += qtyInStockUnit * cost;
         }
         agg.cogs += unitCost * oi.quantity;
       }
