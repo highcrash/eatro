@@ -115,13 +115,16 @@ export default function MenuPrintPage() {
   return (
     <div data-theme={theme} className="menu-print-root">
       {/*
-        @page margin is ZERO so the page background extends to all
-        four edges (otherwise dark mode leaves white printer-margin
-        strips). The A4 white-space is recreated with .mp-page
-        internal padding instead.
+        @page margin is restored (was 0 in v2). Without per-page
+        @page margin, page 2+ would render flush to the top of the
+        paper with no padding — broken-looking. The trade-off is
+        that dark mode now has a thin printer-margin band of paper
+        color around the dark area, which is the physical printer's
+        unprintable area anyway. Every page gets consistent
+        breathing room top + bottom + sides.
       */}
       <style>{`
-        @page { size: A4 portrait; margin: 0; }
+        @page { size: A4 portrait; margin: 12mm 10mm; }
 
         html, body { background: #fff; }
 
@@ -163,9 +166,12 @@ export default function MenuPrintPage() {
         .mp-btn:hover { opacity: 0.85; }
 
         .mp-page {
-          max-width: 210mm; /* A4 width */
+          max-width: 210mm; /* A4 width — for the on-screen preview */
           margin: 0 auto;
-          padding: 14mm 12mm 14mm; /* fakes the printer margin INSIDE the page so the dark/light bg fills to all four edges */
+          padding: 14mm 12mm; /* on-screen padding only; @page handles printed margins */
+        }
+        @media print {
+          .mp-page { padding: 0; max-width: none; }
         }
 
         .mp-header {
@@ -186,8 +192,12 @@ export default function MenuPrintPage() {
         }
 
         .mp-category {
-          break-inside: avoid;
-          page-break-inside: avoid;
+          /* No break-inside: avoid here — categories should flow
+             naturally across pages. v2 had this set, which forced
+             every category to live on a single page; long ones (like
+             Appetizer) bumped to page 2 and left page 1 mostly
+             empty. Cards still keep their own break-inside:avoid so
+             individual items never split. */
           margin-bottom: 16px;
         }
         .mp-cat-title {
@@ -260,15 +270,23 @@ export default function MenuPrintPage() {
         }
         .menu-print-root[data-theme="dark"] .mp-desc { color: #BBB; }
 
-        /* Variants — vertical name : price list. */
+        /* Variants — vertical name : price list. Grid (not flex) so
+           prices line up at the same right-edge column even when
+           a variant name wraps to two lines. */
         .mp-variants { margin-top: 4px; }
         .mp-variant-row {
-          display: flex; justify-content: space-between; align-items: baseline;
+          display: grid;
+          grid-template-columns: 1fr max-content;
+          column-gap: 12px;
+          align-items: baseline;
           font-size: 11px;
           padding: 1px 0;
         }
         .mp-variant-name { color: inherit; opacity: 0.92; }
-        .mp-variant-price { color: #D62B2B; white-space: nowrap; font-weight: 600; }
+        .mp-variant-price {
+          color: #D62B2B; white-space: nowrap; font-weight: 600;
+          text-align: right;
+        }
 
         /* Addon groups — text-only, no chips. */
         .mp-addons { margin-top: 4px; }
@@ -321,7 +339,6 @@ export default function MenuPrintPage() {
         @media print {
           .no-print { display: none !important; }
           .mp-toolbar { display: none !important; }
-          /* Force the chosen theme's background to print to ALL edges. */
           html, body, .menu-print-root {
             background: ${theme === 'dark' ? '#0D0D0D' : '#FFFFFF'} !important;
           }
