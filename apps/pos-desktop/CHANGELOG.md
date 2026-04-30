@@ -3,6 +3,25 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.45 — POS: Mushak Register Serial # + SD column on Sales Report (2026-05-01)
+
+No Electron-shell changes. Rebundles apps/pos only:
+
+- POS Sales Report (Today + Date Range) now renders like the
+  Mushak Register: the throwaway short-code "Ref" column is
+  replaced with "Mushak Serial #", showing the legal serial from
+  each order's MushakInvoice row. Clicking the serial reprints the
+  6.3 invoice slip in a popup (same path RefundOrderDialog uses
+  for 6.8 credit notes). Orders without a Mushak invoice fall back
+  to the old short-code, greyed out.
+- Items column dropped — auditor view only needs amounts.
+- New SD (Supplementary Duty) column between Discount and VAT;
+  pulls MushakInvoice.sdAmount. Grand-total row sums it.
+- Bundled along the way: custom-menu COGS now applies unit
+  conversion (recipe-line "Salt 6 G" against KG-stocked
+  ingredient no longer reports 1/1000th of the real cost). Same
+  fix lands in the Performance Report's per-item COGS column.
+
 ## 1.0.44 — POS: print KOT when approving customer-added items (2026-04-30)
 
 No Electron-shell changes. Rebundles apps/pos only:
