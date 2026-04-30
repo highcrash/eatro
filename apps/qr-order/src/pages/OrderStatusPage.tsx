@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, Clock, ChefHat, Plus, ArrowLeft, XCircle, Trash2 } from 'lucide-react';
+import { CheckCircle, Clock, ChefHat, Plus, ArrowLeft, XCircle, Trash2, Pencil, Receipt, Star } from 'lucide-react';
 
 import { formatCurrency } from '@restora/utils';
 import { useSessionStore } from '../store/session.store';
@@ -15,6 +15,7 @@ interface OrderItem {
   totalPrice: number;
   kitchenStatus: string;
   voidedAt: string | null;
+  notes?: string | null;
 }
 
 interface QrOrder {
@@ -30,6 +31,7 @@ interface QrOrder {
   couponCode?: string | null;
   customerId?: string | null;
   customerName?: string | null;
+  billRequested?: boolean;
   items: OrderItem[];
 }
 
@@ -62,7 +64,12 @@ export default function OrderStatusPage() {
   // hook count stays constant across renders.
   const qc = useQueryClient();
   const branchId = useSessionStore((s) => s.branchId);
+  const customer = useSessionStore((s) => s.customer);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [editingNoteFor, setEditingNoteFor] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [billBusy, setBillBusy] = useState(false);
   const [couponCode, setCouponCode] = useState('');
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponBusy, setCouponBusy] = useState(false);
@@ -227,6 +234,71 @@ export default function OrderStatusPage() {
     }
   };
 
+  const startEditNote = (item: OrderItem) => {
+    setEditingNoteFor(item.id);
+    setNoteDraft(item.notes ?? '');
+  };
+
+  const cancelEditNote = () => {
+    setEditingNoteFor(null);
+    setNoteDraft('');
+  };
+
+  const saveNote = async (itemId: string) => {
+    setNoteBusy(true);
+    try {
+      const res = await fetch(apiUrl(`/orders/qr/${orderId}/items/${itemId}/notes`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
+        body: JSON.stringify({ notes: noteDraft }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Failed to update note' })) as { message?: string };
+        throw new Error(err.message ?? 'Failed to update note');
+      }
+      cancelEditNote();
+      void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setNoteBusy(false);
+    }
+  };
+
+  // "Ask for Bill" — flips order.billRequested on the server, which
+  // pings the POS via the bill:requested WS event. Kept idempotent on
+  // the client (button stays visible but shows the requested state).
+  const requestBill = async () => {
+    if (billBusy) return;
+    setBillBusy(true);
+    try {
+      const res = await fetch(apiUrl(`/orders/qr/${orderId}/request-bill`), {
+        method: 'POST',
+        headers: { 'x-branch-id': branchId || '' },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Failed to request bill' })) as { message?: string };
+        throw new Error(err.message ?? 'Failed to request bill');
+      }
+      void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBillBusy(false);
+    }
+  };
+
+  // Review entry. Reviews need a logged-in customer (the API accepts
+  // anonymous reviews but we want them tied to the loyalty record);
+  // if not logged in, bounce through /login with a return URL.
+  const goReview = () => {
+    if (!customer) {
+      void navigate(`/login?next=/review/${orderId}`);
+      return;
+    }
+    void navigate(`/review/${orderId}`);
+  };
+
   return (
     <div className="min-h-screen bg-[#0D0D0D] pb-28">
       {/* Header */}
@@ -284,24 +356,84 @@ export default function OrderStatusPage() {
         <div className="space-y-2">
           {activeItems.map((item) => {
             const ks = KITCHEN_STATUS_COLOR[item.kitchenStatus] || KITCHEN_STATUS_COLOR.WAITING;
+            // Editable while the order is still PENDING (cashier hasn't
+            // accepted yet) OR for newly-added items individually
+            // flagged PENDING_APPROVAL inside an already-confirmed
+            // order. Same window the cancel button uses.
+            const editable = order.status === 'PENDING' || item.kitchenStatus === 'PENDING_APPROVAL';
+            const isEditing = editingNoteFor === item.id;
             return (
-              <div key={item.id} className="bg-[#1A1A1A] border border-[#2A2A2A] p-4 flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="font-body font-medium text-sm text-white leading-tight">{item.name}</p>
-                  <p className="text-xs text-[#666] font-body mt-0.5">× {item.quantity}</p>
+              <div key={item.id} className="bg-[#1A1A1A] border border-[#2A2A2A] p-4 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-body font-medium text-sm text-white leading-tight">{item.name}</p>
+                    <p className="text-xs text-[#666] font-body mt-0.5">× {item.quantity}</p>
+                  </div>
+                  <span className={`text-[10px] font-body font-medium px-2.5 py-1 ${ks.bg} ${ks.text} tracking-widest uppercase whitespace-nowrap`}>
+                    {ks.label}
+                  </span>
+                  <span className="font-display text-base text-white tracking-wide">{formatCurrency(item.totalPrice)}</span>
+                  {editable && (
+                    <button
+                      onClick={() => void handleRemoveItem(item.id)}
+                      disabled={removingId === item.id}
+                      className="w-8 h-8 flex items-center justify-center text-[#666] hover:text-[#D62B2B] transition-colors disabled:opacity-30"
+                      aria-label="Remove item"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
-                <span className={`text-[10px] font-body font-medium px-2.5 py-1 ${ks.bg} ${ks.text} tracking-widest uppercase whitespace-nowrap`}>
-                  {ks.label}
-                </span>
-                <span className="font-display text-base text-white tracking-wide">{formatCurrency(item.totalPrice)}</span>
-                {(order.status === 'PENDING' || item.kitchenStatus === 'PENDING_APPROVAL') && (
-                  <button
-                    onClick={() => void handleRemoveItem(item.id)}
-                    disabled={removingId === item.id}
-                    className="w-8 h-8 flex items-center justify-center text-[#666] hover:text-[#D62B2B] transition-colors disabled:opacity-30"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+
+                {/* Existing note + edit affordance. Editable only while
+                    the cashier hasn't accepted; once accepted, the note
+                    is read-only so the kitchen ticket doesn't move
+                    under the chef. */}
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      placeholder="Special request — no garlic, less spicy…"
+                      rows={2}
+                      autoFocus
+                      className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-xs font-body text-white outline-none focus:border-[#C8FF00] resize-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={cancelEditNote}
+                        className="flex-1 border border-[#2A2A2A] text-[#999] py-1.5 font-body text-xs"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => void saveNote(item.id)}
+                        disabled={noteBusy}
+                        className="flex-1 bg-[#C8FF00] text-[#0D0D0D] py-1.5 font-body font-medium text-xs disabled:opacity-40"
+                      >
+                        {noteBusy ? 'Saving…' : 'Save Note'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  (item.notes || editable) && (
+                    <div className="flex items-start gap-2">
+                      {item.notes ? (
+                        <p className="flex-1 text-[11px] text-[#888] font-body italic leading-snug">📝 {item.notes}</p>
+                      ) : (
+                        <p className="flex-1 text-[11px] text-[#555] font-body italic">No note</p>
+                      )}
+                      {editable && (
+                        <button
+                          onClick={() => startEditNote(item)}
+                          className="text-[#666] hover:text-[#C8FF00] transition-colors flex items-center gap-1 text-[10px] font-body uppercase tracking-widest"
+                        >
+                          <Pencil size={11} />
+                          {item.notes ? 'Edit' : 'Add note'}
+                        </button>
+                      )}
+                    </div>
+                  )
                 )}
               </div>
             );
@@ -434,7 +566,14 @@ export default function OrderStatusPage() {
         </div>
       )}
 
-      {/* Bottom actions */}
+      {/* Bottom actions. The button stack changes by status:
+          - Add more items (while customer can still order)
+          - Ask for Bill (always visible after the order is past PENDING,
+            unless already paid). Once requested, the same button shows
+            the requested state.
+          - Review your order (visible once a bill has been requested,
+            served, or paid — i.e. customer is wrapping up). Tapping
+            requires login; we bounce through /login if needed. */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-[#0D0D0D] border-t border-[#2A2A2A] px-5 py-4 z-20 space-y-2">
         {canAddItems && (
           <button
@@ -445,12 +584,46 @@ export default function OrderStatusPage() {
             Add More Items
           </button>
         )}
-        {isFinished && (
+
+        {/* Ask for Bill — show whenever the order is past PENDING and
+            not yet paid. Disabled + label-flipped once requested so the
+            customer sees confirmation. */}
+        {order.status !== 'PENDING' && order.status !== 'PAID' && order.status !== 'VOID' && order.status !== 'CANCELLED' && (
+          order.billRequested ? (
+            <div className="w-full bg-[#1A1A1A] border border-[#C8FF00]/40 text-[#C8FF00] py-3 text-center font-body text-xs flex items-center justify-center gap-2">
+              <Receipt size={14} />
+              Bill requested — your server is on the way
+            </div>
+          ) : (
+            <button
+              onClick={() => void requestBill()}
+              disabled={billBusy}
+              className="w-full border border-[#C8FF00] text-[#C8FF00] py-3 font-body font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Receipt size={16} />
+              {billBusy ? 'Requesting…' : 'Ask for Bill'}
+            </button>
+          )
+        )}
+
+        {/* Review — once the customer has wrapped up. Tapping bounces
+            to login when needed; the review form itself enforces it. */}
+        {(order.billRequested || isFinished) && (
+          <button
+            onClick={goReview}
+            className="w-full bg-[#1A1A1A] border border-[#FFA726] text-[#FFA726] py-3 font-body font-medium text-sm flex items-center justify-center gap-2"
+          >
+            <Star size={16} />
+            Review your order
+          </button>
+        )}
+
+        {isFinished && !order.billRequested && (
           <p className="text-center text-xs text-[#C8FF00] font-body font-medium py-2">
             Thank you for dining with us!
           </p>
         )}
-        {!canAddItems && !isFinished && (
+        {!canAddItems && !isFinished && !order.billRequested && order.status !== 'CONFIRMED' && order.status !== 'PREPARING' && order.status !== 'READY' && order.status !== 'SERVED' && (
           <p className="text-center text-xs text-[#666] font-body py-2">
             Your order is almost ready...
           </p>

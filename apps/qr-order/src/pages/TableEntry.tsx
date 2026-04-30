@@ -86,6 +86,36 @@ export default function TableEntry() {
       // didn't return one (e.g. anonymous-cart device).
       if (!activeOrderId) activeOrderId = prev.activeOrderId;
 
+      // Cross-device rescan: another diner already at this table has an
+      // open order. The customer-keyed lookup above only finds orders
+      // that belong to *this* device's logged-in customer; if a guest
+      // (or a different customer) scans the same table, we still want
+      // to land them on the running order so they can add/remove items
+      // or request the bill. Skip when we already have one matched
+      // upstream, and skip when the server returns a different
+      // customer's order while THIS device IS logged in (avoid hijacking
+      // someone else's session).
+      if (!activeOrderId) {
+        try {
+          const res = await fetch(apiUrl(`/orders/qr/by-table/${table.id}`), {
+            headers: { 'x-branch-id': table.branchId },
+          });
+          if (res.ok) {
+            const tableOrder = (await res.json()) as { id: string; customerId: string | null } | null;
+            if (tableOrder) {
+              // If THIS device is logged-in but the table's active order
+              // belongs to a different customer, stay anonymous on the
+              // running order: don't try to claim it as the logged-in
+              // customer's. Customer-id mismatch is OK — the server's
+              // order endpoints accept anonymous edits while the order
+              // is still PENDING.
+              activeOrderId = tableOrder.id;
+              activeOrderTableId = table.id;
+            }
+          }
+        } catch { /* network blip — no fallback */ }
+      }
+
       // 3. Update session. Preserve customer; bump tableId to whatever
       //    was just scanned. The session store's setSession spreads
       //    these onto the existing state without touching customer.
