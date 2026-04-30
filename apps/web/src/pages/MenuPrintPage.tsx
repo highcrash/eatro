@@ -5,6 +5,11 @@ import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
 import { useBranding, getActiveBranchId } from '../lib/cms';
 
+// Strip trailing `.00` from formatted currency for the print sheet —
+// the menu hardcopy reads cleaner as "BDT 270" than "BDT 270.00".
+// Non-zero paise (e.g. ".50") are preserved.
+const fmt = (paisa: number): string => formatCurrency(paisa).replace(/\.00$/, '');
+
 /**
  * /menu-print — printable A4 hardcopy of the public menu.
  *
@@ -466,8 +471,8 @@ export default function MenuPrintPage() {
                   : null;
                 const headPrice =
                   baseFromVariant !== null
-                    ? `${formatCurrency(baseFromVariant)}+`
-                    : formatCurrency(Number(item.discountedPrice ?? item.price));
+                    ? `${fmt(baseFromVariant)}+`
+                    : fmt(Number(item.discountedPrice ?? item.price));
 
                 return (
                   <article key={item.id} className="mp-card">
@@ -504,7 +509,7 @@ export default function MenuPrintPage() {
                                 <div className="mp-variant-row">
                                   <span className="mp-variant-name">{v.name}</span>
                                   <span className="mp-variant-price">
-                                    {formatCurrency(Number(v.price))}
+                                    {fmt(Number(v.price))}
                                   </span>
                                 </div>
                                 {groups.map((g) => (
@@ -516,7 +521,7 @@ export default function MenuPrintPage() {
                                         .map((o) => {
                                           const p = Number(o.addon.price ?? 0);
                                           return p > 0
-                                            ? `${o.addon.name} +${formatCurrency(p)}`
+                                            ? `${o.addon.name} +${fmt(p)}`
                                             : o.addon.name;
                                         })
                                         .join(', ')}
@@ -535,7 +540,7 @@ export default function MenuPrintPage() {
                             <div key={v.id} className="mp-variant-row">
                               <span className="mp-variant-name">{v.name}</span>
                               <span className="mp-variant-price">
-                                {formatCurrency(Number(v.price))}
+                                {fmt(Number(v.price))}
                               </span>
                             </div>
                           ))}
@@ -553,7 +558,7 @@ export default function MenuPrintPage() {
                                   .map((o) => {
                                     const p = Number(o.addon.price ?? 0);
                                     return p > 0
-                                      ? `${o.addon.name} +${formatCurrency(p)}`
+                                      ? `${o.addon.name} +${fmt(p)}`
                                       : o.addon.name;
                                   })
                                   .join(', ')}
