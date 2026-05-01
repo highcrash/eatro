@@ -64,6 +64,14 @@ const FONT_PERANDORY_COND = join(FONTS_DIR, 'perandory-condensed.otf');
 const FONT_HP_SCRIPT = join(FONTS_DIR, 'HelloParisScript.ttf');
 const FONT_HP_BOLD = join(FONTS_DIR, 'HelloParisSerif-Bold.ttf');
 const FONT_HP_REGULAR = join(FONTS_DIR, 'HelloParisSerif-Regular.ttf');
+// Each font's actual family name (id 1 in the OTF/TTF name table) —
+// resvg matches by this exact string. Hello Paris Bold is its own
+// family (not "Hello Paris" weight 700) because the font's name table
+// stores it that way; same trick the inspector script confirmed.
+const FF_PERANDORY = 'Perandory';
+const FF_PERANDORY_COND = 'Perandory Cond';
+const FF_HP_SCRIPT = 'Hello Paris Script';
+const FF_HP_BOLD = 'Hello Paris Bold';
 
 let templateBuffer: Buffer | null = null;
 let splatBuffer: Buffer | null = null;
@@ -156,9 +164,12 @@ function esc(s: string): string {
 
 function discountBadgeLines(d: ComposeDiscountInput['discount']): { off: string; value: string } {
   if (d.type === 'PERCENTAGE') {
-    return { off: 'Off', value: `${Math.round(d.value)}%` };
+    return { off: 'OFF', value: `${Math.round(d.value)}%` };
   }
-  return { off: 'Off', value: `৳${Math.round(d.value / 100)}` };
+  // Hello Paris Bold doesn't have the Bengali Taka glyph (৳), so it
+  // renders as a tofu box. Use BDT prefix instead — matches the
+  // caption template the owner already uses ("BDT 270").
+  return { off: 'OFF', value: `BDT ${Math.round(d.value / 100)}` };
 }
 
 async function fetchImageSafe(url: string | null): Promise<Buffer | null> {
@@ -208,77 +219,103 @@ export async function composeDiscountImage(
     : '';
   const badge = discountBadgeLines(input.discount);
 
-  // ─── Title block (Perandory) ─────────────────────────────────────
-  let titleSvg: string;
+  // ─── Title block (Perandory at calmer height) ────────────────────
+  // The headline used to render at 180px which Perandory's tall
+  // ascenders pushed into a stretched look (taller than wide). The
+  // designer's mockup uses the font at a more horizontal ratio —
+  // 140px is the sweet spot.
+  let titleMainSvg: string;
+  let titleSubSvg: string;
   if (template === 'PRICE_DROP') {
-    titleSvg = `
-      <text x="540" y="200" font-family="Perandory"
-            font-size="180" text-anchor="middle" fill="#0E0E0E"
-            letter-spacing="-2">PRICE DROP</text>
-      <text x="540" y="290" font-family="Perandory"
-            font-size="76" text-anchor="middle" fill="#D43A1F"
-            letter-spacing="2">VALID ${esc(validDate.toUpperCase())}</text>
+    titleMainSvg = `
+      <text x="540" y="170" font-family="${FF_PERANDORY}"
+            font-size="140" text-anchor="middle" fill="#0E0E0E"
+            letter-spacing="-1">PRICE DROP</text>
+    `;
+    titleSubSvg = `
+      <text x="540" y="240" font-family="${FF_PERANDORY_COND}"
+            font-size="58" text-anchor="middle" fill="#D43A1F"
+            letter-spacing="6">VALID ${esc(validDate.toUpperCase())}</text>
     `;
   } else {
-    titleSvg = `
-      <text x="540" y="80" font-family="Perandory"
-            font-size="44" text-anchor="middle" fill="#D43A1F"
-            letter-spacing="1">Valid ${esc(validDate)}</text>
-      <text x="540" y="200" font-family="Perandory"
-            font-size="180" text-anchor="middle" fill="#0E0E0E"
-            letter-spacing="-2">EVERY</text>
-      <text x="540" y="290" font-family="Perandory"
-            font-size="74" text-anchor="middle" fill="#D43A1F"
-            letter-spacing="2">${esc(dayLine.toUpperCase())}</text>
+    // SELECTED_DAYS — three stacked lines. Small "Valid <date>" red
+    // sits ABOVE the EVERY headline; day list sits BELOW. y-stops
+    // chosen so the EVERY ascenders don't overlap the line above.
+    titleMainSvg = `
+      <text x="540" y="180" font-family="${FF_PERANDORY}"
+            font-size="130" text-anchor="middle" fill="#0E0E0E"
+            letter-spacing="-1">EVERY</text>
+    `;
+    titleSubSvg = `
+      <text x="540" y="70" font-family="${FF_PERANDORY_COND}"
+            font-size="36" text-anchor="middle" fill="#D43A1F"
+            letter-spacing="3">VALID ${esc(validDate.toUpperCase())}</text>
+      <text x="540" y="240" font-family="${FF_PERANDORY_COND}"
+            font-size="56" text-anchor="middle" fill="#D43A1F"
+            letter-spacing="5">${esc(dayLine.toUpperCase())}</text>
     `;
   }
-  const titleLayer = await renderTextLayer(titleSvg, FONT_PERANDORY);
-  // Suppress unused — Perandory Condensed will be wired in v2 if the
-  // designer wants different weights for sub-line vs title.
-  void FONT_PERANDORY_COND;
+  // Sub-lines (VALID / day list) use Perandory Condensed for the
+  // narrower, cleaner look the designer wanted; headline uses
+  // regular Perandory. They're separate render passes so resvg
+  // doesn't have to disambiguate two faces of the same family.
+  const titleMainLayer = await renderTextLayer(titleMainSvg, FONT_PERANDORY);
+  const titleSubLayer = await renderTextLayer(titleSubSvg, FONT_PERANDORY_COND);
 
-  // ─── Script overlay (Hello Paris Script) ─────────────────────────
-  // Anchored on the lower-left, lines tilt up to the right at -8°.
-  // Sits across the food's bottom edge and into the splat — same as
-  // the designer's mockup. Up to 3 lines wrap at ~24 chars.
-  const nameLines = wrapWords(input.productName, 24, 3);
-  const scriptStartY = 880;
-  const scriptLineHeight = 88;
+  // ─── Script overlay (Hello Paris Script) — bigger + centered ────
+  // Centred under the food at calmer line-height. 2 lines max.
+  const nameLines = wrapWords(input.productName, 22, 2);
+  const scriptStartY = 920;
+  const scriptLineHeight = 92;
   const scriptSvg = nameLines
     .map((line, i) => {
       const y = scriptStartY + i * scriptLineHeight;
       return `
-      <text x="80" y="${y}"
-            font-family="Hello Paris Script"
+      <text x="540" y="${y}"
+            font-family="${FF_HP_SCRIPT}"
             font-size="92" fill="#0E0E0E"
-            transform="rotate(-8 80 ${y})">${esc(line)}</text>`;
+            text-anchor="middle"
+            transform="rotate(-6 540 ${y})">${esc(line)}</text>`;
     })
     .join('');
   const scriptLayer = await renderTextLayer(scriptSvg, FONT_HP_SCRIPT);
 
-  // ─── Badge text (Hello Paris Bold) ───────────────────────────────
+  // ─── Badge text (Hello Paris Bold) — sized to fit the splat ─────
+  // "BDT 100" is wider than "30%", so the value font size scales
+  // down for longer strings. The splat is roughly 300px across at
+  // its widest; we keep ~30px of safety on each side.
+  const valueFontSize = badge.value.length <= 3 ? 96
+    : badge.value.length <= 6 ? 56
+    : 44;
   const badgeSvg = `
-    <text x="820" y="920" font-family="Hello Paris Bold"
-          font-size="42" text-anchor="middle" fill="#FFFFFF">${esc(badge.off)}</text>
-    <text x="820" y="990" font-family="Hello Paris Bold"
-          font-size="76" text-anchor="middle" fill="#FFFFFF">${esc(badge.value)}</text>
+    <text x="820" y="935" font-family="${FF_HP_BOLD}"
+          font-size="50" text-anchor="middle" fill="#FFFFFF">${esc(badge.off)}</text>
+    <text x="820" y="1015" font-family="${FF_HP_BOLD}"
+          font-size="${valueFontSize}" text-anchor="middle" fill="#FFFFFF">${esc(badge.value)}</text>
   `;
   const badgeLayer = await renderTextLayer(badgeSvg, FONT_HP_BOLD);
 
-  // ─── Address (Hello Paris Regular) ───────────────────────────────
-  const addrLines = wrapWords(input.branding.address, 48, 2);
+  // ─── Address (Perandory Condensed — cleaner serif) ───────────────
+  // Designer wanted "more clean front like this"; Hello Paris Regular
+  // was reading as a stylised script. Perandory Condensed gives the
+  // narrower, all-caps editorial look from the mockup.
+  const addrLines = wrapWords(input.branding.address, 52, 2);
   const addrStartY = 1280;
-  const addrLineHeight = 36;
+  const addrLineHeight = 38;
   const addressSvg = addrLines
     .map(
       (line, i) => `
       <text x="540" y="${addrStartY + i * addrLineHeight}"
-            font-family="Hello Paris"
-            font-size="28" text-anchor="middle" fill="#0E0E0E">${esc(line)}</text>
+            font-family="${FF_PERANDORY_COND}"
+            font-size="30" text-anchor="middle" fill="#0E0E0E"
+            letter-spacing="2">${esc(line.toUpperCase())}</text>
     `,
     )
     .join('');
-  const addressLayer = await renderTextLayer(addressSvg, FONT_HP_REGULAR);
+  const addressLayer = await renderTextLayer(addressSvg, FONT_PERANDORY_COND);
+  // Suppress unused — Hello Paris Regular kept for v2 if a different
+  // address style is requested later.
+  void FONT_HP_REGULAR;
 
   // ─── Composite layers ────────────────────────────────────────────
   // bottom → top:
@@ -296,7 +333,10 @@ export async function composeDiscountImage(
 
   const food = await fetchImageSafe(input.foodImageUrl);
   if (food) {
-    const FOOD_BOX = 640;
+    // Designer feedback: "Image should be more zoomed and large".
+    // Bumped from 640 → 760 — fills the upper-middle band of the
+    // canvas without crowding the title or splat.
+    const FOOD_BOX = 760;
     const resized = await sharp(food)
       .resize(FOOD_BOX, FOOD_BOX, { fit: 'inside', withoutEnlargement: false })
       .png()
@@ -305,7 +345,7 @@ export async function composeDiscountImage(
     composites.push({
       input: resized,
       left: Math.round((W - (meta.width ?? FOOD_BOX)) / 2),
-      top: 360,
+      top: 320,
     });
   }
 
@@ -316,7 +356,9 @@ export async function composeDiscountImage(
 
   const logo = await fetchImageSafe(input.branding.logoUrl);
   if (logo) {
-    const LOGO_MAX_H = 100;
+    // Designer feedback: "logo should be more clear and sharp and
+    // small". Reduced from 100 → 70px tall.
+    const LOGO_MAX_H = 70;
     const resized = await sharp(logo)
       .resize({ height: LOGO_MAX_H, fit: 'inside' })
       .png()
@@ -325,11 +367,12 @@ export async function composeDiscountImage(
     composites.push({
       input: resized,
       left: Math.round((W - (meta.width ?? 200)) / 2),
-      top: 1180 - Math.round((meta.height ?? LOGO_MAX_H) / 2),
+      top: 1210 - Math.round((meta.height ?? LOGO_MAX_H) / 2),
     });
   }
 
-  composites.push({ input: titleLayer, top: 0, left: 0 });
+  composites.push({ input: titleMainLayer, top: 0, left: 0 });
+  composites.push({ input: titleSubLayer, top: 0, left: 0 });
   composites.push({ input: scriptLayer, top: 0, left: 0 });
   composites.push({ input: badgeLayer, top: 0, left: 0 });
   composites.push({ input: addressLayer, top: 0, left: 0 });
