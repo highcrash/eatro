@@ -3,6 +3,29 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.47 — POS: discount price on tiles + auto-FB-post caption editor (2026-05-01)
+
+No Electron-shell changes. Rebundles apps/pos + apps/admin + apps/api:
+
+- POS menu tiles now render the discounted price in accent colour
+  with the original price strikethrough'd next to it. The /menu
+  endpoint that POS hits never carried discount data — the public
+  website applied discounts but POS didn't, so cashiers saw the
+  full price even when the order pricing engine WAS already
+  applying the discount on submit. Customers got the discount;
+  cashiers were just blind to it on the tile.
+- Auto-Facebook-post: admin can now edit the caption template per
+  branch (Settings → Marketing → Post Caption Template). Live
+  preview of {PLACEHOLDER} chips, monospace textarea, Reset to
+  Default. Custom template stored on BranchSetting; null reverts
+  to the system default.
+- Designer-feedback round on the discount image: PRICE DROP /
+  EVERY headline now sized at 140px (was 180, was reading as
+  stretched), VALID + day list switched to Perandory Condensed,
+  food image bumped to 760px, OFF badge value scales by string
+  length (BDT 30 fits the splat now), address footer in clean
+  Perandory Condensed all-caps.
+
 ## 1.0.46 — POS: cash-account transfers now reconcile correctly (2026-05-01)
 
 No Electron-shell changes. Rebundles apps/pos only:
