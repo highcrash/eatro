@@ -56,9 +56,10 @@ export class SocialService {
   }
 
   async setEnabled(branchId: string, enabled: boolean) {
-    await this.prisma.branchSetting.update({
+    await this.prisma.branchSetting.upsert({
       where: { branchId },
-      data: { fbAutopostEnabled: enabled },
+      create: { branchId, fbAutopostEnabled: enabled },
+      update: { fbAutopostEnabled: enabled },
     });
     return { fbAutopostEnabled: enabled };
   }
@@ -67,36 +68,65 @@ export class SocialService {
     if (!/^\d{2}:\d{2}$/.test(time)) {
       throw new BadRequestException('Default post time must be HH:mm');
     }
-    await this.prisma.branchSetting.update({
+    await this.prisma.branchSetting.upsert({
       where: { branchId },
-      data: { fbDefaultPostTime: time },
+      create: { branchId, fbDefaultPostTime: time },
+      update: { fbDefaultPostTime: time },
     });
     return { fbDefaultPostTime: time };
   }
 
-  /** Connect a Facebook page. Verifies the token, then persists. */
+  /** Connect a Facebook page. Verifies the token first so the admin gets
+   *  a friendly Graph-API error message back instead of a 500 from the
+   *  prisma update path. Uses upsert because some branches may not have
+   *  a BranchSetting row yet (created lazily when other settings are
+   *  first touched). */
   async connectPage(branchId: string, dto: { pageId: string; pageAccessToken: string }) {
-    const verified = await this.fb.verifyPage({
-      pageId: dto.pageId.trim(),
-      accessToken: dto.pageAccessToken.trim(),
-    });
-    await this.prisma.branchSetting.update({
-      where: { branchId },
-      data: {
-        fbPageId: verified.pageId,
-        fbPageName: verified.pageName,
-        fbPageAccessToken: dto.pageAccessToken.trim(),
-        fbConnectedAt: new Date(),
-        fbAutopostEnabled: true,
-      },
-    });
+    const pageId = dto.pageId.trim();
+    const accessToken = dto.pageAccessToken.trim();
+    if (!pageId || !accessToken) {
+      throw new BadRequestException('pageId and pageAccessToken are required');
+    }
+    let verified;
+    try {
+      verified = await this.fb.verifyPage({ pageId, accessToken });
+    } catch (err) {
+      const msg = (err as Error).message ?? 'Facebook verification failed';
+      this.log.warn(`connectPage verify failed for branch ${branchId}: ${msg}`);
+      throw new BadRequestException(msg);
+    }
+    try {
+      await this.prisma.branchSetting.upsert({
+        where: { branchId },
+        create: {
+          branchId,
+          fbPageId: verified.pageId,
+          fbPageName: verified.pageName,
+          fbPageAccessToken: accessToken,
+          fbConnectedAt: new Date(),
+          fbAutopostEnabled: true,
+        },
+        update: {
+          fbPageId: verified.pageId,
+          fbPageName: verified.pageName,
+          fbPageAccessToken: accessToken,
+          fbConnectedAt: new Date(),
+          fbAutopostEnabled: true,
+        },
+      });
+    } catch (err) {
+      const msg = (err as Error).message ?? 'Failed to save page connection';
+      this.log.error(`connectPage save failed for branch ${branchId}: ${msg}`);
+      throw new BadRequestException(`Save failed: ${msg}`);
+    }
     return { pageId: verified.pageId, pageName: verified.pageName };
   }
 
   async disconnectPage(branchId: string) {
-    await this.prisma.branchSetting.update({
+    await this.prisma.branchSetting.upsert({
       where: { branchId },
-      data: {
+      create: { branchId, fbAutopostEnabled: false },
+      update: {
         fbPageId: null,
         fbPageName: null,
         fbPageAccessToken: null,
