@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.50 — POS: bKash/MFS expenses now post to the linked account (2026-05-02)
+
+Renderer-only rebundle. No Electron-shell changes.
+
+- Cashier-recorded expenses paid via bKash (and any non-CASH
+  method) were silently skipping the account ledger, so the
+  bKash account statement showed nothing even though the
+  expense was created. The Finance form's payment-method
+  dropdown was hard-coded to legacy enum values that didn't
+  match the configured PaymentOption.codes; replaced it with a
+  /payment-methods-fed selector (same source the order
+  PaymentModal uses), so the cashier picks the actual
+  configured tender and the API gets a code it can resolve.
+- API-side hardening: when a PaymentOption resolves but
+  carries no accountId of its own, the resolver now climbs to
+  the option's PaymentMethodConfig and reuses the category's
+  default-option accountId or the legacy
+  linkedPaymentMethod=<categoryCode> account. Closes the
+  silent-skip path for legacy installs.
+
 ## 1.0.49 — POS: cart subtotal honours active menu-item discounts (2026-05-01)
 
 Renderer-only rebundle. No Electron-shell changes.
