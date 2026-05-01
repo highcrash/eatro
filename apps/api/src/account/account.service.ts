@@ -157,7 +157,7 @@ export class AccountService {
     // First try: find via PaymentOption -> Account link
     const option = await this.prisma.paymentOption.findFirst({
       where: { branchId, code: paymentOptionCode, isActive: true },
-      select: { accountId: true },
+      select: { accountId: true, categoryId: true },
     });
 
     let account;
@@ -170,6 +170,26 @@ export class AccountService {
       account = await this.prisma.account.findFirst({
         where: { branchId, linkedPaymentMethod: paymentOptionCode, isActive: true },
       });
+    }
+
+    // Option exists but no accountId of its own — climb to the
+    // option's category and try the category's default option /
+    // legacy linkedPaymentMethod=<categoryCode>. Lets a "BKASH"
+    // expense post against the MFS-linked account when the bKash
+    // PaymentOption itself was never linked to an Account.
+    if (!account && option?.categoryId) {
+      const cat = await this.prisma.paymentMethodConfig.findFirst({
+        where: { id: option.categoryId },
+        include: { options: { where: { isDefault: true, isActive: true }, select: { accountId: true } } },
+      });
+      if (cat?.options[0]?.accountId) {
+        account = await this.prisma.account.findFirst({ where: { id: cat.options[0].accountId, isActive: true } });
+      }
+      if (!account && cat) {
+        account = await this.prisma.account.findFirst({
+          where: { branchId, linkedPaymentMethod: cat.code, isActive: true },
+        });
+      }
     }
 
     // Also try category code (e.g., "CASH" when option is "CASH")
