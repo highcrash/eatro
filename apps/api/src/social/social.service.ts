@@ -95,6 +95,11 @@ export class SocialService {
       this.log.warn(`connectPage verify failed for branch ${branchId}: ${msg}`);
       throw new BadRequestException(msg);
     }
+    // Save the PAGE-derived access token, not the user token the
+    // admin pasted. verifyPage walks /me/accounts and returns the
+    // page-native token; posting to /{page-id}/photos with a user
+    // token returns "(#200) publish_actions deprecated" even when
+    // the user has all the right scopes.
     try {
       await this.prisma.branchSetting.upsert({
         where: { branchId },
@@ -102,14 +107,14 @@ export class SocialService {
           branchId,
           fbPageId: verified.pageId,
           fbPageName: verified.pageName,
-          fbPageAccessToken: accessToken,
+          fbPageAccessToken: verified.pageAccessToken,
           fbConnectedAt: new Date(),
           fbAutopostEnabled: true,
         },
         update: {
           fbPageId: verified.pageId,
           fbPageName: verified.pageName,
-          fbPageAccessToken: accessToken,
+          fbPageAccessToken: verified.pageAccessToken,
           fbConnectedAt: new Date(),
           fbAutopostEnabled: true,
         },

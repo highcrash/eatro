@@ -41,12 +41,26 @@ export class FacebookClient {
   private readonly log = new Logger(FacebookClient.name);
 
   /**
-   * Resolve the page metadata for the supplied token. Returns the page
-   * name so the Settings UI can show "Connected as <name>". Throws on
-   * any non-2xx response — the connect endpoint catches this and
-   * surfaces a friendly message.
+   * Resolve the page metadata for the supplied token AND return a
+   * page-specific access token suitable for posting to /photos.
+   *
+   * Admins typically paste a USER token from Graph API Explorer with
+   * `pages_manage_posts` etc. checked. That user token can READ the
+   * page (pageId verify works) but POSTING to /{page-id}/photos with
+   * a user token returns "(#200) publish_actions deprecated" — the
+   * Graph API rejects user tokens at publish-time even when the user
+   * has the right page scopes.
+   *
+   * Walk through the user's pages via /me/accounts; each entry
+   * carries a page-native access_token that's the right kind for
+   * publishing. We pick the one matching the supplied pageId and
+   * return it; if none match, we fall back to the supplied token
+   * (caller may have already pasted a page-native token).
    */
-  async verifyPage(input: VerifyPageInput): Promise<{ pageId: string; pageName: string }> {
+  async verifyPage(input: VerifyPageInput): Promise<{ pageId: string; pageName: string; pageAccessToken: string }> {
+    // First: confirm the page id is reachable with this token. This
+    // also catches expired/wrong-scope tokens up front with a clean
+    // error.
     const url = `${GRAPH_BASE}/${encodeURIComponent(input.pageId)}?fields=id,name&access_token=${encodeURIComponent(input.accessToken)}`;
     const res = await fetch(url);
     const body = (await res.json().catch(() => ({}))) as { id?: string; name?: string; error?: { message?: string } };
@@ -54,7 +68,32 @@ export class FacebookClient {
       const msg = body.error?.message ?? `Facebook verify failed (${res.status})`;
       throw new Error(msg);
     }
-    return { pageId: body.id, pageName: body.name ?? input.pageId };
+    const pageName = body.name ?? input.pageId;
+
+    // Second: derive the page-native token. /me/accounts returns
+    // every page the supplied token can manage, each with its own
+    // access_token field. If the supplied token IS already a page
+    // token, /me/accounts may 200 with one entry — same outcome.
+    let pageAccessToken = input.accessToken;
+    try {
+      const accUrl = `${GRAPH_BASE}/me/accounts?fields=id,name,access_token&limit=200&access_token=${encodeURIComponent(input.accessToken)}`;
+      const accRes = await fetch(accUrl);
+      const accBody = (await accRes.json().catch(() => ({}))) as {
+        data?: Array<{ id?: string; name?: string; access_token?: string }>;
+      };
+      const match = accBody.data?.find((p) => p.id === input.pageId && p.access_token);
+      if (match?.access_token) {
+        pageAccessToken = match.access_token;
+      }
+      // If no match — the supplied token IS the page token already
+      // (or the user lacks pages_show_list). Posting with the
+      // original token will surface a real error to the admin.
+    } catch {
+      // Network / parse error — fall back to the supplied token; the
+      // posting cron will retry with whatever we have.
+    }
+
+    return { pageId: body.id, pageName, pageAccessToken };
   }
 
   /**
