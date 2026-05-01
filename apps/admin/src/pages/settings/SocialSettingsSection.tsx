@@ -9,7 +9,24 @@ interface SocialSettings {
   fbConnectedAt: string | null;
   fbDefaultPostTime: string;
   fbHasToken: boolean;
+  /** Per-branch override; null = use the system default. */
+  fbCaptionTemplate: string | null;
+  /** System default (read-only) — also used to seed the textarea
+   *  when admin first opens the editor. */
+  fbCaptionTemplateDefault: string;
 }
+
+const PLACEHOLDER_HELP = [
+  '{PRODUCT NAME}',
+  '{NEW PRICE}',
+  '{OLD PRICE}',
+  '{DISCOUNT}',
+  '{DAYS}',
+  '{DATE}',
+  '{TIME RANGE}',
+  '{ADDRESS}',
+  '{PHONE}',
+];
 
 /**
  * Marketing tab. One sub-card:
@@ -30,13 +47,19 @@ export default function SocialSettingsSection({ isOwner }: { isOwner: boolean })
   const [pageId, setPageId] = useState('');
   const [token, setToken] = useState('');
   const [defaultTime, setDefaultTime] = useState('11:00');
+  const [captionTpl, setCaptionTpl] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [connectError, setConnectError] = useState<string>('');
   const [savedFlash, setSavedFlash] = useState(false);
+  const [tplFlash, setTplFlash] = useState(false);
 
   useEffect(() => {
     if (settings && !loaded) {
       setDefaultTime(settings.fbDefaultPostTime);
+      // Seed the textarea with the branch's saved template, falling
+      // back to the system default so admin can see / edit the
+      // baseline rather than a blank box.
+      setCaptionTpl(settings.fbCaptionTemplate ?? settings.fbCaptionTemplateDefault);
       setLoaded(true);
     }
   }, [settings, loaded]);
@@ -66,6 +89,16 @@ export default function SocialSettingsSection({ isOwner }: { isOwner: boolean })
     onSuccess: () => {
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 1500);
+      void qc.invalidateQueries({ queryKey: ['social-settings'] });
+    },
+  });
+
+  const tplMut = useMutation({
+    mutationFn: (template: string | null) =>
+      api.post('/social/settings/caption-template', { template }),
+    onSuccess: () => {
+      setTplFlash(true);
+      setTimeout(() => setTplFlash(false), 1500);
       void qc.invalidateQueries({ queryKey: ['social-settings'] });
     },
   });
@@ -183,6 +216,62 @@ export default function SocialSettingsSection({ isOwner }: { isOwner: boolean })
           >
             {timeMut.isPending ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Save'}
           </button>
+        </div>
+      </div>
+
+      <div className="bg-[#161616] border border-[#2A2A2A] p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-lg text-white tracking-widest uppercase">Post Caption Template</h3>
+          <span className="text-[10px] uppercase tracking-widest font-body text-[#666]">
+            {settings.fbCaptionTemplate ? 'CUSTOM' : 'DEFAULT'}
+          </span>
+        </div>
+        <p className="text-xs text-[#999] font-body">
+          Edit the text Facebook will publish with each discount image. Use the placeholders below — they'll be replaced with the live discount values when each post is generated.
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {PLACEHOLDER_HELP.map((p) => (
+            <span
+              key={p}
+              className="text-[10px] font-mono px-2 py-0.5 bg-[#0D0D0D] border border-[#2A2A2A] text-[#C8FF00]"
+              title="Click to copy"
+              onClick={() => { void navigator.clipboard?.writeText(p); }}
+              style={{ cursor: 'pointer' }}
+            >
+              {p}
+            </span>
+          ))}
+        </div>
+        <textarea
+          value={captionTpl}
+          onChange={(e) => setCaptionTpl(e.target.value)}
+          rows={18}
+          disabled={!isOwner}
+          spellCheck={false}
+          className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-xs font-mono leading-relaxed focus:outline-none focus:border-[#D62B2B] resize-vertical"
+        />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => tplMut.mutate(captionTpl)}
+            disabled={!isOwner || tplMut.isPending}
+            className="bg-[#D62B2B] hover:bg-[#C02020] text-white text-xs font-body font-medium tracking-widest uppercase px-4 py-2 transition-colors disabled:opacity-40"
+          >
+            {tplMut.isPending ? 'Saving…' : tplFlash ? 'Saved ✓' : 'Save Template'}
+          </button>
+          <button
+            onClick={() => {
+              setCaptionTpl(settings.fbCaptionTemplateDefault);
+              tplMut.mutate(null);
+            }}
+            disabled={!isOwner || tplMut.isPending}
+            className="border border-[#2A2A2A] hover:border-[#D62B2B] text-[#999] hover:text-white text-xs font-body uppercase tracking-widest px-4 py-2 transition-colors disabled:opacity-40"
+            title="Discard custom template and use the system default"
+          >
+            Reset to Default
+          </button>
+          <p className="text-[11px] text-[#666] font-body ml-auto">
+            Lines containing <span className="font-mono text-[#C8FF00]">{'{TIME RANGE}'}</span> are dropped automatically when no time range is set.
+          </p>
         </div>
       </div>
     </div>

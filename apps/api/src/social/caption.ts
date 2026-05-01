@@ -1,11 +1,13 @@
 /**
- * Owner-supplied caption template for menu-discount auto-posts.
- * Substitutes the live discount values into the literal block the
- * owner pasted, leaving the optional Time Range line out when absent.
+ * Facebook auto-post caption builder.
  *
- * The template is intentionally fixed — the owner wants every post
- * to follow the same visual cadence on the FB page so customers
- * recognise it as Eatro branding.
+ * Supports two modes:
+ *   1. Default template — owner's literal block.
+ *   2. Custom template stored on `BranchSetting.fbCaptionTemplate`.
+ *
+ * Both walk the same set of `{PLACEHOLDER}` tokens. Anything not
+ * recognised is left as-is so admins can include their own static
+ * text. Empty / null custom template falls back to the default.
  */
 
 interface CaptionInput {
@@ -23,6 +25,32 @@ interface CaptionInput {
   phone: string;
 }
 
+/** Default template. Matches the literal block the owner pasted —
+ *  used when the branch hasn't customised its template yet, and
+ *  shown as the placeholder in the Settings textarea. */
+export const DEFAULT_CAPTION_TEMPLATE = [
+  '🔥 {PRODUCT NAME} – Special Offer!',
+  '',
+  'Enjoy your favourite {PRODUCT NAME} at a better price! 😍',
+  '',
+  '💸 Now: BDT {NEW PRICE}',
+  'Was: BDT {OLD PRICE}',
+  '🎉 Save BDT {DISCOUNT} OFF!',
+  '',
+  '📅 Offer Days: {DAYS} Only',
+  '⏳ Valid Till: {DATE}',
+  '🕒 Time: {TIME RANGE}',
+  '',
+  "Don't miss out—grab yours while the offer lasts!",
+  '',
+  'Only at Eatro — Where flavour takes the lead.',
+  '',
+  '📍 {ADDRESS}',
+  '📞 {PHONE}',
+  '',
+  '#EatroOffers #SpecialDeal #FoodDeals #EatroDhaka #FlavourTakesTheLead',
+].join('\n');
+
 const DAY_LABEL: Record<string, string> = {
   SUNDAY: 'Sunday',
   MONDAY: 'Monday',
@@ -39,7 +67,6 @@ function formatDays(days: string[] | null): string {
 }
 
 function formatDate(d: Date): string {
-  // "Friday, May 30, 2026"
   return d.toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
@@ -53,31 +80,39 @@ function bdt(paisa: number): string {
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(taka);
 }
 
-export function buildDiscountCaption(input: CaptionInput): string {
-  const { productName, oldPrice, newPrice, days, validTill, timeRange, address, phone } = input;
-  const discount = Math.max(0, oldPrice - newPrice);
-  const lines: string[] = [];
-  lines.push(`🔥 ${productName} – Special Offer!`);
-  lines.push('');
-  lines.push(`Enjoy your favourite ${productName} at a better price! 😍`);
-  lines.push('');
-  lines.push(`💸 Now: BDT ${bdt(newPrice)}`);
-  lines.push(`Was: BDT ${bdt(oldPrice)}`);
-  lines.push(`🎉 Save BDT ${bdt(discount)} OFF!`);
-  lines.push('');
-  lines.push(`📅 Offer Days: ${formatDays(days)} Only`);
-  lines.push(`⏳ Valid Till: ${formatDate(validTill)}`);
-  if (timeRange && timeRange.trim()) {
-    lines.push(`🕒 Time: ${timeRange.trim()}`);
+/** Render the caption.
+ *  - `template` falls back to DEFAULT_CAPTION_TEMPLATE when null/empty.
+ *  - When `timeRange` is null/empty AND the template contains the
+ *    `{TIME RANGE}` placeholder on its own line, the entire line is
+ *    dropped so we don't print "🕒 Time:" with nothing after it. */
+export function buildDiscountCaption(
+  input: CaptionInput,
+  template?: string | null,
+): string {
+  const tpl = (template?.trim().length ? template : DEFAULT_CAPTION_TEMPLATE).trim();
+
+  const discount = Math.max(0, input.oldPrice - input.newPrice);
+  const subs: Record<string, string> = {
+    '{PRODUCT NAME}': input.productName,
+    '{NEW PRICE}': bdt(input.newPrice),
+    '{OLD PRICE}': bdt(input.oldPrice),
+    '{DISCOUNT}': bdt(discount),
+    '{DAYS}': formatDays(input.days),
+    '{DATE}': formatDate(input.validTill),
+    '{TIME RANGE}': input.timeRange?.trim() ?? '',
+    '{ADDRESS}': input.address,
+    '{PHONE}': input.phone,
+  };
+
+  // Two-pass: drop empty {TIME RANGE} lines first, then substitute.
+  const lines = tpl.split('\n').filter((line) => {
+    if (!line.includes('{TIME RANGE}')) return true;
+    const tr = subs['{TIME RANGE}'];
+    return tr.length > 0;
+  });
+  let out = lines.join('\n');
+  for (const [token, value] of Object.entries(subs)) {
+    out = out.split(token).join(value);
   }
-  lines.push('');
-  lines.push("Don't miss out—grab yours while the offer lasts!");
-  lines.push('');
-  lines.push('Only at Eatro — Where flavour takes the lead.');
-  lines.push('');
-  lines.push(`📍 ${address}`);
-  lines.push(`📞 ${phone}`);
-  lines.push('');
-  lines.push('#EatroOffers #SpecialDeal #FoodDeals #EatroDhaka #FlavourTakesTheLead');
-  return lines.join('\n');
+  return out;
 }
