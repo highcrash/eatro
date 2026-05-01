@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SocialService } from '../social/social.service';
 
 @Injectable()
 export class DiscountService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly social: SocialService,
+  ) {}
 
   // ─── Discounts (cashier-applied) ───────────────────────────────────────────
 
@@ -154,8 +158,8 @@ export class DiscountService {
     });
   }
 
-  createMenuItemDiscount(dto: { menuItemId: string; type: string; value: number; startDate: string; endDate: string; applicableDays?: string[] }) {
-    return this.prisma.menuItemDiscount.create({
+  async createMenuItemDiscount(dto: { menuItemId: string; type: string; value: number; startDate: string; endDate: string; applicableDays?: string[] }) {
+    const created = await this.prisma.menuItemDiscount.create({
       data: {
         menuItemId: dto.menuItemId,
         type: dto.type as any,
@@ -166,12 +170,16 @@ export class DiscountService {
       },
       include: { menuItem: { select: { id: true, name: true, price: true } } },
     });
+    // Best-effort schedule a Facebook auto-post for this discount.
+    // No-op when the branch hasn't connected a page; never throws.
+    void this.social.scheduleForDiscount(created.id);
+    return created;
   }
 
   async updateMenuItemDiscount(id: string, dto: { type?: string; value?: number; startDate?: string; endDate?: string; applicableDays?: string[] | null; isActive?: boolean }) {
     const d = await this.prisma.menuItemDiscount.findFirst({ where: { id } });
     if (!d) throw new NotFoundException();
-    return this.prisma.menuItemDiscount.update({
+    const updated = await this.prisma.menuItemDiscount.update({
       where: { id },
       data: {
         ...(dto.type !== undefined ? { type: dto.type as any } : {}),
@@ -183,6 +191,12 @@ export class DiscountService {
       },
       include: { menuItem: { select: { id: true, name: true, price: true } } },
     });
+    // Re-render + reschedule the FB post to keep the queue in sync
+    // with the latest discount terms. scheduleForDiscount overwrites
+    // an existing PENDING row in place; non-PENDING rows are left
+    // alone (admin already saw the outcome).
+    void this.social.scheduleForDiscount(updated.id);
+    return updated;
   }
 
   async deleteMenuItemDiscount(id: string) {

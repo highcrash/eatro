@@ -30,6 +30,7 @@ export type CleanupScope =
   | 'payroll'
   | 'sms-logs'
   | 'waste-logs'
+  | 'fb-scheduled-posts'
   | 'reset-all';
 
 @Injectable()
@@ -88,8 +89,21 @@ export class CleanupService {
       }
 
       case 'discounts': {
+        // ScheduledFbPost has FK menuDiscountId (SetNull on delete),
+        // so we explicitly wipe it here to keep the queue clean —
+        // otherwise admin would see a pile of orphaned PENDING posts
+        // that no longer reference any discount.
+        deleted.scheduledFbPosts = (await p.scheduledFbPost.deleteMany({ where })).count;
         deleted.menuItemDiscounts = (await p.menuItemDiscount.deleteMany({ where: { menuItem: { branchId } } })).count;
         deleted.discounts = (await p.discount.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'fb-scheduled-posts': {
+        // Targeted clean of just the FB queue — useful when admin
+        // swaps Facebook pages and wants to flush old posts without
+        // touching menu discounts.
+        deleted.scheduledFbPosts = (await p.scheduledFbPost.deleteMany({ where })).count;
         break;
       }
 
@@ -265,6 +279,10 @@ export class CleanupService {
 
       case 'reset-all': {
         // Wipe all transactional data, keep: branch, settings, staff, payment methods, branding
+        // FB queue first — its FK to menuItemDiscount uses SetNull,
+        // but it's cleaner to drop the queue rows explicitly so a
+        // post-reset state doesn't show orphaned PENDING posts.
+        deleted.scheduledFbPosts = (await p.scheduledFbPost.deleteMany({ where })).count;
         deleted.reviews = (await p.review.deleteMany({ where })).count;
         // Mushak rows depend on Order — drop them first so order.deleteMany
         // doesn't fail on a restrict FK.

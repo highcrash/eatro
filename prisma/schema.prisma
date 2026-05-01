@@ -243,6 +243,7 @@ model Branch {
   mushakNotes         MushakNote[]
   customRoles         CustomRole[]
   menuItemAddonGroups MenuItemAddonGroup[]
+  scheduledFbPosts    ScheduledFbPost[]
 
   @@index([isActive])
   @@map("branches")
@@ -328,6 +329,22 @@ model BranchSetting {
   /// Minutes after shiftStart before a clock-in is counted as HALF_DAY
   /// (i.e. the cutoff between LATE and HALF_DAY). Default 180 = 3h.
   attendanceHalfDayAfterMinutes Int    @default(180)
+
+  /// Facebook auto-post integration. When `fbAutopostEnabled = true`
+  /// and a `fbPageAccessToken` is set, every menu discount created on
+  /// this branch spawns a scheduled FB post. Default off so existing
+  /// branches don't change behaviour until admin opts in.
+  fbAutopostEnabled  Boolean   @default(false)
+  fbPageId           String?
+  fbPageName         String?
+  /// Long-lived page access token. Write-only via the Settings UI;
+  /// `getSettings` masks it for non-OWNER reads (same convention as
+  /// `smsApiKey` + `tipsoiApiToken`).
+  fbPageAccessToken  String?
+  fbConnectedAt      DateTime?
+  /// Default time-of-day to roll midnight-startDate discounts forward
+  /// to (so we don't all post at 00:00). Format "HH:mm".
+  fbDefaultPostTime  String    @default("11:00")
 
   branch Branch @relation(fields: [branchId], references: [id])
 
@@ -1028,10 +1045,47 @@ model MenuItemDiscount {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  menuItem MenuItem @relation(fields: [menuItemId], references: [id])
+  menuItem        MenuItem          @relation(fields: [menuItemId], references: [id])
+  scheduledPosts  ScheduledFbPost[]
 
   @@index([menuItemId, isActive])
   @@map("menu_item_discounts")
+}
+
+/// Auto-Facebook-post queue. Each row represents one image+caption
+/// scheduled to be posted to the branch's connected FB page. Lifecycle:
+/// PENDING → POSTED on success, → FAILED after 3 failed cron attempts,
+/// → CANCELLED when admin cancels. Reusable for non-discount manual
+/// posts in v2 (menuDiscountId is nullable).
+enum FbPostStatus {
+  PENDING
+  POSTED
+  CANCELLED
+  FAILED
+}
+
+model ScheduledFbPost {
+  id             String       @id @default(cuid())
+  branchId       String
+  menuDiscountId String?
+  status         FbPostStatus @default(PENDING)
+  scheduledAt    DateTime
+  postedAt       DateTime?
+  /// FB returns post id on success — store for the "View on Facebook" link.
+  fbPostId       String?
+  message        String       @db.Text
+  /// Either an absolute /uploads/... path (dev) or an S3/Spaces key (prod).
+  imagePath      String
+  attempts       Int          @default(0)
+  lastError      String?      @db.Text
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  branch       Branch            @relation(fields: [branchId], references: [id])
+  menuDiscount MenuItemDiscount? @relation(fields: [menuDiscountId], references: [id], onDelete: SetNull)
+
+  @@index([branchId, status, scheduledAt])
+  @@map("scheduled_fb_posts")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

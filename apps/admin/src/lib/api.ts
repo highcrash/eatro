@@ -74,4 +74,12 @@ export const api = {
     const match = /filename="([^"]+)"/.exec(cd);
     return { blob: await res.blob(), filename: match?.[1] ?? 'backup.json.gz' };
   },
+  // Plain blob fetch — used by image previews where we just want the
+  // bytes without the Content-Disposition parsing.
+  getBlob: async (path: string): Promise<Blob> => {
+    const token = useAuthStore.getState().accessToken;
+    const res = await fetch(`${BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+    return res.blob();
+  },
 };

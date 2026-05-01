@@ -14,6 +14,7 @@ import { WsGatewayModule } from './ws-gateway/ws-gateway.module';
 import { SupplierModule } from './supplier/supplier.module';
 import { CreditorModule } from './creditor/creditor.module';
 import { TipsoiModule } from './tipsoi/tipsoi.module';
+import { SocialModule } from './social/social.module';
 import { IngredientModule } from './ingredient/ingredient.module';
 import { RecipeModule } from './recipe/recipe.module';
 import { PurchasingModule } from './purchasing/purchasing.module';
@@ -190,6 +191,11 @@ import { ScheduleModule } from '@nestjs/schedule';
     // Tipsoi attendance integration — hourly sync of biometric clock
     // events into Attendance rows + branch/per-staff shift rules.
     TipsoiModule,
+
+    // Auto-Facebook-post pipeline for menu discounts. Settings
+    // tab + queue panel + per-minute cron worker. Default off
+    // per branch.
+    SocialModule,
   ],
 })
 export class AppModule {}
