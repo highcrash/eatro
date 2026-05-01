@@ -553,9 +553,20 @@ function AddItemsOverlay({
                     )}
                   </div>
                   <p className="text-[10px] font-semibold text-theme-text leading-tight truncate">{item.name}</p>
-                  <p className="text-[11px] font-bold text-theme-text">
-                    {item.isVariantParent ? <span className="text-theme-text-muted text-[9px]">Pick variant</span> : formatCurrency(Number(item.price))}
-                  </p>
+                  {(() => {
+                    if (item.isVariantParent) return <p className="text-[11px] font-bold text-theme-text"><span className="text-theme-text-muted text-[9px]">Pick variant</span></p>;
+                    const dp = (item as { discountedPrice?: number | null }).discountedPrice;
+                    const hasDiscount = dp != null && dp < Number(item.price);
+                    if (hasDiscount) {
+                      return (
+                        <p className="text-[11px] font-bold text-theme-accent leading-tight">
+                          {formatCurrency(Number(dp))}
+                          <span className="ml-1 text-theme-text-muted line-through text-[9px] font-medium">{formatCurrency(Number(item.price))}</span>
+                        </p>
+                      );
+                    }
+                    return <p className="text-[11px] font-bold text-theme-text">{formatCurrency(Number(item.price))}</p>;
+                  })()}
                 </button>
               );
             })}
@@ -2312,9 +2323,20 @@ function NewOrderView({
                   )}
                 </div>
                 <p className="text-[11px] font-semibold text-theme-text leading-tight truncate">{item.name}</p>
-                <p className="text-xs font-bold text-theme-text">
-                  {item.isVariantParent ? <span className="text-theme-text-muted text-[10px]">Pick a variant</span> : formatCurrency(Number(item.price))}
-                </p>
+                {(() => {
+                  if (item.isVariantParent) return <p className="text-xs font-bold text-theme-text"><span className="text-theme-text-muted text-[10px]">Pick a variant</span></p>;
+                  const dp = (item as { discountedPrice?: number | null }).discountedPrice;
+                  const hasDiscount = dp != null && dp < Number(item.price);
+                  if (hasDiscount) {
+                    return (
+                      <p className="text-xs font-bold text-theme-accent leading-tight">
+                        {formatCurrency(Number(dp))}
+                        <span className="ml-1 text-theme-text-muted line-through text-[10px] font-medium">{formatCurrency(Number(item.price))}</span>
+                      </p>
+                    );
+                  }
+                  return <p className="text-xs font-bold text-theme-text">{formatCurrency(Number(item.price))}</p>;
+                })()}
               </button>
             );
           })}

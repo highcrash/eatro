@@ -33,8 +33,8 @@ export class MenuService {
     private readonly unitConversion: UnitConversionService,
   ) {}
 
-  findAll(branchId: string, includeCustom = false, includeAddons = false) {
-    return this.prisma.menuItem.findMany({
+  async findAll(branchId: string, includeCustom = false, includeAddons = false) {
+    const items = await this.prisma.menuItem.findMany({
       where: {
         branchId,
         deletedAt: null,
@@ -52,6 +52,7 @@ export class MenuService {
       include: comboAndLinkedInclude,
       orderBy: [{ category: { sortOrder: 'asc' } }, { sortOrder: 'asc' }],
     });
+    return this.stampActiveDiscounts(branchId, items);
   }
 
   async findOne(id: string, branchId: string) {
@@ -60,7 +61,81 @@ export class MenuService {
       include: comboAndLinkedInclude,
     });
     if (!item) throw new NotFoundException(`Menu item ${id} not found`);
-    return item;
+    const [stamped] = await this.stampActiveDiscounts(branchId, [item]);
+    return stamped;
+  }
+
+  /**
+   * Stamp `discountedPrice / discountType / discountValue` onto each
+   * menu item (and each child variant) based on active
+   * MenuItemDiscount rows. POS calls /menu and renders price + strike
+   * — without this, the cashier saw the regular price even when admin
+   * had set a percentage / flat discount on the item. Mirrors the
+   * public website's `applyDiscounts` so the POS and the customer site
+   * stay in lockstep.
+   */
+  private async stampActiveDiscounts<T extends { id: string; price: unknown; variants?: Array<{ id: string; price: unknown }> }>(
+    branchId: string,
+    items: T[],
+  ): Promise<Array<T & { discountedPrice: number | null; discountType: string | null; discountValue: number | null }>> {
+    if (items.length === 0) return [] as never;
+    const now = new Date();
+    const dayName = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
+    const discounts = await this.prisma.menuItemDiscount.findMany({
+      where: {
+        isActive: true,
+        startDate: { lte: now },
+        endDate: { gte: now },
+        menuItem: { branchId },
+      },
+    });
+    const active = discounts.filter((d) => {
+      if (!d.applicableDays) return true;
+      try {
+        const days: string[] = JSON.parse(d.applicableDays);
+        return days.includes(dayName);
+      } catch {
+        return true;
+      }
+    });
+    const byMenuItemId = new Map(active.map((d) => [d.menuItemId, d]));
+    const apply = (price: number, d: typeof active[number]): number =>
+      d.type === 'FLAT'
+        ? Math.max(0, price - Number(d.value))
+        : Math.round(price * (1 - Number(d.value) / 100));
+
+    return items.map((it) => {
+      const d = byMenuItemId.get(it.id);
+      const stampedVariants = Array.isArray(it.variants)
+        ? it.variants.map((v) => {
+            const vd = byMenuItemId.get(v.id);
+            if (!vd) return { ...v, discountedPrice: null, discountType: null, discountValue: null };
+            const vp = Number(v.price);
+            return {
+              ...v,
+              discountedPrice: apply(vp, vd),
+              discountType: vd.type,
+              discountValue: Number(vd.value),
+            };
+          })
+        : undefined;
+      const out: T & { discountedPrice: number | null; discountType: string | null; discountValue: number | null } = {
+        ...it,
+        discountedPrice: null,
+        discountType: null,
+        discountValue: null,
+      };
+      if (stampedVariants) {
+        (out as unknown as { variants: unknown }).variants = stampedVariants;
+      }
+      if (d) {
+        const p = Number(it.price);
+        out.discountedPrice = apply(p, d);
+        out.discountType = d.type;
+        out.discountValue = Number(d.value);
+      }
+      return out;
+    });
   }
 
   /**
