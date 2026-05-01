@@ -38,6 +38,17 @@ export class SocialController {
     return this.social.setDefaultPostTime(user.branchId, dto.time);
   }
 
+  /** Save (or clear) the per-branch FB caption template. Pass an empty
+   *  string to clear the override and revert to the system default. */
+  @Post('settings/caption-template')
+  @Roles('OWNER', 'MANAGER')
+  setCaptionTemplate(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { template: string | null },
+  ) {
+    return this.social.setCaptionTemplate(user.branchId, dto.template ?? null);
+  }
+
   @Post('connect')
   @Roles('OWNER')
   connect(@CurrentUser() user: JwtPayload, @Body() dto: { pageId: string; pageAccessToken: string }) {

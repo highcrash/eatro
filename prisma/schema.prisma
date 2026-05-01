@@ -345,6 +345,10 @@ model BranchSetting {
   /// Default time-of-day to roll midnight-startDate discounts forward
   /// to (so we don't all post at 00:00). Format "HH:mm".
   fbDefaultPostTime  String    @default("11:00")
+  /// Optional custom caption template. Null falls back to the
+  /// hard-coded default in apps/api/src/social/caption.ts. Supports
+  /// the same {PLACEHOLDER} substitutions documented in that file.
+  fbCaptionTemplate  String?   @db.Text
 
   branch Branch @relation(fields: [branchId], references: [id])
 

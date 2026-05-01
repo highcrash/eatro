@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { FacebookClient } from './facebook.client';
 import { SocialImageStore } from './image-store';
 import { composeDiscountImage } from './image-composer';
-import { buildDiscountCaption } from './caption';
+import { buildDiscountCaption, DEFAULT_CAPTION_TEMPLATE } from './caption';
 
 /**
  * Auto-Facebook-post coordinator.
@@ -52,7 +52,24 @@ export class SocialService {
       fbConnectedAt: s.fbConnectedAt,
       fbDefaultPostTime: s.fbDefaultPostTime,
       fbHasToken: !!s.fbPageAccessToken,
+      // Custom caption template, falls back to the default constant
+      // server-side at scheduling time. Returning the default here too
+      // so the Settings textarea has something to show on first load.
+      fbCaptionTemplate: (s as { fbCaptionTemplate?: string | null }).fbCaptionTemplate ?? null,
+      fbCaptionTemplateDefault: DEFAULT_CAPTION_TEMPLATE,
     };
+  }
+
+  /** Save (or clear) the per-branch caption template. Empty string
+   *  clears the override so future posts use DEFAULT_CAPTION_TEMPLATE. */
+  async setCaptionTemplate(branchId: string, template: string | null) {
+    const value = template?.trim().length ? template : null;
+    await this.prisma.branchSetting.upsert({
+      where: { branchId },
+      create: { branchId, fbCaptionTemplate: value },
+      update: { fbCaptionTemplate: value },
+    });
+    return { fbCaptionTemplate: value };
   }
 
   async setEnabled(branchId: string, enabled: boolean) {
@@ -222,17 +239,22 @@ export class SocialService {
       // the same image file rather than leaking copies.
       const stored = await this.store.save(`discount-${discount.id}`, imageRender.buffer);
 
-      // Build the caption.
-      const message = buildDiscountCaption({
-        productName: discount.menuItem.name,
-        oldPrice,
-        newPrice,
-        days,
-        validTill: new Date(discount.endDate),
-        timeRange: null,
-        address: branch.address ?? '',
-        phone: branch.phone ?? '',
-      });
+      // Build the caption from the per-branch custom template, falling
+      // back to the default block when the branch hasn't customised it.
+      const customTpl = (settings as { fbCaptionTemplate?: string | null }).fbCaptionTemplate ?? null;
+      const message = buildDiscountCaption(
+        {
+          productName: discount.menuItem.name,
+          oldPrice,
+          newPrice,
+          days,
+          validTill: new Date(discount.endDate),
+          timeRange: null,
+          address: branch.address ?? '',
+          phone: branch.phone ?? '',
+        },
+        customTpl,
+      );
 
       // Upsert by discountId — a given discount can have at most one
       // active scheduled post. If a row already exists in non-PENDING
