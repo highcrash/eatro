@@ -51,6 +51,16 @@ function cartLineKey(item: { menuItem: { id: string }; removedIngredientIds?: st
   return `${item.menuItem.id}::${ids}::${addonsKey}::${item.notes ?? ''}`;
 }
 
+// Honour the discountedPrice the menu fetch stamps when a
+// MenuItemDiscount is active — the order pricer charges the same
+// figure, so the cart subtotal lines up with the checkout total.
+function effectiveUnitPrice(mi: { price: unknown; discountedPrice?: number | null }): number {
+  const base = Number(mi.price);
+  const dp = mi.discountedPrice;
+  if (dp != null && Number(dp) < base) return Number(dp);
+  return base;
+}
+
 // ─── Void Item Dialog ─────────────────────────────────────────────────────────
 
 interface VoidItemDialogProps {
@@ -428,7 +438,7 @@ function AddItemsOverlay({
   const newCartTotal = newItemCart.reduce(
     (s, c) => {
       const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
-      return s + (Number(c.menuItem.price) + addonsTotal) * c.quantity;
+      return s + (effectiveUnitPrice(c.menuItem) + addonsTotal) * c.quantity;
     },
     0,
   );
@@ -591,7 +601,7 @@ function AddItemsOverlay({
                 const { menuItem, quantity, notes, removedNames, addons } = line;
                 const key = cartLineKey(line);
                 const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
-                const unitPrice = Number(menuItem.price) + addonsTotal;
+                const unitPrice = effectiveUnitPrice(menuItem) + addonsTotal;
                 // React key uses the array index, NOT cartLineKey,
                 // because cartLineKey embeds `notes`. Without this,
                 // every keystroke in the note input rebuilt the
@@ -2025,7 +2035,7 @@ function NewOrderView({
 
   const subtotal = cart.reduce((s, c) => {
     const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
-    return s + (Number(c.menuItem.price) + addonsTotal) * c.quantity;
+    return s + (effectiveUnitPrice(c.menuItem) + addonsTotal) * c.quantity;
   }, 0);
 
   const addToCart = (item: MenuItem) => {
@@ -2363,7 +2373,7 @@ function NewOrderView({
               const { menuItem, quantity, notes, removedNames, addons } = line;
               const key = cartLineKey(line);
               const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
-              const unitPrice = Number(menuItem.price) + addonsTotal;
+              const unitPrice = effectiveUnitPrice(menuItem) + addonsTotal;
               // See the new-item overlay's matching comment — React key
               // uses the array index so a notes edit doesn't rebuild
               // the row and bounce focus onto the menu searchbar.
