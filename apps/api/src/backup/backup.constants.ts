@@ -83,6 +83,12 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'discount', table: 'discounts' },
   { accessor: 'coupon', table: 'coupons' },
   { accessor: 'menuItemDiscount', table: 'menu_item_discounts' },
+  // Auto-Facebook-post queue. References menuItemDiscount via FK with
+  // SetNull on delete, so it MUST come after menuItemDiscount in the
+  // restore order. Image bytes themselves live in uploads/social/ —
+  // not in this manifest; admin re-rendering an old discount will
+  // regenerate the image on demand.
+  { accessor: 'scheduledFbPost', table: 'scheduled_fb_posts' },
   { accessor: 'reservation', table: 'reservations' },
 
   // Tier 8 — orders (depend on menu, tables, customers, staff, coupons/discounts)

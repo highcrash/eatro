@@ -4,6 +4,7 @@ import { Plus, Pencil, Trash2, X, Search, ChevronRight } from 'lucide-react';
 import type { MenuItem, MenuCategory } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
+import ScheduledPostsPanel from './discounts/ScheduledPostsPanel';
 
 interface Discount {
   id: string; name: string; type: string; value: number; scope: string; targetItems: string | null; isActive: boolean;
@@ -429,7 +430,7 @@ function MenuDiscountDialog({ initial, menuItems, onClose, onSave }: { initial?:
 // ─── Main Page ───────────────────────────────────────────────────────────────
 export default function DiscountsPage() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'discounts' | 'coupons' | 'menu'>('discounts');
+  const [tab, setTab] = useState<'discounts' | 'coupons' | 'menu' | 'scheduled'>('discounts');
   const [discountDialog, setDiscountDialog] = useState<{ open: boolean; item?: Discount }>({ open: false });
   const [couponDialog, setCouponDialog] = useState<{ open: boolean; item?: Coupon }>({ open: false });
   const [menuDiscDialog, setMenuDiscDialog] = useState<{ open: boolean; item?: MenuItemDiscount }>({ open: false });
@@ -478,24 +479,26 @@ export default function DiscountsPage() {
           <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase mb-1">Promotions</p>
           <h1 className="font-display text-4xl text-white tracking-wide">DISCOUNTS & COUPONS</h1>
         </div>
-        <button onClick={() => {
-          if (tab === 'discounts') setDiscountDialog({ open: true });
-          else if (tab === 'coupons') setCouponDialog({ open: true });
-          else setMenuDiscDialog({ open: true });
-        }} className="flex items-center gap-1.5 bg-[#D62B2B] text-white px-4 py-2 text-sm font-body font-medium hover:bg-[#F03535] transition-colors">
-          <Plus size={14} /> Add {tab === 'discounts' ? 'Discount' : tab === 'coupons' ? 'Coupon' : 'Menu Discount'}
-        </button>
+        {tab !== 'scheduled' && (
+          <button onClick={() => {
+            if (tab === 'discounts') setDiscountDialog({ open: true });
+            else if (tab === 'coupons') setCouponDialog({ open: true });
+            else setMenuDiscDialog({ open: true });
+          }} className="flex items-center gap-1.5 bg-[#D62B2B] text-white px-4 py-2 text-sm font-body font-medium hover:bg-[#F03535] transition-colors">
+            <Plus size={14} /> Add {tab === 'discounts' ? 'Discount' : tab === 'coupons' ? 'Coupon' : 'Menu Discount'}
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
       <div className="flex gap-0 border-b border-[#2A2A2A]">
-        {(['discounts', 'coupons', 'menu'] as const).map((t) => (
+        {(['discounts', 'coupons', 'menu', 'scheduled'] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-xs font-body font-medium tracking-widest uppercase border-b-2 transition-colors ${
               tab === t ? 'border-[#D62B2B] text-[#D62B2B]' : 'border-transparent text-[#999]'
             }`}
           >
-            {t === 'menu' ? 'Menu Discounts' : t}
+            {t === 'menu' ? 'Menu Discounts' : t === 'scheduled' ? 'Facebook Posts' : t}
           </button>
         ))}
       </div>
@@ -599,6 +602,8 @@ export default function DiscountsPage() {
           </table>
         </div>
       )}
+
+      {tab === 'scheduled' && <ScheduledPostsPanel />}
 
       {discountDialog.open && <DiscountDialog initial={discountDialog.item} menuItems={menuItems} categories={categories} onClose={() => setDiscountDialog({ open: false })} onSave={(d) => saveDiscount.mutate(d)} />}
       {couponDialog.open && <CouponDialog initial={couponDialog.item} menuItems={menuItems} categories={categories} onClose={() => setCouponDialog({ open: false })} onSave={(d) => saveCoupon.mutate(d)} />}
