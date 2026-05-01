@@ -65,6 +65,7 @@ export default function OrderStatusPage() {
   const qc = useQueryClient();
   const branchId = useSessionStore((s) => s.branchId);
   const customer = useSessionStore((s) => s.customer);
+  const setCustomer = useSessionStore((s) => s.setCustomer);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [editingNoteFor, setEditingNoteFor] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
@@ -201,6 +202,22 @@ export default function OrderStatusPage() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({ message: 'Login failed' })) as { message?: string };
         throw new Error(err.message || 'Login failed');
+      }
+      // Hydrate the session-store customer so downstream gates (Review,
+      // future coupon retries on different orders) see the user as
+      // logged-in. The endpoint returns the resolved customer payload;
+      // mirror it into the session so it persists across navigation
+      // and reload (localStorage-backed).
+      const resolved = (await res.json().catch(() => null)) as
+        | { customerId: string; customerName: string; customerPhone: string; customerEmail?: string | null }
+        | null;
+      if (resolved?.customerId) {
+        setCustomer({
+          id: resolved.customerId,
+          name: resolved.customerName,
+          phone: resolved.customerPhone,
+          email: resolved.customerEmail ?? null,
+        });
       }
       setShowLogin(false);
       void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
