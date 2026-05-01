@@ -3,6 +3,19 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.49 — POS: cart subtotal honours active menu-item discounts (2026-05-01)
+
+Renderer-only rebundle. No Electron-shell changes.
+
+- Cart line subtotals and the running cart total now use the
+  server-stamped discountedPrice when a MenuItemDiscount is active,
+  matching what the order pricer charges on submit. Previously the
+  menu tile showed the discount with a strikethrough but the cart
+  itself charged the un-discounted figure, so the cashier-visible
+  total drifted from the actual checkout total.
+- Fix lands at all four sites: new-order subtotal + line display
+  and the add-items overlay's subtotal + line display.
+
 ## 1.0.48 — Lock screen: Forgot PIN? Reset with password (2026-05-01)
 
 Renderer-only change. Reuses the existing setPin IPC.
