@@ -3,6 +3,23 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.54 — Lock screen: Forgot PIN? Reset with password (2026-05-01)
+
+Renderer-only change. Reuses the existing setPin IPC.
+
+- New "Forgot PIN? Reset with password" link on the PIN pad.
+  Tapping it routes the cashier to the same form first-time
+  cashiers use (verify Your Restaurant password, then pick a new
+  4–6 digit PIN). The setPin IPC handler validates the password
+  against the API via passwordLoginOnDevice and overwrites the
+  local bcrypt PIN hash on success.
+- Form copy switches between "Set PIN" (first-time) and "Reset
+  PIN" (forgot) so the cashier knows whether they're choosing a
+  fresh PIN or replacing an existing one.
+- No new IPC, no new server endpoint — same auth path the device
+  already uses for first-time PIN setup. Lockout state is cleared
+  by the underlying setPin upsert.
+
 ## 0.8.53 — POS: discount price on tiles + auto-FB-post caption editor (2026-05-01)
 
 No Electron-shell changes. Rebundles apps/pos + apps/admin + apps/api:
