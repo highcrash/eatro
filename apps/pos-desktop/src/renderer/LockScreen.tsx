@@ -4,7 +4,11 @@ import type { CashierTile, SessionUser } from './desktop-api';
 type View =
   | { kind: 'grid' }
   | { kind: 'pin'; cashier: CashierTile }
-  | { kind: 'first-time'; cashier: CashierTile };
+  | { kind: 'first-time'; cashier: CashierTile }
+  // Forgot-PIN reset uses the same form as first-time setup (verify
+  // password, pick a new PIN) but with copy that says "Reset" instead
+  // of "Set" so the cashier knows their old PIN is being replaced.
+  | { kind: 'forgot-pin'; cashier: CashierTile };
 
 interface Props {
   onSignedIn: (user: SessionUser) => void;
@@ -33,6 +37,7 @@ export function LockScreen({ onSignedIn, deviceName, branchName, onUnpair }: Pro
       <PinPad
         cashier={view.cashier}
         onBack={() => setView({ kind: 'grid' })}
+        onForgot={() => setView({ kind: 'forgot-pin', cashier: view.cashier })}
         onSignedIn={onSignedIn}
       />
     );
@@ -41,7 +46,18 @@ export function LockScreen({ onSignedIn, deviceName, branchName, onUnpair }: Pro
     return (
       <FirstTimePin
         cashier={view.cashier}
+        mode="first-time"
         onBack={() => setView({ kind: 'grid' })}
+        onSignedIn={onSignedIn}
+      />
+    );
+  }
+  if (view.kind === 'forgot-pin') {
+    return (
+      <FirstTimePin
+        cashier={view.cashier}
+        mode="reset"
+        onBack={() => setView({ kind: 'pin', cashier: view.cashier })}
         onSignedIn={onSignedIn}
       />
     );
@@ -86,10 +102,12 @@ export function LockScreen({ onSignedIn, deviceName, branchName, onUnpair }: Pro
 function PinPad({
   cashier,
   onBack,
+  onForgot,
   onSignedIn,
 }: {
   cashier: CashierTile;
   onBack: () => void;
+  onForgot: () => void;
   onSignedIn: (user: SessionUser) => void;
 }): JSX.Element {
   const [pin, setPin] = useState('');
@@ -248,6 +266,13 @@ function PinPad({
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </div>
+
+        {/* Escape valve when the cashier can't recall their PIN. Routes
+            to the same form we use for first-time setup; password +
+            new PIN replace the old hash via the existing setPin IPC. */}
+        <button onClick={onForgot} disabled={busy} style={styles.forgotLink}>
+          Forgot PIN? Reset with password
+        </button>
       </div>
     </div>
   );
@@ -257,10 +282,15 @@ function PinPad({
 
 function FirstTimePin({
   cashier,
+  mode,
   onBack,
   onSignedIn,
 }: {
   cashier: CashierTile;
+  /** "first-time" — cashier never set a PIN on this terminal.
+   *  "reset"     — cashier forgot their existing PIN; we'll
+   *                overwrite the local hash. Same backend path. */
+  mode: 'first-time' | 'reset';
   onBack: () => void;
   onSignedIn: (user: SessionUser) => void;
 }): JSX.Element {
@@ -301,11 +331,14 @@ function FirstTimePin({
       <div style={styles.pinBox}>
         <div style={styles.avatarLarge}>{initials(cashier.name)}</div>
         <h2 style={styles.pinName}>{cashier.name}</h2>
-        <p style={styles.pinRole}>First time on this terminal</p>
+        <p style={styles.pinRole}>
+          {mode === 'reset' ? 'Reset PIN with password' : 'First time on this terminal'}
+        </p>
 
         <p style={styles.setPinHelp}>
-          Prove it's you with your Your Restaurant password, then pick a 4–6 digit PIN you'll use on this terminal.
-          The password is never stored here.
+          {mode === 'reset'
+            ? 'Enter your Your Restaurant password to authorise the reset, then choose a new 4–6 digit PIN. The old PIN on this terminal is replaced; the password itself is never stored here.'
+            : "Prove it's you with your Your Restaurant password, then pick a 4–6 digit PIN you'll use on this terminal. The password is never stored here."}
         </p>
 
         <div style={styles.setPinForm}>
@@ -349,7 +382,7 @@ function FirstTimePin({
         <div style={styles.pinActions}>
           <button onClick={onBack} style={styles.btnSecondary}>Back</button>
           <button onClick={() => void submit()} disabled={busy} style={styles.btnPrimary}>
-            {busy ? 'Saving…' : 'Set PIN & sign in'}
+            {busy ? 'Saving…' : mode === 'reset' ? 'Reset PIN & sign in' : 'Set PIN & sign in'}
           </button>
         </div>
       </div>
@@ -481,6 +514,20 @@ const styles: Record<string, React.CSSProperties> = {
   },
   pinKeySmall: { color: '#888', fontSize: 18 },
   pinActions: { display: 'flex', gap: 8, marginTop: 16 },
+
+  forgotLink: {
+    marginTop: 12,
+    width: '100%',
+    background: 'transparent',
+    border: 'none',
+    color: '#888',
+    padding: 8,
+    fontSize: 11,
+    letterSpacing: 1,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    textDecoration: 'underline',
+  },
 
   btnSecondary: {
     flex: 1,
