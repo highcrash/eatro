@@ -122,6 +122,13 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'mushakSequence', table: 'mushak_sequences' },
   { accessor: 'mushakInvoice', table: 'mushak_invoices' },
   { accessor: 'mushakNote', table: 'mushak_notes' },
+
+  // Tier 13 — admin-config audit trail. Back up AFTER staff (FK to
+  // actorId, SetNull on delete) and AFTER all other tables so a
+  // restored snapshot replays the full chain of admin events in
+  // chronological order. Auto-purged at 90 days by the scheduler so
+  // older rows simply won't be present in the manifest.
+  { accessor: 'activityLog', table: 'activity_logs' },
 ];
 
 export const BACKUP_FILE_VERSION = 1;
