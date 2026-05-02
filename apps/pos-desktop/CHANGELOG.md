@@ -3,6 +3,18 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.52 — POS: Recent custom menus picker + edit-as-new (2026-05-02)
+
+POS + API rebundle. No Electron-shell changes.
+
+- Custom Menu dialog now shows a "Recent (N)" button when there
+  are custom items built on this branch in the last 30 days.
+- Recent picker offers two actions per row: "Add" reuses the
+  exact same MenuItem in the cart (no duplicate row created),
+  or "Edit & Save New" prefills the form with the prior recipe
+  + price + name (suffixed " (copy)") so the cashier can tweak
+  ingredients and save as a fresh custom item.
+
 ## 1.0.51 — Admin: Custom Menu audit + promote-to-regular flow (2026-05-02)
 
 Admin + API rebundle. No Electron-shell changes.
