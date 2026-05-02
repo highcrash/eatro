@@ -3,6 +3,25 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.54 — Build: rebundle 1.0.46–1.0.53 + CI license-client fix (2026-05-02)
+
+Re-cuts every codecanyon release from 1.0.46 onwards in a single
+installer. None of those tags actually published an .exe — the
+release workflow has been silently failing since the
+license-client dep was added because the package's `prepare: tsc`
+hook leaves dist/ empty on CI. Added a defensive CI step that
+rebuilds the license-client when its dist/index.js is missing.
+
+Bundles all the user-facing work shipped under 1.0.46–1.0.53:
+- 1.0.53 — Customise dialog: add ingredients with margin band
+- 1.0.52 — Recent custom menus picker + edit-as-new
+- 1.0.51 — Admin Custom Menu audit + promote-to-regular
+- 1.0.50 — bKash/MFS expenses post to the linked account
+- 1.0.49 — cart subtotal honours active menu-item discounts
+- 1.0.48 — Lock screen: Forgot PIN? Reset with password
+- 1.0.47 — discount price on tiles + FB caption editor
+- 1.0.46 — cash-account transfers reconcile correctly
+
 ## 1.0.53 — POS: Customise dialog can add ingredients (margin-gated) (2026-05-02)
 
 POS + API rebundle. No Electron-shell changes.
