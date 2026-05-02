@@ -32,7 +32,11 @@ export class PreReadyController {
 
   @Patch('items/:id')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  updateItem(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { name?: string; minimumStock?: number; unit?: string }) {
+  updateItem(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { name?: string; minimumStock?: number; unit?: string; autoDeductInputs?: boolean; producesIngredientId?: string | null },
+  ) {
     return this.preReadyService.updateItem(id, user.branchId, dto);
   }
 

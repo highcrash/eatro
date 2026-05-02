@@ -1219,16 +1219,29 @@ model PreReadyItem {
   /// the Recalculate Cost button or whenever a production is completed.
   /// Stored in paisa.
   costPerUnit  Decimal   @default(0) @db.Decimal(14, 2)
+  /// Optional pairing: when set, every completed production batch ALSO
+  /// bumps the linked Ingredient's currentStock by the produced yield
+  /// (in addition to PreReadyItem.currentStock), so menu recipes that
+  /// reference the linked Ingredient deduct from the same single
+  /// source of truth. Without this link, PreReadyItem and Ingredient
+  /// counters drift permanently.
+  producesIngredientId String?
+  /// When true (default), production-completion auto-deducts the
+  /// recipe's input ingredients from inventory. Some kitchens prefer
+  /// to reconcile raw stock manually at end of week — opting out here
+  /// keeps production tracked but skips the auto-deduction step.
+  autoDeductInputs Boolean @default(true)
   isActive     Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime?
 
   // Relations
-  branch           Branch                @relation(fields: [branchId], references: [id])
-  recipe           PreReadyRecipe?
-  productionOrders ProductionOrder[]
-  batches          PreReadyBatch[]
+  branch              Branch            @relation(fields: [branchId], references: [id])
+  recipe              PreReadyRecipe?
+  productionOrders    ProductionOrder[]
+  batches             PreReadyBatch[]
+  producesIngredient  Ingredient?       @relation("PreReadyProducesIngredient", fields: [producesIngredientId], references: [id], onDelete: SetNull)
 
   @@index([branchId, isActive])
   @@map("pre_ready_items")
@@ -1353,6 +1366,11 @@ enum StockMovementType {
   ADJUSTMENT       // manual stock correction
   WASTE            // waste/spoilage write-off
   OPERATIONAL_USE  // manual usage log for non-recipe supplies (Inventory → Supplies)
+  PRODUCTION_RECEIVED // bumped when a Pre-Ready batch finishes and its
+                      // PreReadyItem.producesIngredientId is set — the
+                      // produced yield is added to the linked Ingredient
+                      // counter so menu recipes that reference it deduct
+                      // from the same single source of truth.
 }
 
 enum StockUnit {
@@ -1616,6 +1634,11 @@ model Ingredient {
   returnItems         PurchaseReturnItem[]
   parent             Ingredient?  @relation("IngredientVariants", fields: [parentId], references: [id])
   variants           Ingredient[] @relation("IngredientVariants")
+  /// Reverse-link to any PreReadyItem that produces stock for this
+  /// Ingredient. One Ingredient should be paired with at most one
+  /// PreReadyItem in v1; the array exists because Prisma requires it
+  /// for the relation, not because multi-link is supported in code.
+  producedBy         PreReadyItem[] @relation("PreReadyProducesIngredient")
 
   @@index([branchId, isActive])
   @@index([itemCode])
