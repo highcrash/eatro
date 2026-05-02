@@ -3,6 +3,13 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.60 — Build: split CI dist step + rebuild current main (2026-05-02)
+
+Rebundle of current main with the CI workflow split (cherry-picked
+from codecanyon) so future failures pinpoint the broken sub-step
+instead of opaque "Build installer / exit code 1". Re-cuts an
+installer with every main change through 0.8.59.
+
 ## 0.8.59 — POS: Customise dialog can add ingredients (margin-gated) (2026-05-02)
 
 POS + API rebundle. No Electron-shell changes.
