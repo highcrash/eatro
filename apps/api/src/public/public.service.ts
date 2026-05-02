@@ -39,7 +39,14 @@ const PUBLIC_MENU_ITEM_SELECT = {
   isVariantParent: true,
   variantParentId: true,
   variants: {
-    where: { deletedAt: null, isAvailable: true },
+    // websiteVisible MUST be enforced here too — the parent shell's
+    // own websiteVisible filter (in itemWhere) doesn't reach the
+    // included variants, so a variant toggled off in admin would
+    // still ship to the website / menu-print payload and render as
+    // a tab on the parent's detail page. Aligns with how admin uses
+    // websiteVisible per-row to hide individual flavours/sizes from
+    // the customer view without removing them from the POS.
+    where: { deletedAt: null, isAvailable: true, websiteVisible: true },
     orderBy: { sortOrder: 'asc' as const },
     select: {
       id: true,
@@ -336,7 +343,13 @@ export class PublicService {
       }),
     ]);
 
-    const itemsWithDiscount = await this.applyDiscounts(branchId, items);
+    // Drop variant parents whose every variant got filtered out by
+    // websiteVisible. Without this the parent shell would render
+    // as an empty card (parent's own price is 0 by convention) and
+    // clicking it would land on a detail page with no tabs.
+    const visibleItems = items.filter((it: any) => !it.isVariantParent || ((it.variants ?? []).length > 0));
+
+    const itemsWithDiscount = await this.applyDiscounts(branchId, visibleItems);
     return { categories, items: itemsWithDiscount };
   }
 
@@ -385,7 +398,10 @@ export class PublicService {
           // print page rendered variants without addons. Falls back
           // to parent.addonGroups in the UI when a variant has none.
           variants: {
-            where: { deletedAt: null, isAvailable: true },
+            // Same websiteVisible enforcement as the live menu — see
+            // PUBLIC_MENU_ITEM_SELECT for the why. Without this an
+            // admin-hidden variant would still print on the A4 menu.
+            where: { deletedAt: null, isAvailable: true, websiteVisible: true },
             orderBy: { sortOrder: 'asc' as const },
             select: {
               id: true, name: true, slug: true, description: true,
@@ -420,15 +436,19 @@ export class PublicService {
       }),
     ]);
 
+    // Drop variant parents with zero visible variants — same logic
+    // as getMenu (avoids printing an empty parent card).
+    const visibleItems = (items as any[]).filter((it) => !it.isVariantParent || ((it.variants ?? []).length > 0));
+
     // websiteDisplayName aliasing — same raw-SQL fallback as
     // getMenuItem so the endpoint works against an older generated
     // Prisma client too. Single round-trip across ALL ingredients.
     const allIngredientIds = Array.from(new Set(
-      (items as any[]).flatMap((i) => (i.recipe?.items ?? []).map((ri: any) => ri.ingredient.id)),
+      visibleItems.flatMap((i) => (i.recipe?.items ?? []).map((ri: any) => ri.ingredient.id)),
     ));
     const aliasMap = await this.fetchIngredientDisplayNames(allIngredientIds);
 
-    const itemsWithDiscount = await this.applyDiscounts(branchId, items);
+    const itemsWithDiscount = await this.applyDiscounts(branchId, visibleItems);
 
     const enriched = (itemsWithDiscount as any[]).map((item) => {
       const keyIngredients = (item.recipe?.items ?? [])
