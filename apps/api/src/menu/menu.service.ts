@@ -461,6 +461,40 @@ export class MenuService {
   }
 
   /**
+   * Cashier-facing list of recent custom items for the Custom Menu
+   * dialog's "Recent" picker. Last 20 created in the last 30 days,
+   * with just enough fields to either re-add directly to the cart
+   * (id, price) or prefill the form for a save-as-new copy (recipe
+   * lines + name). No order-stats join — that's the audit endpoint.
+   */
+  async listRecentCustomItems(branchId: string) {
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+    const items = await this.prisma.menuItem.findMany({
+      where: { branchId, deletedAt: null, isCustom: true, createdAt: { gte: since } },
+      include: {
+        recipe: { include: { items: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    return items.map((it) => ({
+      id: it.id,
+      name: it.name,
+      description: it.description,
+      price: it.price.toNumber(),
+      createdAt: it.createdAt,
+      recipe: it.recipe
+        ? it.recipe.items.map((ri) => ({
+            ingredientId: ri.ingredientId,
+            quantity: ri.quantity.toNumber(),
+            unit: ri.unit as unknown as string,
+          }))
+        : [],
+    }));
+  }
+
+  /**
    * Audit list of POS-created custom items for a branch. Returns the
    * full recipe (ingredient name + cost + qty + unit), order count,
    * total revenue, and last-sold date so the owner can review what

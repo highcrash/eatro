@@ -194,6 +194,17 @@ export class CashierOpsController {
   }
 
   /**
+   * Recent custom items the cashier (or any cashier on this branch)
+   * built before, surfaced in the Custom Menu dialog so they can be
+   * reused directly or used as a starting template for a new variant
+   * — saves the cashier from rebuilding the same recipe twice.
+   */
+  @Get('custom-menu/recent')
+  async listRecentCustomMenus(@CurrentUser() user: JwtPayload) {
+    return this.menu.listRecentCustomItems(user.branchId);
+  }
+
+  /**
    * Cashier-readable recipe lookup powering the "Customise" dialog —
    * picks which ingredients the customer wants removed from a single
    * order line. The /recipes endpoint is admin-only, so this is the

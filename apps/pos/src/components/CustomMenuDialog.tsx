@@ -1,11 +1,20 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { X, Plus, Trash2, Search, Copy } from 'lucide-react';
+import { X, Plus, Trash2, Search, Copy, History, Pencil } from 'lucide-react';
 
 import type { CreateCustomMenuDto, MenuItem } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
 import ApprovalOtpDialog from './ApprovalOtpDialog';
+
+interface RecentCustomItem {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  createdAt: string;
+  recipe: { ingredientId: string; quantity: number; unit: string }[];
+}
 
 interface IngredientRow {
   id: string;
@@ -64,6 +73,7 @@ export default function CustomMenuDialog({ approval, onClose, onCreated }: Props
   const [sellingPrice, setSellingPrice] = useState<string>('');
   const [touchedPrice, setTouchedPrice] = useState(false);
   const [showCopyPicker, setShowCopyPicker] = useState(false);
+  const [showRecentPicker, setShowRecentPicker] = useState(false);
   const [showIngredientPicker, setShowIngredientPicker] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingOtp, setPendingOtp] = useState(false);
@@ -83,6 +93,15 @@ export default function CustomMenuDialog({ approval, onClose, onCreated }: Props
   const { data: sources = [] } = useQuery<RecipeSourceItem[]>({
     queryKey: ['custom-menu-sources'],
     queryFn: () => api.get<RecipeSourceItem[]>('/cashier-ops/custom-menu/sources'),
+  });
+
+  // Recent custom items (last 30 days, max 20) — for the "Recent"
+  // picker that lets the cashier reuse a prior custom dish either
+  // as-is (adds the existing MenuItem to cart) or as an editable
+  // template (prefills the form, save creates a NEW custom item).
+  const { data: recents = [] } = useQuery<RecentCustomItem[]>({
+    queryKey: ['custom-menu-recent'],
+    queryFn: () => api.get<RecentCustomItem[]>('/cashier-ops/custom-menu/recent'),
   });
 
   // Variant fallback for cost lookup (mirrors server engine).
@@ -182,6 +201,22 @@ export default function CustomMenuDialog({ approval, onClose, onCreated }: Props
     setShowCopyPicker(false);
   };
 
+  // "Edit & Save as new" path from the Recent picker: prefill the form
+  // with the prior custom item's name (suffixed " (copy)" so the
+  // unique-name constraint plays nice and the cashier can rename), its
+  // recipe, and its selling price. The submit path always creates a
+  // fresh MenuItem — the original row is untouched, which matches the
+  // "save as new" intent and avoids editing history on already-sold
+  // dishes.
+  const editAsNew = (item: RecentCustomItem) => {
+    setName(`${item.name} (copy)`);
+    setDescription(item.description ?? '');
+    setRecipe(mergeLines(item.recipe));
+    setSellingPrice((item.price / 100).toFixed(2));
+    setTouchedPrice(true);
+    setShowRecentPicker(false);
+  };
+
   const updateLine = (idx: number, patch: Partial<RecipeLineWithIngredient>) => {
     setRecipe(recipe.map((l, i) => i === idx ? { ...l, ...patch } : l));
   };
@@ -221,6 +256,12 @@ export default function CustomMenuDialog({ approval, onClose, onCreated }: Props
             <div className="flex items-center justify-between mb-2">
               <p className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Recipe</p>
               <div className="flex gap-2">
+                {recents.length > 0 && (
+                  <button type="button" onClick={() => setShowRecentPicker(true)}
+                    className="bg-theme-surface border border-theme-border rounded-theme px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-theme-text hover:border-theme-accent inline-flex items-center gap-1">
+                    <History size={12} /> Recent ({recents.length})
+                  </button>
+                )}
                 <button type="button" onClick={() => setShowCopyPicker(true)}
                   className="bg-theme-surface border border-theme-border rounded-theme px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-theme-text hover:border-theme-accent inline-flex items-center gap-1">
                   <Copy size={12} /> Copy From Recipe
@@ -322,6 +363,24 @@ export default function CustomMenuDialog({ approval, onClose, onCreated }: Props
         />
       )}
 
+      {/* Recent custom-menu picker */}
+      {showRecentPicker && (
+        <RecentCustomPicker
+          recents={recents}
+          onReuse={(item) => {
+            // Hand the existing MenuItem straight to the cart — no new
+            // row created. The order pricer + recipe deduction ride
+            // the item's existing id, so reusing the same custom dish
+            // ten times costs ten ingredient draws against the same
+            // recipe rather than creating ten near-identical
+            // MenuItem rows.
+            onCreated({ id: item.id, name: item.name, price: item.price } as MenuItem);
+          }}
+          onEdit={editAsNew}
+          onClose={() => setShowRecentPicker(false)}
+        />
+      )}
+
       {/* Ingredient picker for a specific row */}
       {showIngredientPicker != null && (
         <IngredientPicker
@@ -380,6 +439,68 @@ function RecipeSourcePicker({ sources, onPick, onClose }: {
               <span className="text-sm text-theme-text">{s.name}</span>
               <span className="text-[10px] uppercase tracking-wider text-theme-text-muted">{s.items.length} ingredients</span>
             </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Recent custom-menu picker ───────────────────────────────────────────────
+
+function RecentCustomPicker({ recents, onReuse, onEdit, onClose }: {
+  recents: RecentCustomItem[];
+  onReuse: (item: RecentCustomItem) => void;
+  onEdit: (item: RecentCustomItem) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const lower = q.trim().toLowerCase();
+  const filtered = lower
+    ? recents.filter((r) => r.name.toLowerCase().includes(lower))
+    : recents;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div className="bg-theme-surface rounded-theme shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <header className="px-5 py-3 border-b border-theme-border flex items-center justify-between">
+          <div>
+            <p className="text-sm font-bold text-theme-text">Recent Custom Items</p>
+            <p className="text-[10px] text-theme-text-muted">Re-add to cart, or edit and save as new</p>
+          </div>
+          <button onClick={onClose} className="text-theme-text-muted"><X size={14} /></button>
+        </header>
+        <div className="p-3 border-b border-theme-border">
+          <div className="relative">
+            <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-theme-text-muted" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…"
+              className="w-full bg-theme-bg border border-theme-border rounded-theme pl-8 pr-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent" />
+          </div>
+        </div>
+        <div className="overflow-auto">
+          {filtered.length === 0 ? (
+            <p className="text-xs text-theme-text-muted text-center py-12">No recent custom items.</p>
+          ) : filtered.map((r) => (
+            <div key={r.id} className="px-4 py-3 border-b border-theme-border hover:bg-theme-bg">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0">
+                  <p className="text-sm text-theme-text font-semibold truncate">{r.name}</p>
+                  <p className="text-[10px] uppercase tracking-wider text-theme-text-muted">
+                    {r.recipe.length} ingredient{r.recipe.length === 1 ? '' : 's'} • {formatCurrency(r.price)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => onReuse(r)}
+                  className="flex-1 bg-theme-accent text-white rounded-theme px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:opacity-90 inline-flex items-center justify-center gap-1">
+                  <Plus size={12} /> Add
+                </button>
+                <button type="button" onClick={() => onEdit(r)}
+                  className="flex-1 bg-theme-surface border border-theme-border rounded-theme px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-theme-text hover:border-theme-accent inline-flex items-center justify-center gap-1">
+                  <Pencil size={12} /> Edit & Save New
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       </div>
