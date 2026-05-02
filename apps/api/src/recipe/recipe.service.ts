@@ -394,6 +394,58 @@ export class RecipeService {
     for (const parentId of parentSyncIds) {
       await this.ingredientService.syncParentStock(parentId);
     }
+
+    // Mirror the deduction back onto any PreReadyItem paired with one
+    // of the deducted Ingredient rows. This is the consumption-side
+    // half of the Pre-Ready ↔ Inventory link: production bumps both
+    // counters in completeProduction; menu sales must shrink both
+    // counters here. Without this the PreReadyItem display would
+    // permanently inflate as menus consume the linked Ingredient.
+    await this.mirrorDeductionToLinkedPreReady(stockUpdates);
+  }
+
+  /**
+   * For each Ingredient that was just decremented, find any
+   * PreReadyItem whose producesIngredientId points at it and
+   * decrement that PreReadyItem.currentStock by the same amount.
+   * Best-effort, fire-and-forget — swallows errors so a mirror
+   * failure can't roll back the actual sale.
+   */
+  private async mirrorDeductionToLinkedPreReady(stockUpdates: { id: string; decrement: number }[]) {
+    if (stockUpdates.length === 0) return;
+    try {
+      const ingredientIds = Array.from(new Set(stockUpdates.map((u) => u.id)));
+      // Pull every PreReadyItem linked to one of these ingredients
+      // in a single round-trip; usually 0–1 matches per sale.
+      const linked = await this.prisma.preReadyItem.findMany({
+        where: { producesIngredientId: { in: ingredientIds }, deletedAt: null },
+        select: { id: true, producesIngredientId: true },
+      });
+      if (linked.length === 0) return;
+      // Aggregate decrements per ingredientId so a recipe that
+      // references the same paired Ingredient twice (rare but
+      // possible) only decrements the PreReadyItem once with the
+      // total qty.
+      const totalByIngredient = new Map<string, number>();
+      for (const u of stockUpdates) {
+        totalByIngredient.set(u.id, (totalByIngredient.get(u.id) ?? 0) + u.decrement);
+      }
+      await Promise.all(
+        linked.map((pr) => {
+          const dec = totalByIngredient.get(pr.producesIngredientId!) ?? 0;
+          if (dec <= 0) return null;
+          return this.prisma.preReadyItem.update({
+            where: { id: pr.id },
+            data: { currentStock: { decrement: dec } },
+          });
+        }).filter(Boolean) as Promise<unknown>[],
+      );
+    } catch {
+      // Mirror failure must not propagate — the underlying sale's
+      // Ingredient deduction already committed. The Pre-Ready
+      // dashboard will simply show stale stock until the next
+      // production batch reconciles it.
+    }
   }
 
   /**
@@ -484,6 +536,10 @@ export class RecipeService {
     for (const parentId of parentSyncIds) {
       await this.ingredientService.syncParentStock(parentId);
     }
+    // Same Pre-Ready ↔ Inventory mirror as deductStockForOrder so
+    // ad-hoc cashier-added ingredients also keep PreReadyItem stock
+    // honest.
+    await this.mirrorDeductionToLinkedPreReady(stockUpdates);
   }
 
   // Used by OrderService to restore stock on item void / order void
@@ -564,6 +620,29 @@ export class RecipeService {
 
     for (const parentId of parentSyncIds) {
       await this.ingredientService.syncParentStock(parentId);
+    }
+
+    // Restore-side mirror: when a void puts stock BACK on an
+    // Ingredient, the linked PreReadyItem should also gain that
+    // stock so its display stays in sync.
+    try {
+      const ingredientIds = Array.from(new Set(stockUpdates.map((u) => u.id)));
+      const linked = await this.prisma.preReadyItem.findMany({
+        where: { producesIngredientId: { in: ingredientIds }, deletedAt: null },
+        select: { id: true, producesIngredientId: true },
+      });
+      const totalByIngredient = new Map<string, number>();
+      for (const u of stockUpdates) totalByIngredient.set(u.id, (totalByIngredient.get(u.id) ?? 0) + u.increment);
+      await Promise.all(linked.map((pr) => {
+        const inc = totalByIngredient.get(pr.producesIngredientId!) ?? 0;
+        if (inc <= 0) return null;
+        return this.prisma.preReadyItem.update({
+          where: { id: pr.id },
+          data: { currentStock: { increment: inc } },
+        });
+      }).filter(Boolean) as Promise<unknown>[]);
+    } catch {
+      // Mirror failure must not roll back the void.
     }
   }
 }

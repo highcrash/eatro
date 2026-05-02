@@ -70,7 +70,11 @@ export class PreReadyService {
     return item;
   }
 
-  async updateItem(id: string, branchId: string, dto: { name?: string; minimumStock?: number; unit?: string }) {
+  async updateItem(
+    id: string,
+    branchId: string,
+    dto: { name?: string; minimumStock?: number; unit?: string; autoDeductInputs?: boolean; producesIngredientId?: string | null },
+  ) {
     const item = await this.findOneItem(id, branchId);
 
     // Unit change is destructive on the meaning of every Decimal that
@@ -116,6 +120,8 @@ export class PreReadyService {
           ...(dto.name ? { name: dto.name } : {}),
           ...(dto.minimumStock !== undefined ? { minimumStock: dto.minimumStock } : {}),
           ...(unitChanged ? { unit: dto.unit as any } : {}),
+          ...(dto.autoDeductInputs !== undefined ? { autoDeductInputs: dto.autoDeductInputs } as any : {}),
+          ...(dto.producesIngredientId !== undefined ? { producesIngredientId: dto.producesIngredientId } as any : {}),
         },
       });
 
@@ -502,9 +508,14 @@ export class PreReadyService {
 
     const parentSyncIds = new Set<string>();
 
+    // Honour the per-PreReadyItem opt-out for input-side ingredient
+    // deduction. Some kitchens reconcile raw stock manually at end of
+    // week and don't want production to silently eat their inventory.
+    const autoDeduct = (po.preReadyItem as { autoDeductInputs?: boolean }).autoDeductInputs !== false;
+
     const txResult = await this.prisma.$transaction(async (tx) => {
       // 1. Deduct raw ingredients based on recipe (proportional to production qty)
-      if (recipe && recipe.items.length > 0) {
+      if (autoDeduct && recipe && recipe.items.length > 0) {
         for (let idx = 0; idx < recipe.items.length; idx++) {
           const recipeItem = recipe.items[idx];
           const deductQty = conversions[idx];
@@ -570,12 +581,28 @@ export class PreReadyService {
         },
       });
 
-      // 4. Auto-add to Inventory with calculated cost per unit
-      //    Cost = sum(each ingredient's deductQty × costPerUnit) / producedQty
+      // 4. Bump the linked Inventory Ingredient by the produced yield.
+      //    Lookup order:
+      //      a) Explicit producesIngredientId on the PreReadyItem (new
+      //         schema, immune to PreReadyItem renames).
+      //      b) Legacy "[PR] <name>" name match (every install before
+      //         this commit relied on it).
+      //      c) Auto-create a fresh "[PR] <name>" Ingredient if neither
+      //         exists, and stamp producesIngredientId so subsequent
+      //         productions hit (a) directly.
+      //    Whichever path resolves the row, we backfill
+      //    producesIngredientId so the Pre-Ready ↔ Inventory pairing
+      //    becomes explicit and survives a future rename.
+      const linkedId = (po.preReadyItem as { producesIngredientId?: string | null }).producesIngredientId ?? null;
       const ingredientName = `[PR] ${po.preReadyItem.name}`;
-      let ingredient = await tx.ingredient.findFirst({
-        where: { branchId, name: ingredientName, deletedAt: null },
-      });
+      let ingredient = linkedId
+        ? await tx.ingredient.findFirst({ where: { id: linkedId, branchId, deletedAt: null } })
+        : null;
+      if (!ingredient) {
+        ingredient = await tx.ingredient.findFirst({
+          where: { branchId, name: ingredientName, deletedAt: null },
+        });
+      }
       if (!ingredient) {
         ingredient = await tx.ingredient.create({
           data: {
@@ -607,15 +634,26 @@ export class PreReadyService {
           },
         });
       }
+      // Backfill the link so subsequent productions skip the name
+      // lookup and survive PreReadyItem renames.
+      if (!linkedId) {
+        await tx.preReadyItem.update({
+          where: { id: po.preReadyItemId },
+          data: { producesIngredientId: ingredient.id } as any,
+        });
+      }
 
-      // Create stock movement for the inventory ingredient
+      // Create stock movement for the inventory ingredient. New
+      // PRODUCTION_RECEIVED type (not PURCHASE) so the Stock
+      // Movements feed cleanly distinguishes "we made it ourselves"
+      // from "we bought it from a supplier".
       await tx.stockMovement.create({
         data: {
           branchId,
           ingredientId: ingredient.id,
-          type: 'PURCHASE',
+          type: 'PRODUCTION_RECEIVED',
           quantity: producedQty,
-          notes: `Pre-ready production completed: ${po.preReadyItem.name} x${producedQty}`,
+          notes: `Production: ${po.preReadyItem.name} ×${producedQty} ${po.preReadyItem.unit}`,
         },
       });
 

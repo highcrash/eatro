@@ -126,7 +126,7 @@ export default function PreReadyPage() {
     });
   };
   const [editingItem, setEditingItem] = useState<PreReadyItem | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', minimumStock: '0', unit: 'PCS' });
+  const [editForm, setEditForm] = useState({ name: '', minimumStock: '0', unit: 'PCS', autoDeductInputs: true });
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRows, setBulkRows] = useState<{ preReadyItemName: string; yieldQuantity?: number; yieldUnit?: string; ingredientName: string; quantity: number; unit?: string }[]>([]);
@@ -361,6 +361,7 @@ export default function PreReadyPage() {
     mutationFn: () => api.patch(`/pre-ready/items/${editingItem!.id}`, {
       name: editForm.name || undefined,
       minimumStock: parseFloat(editForm.minimumStock),
+      autoDeductInputs: editForm.autoDeductInputs,
       // Only include unit when admin actually changed it — unchanged
       // units skip the strict gates on the server side.
       ...(editingItem && editForm.unit !== editingItem.unit ? { unit: editForm.unit } : {}),
@@ -518,7 +519,12 @@ Fried Onion,500,G,Oil,100,ML`;
 
   const openEditItem = (item: PreReadyItem) => {
     setEditingItem(item);
-    setEditForm({ name: item.name, minimumStock: String(Number(item.minimumStock)), unit: item.unit });
+    setEditForm({
+      name: item.name,
+      minimumStock: String(Number(item.minimumStock)),
+      unit: item.unit,
+      autoDeductInputs: (item as { autoDeductInputs?: boolean }).autoDeductInputs !== false,
+    });
   };
 
   const handleDeleteItem = (item: PreReadyItem) => {
@@ -1224,8 +1230,8 @@ function EditItemDialog({
   onSave,
 }: {
   item: PreReadyItem;
-  form: { name: string; minimumStock: string; unit: string };
-  setForm: React.Dispatch<React.SetStateAction<{ name: string; minimumStock: string; unit: string }>>;
+  form: { name: string; minimumStock: string; unit: string; autoDeductInputs: boolean };
+  setForm: React.Dispatch<React.SetStateAction<{ name: string; minimumStock: string; unit: string; autoDeductInputs: boolean }>>;
   units: string[];
   saving: boolean;
   error: Error | null;
@@ -1280,6 +1286,37 @@ function EditItemDialog({
                 {units.map((u) => <option key={u} value={u}>{u}</option>)}
               </select>
             )}
+          </div>
+
+          {/* Inventory ↔ Pre-Ready link explanation. The link is set
+              automatically the first time a production batch finishes
+              (the system creates / reuses an "[PR] <name>" Ingredient
+              row and stamps the link). After that, every menu sale
+              that consumes the linked Ingredient also decrements
+              this PreReadyItem so the two counters stay in sync. */}
+          <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-2">
+            <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase">
+              Linked Inventory Ingredient
+            </p>
+            <p className="text-[#999] font-body text-[11px]">
+              {(item as { producesIngredientId?: string | null }).producesIngredientId
+                ? 'Linked. Production bumps the linked inventory row; menu sales that consume it also decrement this pre-ready stock so both counters stay in sync.'
+                : 'Not yet linked. The link is created automatically the first time you complete a production batch — an "[PR] <name>" inventory row gets created (or reused) and paired with this pre-ready item.'}
+            </p>
+            <label className="flex items-start gap-2 pt-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.autoDeductInputs}
+                onChange={(e) => setForm((f) => ({ ...f, autoDeductInputs: e.target.checked }))}
+                className="mt-0.5"
+              />
+              <span className="text-[#DDD] font-body text-xs">
+                Auto-deduct input ingredients on production
+                <span className="block text-[#666] text-[10px]">
+                  When OFF, completing a production batch only adds the produced output and skips deducting the recipe's input ingredients from inventory. Use only if you reconcile raw stock manually.
+                </span>
+              </span>
+            </label>
           </div>
         </div>
 
