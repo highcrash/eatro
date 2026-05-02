@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { AccountService } from './account.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -10,7 +11,10 @@ import type { JwtPayload, CreateAccountDto, AdjustBalanceDto } from '@restora/ty
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('OWNER', 'MANAGER')
 export class AccountController {
-  constructor(private readonly accountService: AccountService) {}
+  constructor(
+    private readonly accountService: AccountService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   // POS Start-Day dialog fetches /accounts to show the opening-cash
   // picker — advisors + waiters running the register need this read
@@ -23,23 +27,54 @@ export class AccountController {
   }
 
   @Post()
-  create(@CurrentUser() user: JwtPayload, @Body() dto: CreateAccountDto) {
-    return this.accountService.create(user.branchId, dto);
+  async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateAccountDto) {
+    const created = await this.accountService.create(user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'ACCOUNT', action: 'CREATE',
+      entityType: 'account', entityId: created.id, entityName: created.name,
+      after: created as any,
+      summary: `Created ${created.type} account "${created.name}"`,
+    });
+    return created;
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: Partial<CreateAccountDto>) {
-    return this.accountService.update(id, user.branchId, dto);
+  async update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: Partial<CreateAccountDto>) {
+    const before = await this.accountService.findOne(id, user.branchId).catch(() => null);
+    const updated = await this.accountService.update(id, user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'ACCOUNT', action: 'UPDATE',
+      entityType: 'account', entityId: updated.id, entityName: updated.name,
+      before: before as any, after: updated as any,
+      summary: `Updated account "${updated.name}"`,
+    });
+    return updated;
   }
 
   @Post(':id/adjust')
-  adjustBalance(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: AdjustBalanceDto) {
-    return this.accountService.adjustBalance(id, user.branchId, dto);
+  async adjustBalance(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: AdjustBalanceDto) {
+    const acct = await this.accountService.findOne(id, user.branchId).catch(() => null);
+    const result = await this.accountService.adjustBalance(id, user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'ACCOUNT', action: 'UPDATE',
+      entityType: 'account', entityId: id, entityName: acct?.name ?? id,
+      after: { adjustment: dto } as any,
+      summary: `Manual balance adjustment ${(Number(dto.amount) / 100).toFixed(2)}: ${dto.description}`,
+    });
+    return result;
   }
 
   @Post('transfer')
-  transfer(@CurrentUser() user: JwtPayload, @Body() dto: { fromAccountId: string; toAccountId: string; amount: number; description?: string }) {
-    return this.accountService.transfer(user.branchId, { ...dto, amount: Math.round(dto.amount) });
+  async transfer(@CurrentUser() user: JwtPayload, @Body() dto: { fromAccountId: string; toAccountId: string; amount: number; description?: string }) {
+    const result = await this.accountService.transfer(user.branchId, { ...dto, amount: Math.round(dto.amount) });
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'ACCOUNT', action: 'UPDATE',
+      entityType: 'accountTransfer', entityId: `${dto.fromAccountId}->${dto.toAccountId}`,
+      entityName: 'Account transfer',
+      after: dto as any,
+      summary: `Transfer ${(Number(dto.amount) / 100).toFixed(2)} (${dto.description ?? ''})`,
+    });
+    return result;
   }
 
   @Get(':id/statement')
