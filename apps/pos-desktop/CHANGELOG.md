@@ -3,6 +3,29 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.61 — Daily report outflow tiles + variant-parent negative-cost fix (2026-05-03)
+
+API + admin rebundle. No Electron-shell changes.
+
+- Daily report now surfaces Supplier Payments + Salary Payments
+  as their own headline tiles (and rows on the printed Z-report)
+  alongside Total Expenses. Previously a quiet ad-hoc-expense day
+  with a big supplier payout read "Total Expenses: 0" because
+  auto-mirror Expense rows are filtered out to avoid
+  double-counting against the Reconciliation grid; the filtered
+  totals now show explicitly so the day's real outflow is
+  unmissable. New "Net Cash (Sales − Outflow)" tile reflects the
+  realistic daily net.
+- Variant-parent ingredients no longer show a negative
+  costPerUnit when one variant has been over-deducted into
+  negative stock. syncParentStock now sums only positive-stock
+  variants into the weighted average and falls back to the
+  cheapest variant cost when no variant has positive on-hand
+  stock — same policy the order/recipe/pre-ready engines use.
+- New POST /ingredients/resync-variant-parents (OWNER) one-shot
+  refreshes existing stuck aggregates without waiting for the
+  next stock movement.
+
 ## 0.8.60 — Build: split CI dist step + rebuild current main (2026-05-02)
 
 Rebundle of current main with the CI workflow split (cherry-picked
