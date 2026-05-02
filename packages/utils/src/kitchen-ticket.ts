@@ -41,13 +41,24 @@ export interface KitchenTicketInput {
      *  spots them at a glance. */
     removedIngredients?: string[] | null;
     /** Raw OrderItem.modifications shape — accepted as a fallback so
-     *  callers can pass an Order straight through without remapping. */
-    modifications?: { removedNames?: string[] | null } | null;
+     *  callers can pass an Order straight through without remapping.
+     *  `addedIngredients` carries the cashier's ad-hoc additions
+     *  (qty + unit) attached via the Customise dialog so the kitchen
+     *  knows to make them on top of the recipe. */
+    modifications?: {
+      removedNames?: string[] | null;
+      addedIngredients?: Array<{ ingredientName: string; quantity: number; unit: string }> | null;
+    } | null;
     /** Selected addon names ("Cheese Sauce", "Garlic Nun"). Rendered
      *  as "+ <NAME>" rows under the item so the chef plates them. */
     selectedAddons?: string[] | null;
     /** Raw OrderItem.addons shape — accepted as fallback. */
     addons?: { addonName: string }[] | null;
+    /** Cashier-added ingredients (Customise → Add). Rendered as
+     *  "+ <QTY><UNIT> <NAME>" rows so the kitchen prepares the
+     *  add-ons. Same printed shape as the `selectedAddons` rows so
+     *  the chef can scan top-to-bottom without context-switching. */
+    addedIngredients?: Array<{ ingredientName: string; quantity: number; unit: string }> | null;
   }>;
   /** Kitchen section label printed as a sub-header on sectioned KOTs
    *  (e.g. "-- FOOD --", "-- BEVERAGE --"). Desktop-only; web POS
@@ -70,7 +81,14 @@ export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {
       const addonsHtml = addons
         .map((n) => `<div class="item-addon">+ ${escapeHtml(n)}</div>`)
         .join('');
-      return `<div class="item"><div class="item-line">${i.quantity}-:${escapeHtml(i.menuItemName)}</div>${addonsHtml}${removedHtml}${i.notes ? `<div class="item-note">&rarr; ${escapeHtml(i.notes)}</div>` : ''}<div class="item-sep"></div></div>`;
+      // Cashier-added ingredients via the Customise dialog. Falls
+      // back to OrderItem.modifications.addedIngredients when the
+      // caller hands us a server-side row directly.
+      const added = (i.addedIngredients ?? i.modifications?.addedIngredients ?? []) || [];
+      const addedHtml = added
+        .map((a) => `<div class="item-addon">+ ${escapeHtml(`${a.quantity}${a.unit} ${a.ingredientName}`)}</div>`)
+        .join('');
+      return `<div class="item"><div class="item-line">${i.quantity}-:${escapeHtml(i.menuItemName)}</div>${addonsHtml}${addedHtml}${removedHtml}${i.notes ? `<div class="item-note">&rarr; ${escapeHtml(i.notes)}</div>` : ''}<div class="item-sep"></div></div>`;
     })
     .join('');
 

@@ -382,6 +382,96 @@ export class RecipeService {
     }
   }
 
+  /**
+   * Public unit-conversion helper exposed for OrderService when it
+   * validates ad-hoc cashier-added ingredients against the
+   * customMenu cost-margin band — the cashier may type "100 G" but
+   * the ingredient is stocked in KG, so the band has to be computed
+   * in stock units. Thin pass-through to UnitConversionService.
+   */
+  convertUnitsForBranch(branchId: string, qty: number, fromUnit: string, toUnit: string): Promise<number> {
+    return this.unitConversionService.convert(branchId, qty, fromUnit, toUnit);
+  }
+
+  /**
+   * Deduct raw ingredient quantities for ad-hoc additions the cashier
+   * attached to a regular menu item via the Customise dialog. Mirrors
+   * deductStockForOrder's logic for unit conversion + variant-parent
+   * fallback, but skips the Recipe lookup since these don't come
+   * from a MenuItem.
+   */
+  async deductRawIngredientsForOrder(
+    branchId: string,
+    orderId: string,
+    items: Array<{ ingredientId: string; quantity: number; unit: string }>,
+  ) {
+    if (items.length === 0) return;
+
+    const ingredientIds = Array.from(new Set(items.map((i) => i.ingredientId)));
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { id: { in: ingredientIds } },
+    });
+    const byId = new Map(ingredients.map((i) => [i.id, i] as const));
+
+    const movements: { branchId: string; ingredientId: string; type: 'SALE'; quantity: number; orderId: string; notes: string }[] = [];
+    const stockUpdates: { id: string; decrement: number }[] = [];
+    const parentSyncIds = new Set<string>();
+
+    for (const it of items) {
+      const ing = byId.get(it.ingredientId);
+      if (!ing) continue;
+      let totalQty = it.quantity;
+      if (it.unit !== ing.unit) {
+        try {
+          totalQty = await this.unitConversionService.convert(branchId, it.quantity, it.unit, ing.unit);
+        } catch {
+          totalQty = it.quantity; // best-effort
+        }
+      }
+
+      if (ing.hasVariants) {
+        const variants = await this.prisma.ingredient.findMany({
+          where: { parentId: ing.id, isActive: true, deletedAt: null, currentStock: { gt: 0 } },
+          orderBy: { createdAt: 'asc' },
+        });
+        let remaining = totalQty;
+        for (const v of variants) {
+          if (remaining <= 0) break;
+          const available = Number(v.currentStock);
+          const deduct = Math.min(remaining, available);
+          movements.push({ branchId, ingredientId: v.id, type: 'SALE', quantity: -deduct, orderId, notes: 'Auto-deducted (added ingredient)' });
+          stockUpdates.push({ id: v.id, decrement: deduct });
+          remaining -= deduct;
+        }
+        if (remaining > 0) {
+          const fallback = variants[0] ?? await this.prisma.ingredient.findFirst({
+            where: { parentId: ing.id, isActive: true, deletedAt: null },
+            orderBy: { createdAt: 'asc' },
+          });
+          if (fallback) {
+            movements.push({ branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, orderId, notes: 'Auto-deducted (added ingredient, insufficient stock)' });
+            stockUpdates.push({ id: fallback.id, decrement: remaining });
+          }
+        }
+        parentSyncIds.add(ing.id);
+      } else {
+        movements.push({ branchId, ingredientId: ing.id, type: 'SALE', quantity: -totalQty, orderId, notes: 'Auto-deducted (added ingredient)' });
+        stockUpdates.push({ id: ing.id, decrement: totalQty });
+      }
+    }
+
+    if (movements.length === 0) return;
+    await this.prisma.$transaction([
+      ...stockUpdates.map((u) =>
+        this.prisma.ingredient.update({ where: { id: u.id }, data: { currentStock: { decrement: u.decrement } } }),
+      ),
+      this.prisma.stockMovement.createMany({ data: movements }),
+    ]);
+    for (const parentId of parentSyncIds) {
+      await this.ingredientService.syncParentStock(parentId);
+    }
+  }
+
   // Used by OrderService to restore stock on item void / order void
   async restoreStockForItems(branchId: string, orderId: string, items: { menuItemId: string; quantity: number }[]) {
     const menuItemIds = items.map((i) => i.menuItemId);

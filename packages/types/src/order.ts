@@ -23,6 +23,19 @@ export interface OrderItemModifications {
   removedIngredientIds: string[];
   /** Frozen names of removed ingredients — survives ingredient rename. */
   removedNames: string[];
+  /**
+   * Ad-hoc ingredients the cashier added on top of the recipe.
+   * Each entry stamps the ingredient name + qty + unit + per-unit
+   * surcharge frozen at order time so a future cost / rename
+   * doesn't rewrite history.
+   */
+  addedIngredients?: Array<{
+    ingredientId: string;
+    ingredientName: string;
+    quantity: number;
+    unit: string;
+    surcharge: MoneyAmount;
+  }>;
 }
 
 export interface OrderItemAddonSnapshot {
@@ -110,6 +123,23 @@ export interface CreateOrderItemDto {
   removedIngredientIds?: string[];
   /** Addon picks for this line. Server validates min/max per group. */
   addons?: AddonSelectionInput[];
+  /**
+   * Ad-hoc ingredients the cashier added on top of the recipe via
+   * the Customise dialog. Each entry adds `surcharge` (paisa) to
+   * the line's per-unit price and the listed quantity to the stock
+   * deduction. Server re-validates each surcharge falls inside the
+   * branch's [costMargin, maxMargin] band so cashiers can't price
+   * additions arbitrarily.
+   */
+  addedIngredients?: AddedIngredientInput[];
+}
+
+export interface AddedIngredientInput {
+  ingredientId: string;
+  quantity: number;
+  unit: string;
+  /** Per-unit surcharge in paisa (added once per ordered quantity). */
+  surcharge: number;
 }
 
 export interface CreateOrderDto {
@@ -130,6 +160,8 @@ export interface AddOrderItemDto {
   removedIngredientIds?: string[];
   /** Addon picks for this line. Server validates min/max per group. */
   addons?: AddonSelectionInput[];
+  /** Ad-hoc additions on top of the recipe — see CreateOrderItemDto. */
+  addedIngredients?: AddedIngredientInput[];
 }
 
 export interface ProcessPaymentDto {
