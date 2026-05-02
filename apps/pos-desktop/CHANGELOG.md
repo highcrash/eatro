@@ -3,6 +3,19 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.56 — Build: strip license-client src + capture debug artifacts (2026-05-03)
+
+v1.0.55 isolated the failure to `electron-builder package` (codecanyon
+only — main 0.8.60 succeeded with the same workflow split). Likely
+cause: pnpm-nested license-client tarball ships src/ + tests + tsconfig
+that the existing yml exclude pattern doesn't reach through the
+.pnpm/ hoist symlink path on Windows, so asar packaging chokes.
+
+Brute-force fix: rm -rf the non-runtime files from the license-client
+hoist directory before packaging. Plus DEBUG=electron-builder on the
+build step + actions/upload-artifact on failure so the next attempt
+captures the real error if this isn't the right diagnosis.
+
 ## 1.0.55 — Build: split CI dist step to surface failure (2026-05-02)
 
 CI debug pass — 1.0.54 still failed at the combined "Build

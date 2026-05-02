@@ -64,10 +64,43 @@ jobs:
       - name: electron-vite build (renderer + main bundles)
         run: pnpm --filter @restora/pos-desktop exec electron-vite build
 
+      # Strip files from the license-client tarball that electron-builder's
+      # asar packaging chokes on. The yml exclude pattern targets the
+      # symlink path `node_modules/@restora/license-client/src` but pnpm's
+      # actual hoist layout is `node_modules/.pnpm/@restora+license-client@.../node_modules/@restora/license-client/src`,
+      # which the glob doesn't always traverse on Windows. Removing
+      # src + tests + tsconfig from disk before packaging is brute-force
+      # but bulletproof — the runtime only needs the compiled dist/.
+      - name: Strip license-client source from disk (codecanyon only)
+        shell: bash
+        run: |
+          set -e
+          shopt -s nullglob
+          for pkg_dir in node_modules/.pnpm/@restora+license-client@*/node_modules/@restora/license-client; do
+            echo "Stripping non-runtime files from $pkg_dir"
+            rm -rf "$pkg_dir/src" "$pkg_dir/tests" "$pkg_dir/__tests__"
+            rm -f "$pkg_dir/tsconfig.json" "$pkg_dir/jest.config.js" "$pkg_dir/jest.config.ts" "$pkg_dir"/*.test.*
+          done
+
       - name: electron-builder package
-        run: pnpm --filter @restora/pos-desktop exec electron-builder --win --config electron-builder.yml
+        run: pnpm --filter @restora/pos-desktop exec electron-builder --win --config electron-builder.yml --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEBUG: electron-builder
+
+      # Capture release/ artifacts (and any partial output / logs)
+      # on failure so the next investigation has the actual log line
+      # rather than another opaque "exit code 1".
+      - name: Upload electron-builder debug artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pos-desktop-debug-${{ github.ref_name }}
+          path: |
+            apps/pos-desktop/release/**/*
+            apps/pos-desktop/dist/**/*
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Publish release assets
         uses: softprops/action-gh-release@v2

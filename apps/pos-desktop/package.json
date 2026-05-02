@@ -1,6 +1,6 @@
 {
   "name": "@restora/pos-desktop",
-  "version": "1.0.55",
+  "version": "1.0.56",
   "private": true,
   "description": "Windows cashier terminal — Electron shell that wraps the web POS and adds native printing, cash drawer, and offline sync.",
   "main": "dist/main/index.js",
