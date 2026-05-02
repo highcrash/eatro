@@ -461,6 +461,119 @@ export class MenuService {
   }
 
   /**
+   * Audit list of POS-created custom items for a branch. Returns the
+   * full recipe (ingredient name + cost + qty + unit), order count,
+   * total revenue, and last-sold date so the owner can review what
+   * cashiers built ad-hoc and decide which are worth promoting to the
+   * regular menu. Hidden by default from /menu so a separate endpoint
+   * is the right surface.
+   */
+  async findCustomItems(branchId: string) {
+    const items = await this.prisma.menuItem.findMany({
+      where: { branchId, deletedAt: null, isCustom: true },
+      include: {
+        category: { select: { id: true, name: true } },
+        recipe: {
+          include: {
+            items: {
+              include: {
+                ingredient: { select: { id: true, name: true, unit: true, costPerUnit: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (items.length === 0) return [];
+
+    const ids = items.map((i) => i.id);
+    const stats = await this.prisma.orderItem.groupBy({
+      by: ['menuItemId'],
+      where: {
+        menuItemId: { in: ids },
+        order: { branchId, deletedAt: null, status: { notIn: ['VOID', 'REFUNDED'] } },
+        voidedAt: null,
+      },
+      _sum: { quantity: true, totalPrice: true },
+      _max: { createdAt: true },
+    });
+    const statsById = new Map(stats.map((s) => [s.menuItemId, s] as const));
+
+    return items.map((it) => {
+      const s = statsById.get(it.id);
+      return {
+        id: it.id,
+        name: it.name,
+        description: it.description,
+        price: it.price.toNumber(),
+        costPrice: it.costPrice ? it.costPrice.toNumber() : 0,
+        category: it.category ? { id: it.category.id, name: it.category.name } : null,
+        createdAt: it.createdAt,
+        recipe: it.recipe
+          ? {
+              id: it.recipe.id,
+              items: it.recipe.items.map((ri) => ({
+                ingredientId: ri.ingredientId,
+                ingredientName: ri.ingredient.name,
+                stockUnit: ri.ingredient.unit,
+                costPerStockUnit: ri.ingredient.costPerUnit ? ri.ingredient.costPerUnit.toNumber() : 0,
+                quantity: ri.quantity.toNumber(),
+                unit: ri.unit,
+              })),
+            }
+          : null,
+        soldQuantity: s?._sum?.quantity ? Number(s._sum.quantity) : 0,
+        soldRevenue: s?._sum?.totalPrice ? s._sum.totalPrice.toNumber() : 0,
+        lastSoldAt: s?._max?.createdAt ?? null,
+      };
+    });
+  }
+
+  /**
+   * Promote a POS-created custom item to a regular menu item the
+   * cashier can re-order from the standard picker. Flips isCustom=false,
+   * optionally moves to a different category and toggles website
+   * visibility, optionally renames. The existing Recipe + RecipeItems
+   * are preserved as-is — that's the whole point of saving the custom
+   * dish for future use. Refuses to promote anything that isn't
+   * currently a custom item, so the endpoint can't be abused to mass
+   * mutate regular items.
+   */
+  async promoteCustomItem(
+    id: string,
+    branchId: string,
+    dto: { categoryId?: string; name?: string; websiteVisible?: boolean; price?: number } = {},
+  ) {
+    const existing = await this.prisma.menuItem.findFirst({
+      where: { id, branchId, deletedAt: null },
+      select: { id: true, isCustom: true },
+    });
+    if (!existing) throw new NotFoundException(`Menu item ${id} not found`);
+    if (!existing.isCustom) throw new BadRequestException('Item is already a regular menu item');
+
+    if (dto.categoryId) {
+      const cat = await this.prisma.menuCategory.findFirst({
+        where: { id: dto.categoryId, branchId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!cat) throw new BadRequestException('Target category not found');
+    }
+
+    return this.prisma.menuItem.update({
+      where: { id },
+      data: {
+        isCustom: false,
+        ...(dto.categoryId ? { categoryId: dto.categoryId } : {}),
+        ...(dto.name ? { name: dto.name } : {}),
+        ...(dto.price !== undefined ? { price: dto.price } : {}),
+        websiteVisible: dto.websiteVisible ?? true,
+      },
+      include: comboAndLinkedInclude,
+    });
+  }
+
+  /**
    * Get-or-create the auto-managed "Custom Orders" category for a branch.
    * Always websiteVisible=false so the website / QR feed never shows it.
    * Re-uses an existing category named "Custom Orders" (case-insensitive)
