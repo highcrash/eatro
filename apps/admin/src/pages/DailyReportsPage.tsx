@@ -23,6 +23,13 @@ interface WorkPeriodSummary {
   totalExpenses: number;
   expenseCount: number;
   expenseByCategory: Record<string, number>;
+  /** Aggregate of supplier payments in the period — kept separate
+   *  from totalExpenses so the auto-mirror Expense rows aren't
+   *  double-counted, but surfaced as its own tile so the day's
+   *  supplier outflows don't get hidden when the cashier scans
+   *  the report. */
+  totalSupplierPayments: number;
+  totalSalaryPayments: number;
   balances: {
     opening: Record<string, number>;
     salesByMethod: Record<string, number>;
@@ -71,7 +78,7 @@ function daysAgoISO(d: number) {
 }
 
 function printReport(summary: WorkPeriodSummary) {
-  const { workPeriod: wp, totalSales, orderCount, voidedOrders, byPaymentMethod, byOrderType, totalExpenses, expenseCount, expenseByCategory, balances, posAccounts, consumedItems, consumedTotalValue, wasteItems, wasteTotalValue } = summary;
+  const { workPeriod: wp, totalSales, orderCount, voidedOrders, byPaymentMethod, byOrderType, totalExpenses, expenseCount, expenseByCategory, totalSupplierPayments, totalSalaryPayments, balances, posAccounts, consumedItems, consumedTotalValue, wasteItems, wasteTotalValue } = summary;
 
   const startTime = new Date(wp.startedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   const endTime = wp.endedAt ? new Date(wp.endedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Open';
@@ -110,7 +117,12 @@ function printReport(summary: WorkPeriodSummary) {
     </tr>`;
   }).join('');
 
-  const netCash = totalSales - totalExpenses;
+  // True net outflow = ad-hoc expenses + supplier payments + salary
+  // payments. Supplier + salary live in their own tables (auto-mirror
+  // Expense rows are filtered upstream to avoid double-counting), so
+  // surfacing them here makes the daily NET realistic.
+  const totalOutflow = totalExpenses + totalSupplierPayments + totalSalaryPayments;
+  const netCash = totalSales - totalOutflow;
   const html = `<html><head><title>Daily Report — ${fmtDateOnly(wp.startedAt)}</title>
     <style>
       *{margin:0;padding:0;box-sizing:border-box}
@@ -145,8 +157,13 @@ function printReport(summary: WorkPeriodSummary) {
 
     <h2>Expenses (${expenseCount})</h2>
     <table>${expenseRows || '<tr><td colspan="2" style="text-align:center;color:#999">No expenses</td></tr>'}</table>
-    <table><tr class="total-row"><td>Total Expenses</td><td style="text-align:right">${formatCurrency(totalExpenses)}</td></tr></table>
-    <table><tr class="total-row"><td>NET (Sales − Expenses)</td><td style="text-align:right">${formatCurrency(netCash)}</td></tr></table>
+    <table>
+      <tr><td>Total Expenses</td><td style="text-align:right">${formatCurrency(totalExpenses)}</td></tr>
+      <tr><td>Supplier Payments</td><td style="text-align:right">${formatCurrency(totalSupplierPayments)}</td></tr>
+      <tr><td>Salary Payments</td><td style="text-align:right">${formatCurrency(totalSalaryPayments)}</td></tr>
+      <tr class="total-row"><td>Total Outflow</td><td style="text-align:right">${formatCurrency(totalOutflow)}</td></tr>
+    </table>
+    <table><tr class="total-row"><td>NET (Sales − Outflow)</td><td style="text-align:right">${formatCurrency(netCash)}</td></tr></table>
 
     <h2>Balance Reconciliation</h2>
     <table class="recon">
@@ -225,6 +242,19 @@ function ReportDetailModal({ wpId, onClose }: { wpId: string; onClose: () => voi
                 <Stat label="Voided" value={String(summary.voidedOrders)} />
                 <Stat label="Total Sales" value={formatCurrency(summary.totalSales)} accent="text-[#4CAF50]" />
                 <Stat label="Total Expenses" value={formatCurrency(summary.totalExpenses)} accent="text-[#D62B2B]" />
+              </div>
+              {/* Supplier + salary outflow tiles. Kept as a separate
+                  row so a quiet expense day with a big supplier payment
+                  is unmissable — the legacy "Total Expenses" tile alone
+                  could read 0 even when thousands went out the door. */}
+              <div className="grid grid-cols-3 gap-3">
+                <Stat label="Supplier Payments" value={formatCurrency(summary.totalSupplierPayments)} accent="text-[#D62B2B]" />
+                <Stat label="Salary Payments" value={formatCurrency(summary.totalSalaryPayments)} accent="text-[#D62B2B]" />
+                <Stat
+                  label="Net Cash (Sales − Outflow)"
+                  value={formatCurrency(summary.totalSales - summary.totalExpenses - summary.totalSupplierPayments - summary.totalSalaryPayments)}
+                  accent="text-[#DDD9D3]"
+                />
               </div>
 
               {/* By payment method */}
