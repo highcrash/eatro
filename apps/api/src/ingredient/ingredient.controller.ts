@@ -143,4 +143,14 @@ export class IngredientController {
   repairVariantCosts(@CurrentUser() user: JwtPayload) {
     return this.ingredientService.repairVariantCosts(user.branchId);
   }
+
+  // One-shot recompute of every variant-parent aggregate. Use after
+  // a syncParentStock logic change to refresh stuck per-parent
+  // costPerUnit / currentStock values without waiting for the next
+  // stock movement.
+  @Post('resync-variant-parents')
+  @Roles('OWNER')
+  resyncVariantParents(@CurrentUser() user: JwtPayload) {
+    return this.ingredientService.resyncAllVariantParents(user.branchId);
+  }
 }

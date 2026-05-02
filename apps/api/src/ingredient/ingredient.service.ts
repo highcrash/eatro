@@ -231,6 +231,20 @@ export class IngredientService {
     return { scanned: variants.length, fixed, parentsResynced: parentIds.size };
   }
 
+  /**
+   * Re-run syncParentStock for every variant-parent ingredient on a
+   * branch. Use after a logic fix to syncParentStock to refresh
+   * stuck aggregates without waiting for the next stock movement.
+   */
+  async resyncAllVariantParents(branchId: string) {
+    const parents = await this.prisma.ingredient.findMany({
+      where: { branchId, hasVariants: true, deletedAt: null },
+      select: { id: true },
+    });
+    for (const p of parents) await this.syncParentStock(p.id);
+    return { resynced: parents.length };
+  }
+
   async getVariants(id: string, branchId: string) {
     await this.findOne(id, branchId);
     return this.prisma.ingredient.findMany({
@@ -249,14 +263,34 @@ export class IngredientService {
       select: { currentStock: true, costPerUnit: true },
     });
 
+    // currentStock is the signed sum (may be negative when a variant has
+    // been over-deducted). The weighted-avg cost, on the other hand, must
+    // only consider variants with positive on-hand stock — a negative
+    // variant otherwise drags the parent cost below zero (e.g. one
+    // variant at −147 × ৳3.53 wiped out the positive contributions and
+    // the parent showed cost = −৳0.01). When no variant has positive
+    // stock, fall back to the cheapest active variant cost — same
+    // policy the order/recipe engines apply when a parent's own cost
+    // is 0.
     let totalStock = 0;
-    let totalValue = 0;
+    let positiveStock = 0;
+    let positiveValue = 0;
+    let cheapestPositiveCost: number | null = null;
     for (const v of variants) {
       const stock = Number(v.currentStock);
+      const cost = Number(v.costPerUnit);
       totalStock += stock;
-      totalValue += stock * Number(v.costPerUnit);
+      if (stock > 0) {
+        positiveStock += stock;
+        positiveValue += stock * cost;
+      }
+      if (cost > 0 && (cheapestPositiveCost == null || cost < cheapestPositiveCost)) {
+        cheapestPositiveCost = cost;
+      }
     }
-    const avgCost = totalStock > 0 ? totalValue / totalStock : (variants[0] ? Number(variants[0].costPerUnit) : 0);
+    const avgCost = positiveStock > 0
+      ? positiveValue / positiveStock
+      : (cheapestPositiveCost ?? (variants[0] ? Number(variants[0].costPerUnit) : 0));
 
     const parent = await db.ingredient.update({
       where: { id: parentId },
