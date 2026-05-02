@@ -539,6 +539,16 @@ export class WorkPeriodService {
       netSales: paidOrders.reduce((s, o) => s + o.totalAmount.toNumber(), 0),
     };
 
+    // Supplier + salary payments are kept SEPARATE from totalExpenses to
+    // avoid double-counting against the auto-mirror Expense rows the
+    // category breakdown filters out. Surface their aggregates so the
+    // daily report can show them as their own tiles + Z-report rows —
+    // without them the cashier saw "Total Expenses: 0" on a day with
+    // huge supplier payouts and concluded supplier bills weren't being
+    // tracked.
+    const totalSupplierPayments = Object.values(balances.supplierByAccount ?? {}).reduce((s, n) => s + n, 0);
+    const totalSalaryPayments = Object.values(balances.salaryByAccount ?? {}).reduce((s, n) => s + n, 0);
+
     return {
       workPeriod: wp,
       totalSales: orders.reduce((s, o) => s + o.totalAmount.toNumber(), 0),
@@ -549,6 +559,8 @@ export class WorkPeriodService {
       totalExpenses: expenses.reduce((s, e) => s + e.amount.toNumber(), 0),
       expenseCount: expenses.length,
       expenseByCategory,
+      totalSupplierPayments,
+      totalSalaryPayments,
       taxBreakdown,
       balances,
       posAccounts,
