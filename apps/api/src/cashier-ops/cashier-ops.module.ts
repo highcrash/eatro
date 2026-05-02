@@ -8,10 +8,11 @@ import { PermissionsModule } from '../permissions/permissions.module';
 import { SmsModule } from '../sms/sms.module';
 import { MenuModule } from '../menu/menu.module';
 import { RecipeModule } from '../recipe/recipe.module';
+import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { CashierOpsController } from './cashier-ops.controller';
 
 @Module({
-  imports: [PurchasingModule, SupplierModule, ExpenseModule, PayrollModule, PreReadyModule, PermissionsModule, SmsModule, MenuModule, RecipeModule],
+  imports: [PurchasingModule, SupplierModule, ExpenseModule, PayrollModule, PreReadyModule, PermissionsModule, SmsModule, MenuModule, RecipeModule, ActivityLogModule],
   controllers: [CashierOpsController],
 })
 export class CashierOpsModule {}

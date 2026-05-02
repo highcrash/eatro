@@ -13,6 +13,7 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { SmsService } from '../sms/sms.service';
 import { MenuService } from '../menu/menu.service';
 import { RecipeService } from '../recipe/recipe.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 /**
  * Phase 7 — POS-side cashier purchasing operations.
@@ -41,6 +42,7 @@ export class CashierOpsController {
     private readonly sms: SmsService,
     private readonly menu: MenuService,
     private readonly recipes: RecipeService,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   /** List open POs (DRAFT/SENT/PARTIAL) — used by the Receive Goods tab. */
@@ -86,7 +88,19 @@ export class CashierOpsController {
     const { actionOtp: _otp, ...createDto } = dto;
     const created = await this.purchasing.create(user.branchId, user.sub, createDto);
     // Auto-advance to SENT so the cashier doesn't have to do a separate "send" step.
-    return this.purchasing.send(created.id, user.branchId);
+    const sent = await this.purchasing.send(created.id, user.branchId);
+    void this.activityLog.log({
+      branchId: user.branchId,
+      actor: user,
+      category: 'PURCHASING',
+      action: 'CREATE',
+      entityType: 'purchaseOrder',
+      entityId: sent.id,
+      entityName: (sent as any).poNumber ?? sent.id,
+      after: sent as any,
+      summary: `POS created PO with ${createDto.items.length} item(s)`,
+    });
+    return sent;
   }
 
   @Post('purchase-order/receive')
@@ -97,7 +111,19 @@ export class CashierOpsController {
     if (!dto.purchaseOrderId) throw new BadRequestException('purchaseOrderId required');
     await this.permissions.requirePermission(user.branchId, user.role, 'receivePurchaseOrder', dto.actionOtp, user.customRoleId ?? null);
     const { actionOtp: _otp, purchaseOrderId, ...receiveDto } = dto;
-    return this.purchasing.receiveGoods(purchaseOrderId, user.branchId, user.sub, receiveDto);
+    const result = await this.purchasing.receiveGoods(purchaseOrderId, user.branchId, user.sub, receiveDto);
+    void this.activityLog.log({
+      branchId: user.branchId,
+      actor: user,
+      category: 'PURCHASING',
+      action: 'UPDATE',
+      entityType: 'purchaseOrder',
+      entityId: purchaseOrderId,
+      entityName: (result as any)?.poNumber ?? purchaseOrderId,
+      after: { received: receiveDto } as any,
+      summary: `POS received goods on PO`,
+    });
+    return result;
   }
 
   @Post('purchase-order/return')
@@ -111,7 +137,19 @@ export class CashierOpsController {
     const created = await this.purchasing.createReturn(user.branchId, user.sub, returnDto as CreateReturnDto & { supplierId: string });
     // Auto-complete the return so stock + supplier due are updated immediately
     // (cashier flow is single-step, mirroring auto-send for PO create).
-    return this.purchasing.completeReturn(created.id, user.branchId);
+    const completed = await this.purchasing.completeReturn(created.id, user.branchId);
+    void this.activityLog.log({
+      branchId: user.branchId,
+      actor: user,
+      category: 'PURCHASING',
+      action: 'CREATE',
+      entityType: 'purchaseReturn',
+      entityId: created.id,
+      entityName: `Return ${created.id}`,
+      after: completed as any,
+      summary: `POS purchase return: ${returnDto.items.length} item(s)`,
+    });
+    return completed;
   }
 
   @Post('supplier/pay')
@@ -122,7 +160,19 @@ export class CashierOpsController {
     if (!dto.supplierId || !dto.amount) throw new BadRequestException('Supplier and amount required');
     await this.permissions.requirePermission(user.branchId, user.role, 'paySupplier', dto.actionOtp, user.customRoleId ?? null);
     const { actionOtp: _otp, ...payDto } = dto;
-    return this.suppliers.makePayment(user.branchId, user.sub, payDto);
+    const result = await this.suppliers.makePayment(user.branchId, user.sub, payDto);
+    void this.activityLog.log({
+      branchId: user.branchId,
+      actor: user,
+      category: 'SUPPLIER',
+      action: 'UPDATE',
+      entityType: 'supplier',
+      entityId: payDto.supplierId,
+      entityName: (result as any)?.supplier?.name ?? `supplier ${payDto.supplierId}`,
+      after: { payment: payDto } as any,
+      summary: `POS supplier payment ${(Number(payDto.amount) / 100).toFixed(2)} via ${payDto.paymentMethod ?? 'CASH'}`,
+    });
+    return result;
   }
 
   // ─── Phase 8: Expenses ─────────────────────────────────────────────────────
@@ -148,7 +198,19 @@ export class CashierOpsController {
     }
 
     const { actionOtp: _otp, ...createDto } = dto;
-    return this.expenses.create(user.branchId, user.sub, createDto);
+    const created = await this.expenses.create(user.branchId, user.sub, createDto);
+    void this.activityLog.log({
+      branchId: user.branchId,
+      actor: user,
+      category: 'EXPENSE',
+      action: 'CREATE',
+      entityType: 'expense',
+      entityId: created.id,
+      entityName: createDto.description ?? createDto.category ?? 'expense',
+      after: created as any,
+      summary: `Cashier expense ${createDto.category} ${(Number(createDto.amount) / 100).toFixed(2)} via ${createDto.paymentMethod ?? 'CASH'}`,
+    });
+    return created;
   }
 
   // ─── Phase 8: Payroll ──────────────────────────────────────────────────────
@@ -224,7 +286,19 @@ export class CashierOpsController {
       throw new BadRequestException('name, sellingPrice and at least one item are required');
     }
     await this.permissions.requirePermission(user.branchId, user.role, 'createCustomMenu', dto.actionOtp, user.customRoleId ?? null);
-    return this.menu.createCustomFromCashier(user.branchId, dto);
+    const created = await this.menu.createCustomFromCashier(user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId,
+      actor: user,
+      category: 'MENU',
+      action: 'CREATE',
+      entityType: 'menuItem',
+      entityId: created.id,
+      entityName: created.name,
+      after: created as any,
+      summary: `POS custom menu "${created.name}" @ ${(Number(dto.sellingPrice) / 100).toFixed(2)} (${dto.items.length} ingredients)`,
+    });
+    return created;
   }
 
   @Post('payroll/pay')
@@ -235,6 +309,18 @@ export class CashierOpsController {
     if (!dto.payrollId || !dto.amount) throw new BadRequestException('Payroll and amount required');
     await this.permissions.requirePermission(user.branchId, user.role, 'payPayroll', dto.actionOtp, user.customRoleId ?? null);
     const { payrollId, actionOtp: _otp, ...payDto } = dto;
-    return this.payroll.makePayment(payrollId, user.branchId, user.sub, payDto);
+    const result = await this.payroll.makePayment(payrollId, user.branchId, user.sub, payDto);
+    void this.activityLog.log({
+      branchId: user.branchId,
+      actor: user,
+      category: 'PAYROLL',
+      action: 'UPDATE',
+      entityType: 'payroll',
+      entityId: payrollId,
+      entityName: (result as any)?.staff?.name ?? `payroll ${payrollId}`,
+      after: { paymentMade: payDto } as any,
+      summary: `POS payroll payment ${(Number(payDto.amount) / 100).toFixed(2)} via ${payDto.paymentMethod ?? 'CASH'}`,
+    });
+    return result;
   }
 }
