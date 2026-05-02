@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -81,6 +81,88 @@ interface RecommendedItem {
   price: number;
   discountedPrice?: number;
   imageUrl: string | null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Key-ingredients slider                                              */
+/* ------------------------------------------------------------------ */
+
+/** Mirrors the MenuCarousel pattern: hover-fade arrows nudge the
+ *  horizontal scroller. Arrows show only on hover and only when there
+ *  is room to scroll in that direction so a short ingredient list
+ *  stays clean. */
+function KeyIngredientsSlider({ ingredients }: { ingredients: Ingredient[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+
+  const updateScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 4);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
+
+  useEffect(() => {
+    updateScroll();
+    const el = scrollRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', updateScroll, { passive: true });
+    window.addEventListener('resize', updateScroll);
+    return () => {
+      el.removeEventListener('scroll', updateScroll);
+      window.removeEventListener('resize', updateScroll);
+    };
+  }, [ingredients.length]);
+
+  const scroll = (dir: 'left' | 'right') => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir === 'left' ? -240 : 240, behavior: 'smooth' });
+  };
+
+  return (
+    <div className="relative group">
+      {canLeft && (
+        <button
+          onClick={() => scroll('left')}
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-9 h-9 bg-card border border-border flex items-center justify-center text-text hover:bg-hover transition-opacity opacity-0 group-hover:opacity-100"
+          aria-label="Scroll ingredients left"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+      )}
+      {canRight && (
+        <button
+          onClick={() => scroll('right')}
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-9 h-9 bg-card border border-border flex items-center justify-center text-text hover:bg-hover transition-opacity opacity-0 group-hover:opacity-100"
+          aria-label="Scroll ingredients right"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      )}
+      <div ref={scrollRef} className="flex gap-4 overflow-x-auto no-scrollbar pb-2 scroll-smooth">
+        {ingredients.map((ing) => (
+          <div key={ing.id} className="flex-shrink-0 flex flex-col items-center gap-2 w-20">
+            {ing.imageUrl ? (
+              <img src={ing.imageUrl} alt={ing.name} className="w-14 h-14 object-cover border border-border" />
+            ) : (
+              <div className="w-14 h-14 bg-hover border border-border flex items-center justify-center text-muted text-xs">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+            )}
+            <span className="text-xs text-muted text-center leading-tight">{ing.name}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -370,26 +452,7 @@ export default function MenuItemPage() {
         {content?.showKeyIngredients && displayed?.ingredients && displayed.ingredients.length > 0 && (
           <div className="mt-10">
             <h2 className="font-display text-2xl tracking-wider mb-4">KEY INGREDIENTS</h2>
-            <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-              {displayed.ingredients.map((ing) => (
-                <div key={ing.id} className="flex-shrink-0 flex flex-col items-center gap-2 w-20">
-                  {ing.imageUrl ? (
-                    <img
-                      src={ing.imageUrl}
-                      alt={ing.name}
-                      className="w-14 h-14 object-cover border border-border"
-                    />
-                  ) : (
-                    <div className="w-14 h-14 bg-hover border border-border flex items-center justify-center text-muted text-xs">
-                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                  )}
-                  <span className="text-xs text-muted text-center leading-tight">{ing.name}</span>
-                </div>
-              ))}
-            </div>
+            <KeyIngredientsSlider ingredients={displayed.ingredients} />
           </div>
         )}
 
