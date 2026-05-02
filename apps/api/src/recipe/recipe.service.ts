@@ -295,7 +295,11 @@ export class RecipeService {
     const menuItemIds = items.map((i) => i.menuItemId);
     const recipes = await this.prisma.recipe.findMany({
       where: { menuItemId: { in: menuItemIds } },
-      include: { items: { include: { ingredient: true } } },
+      // menuItem.name flows into the stock-movement note so the
+      // Stock Movements report reads "Auto-deducted for Burger ×2"
+      // instead of the opaque "Auto-deducted for order". Same query,
+      // one extra column per row.
+      include: { items: { include: { ingredient: true } }, menuItem: { select: { name: true } } },
     });
 
     if (recipes.length === 0) return; // No recipes configured, skip
@@ -315,6 +319,16 @@ export class RecipeService {
     for (const orderItem of items) {
       const recipe = recipes.find((r) => r.menuItemId === orderItem.menuItemId);
       if (!recipe) continue;
+      // Note prefix carries the menu item name + ordered quantity so
+      // an admin scanning the Stock Movements feed can answer "what
+      // sale ate this stock?" without opening the order. Falls back
+      // to the plain "for order" wording when the recipe is somehow
+      // detached from a deleted menu item (shouldn't happen — soft-
+      // delete leaves the row intact — but harmless if it does).
+      const itemName = recipe.menuItem?.name ?? null;
+      const noteBase = itemName
+        ? `Auto-deducted: ${itemName} ×${orderItem.quantity}`
+        : 'Auto-deducted for order';
 
       const removed = new Set(orderItem.removedIngredientIds ?? []);
 
@@ -340,7 +354,7 @@ export class RecipeService {
             if (remaining <= 0) break;
             const available = Number(variant.currentStock);
             const deduct = Math.min(remaining, available);
-            movements.push({ branchId, ingredientId: variant.id, type: 'SALE', quantity: -deduct, orderId, notes: 'Auto-deducted for order' });
+            movements.push({ branchId, ingredientId: variant.id, type: 'SALE', quantity: -deduct, orderId, notes: noteBase });
             stockUpdates.push({ id: variant.id, decrement: deduct });
             remaining -= deduct;
           }
@@ -351,14 +365,14 @@ export class RecipeService {
               orderBy: { createdAt: 'asc' },
             });
             if (fallback) {
-              movements.push({ branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, orderId, notes: 'Auto-deducted for order (insufficient stock)' });
+              movements.push({ branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, orderId, notes: `${noteBase} (insufficient stock)` });
               stockUpdates.push({ id: fallback.id, decrement: remaining });
             }
           }
           parentSyncIds.add(recipeItem.ingredientId);
         } else {
           // Standard ingredient (no variants) — existing logic
-          movements.push({ branchId, ingredientId: recipeItem.ingredientId, type: 'SALE', quantity: -totalQty, orderId, notes: 'Auto-deducted for order' });
+          movements.push({ branchId, ingredientId: recipeItem.ingredientId, type: 'SALE', quantity: -totalQty, orderId, notes: noteBase });
           stockUpdates.push({ id: recipeItem.ingredientId, decrement: totalQty });
         }
       }
