@@ -3,6 +3,25 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.57 — Admin: Custom Menu audit + promote-to-regular flow (2026-05-02)
+
+Admin + API rebundle. No Electron-shell changes.
+
+- New "Custom Menu" page under RESTAURANT in the admin sidebar.
+  Lists every POS-built custom item with name, price, COGS,
+  margin %, sold count, lifetime revenue, and last-sold date.
+  Click a row to expand its recipe (ingredient, qty per
+  serving, stock-unit cost) for audit.
+- Per-row "Save to Menu" promotes the custom dish to a regular
+  menu item the cashier can re-order from the standard picker.
+  Owner picks a real category, optionally renames, optionally
+  toggles website visibility (defaults to visible). Recipe and
+  price are preserved as-is.
+- API: GET /menu/custom-items + POST /menu/:id/promote, both
+  OWNER/MANAGER/ADVISOR. Stats join through OrderItem and
+  exclude voided/refunded so audit numbers match the sales
+  reports.
+
 ## 0.8.56 — POS: bKash/MFS expenses now post to the linked account (2026-05-02)
 
 Renderer-only rebundle. No Electron-shell changes.
