@@ -9,6 +9,7 @@ import AdminLayout from './layouts/AdminLayout';
 import DashboardPage from './pages/DashboardPage';
 import MenuPage from './pages/MenuPage';
 import CustomMenuPage from './pages/CustomMenuPage';
+import ActivityLogPage from './pages/ActivityLogPage';
 import TablesPage from './pages/TablesPage';
 import StaffPage from './pages/StaffPage';
 import OrdersPage from './pages/OrdersPage';
@@ -107,6 +108,7 @@ export default function AdminApp() {
         <Route path="/reports/performance" element={<PerformanceReportPage />} />
         <Route path="/reports/supplies" element={<SuppliesReportPage />} />
         <Route path="/reports/mushak" element={<MushakRegisterPage />} />
+        <Route path="/reports/activity-log" element={<ActivityLogPage />} />
         <Route path="/mushak/invoices/:id" element={<MushakInvoiceView />} />
         <Route path="/mushak/notes/:id" element={<MushakInvoiceView />} />
         <Route path="/discounts" element={<DiscountsPage />} />

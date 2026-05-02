@@ -35,6 +35,7 @@ import {
   Search,
   ChevronRight,
   X,
+  History,
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -105,6 +106,7 @@ const NAV_GROUPS: Array<{
       { to: '/reports/supplies', icon: BarChart2, label: 'Supplies', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/reports/daily', icon: BarChart2, label: 'Daily Reports', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/voids', icon: BarChart2, label: 'Void Audit', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/reports/activity-log', icon: History, label: 'Activity Log', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/reports/mushak', icon: Receipt, label: 'Mushak Register', allowedRoles: OPERATIONAL_ROLES },
       { to: '/discounts', icon: BarChart2, label: 'Discounts & Coupons', allowedRoles: OPERATIONAL_ROLES },
       { to: '/expenses', icon: Receipt, label: 'Expenses', allowedRoles: OPERATIONAL_ROLES },

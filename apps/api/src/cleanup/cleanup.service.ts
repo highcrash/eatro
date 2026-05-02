@@ -31,6 +31,7 @@ export type CleanupScope =
   | 'sms-logs'
   | 'waste-logs'
   | 'fb-scheduled-posts'
+  | 'activity-logs'
   | 'reset-all';
 
 @Injectable()
@@ -104,6 +105,14 @@ export class CleanupService {
         // swaps Facebook pages and wants to flush old posts without
         // touching menu discounts.
         deleted.scheduledFbPosts = (await p.scheduledFbPost.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'activity-logs': {
+        // Manual purge of the audit trail. The 90-day cron handles
+        // automatic retention; this scope is for blow-it-all-away
+        // scenarios (rebrand, install hand-off, debugging).
+        deleted.activityLogs = (await p.activityLog.deleteMany({ where })).count;
         break;
       }
 
@@ -315,6 +324,9 @@ export class CleanupService {
         deleted.payrolls = (await p.payroll.deleteMany({ where })).count;
         deleted.wasteLogs = (await p.wasteLog.deleteMany({ where })).count;
         deleted.smsLogs = (await p.smsLog.deleteMany({ where })).count;
+        // Activity log audit trail — wiped as part of reset-all so a
+        // post-reset install starts with a clean audit slate.
+        deleted.activityLogs = (await p.activityLog.deleteMany({ where })).count;
         await p.ingredient.updateMany({ where, data: { currentStock: 0 } });
         break;
       }

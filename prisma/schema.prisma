@@ -244,6 +244,7 @@ model Branch {
   customRoles         CustomRole[]
   menuItemAddonGroups MenuItemAddonGroup[]
   scheduledFbPosts    ScheduledFbPost[]
+  activityLogs        ActivityLog[]
 
   @@index([isActive])
   @@map("branches")
@@ -514,6 +515,7 @@ model Staff {
   reservationsConfirmed     Reservation[]      @relation("ReservationConfirmer")
   mushakNotesIssued         MushakNote[]       @relation("MushakNoteIssuer")
   customRole                CustomRole?        @relation(fields: [customRoleId], references: [id])
+  activityLogs              ActivityLog[]
 
   @@index([branchId, isActive])
   @@index([email])
@@ -2497,4 +2499,90 @@ model SmsTemplate {
   @@unique([branchId, name])
   @@index([branchId])
   @@map("sms_templates")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACTIVITY LOG — admin-config audit trail
+// ─────────────────────────────────────────────────────────────────────────────
+// Records who/when/what for every admin-config mutation (menu, recipes,
+// ingredients, suppliers, expenses, accounts, settings, etc.). Order /
+// payment audit lives in their own purpose-built fields (Order.voidedAt,
+// OrderItem, OrderPayment, StockMovement, AccountTransaction) — not here.
+// Retention: 90 days, auto-purged nightly by ActivityLogScheduler.
+
+enum ActivityCategory {
+  MENU
+  RECIPE
+  INGREDIENT
+  SUPPLIER
+  PURCHASING
+  EXPENSE
+  ACCOUNT
+  PAYROLL
+  CUSTOMER
+  STAFF
+  BRANCH
+  DISCOUNT
+  RESERVATION
+  WASTE
+  PRE_READY
+  SETTINGS
+  PERMISSIONS
+  COOKING_STATION
+  TABLE
+}
+
+enum ActivityAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+model ActivityLog {
+  id         String           @id @default(cuid())
+  branchId   String
+  /// Who performed the action. Nullable so system-generated entries
+  /// (cron auto-cleanup, scheduled jobs) still log without a user
+  /// and so a deleted Staff row doesn't cascade-remove their audit
+  /// trail (onDelete: SetNull).
+  actorId    String?
+  /// Frozen at log time so a future staff rename / role change
+  /// doesn't rewrite history.
+  actorName  String?
+  actorRole  String?
+
+  category   ActivityCategory
+  action     ActivityAction
+
+  /// Domain entity touched (e.g. "menuItem", "ingredient",
+  /// "supplier"). Drives both per-category filters and the
+  /// per-entity drill-in view.
+  entityType String
+  entityId   String
+  /// Frozen display name so the log reads "Orange Juice" even if
+  /// the row was renamed or deleted later.
+  entityName String
+
+  /// Field-level diff. Shape:
+  ///   UPDATE: { fieldName: { before: any, after: any } }
+  ///   CREATE: { __after: { ...full row } }
+  ///   DELETE: { __before: { ...full row } }
+  /// Sensitive fields (password hash, token, secret, PIN hash) are
+  /// stripped in the service before serialising — they never reach
+  /// the DB.
+  diff       Json?
+  /// Optional one-line headline ("price ৳10.00 → ৳12.00") computed
+  /// by the service. Falls back to "<action> <entityType>
+  /// <entityName>" in the UI when null.
+  summary    String?
+
+  createdAt  DateTime         @default(now())
+
+  branch     Branch           @relation(fields: [branchId], references: [id])
+  actor      Staff?           @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([branchId, createdAt])
+  @@index([branchId, category, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@map("activity_logs")
 }

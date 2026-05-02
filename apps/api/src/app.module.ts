@@ -15,6 +15,7 @@ import { SupplierModule } from './supplier/supplier.module';
 import { CreditorModule } from './creditor/creditor.module';
 import { TipsoiModule } from './tipsoi/tipsoi.module';
 import { SocialModule } from './social/social.module';
+import { ActivityLogModule } from './activity-log/activity-log.module';
 import { IngredientModule } from './ingredient/ingredient.module';
 import { RecipeModule } from './recipe/recipe.module';
 import { PurchasingModule } from './purchasing/purchasing.module';
@@ -196,6 +197,12 @@ import { ScheduleModule } from '@nestjs/schedule';
     // tab + queue panel + per-minute cron worker. Default off
     // per branch.
     SocialModule,
+
+    // Generic admin-config audit trail. Other modules call
+    // ActivityLogService.log(...) fire-and-forget after mutations;
+    // the controller serves the paginated viewer; the scheduler
+    // auto-purges rows older than 90 days.
+    ActivityLogModule,
   ],
 })
 export class AppModule {}
