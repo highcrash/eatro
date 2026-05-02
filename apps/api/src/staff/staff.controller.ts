@@ -7,13 +7,17 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { StaffService } from './staff.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 @ApiTags('Staff')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('staff')
 export class StaffController {
-  constructor(private readonly staffService: StaffService) {}
+  constructor(
+    private readonly staffService: StaffService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   @Get()
   // List-only: needed by ADVISOR too (Leave / Attendance staff pickers).
@@ -33,19 +37,45 @@ export class StaffController {
 
   @Post()
   @Roles('OWNER', 'MANAGER')
-  create(@Body() dto: CreateStaffDto, @CurrentUser() user: JwtPayload) {
-    return this.staffService.create(user.branchId, dto);
+  async create(@Body() dto: CreateStaffDto, @CurrentUser() user: JwtPayload) {
+    const created = await this.staffService.create(user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'STAFF', action: 'CREATE',
+      entityType: 'staff', entityId: created.id, entityName: created.name,
+      after: created as any,
+      summary: `Created staff "${created.name}" (${created.role})`,
+    });
+    return created;
   }
 
   @Patch(':id')
   @Roles('OWNER', 'MANAGER')
-  update(@Param('id') id: string, @Body() dto: UpdateStaffDto, @CurrentUser() user: JwtPayload) {
-    return this.staffService.update(id, user.branchId, dto);
+  async update(@Param('id') id: string, @Body() dto: UpdateStaffDto, @CurrentUser() user: JwtPayload) {
+    const before = await this.staffService.findOne(id, user.branchId).catch(() => null);
+    const updated = await this.staffService.update(id, user.branchId, dto);
+    const summary = (dto as any).password ? `Reset password for "${updated.name}"` : `Updated staff "${updated.name}"`;
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'STAFF', action: 'UPDATE',
+      entityType: 'staff', entityId: updated.id, entityName: updated.name,
+      before: before as any, after: updated as any,
+      summary,
+    });
+    return updated;
   }
 
   @Delete(':id')
   @Roles('OWNER')
-  remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.staffService.remove(id, user.branchId);
+  async remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    const before = await this.staffService.findOne(id, user.branchId).catch(() => null);
+    const result = await this.staffService.remove(id, user.branchId);
+    if (before) {
+      void this.activityLog.log({
+        branchId: user.branchId, actor: user, category: 'STAFF', action: 'DELETE',
+        entityType: 'staff', entityId: before.id, entityName: before.name,
+        before: before as any,
+        summary: `Removed staff "${before.name}"`,
+      });
+    }
+    return result;
   }
 }
