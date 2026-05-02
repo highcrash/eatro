@@ -5,6 +5,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PermissionsService } from './permissions.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 /**
  * Phase 6 — Cashier permissions admin endpoints.
@@ -15,7 +16,10 @@ import { PermissionsService } from './permissions.service';
 @Controller('cashier-permissions')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PermissionsController {
-  constructor(private readonly service: PermissionsService) {}
+  constructor(
+    private readonly service: PermissionsService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   @Get()
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
@@ -29,7 +33,15 @@ export class PermissionsController {
 
   @Patch()
   @Roles('OWNER')
-  update(@CurrentUser() user: JwtPayload, @Body() perms: CashierPermissions) {
-    return this.service.updatePermissions(user.branchId, perms);
+  async update(@CurrentUser() user: JwtPayload, @Body() perms: CashierPermissions) {
+    const before = await this.service.getPermissionsForStaff(user.branchId, null).catch(() => null);
+    const updated = await this.service.updatePermissions(user.branchId, perms);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'PERMISSIONS', action: 'UPDATE',
+      entityType: 'cashierPermissions', entityId: user.branchId, entityName: 'Cashier Permissions matrix',
+      before: before as any, after: updated as any,
+      summary: 'Updated cashier permissions matrix',
+    });
+    return updated;
   }
 }
