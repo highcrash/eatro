@@ -5,11 +5,15 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '@restora/types';
 import { BranchSettingsService } from './branch-settings.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 @Controller('branch-settings')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class BranchSettingsController {
-  constructor(private readonly svc: BranchSettingsService) {}
+  constructor(
+    private readonly svc: BranchSettingsService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   @Get()
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'KITCHEN', 'WAITER')
@@ -19,7 +23,7 @@ export class BranchSettingsController {
 
   @Patch()
   @Roles('OWNER', 'MANAGER')
-  update(
+  async update(
     @CurrentUser() user: JwtPayload,
     @Body() dto: {
       useKds?: boolean;
@@ -32,6 +36,14 @@ export class BranchSettingsController {
       tableTimerServedToClearMin?: number | null;
     },
   ) {
-    return this.svc.update(user.branchId, dto);
+    const before = await this.svc.getOrCreate(user.branchId).catch(() => null);
+    const updated = await this.svc.update(user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'SETTINGS', action: 'UPDATE',
+      entityType: 'branchSettings', entityId: user.branchId, entityName: 'Branch settings',
+      before: before as any, after: updated as any,
+      summary: `Updated branch settings (${Object.keys(dto).join(', ')})`,
+    });
+    return updated;
   }
 }
