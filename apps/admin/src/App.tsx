@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage';
 import AdminLayout from './layouts/AdminLayout';
 import DashboardPage from './pages/DashboardPage';
 import MenuPage from './pages/MenuPage';
+import CustomMenuPage from './pages/CustomMenuPage';
 import TablesPage from './pages/TablesPage';
 import StaffPage from './pages/StaffPage';
 import OrdersPage from './pages/OrdersPage';
@@ -58,6 +59,7 @@ export default function AdminApp() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/menu" element={<MenuPage />} />
+        <Route path="/menu/custom" element={<CustomMenuPage />} />
         <Route path="/tables" element={<TablesPage />} />
         <Route path="/staff" element={<StaffPage />} />
         <Route path="/orders" element={<OrdersPage />} />

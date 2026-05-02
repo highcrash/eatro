@@ -24,9 +24,38 @@ export class MenuController {
     return this.menuService.findAll(user.branchId, includeCustom === 'true', includeAddons === 'true');
   }
 
+  /**
+   * Audit feed of POS-created custom items + their full recipes,
+   * order count, revenue, and last-sold date. Surfaced on the admin
+   * Custom Menu page so owners can review what cashiers built
+   * ad-hoc and promote re-usable ones to the regular menu.
+   */
+  @Get('custom-items')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  findCustomItems(@CurrentUser() user: JwtPayload) {
+    return this.menuService.findCustomItems(user.branchId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.menuService.findOne(id, user.branchId);
+  }
+
+  /**
+   * Convert a one-off POS custom item into a regular menu item the
+   * cashier can re-order from the standard picker. Recipe + price are
+   * preserved; admin can optionally rename, change category, override
+   * price, or toggle website visibility (defaults to visible so the
+   * promoted dish actually shows up on the website).
+   */
+  @Post(':id/promote')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  promoteCustomItem(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { categoryId?: string; name?: string; websiteVisible?: boolean; price?: number },
+  ) {
+    return this.menuService.promoteCustomItem(id, user.branchId, dto ?? {});
   }
 
   @Post()

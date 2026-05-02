@@ -74,6 +74,7 @@ const NAV_GROUPS: Array<{
     label: 'RESTAURANT',
     items: [
       { to: '/menu', icon: UtensilsCrossed, label: 'Menu', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/menu/custom', icon: ChefHat, label: 'Custom Menu', allowedRoles: OPERATIONAL_ROLES },
       { to: '/tables', icon: Grid3X3, label: 'Tables', allowedRoles: OPERATIONAL_ROLES },
       { to: '/orders', icon: ClipboardList, label: 'Orders' },
       { to: '/recipes', icon: BookOpen, label: 'Recipes', allowedRoles: OPERATIONAL_ROLES },
@@ -331,16 +332,22 @@ export default function AdminLayout() {
                 )}
                 {isOpen && (
                   <div className="space-y-px">
-                    {visibleItems.map(({ to, icon: Icon, label }) => (
-                      <NavLink key={to} to={to} className={({ isActive }) =>
-                        `flex items-center gap-2.5 px-2.5 py-2 text-[13px] font-body transition-colors ${
-                          isActive ? 'bg-[#D62B2B] text-white font-medium' : 'text-[#999] hover:bg-[#1A1A1A] hover:text-white'
-                        }`
-                      }>
-                        <Icon size={15} />
-                        {label}
-                      </NavLink>
-                    ))}
+                    {visibleItems.map(({ to, icon: Icon, label }) => {
+                      // Use `end` for routes that have nav siblings under them
+                      // (e.g. /menu vs /menu/custom) so the parent doesn't
+                      // light up when a child is active.
+                      const hasSubRoute = visibleItems.some((other) => other.to !== to && other.to.startsWith(to + '/'));
+                      return (
+                        <NavLink key={to} to={to} end={hasSubRoute} className={({ isActive }) =>
+                          `flex items-center gap-2.5 px-2.5 py-2 text-[13px] font-body transition-colors ${
+                            isActive ? 'bg-[#D62B2B] text-white font-medium' : 'text-[#999] hover:bg-[#1A1A1A] hover:text-white'
+                          }`
+                        }>
+                          <Icon size={15} />
+                          {label}
+                        </NavLink>
+                      );
+                    })}
                   </div>
                 )}
               </div>
