@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { IngredientService } from './ingredient.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -9,7 +10,10 @@ import type { JwtPayload, CreateIngredientDto, UpdateIngredientDto, AdjustStockD
 @Controller('ingredients')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class IngredientController {
-  constructor(private readonly ingredientService: IngredientService) {}
+  constructor(
+    private readonly ingredientService: IngredientService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   @Get()
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
@@ -72,20 +76,45 @@ export class IngredientController {
 
   @Post()
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  create(@CurrentUser() user: JwtPayload, @Body() dto: CreateIngredientDto) {
-    return this.ingredientService.create(user.branchId, dto);
+  async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateIngredientDto) {
+    const created = await this.ingredientService.create(user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'INGREDIENT', action: 'CREATE',
+      entityType: 'ingredient', entityId: created.id, entityName: created.name,
+      after: created as any,
+      summary: `Created ingredient "${created.name}"`,
+    });
+    return created;
   }
 
   @Patch(':id')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpdateIngredientDto) {
-    return this.ingredientService.update(id, user.branchId, dto);
+  async update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpdateIngredientDto) {
+    const before = await this.ingredientService.findOne(id, user.branchId).catch(() => null);
+    const updated = await this.ingredientService.update(id, user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'INGREDIENT', action: 'UPDATE',
+      entityType: 'ingredient', entityId: updated.id, entityName: updated.name,
+      before: before as any, after: updated as any,
+      summary: `Updated ingredient "${updated.name}"`,
+    });
+    return updated;
   }
 
   @Delete(':id')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.ingredientService.remove(id, user.branchId);
+  async remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    const before = await this.ingredientService.findOne(id, user.branchId).catch(() => null);
+    const result = await this.ingredientService.remove(id, user.branchId);
+    if (before) {
+      void this.activityLog.log({
+        branchId: user.branchId, actor: user, category: 'INGREDIENT', action: 'DELETE',
+        entityType: 'ingredient', entityId: before.id, entityName: before.name,
+        before: before as any,
+        summary: `Deleted ingredient "${before.name}"`,
+      });
+    }
+    return result;
   }
 
   @Post('bulk')
@@ -111,8 +140,16 @@ export class IngredientController {
 
   @Post(':id/adjust')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  adjustStock(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: AdjustStockDto) {
-    return this.ingredientService.adjustStock(id, user.branchId, user.sub, dto);
+  async adjustStock(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: AdjustStockDto) {
+    const before = await this.ingredientService.findOne(id, user.branchId).catch(() => null);
+    const result = await this.ingredientService.adjustStock(id, user.branchId, user.sub, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'INGREDIENT', action: 'UPDATE',
+      entityType: 'ingredient', entityId: id, entityName: before?.name ?? id,
+      after: { adjustment: dto } as any,
+      summary: `Stock adjusted: ${(dto as any).quantity ?? '?'} ${(dto as any).unit ?? ''} (${(dto as any).reason ?? 'no reason'})`,
+    });
+    return result;
   }
 
   // ─── Variants ─────────────────────────────────────────────────────────────
