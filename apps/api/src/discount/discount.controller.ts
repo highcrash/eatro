@@ -5,6 +5,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '@restora/types';
 import { DiscountService } from './discount.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 // ─── Admin endpoints (authenticated) ─────────────────────────────────────────
 
@@ -12,7 +13,10 @@ import { DiscountService } from './discount.service';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('OWNER', 'MANAGER', 'ADVISOR')
 export class DiscountController {
-  constructor(private readonly svc: DiscountService) {}
+  constructor(
+    private readonly svc: DiscountService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   // ── Discounts ──────────────────────────────────────────────────────────────
 
@@ -22,18 +26,38 @@ export class DiscountController {
   }
 
   @Post()
-  create(@CurrentUser() user: JwtPayload, @Body() dto: { name: string; type: string; value: number; scope?: string; targetItems?: string[] }) {
-    return this.svc.createDiscount(user.branchId, dto);
+  async create(@CurrentUser() user: JwtPayload, @Body() dto: { name: string; type: string; value: number; scope?: string; targetItems?: string[] }) {
+    const created = await this.svc.createDiscount(user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'DISCOUNT', action: 'CREATE',
+      entityType: 'discount', entityId: (created as any).id, entityName: dto.name,
+      after: created as any,
+      summary: `Created ${dto.type} discount "${dto.name}" (${dto.value})`,
+    });
+    return created;
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: any) {
-    return this.svc.updateDiscount(id, user.branchId, dto);
+  async update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: any) {
+    const updated = await this.svc.updateDiscount(id, user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'DISCOUNT', action: 'UPDATE',
+      entityType: 'discount', entityId: id, entityName: (updated as any)?.name ?? id,
+      after: updated as any,
+      summary: `Updated discount "${(updated as any)?.name ?? id}"`,
+    });
+    return updated;
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.svc.deleteDiscount(id, user.branchId);
+  async remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    const result = await this.svc.deleteDiscount(id, user.branchId);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'DISCOUNT', action: 'DELETE',
+      entityType: 'discount', entityId: id, entityName: (result as any)?.name ?? `discount ${id}`,
+      summary: `Deleted discount`,
+    });
+    return result;
   }
 
   // ── Coupons ────────────────────────────────────────────────────────────────
@@ -44,18 +68,38 @@ export class DiscountController {
   }
 
   @Post('coupons')
-  createCoupon(@CurrentUser() user: JwtPayload, @Body() dto: any) {
-    return this.svc.createCoupon(user.branchId, dto);
+  async createCoupon(@CurrentUser() user: JwtPayload, @Body() dto: any) {
+    const created = await this.svc.createCoupon(user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'DISCOUNT', action: 'CREATE',
+      entityType: 'coupon', entityId: (created as any).id, entityName: (created as any).code ?? 'coupon',
+      after: created as any,
+      summary: `Created coupon "${(created as any).code}"`,
+    });
+    return created;
   }
 
   @Patch('coupons/:id')
-  updateCoupon(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: any) {
-    return this.svc.updateCoupon(id, user.branchId, dto);
+  async updateCoupon(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: any) {
+    const updated = await this.svc.updateCoupon(id, user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'DISCOUNT', action: 'UPDATE',
+      entityType: 'coupon', entityId: id, entityName: (updated as any)?.code ?? id,
+      after: updated as any,
+      summary: `Updated coupon "${(updated as any)?.code ?? id}"`,
+    });
+    return updated;
   }
 
   @Delete('coupons/:id')
-  removeCoupon(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.svc.deleteCoupon(id, user.branchId);
+  async removeCoupon(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    const result = await this.svc.deleteCoupon(id, user.branchId);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'DISCOUNT', action: 'DELETE',
+      entityType: 'coupon', entityId: id, entityName: (result as any)?.code ?? `coupon ${id}`,
+      summary: `Deleted coupon`,
+    });
+    return result;
   }
 
   // ── Menu Item Discounts ────────────────────────────────────────────────────
@@ -66,18 +110,41 @@ export class DiscountController {
   }
 
   @Post('menu-discounts')
-  createMenuDiscount(@Body() dto: any) {
-    return this.svc.createMenuItemDiscount(dto);
+  async createMenuDiscount(@CurrentUser() user: JwtPayload, @Body() dto: any) {
+    const created = await this.svc.createMenuItemDiscount(dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'DISCOUNT', action: 'CREATE',
+      entityType: 'menuItemDiscount', entityId: (created as any).id,
+      entityName: `Menu discount ${dto.menuItemId}`,
+      after: created as any,
+      summary: `Created menu-item discount`,
+    });
+    return created;
   }
 
   @Patch('menu-discounts/:id')
-  updateMenuDiscount(@Param('id') id: string, @Body() dto: any) {
-    return this.svc.updateMenuItemDiscount(id, dto);
+  async updateMenuDiscount(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: any) {
+    const updated = await this.svc.updateMenuItemDiscount(id, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'DISCOUNT', action: 'UPDATE',
+      entityType: 'menuItemDiscount', entityId: id,
+      entityName: `Menu discount ${id}`,
+      after: updated as any,
+      summary: `Updated menu-item discount`,
+    });
+    return updated;
   }
 
   @Delete('menu-discounts/:id')
-  removeMenuDiscount(@Param('id') id: string) {
-    return this.svc.deleteMenuItemDiscount(id);
+  async removeMenuDiscount(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    const result = await this.svc.deleteMenuItemDiscount(id);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'DISCOUNT', action: 'DELETE',
+      entityType: 'menuItemDiscount', entityId: id,
+      entityName: `Menu discount ${id}`,
+      summary: `Deleted menu-item discount`,
+    });
+    return result;
   }
 }
 
