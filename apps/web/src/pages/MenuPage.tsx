@@ -121,9 +121,22 @@ export default function MenuPage() {
   });
 
   const [active, setActive] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const categories = menu?.categories ?? [];
   const allItems = useMemo(() => menu?.items?.filter((i) => i.isAvailable) ?? [], [menu]);
+
+  // Live search across name + description. When the field is non-empty
+  // the page collapses category sections and the carousel layout into a
+  // single flat result grid so the user sees every match at once.
+  const searchQ = search.trim().toLowerCase();
+  const searchMatches = useMemo(() => {
+    if (!searchQ) return [];
+    return allItems.filter((i) => {
+      const hay = `${i.name} ${i.description ?? ''}`.toLowerCase();
+      return hay.includes(searchQ);
+    });
+  }, [allItems, searchQ]);
 
   // Build parent→children map
   const parentCategories = useMemo(() => categories.filter((c) => !c.parentId), [categories]);
@@ -212,6 +225,31 @@ export default function MenuPage() {
           <p className="font-serif italic text-accent mb-2">Discover</p>
           <h1 className="font-display text-6xl md:text-7xl tracking-wider">OUR MENU</h1>
           <p className="text-muted mt-3">Fresh ingredients, made-to-order daily</p>
+          <div className="mt-6 max-w-md mx-auto relative">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search the menu..."
+              aria-label="Search menu"
+              className="w-full bg-bg border border-border focus:border-accent text-text placeholder:text-muted px-4 py-3 pl-11 pr-10 outline-none transition-colors"
+            />
+            <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+            </svg>
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-muted hover:text-text"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </section>
 
@@ -292,6 +330,26 @@ export default function MenuPage() {
       <section className="max-w-7xl mx-auto px-6 py-12">
         {isLoading ? (
           <p className="text-center text-muted py-12">Loading menu...</p>
+
+        ) : searchQ ? (
+          /* ── Search results — flat grid, ignores category nav. ── */
+          <div>
+            <div className="flex items-baseline justify-between mb-6">
+              <h2 className="font-display text-3xl tracking-wider">
+                Results for "{search}"
+              </h2>
+              <span className="text-muted text-sm">
+                {searchMatches.length} item{searchMatches.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            {searchMatches.length === 0 ? (
+              <p className="text-center text-muted py-12">No menu items match your search.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {searchMatches.map((it) => <ItemCard key={it.id} it={it} navigate={navigate} />)}
+              </div>
+            )}
+          </div>
 
         ) : active === '__deals__' ? (
           /* ── Deals tab ── */
