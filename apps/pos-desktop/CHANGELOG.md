@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 0.8.59 — POS: Customise dialog can add ingredients (margin-gated) (2026-05-02)
+
+POS + API rebundle. No Electron-shell changes.
+
+- Customise dialog now has an "Add ingredients" section under the
+  existing remove section. Cashier picks any branch ingredient
+  + qty + unit + per-unit surcharge, with a live floor/ceiling
+  band shown beside each line. Save is gated until every line
+  is in-band.
+- Pricing rule: floor = COGS × (1 + customMenuCostMargin) STRICT
+  (no negotiation here, that rule only applies to full custom
+  menus); ceiling = COGS × (1 + customMenuMaxMargin). Both
+  margins come from BranchSetting.
+- Surcharge folds into the line's per-unit price; cart subtotal
+  + receipt + KT total all reflect it. KT prints
+  "+ <QTY><UNIT> <NAME>" rows alongside addons / NO lines so the
+  kitchen knows to make them.
+- Stock is decremented automatically (parallels the addon-recipe
+  pathway) so inventory reports stay accurate.
+
 ## 0.8.58 — POS: Recent custom menus picker + edit-as-new (2026-05-02)
 
 POS + API rebundle. No Electron-shell changes.
