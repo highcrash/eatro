@@ -50,7 +50,11 @@ export class OrderController {
   }
 
   @Post(':id/items')
-  addItems(@Param('id') id: string, @Body() items: { menuItemId: string; quantity: number; notes?: string }[], @CurrentUser() user: JwtPayload) {
+  addItems(
+    @Param('id') id: string,
+    @Body() items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: { groupId: string; addonItemId: string }[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[] }[],
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.orderService.addItemsToOrder(id, user.branchId, items);
   }
 

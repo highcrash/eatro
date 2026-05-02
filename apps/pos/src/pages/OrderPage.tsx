@@ -38,17 +38,28 @@ interface CartItem {
    *  selected (groupId,addonItemId) pairs so different selections
    *  become separate cart rows. */
   addons?: { groupId: string; groupName: string; addonItemId: string; addonName: string; price: number }[];
+  /** Ad-hoc ingredients the cashier added on top of the recipe via
+   *  the Customise dialog. Each entry contributes `surcharge` (paisa)
+   *  per unit to the line price and the listed quantity to the stock
+   *  deduction. cartLineKey hashes the tuples so 2× burger + extra
+   *  cheese stays separate from 2× plain burger. */
+  addedIngredients?: { ingredientId: string; ingredientName: string; quantity: number; unit: string; surcharge: number }[];
 }
 
 /** Stable key for matching cart lines (variant + same removed-ID set
- *  + same addon picks + same notes = same cart row). */
-function cartLineKey(item: { menuItem: { id: string }; removedIngredientIds?: string[]; notes?: string; addons?: { groupId: string; addonItemId: string }[] }): string {
+ *  + same addon picks + same added-ingredient picks + same notes
+ *  = same cart row). */
+function cartLineKey(item: { menuItem: { id: string }; removedIngredientIds?: string[]; notes?: string; addons?: { groupId: string; addonItemId: string }[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[] }): string {
   const ids = [...(item.removedIngredientIds ?? [])].sort().join(',');
   const addonsKey = [...(item.addons ?? [])]
     .map((a) => `${a.groupId}:${a.addonItemId}`)
     .sort()
     .join(',');
-  return `${item.menuItem.id}::${ids}::${addonsKey}::${item.notes ?? ''}`;
+  const addedKey = [...(item.addedIngredients ?? [])]
+    .map((a) => `${a.ingredientId}:${a.quantity}:${a.unit}:${a.surcharge}`)
+    .sort()
+    .join(',');
+  return `${item.menuItem.id}::${ids}::${addonsKey}::${addedKey}::${item.notes ?? ''}`;
 }
 
 // Honour the discountedPrice the menu fetch stamps when a
@@ -438,7 +449,8 @@ function AddItemsOverlay({
   const newCartTotal = newItemCart.reduce(
     (s, c) => {
       const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
-      return s + (effectiveUnitPrice(c.menuItem) + addonsTotal) * c.quantity;
+      const addedTotal = (c.addedIngredients ?? []).reduce((a, b) => a + b.surcharge, 0);
+      return s + (effectiveUnitPrice(c.menuItem) + addonsTotal + addedTotal) * c.quantity;
     },
     0,
   );
@@ -598,10 +610,11 @@ function AddItemsOverlay({
               <p className="text-center text-theme-text-muted text-xs py-6">Tap items to add</p>
             ) : (
               newItemCart.map((line, idx) => {
-                const { menuItem, quantity, notes, removedNames, addons } = line;
+                const { menuItem, quantity, notes, removedNames, addons, addedIngredients } = line;
                 const key = cartLineKey(line);
                 const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
-                const unitPrice = effectiveUnitPrice(menuItem) + addonsTotal;
+                const addedTotal = (addedIngredients ?? []).reduce((s, a) => s + a.surcharge, 0);
+                const unitPrice = effectiveUnitPrice(menuItem) + addonsTotal + addedTotal;
                 // React key uses the array index, NOT cartLineKey,
                 // because cartLineKey embeds `notes`. Without this,
                 // every keystroke in the note input rebuilt the
@@ -626,6 +639,11 @@ function AddItemsOverlay({
                       {addons && addons.length > 0 && (
                         <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">
                           {addons.map((a) => `+ ${a.addonName}${a.price > 0 ? ` (${formatCurrency(a.price)})` : ''}`).join(' • ')}
+                        </p>
+                      )}
+                      {addedIngredients && addedIngredients.length > 0 && (
+                        <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">
+                          {addedIngredients.map((a) => `+ ${a.quantity}${a.unit} ${a.ingredientName} (${formatCurrency(a.surcharge)})`).join(' • ')}
                         </p>
                       )}
                       {removedNames && removedNames.length > 0 && (
@@ -769,10 +787,16 @@ function AddItemsOverlay({
             menuItemId={line.menuItem.id}
             menuItemName={line.menuItem.name}
             initialRemovedIds={line.removedIngredientIds ?? []}
+            initialAdded={line.addedIngredients ?? []}
             onClose={() => setCustomizingNewKey(null)}
-            onSave={(ids, names) => {
+            onSave={(ids, names, addedIngredients) => {
               setNewItemCart((prev) => {
-                const updated = prev.map((c) => cartLineKey(c) === customizingNewKey ? { ...c, removedIngredientIds: ids.length > 0 ? ids : undefined, removedNames: names.length > 0 ? names : undefined } : c);
+                const updated = prev.map((c) => cartLineKey(c) === customizingNewKey ? {
+                  ...c,
+                  removedIngredientIds: ids.length > 0 ? ids : undefined,
+                  removedNames: names.length > 0 ? names : undefined,
+                  addedIngredients: addedIngredients.length > 0 ? addedIngredients : undefined,
+                } : c);
                 const merged: typeof updated = [];
                 for (const row of updated) {
                   const k = cartLineKey(row);
@@ -907,7 +931,7 @@ function ActiveOrderView({
   });
 
   const addItemsMutation = useMutation({
-    mutationFn: (items: { menuItemId: string; quantity: number; notes?: string }[]) =>
+    mutationFn: (items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: { groupId: string; addonItemId: string }[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[] }[]) =>
       api.post<Order>(`/orders/${order.id}/items`, items),
     onSuccess: (updated) => {
       if (!branchSettings || !branchSettings.useKds) printNewItemsKT(updated, newItemCart);
@@ -938,6 +962,9 @@ function ActiveOrderView({
         notes: c.notes ?? null,
         removedIngredients: c.removedNames && c.removedNames.length > 0 ? c.removedNames : undefined,
         selectedAddons: c.addons && c.addons.length > 0 ? c.addons.map((a) => a.addonName) : undefined,
+        addedIngredients: c.addedIngredients && c.addedIngredients.length > 0
+          ? c.addedIngredients.map((a) => ({ ingredientName: a.ingredientName, quantity: a.quantity, unit: a.unit }))
+          : undefined,
       })),
     };
     const ok = printKitchenTicketUtil(ticket);
@@ -1623,6 +1650,9 @@ function ActiveOrderView({
             notes: c.notes || undefined,
             removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined,
             addons: c.addons && c.addons.length > 0 ? c.addons.map((a) => ({ groupId: a.groupId, addonItemId: a.addonItemId })) : undefined,
+            addedIngredients: c.addedIngredients && c.addedIngredients.length > 0
+              ? c.addedIngredients.map((a) => ({ ingredientId: a.ingredientId, quantity: a.quantity, unit: a.unit, surcharge: a.surcharge }))
+              : undefined,
           })))}
           isPending={addItemsMutation.isPending}
           orderNumber={order.orderNumber}
@@ -2035,7 +2065,8 @@ function NewOrderView({
 
   const subtotal = cart.reduce((s, c) => {
     const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
-    return s + (effectiveUnitPrice(c.menuItem) + addonsTotal) * c.quantity;
+    const addedTotal = (c.addedIngredients ?? []).reduce((a, b) => a + b.surcharge, 0);
+    return s + (effectiveUnitPrice(c.menuItem) + addonsTotal + addedTotal) * c.quantity;
   }, 0);
 
   const addToCart = (item: MenuItem) => {
@@ -2173,6 +2204,9 @@ function NewOrderView({
         notes: c.notes || undefined,
         removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined,
         addons: c.addons && c.addons.length > 0 ? c.addons.map((a) => ({ groupId: a.groupId, addonItemId: a.addonItemId })) : undefined,
+        addedIngredients: c.addedIngredients && c.addedIngredients.length > 0
+          ? c.addedIngredients.map((a) => ({ ingredientId: a.ingredientId, quantity: a.quantity, unit: a.unit, surcharge: a.surcharge }))
+          : undefined,
       })),
     });
   };
@@ -2370,10 +2404,11 @@ function NewOrderView({
             </div>
           ) : (
             cart.map((line, idx) => {
-              const { menuItem, quantity, notes, removedNames, addons } = line;
+              const { menuItem, quantity, notes, removedNames, addons, addedIngredients } = line;
               const key = cartLineKey(line);
               const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
-              const unitPrice = effectiveUnitPrice(menuItem) + addonsTotal;
+              const addedTotal = (addedIngredients ?? []).reduce((s, a) => s + a.surcharge, 0);
+              const unitPrice = effectiveUnitPrice(menuItem) + addonsTotal + addedTotal;
               // See the new-item overlay's matching comment — React key
               // uses the array index so a notes edit doesn't rebuild
               // the row and bounce focus onto the menu searchbar.
@@ -2391,6 +2426,11 @@ function NewOrderView({
                     {addons && addons.length > 0 && (
                       <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">
                         {addons.map((a) => `+ ${a.addonName}${a.price > 0 ? ` (${formatCurrency(a.price)})` : ''}`).join(' • ')}
+                      </p>
+                    )}
+                    {addedIngredients && addedIngredients.length > 0 && (
+                      <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">
+                        {addedIngredients.map((a) => `+ ${a.quantity}${a.unit} ${a.ingredientName} (${formatCurrency(a.surcharge)})`).join(' • ')}
                       </p>
                     )}
                     {removedNames && removedNames.length > 0 && (
@@ -2559,13 +2599,19 @@ function NewOrderView({
             menuItemId={line.menuItem.id}
             menuItemName={line.menuItem.name}
             initialRemovedIds={line.removedIngredientIds ?? []}
+            initialAdded={line.addedIngredients ?? []}
             onClose={() => setCustomizingKey(null)}
-            onSave={(ids, names) => {
+            onSave={(ids, names, addedIngredients) => {
               // Re-key the line. If another cart row now has the same
-              // (menuItemId, removedIds, notes) signature, merge them
-              // by summing quantity — keeps the cart tidy.
+              // (menuItemId, removedIds, addedIngredients, notes) signature,
+              // merge them by summing quantity — keeps the cart tidy.
               setCart((prev) => {
-                const updated = prev.map((c) => cartLineKey(c) === customizingKey ? { ...c, removedIngredientIds: ids.length > 0 ? ids : undefined, removedNames: names.length > 0 ? names : undefined } : c);
+                const updated = prev.map((c) => cartLineKey(c) === customizingKey ? {
+                  ...c,
+                  removedIngredientIds: ids.length > 0 ? ids : undefined,
+                  removedNames: names.length > 0 ? names : undefined,
+                  addedIngredients: addedIngredients.length > 0 ? addedIngredients : undefined,
+                } : c);
                 const merged: typeof updated = [];
                 for (const row of updated) {
                   const k = cartLineKey(row);

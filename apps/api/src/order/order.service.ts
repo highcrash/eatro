@@ -225,6 +225,118 @@ export class OrderService {
     return { snapshot, addonRecipeItems, extraUnitPrice };
   }
 
+  /**
+   * Resolve the ad-hoc "added ingredients" the cashier attached via
+   * the Customise dialog. Mirrors resolveAddonsForLine in shape:
+   * returns a snapshot for the OrderItem.modifications JSON, the
+   * extra per-unit price, and a deduction list keyed by ingredient
+   * id (no MenuItem to point at, so this can't reuse the
+   * addon-recipe-items pathway). Validates each surcharge falls
+   * inside the branch's customMenu margin band — strict floor
+   * (costMargin) with no negotiation, and customMenuMaxMargin as
+   * the ceiling. Cashier can't price an addition outside that band.
+   */
+  private async resolveAddedIngredientsForLine(
+    branchId: string,
+    settings: { customMenuCostMargin: { toNumber(): number } | null; customMenuMaxMargin: { toNumber(): number } | null } | null,
+    additions: Array<{ ingredientId: string; quantity: number; unit: string; surcharge: number }>,
+  ): Promise<{
+    snapshot: Array<{ ingredientId: string; ingredientName: string; quantity: number; unit: string; surcharge: number }>;
+    extraUnitPrice: number;
+    deductions: Array<{ ingredientId: string; quantity: number; unit: string }>;
+  }> {
+    if (!additions || additions.length === 0) {
+      return { snapshot: [], extraUnitPrice: 0, deductions: [] };
+    }
+
+    const ids = Array.from(new Set(additions.map((a) => a.ingredientId)));
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { id: { in: ids }, branchId, deletedAt: null },
+      select: { id: true, name: true, unit: true, costPerUnit: true, hasVariants: true, parentId: true },
+    });
+    const byId = new Map(ingredients.map((i) => [i.id, i] as const));
+    if (byId.size !== ids.length) {
+      throw new BadRequestException('One or more added ingredients are unavailable');
+    }
+
+    // Cheapest-variant fallback for parents whose own costPerUnit is 0.
+    const cheapestVariantCost = new Map<string, number>();
+    if (ingredients.some((i) => i.hasVariants)) {
+      const variantParents = ingredients.filter((i) => i.hasVariants).map((i) => i.id);
+      const variants = await this.prisma.ingredient.findMany({
+        where: { parentId: { in: variantParents }, isActive: true, deletedAt: null },
+        select: { parentId: true, costPerUnit: true },
+      });
+      for (const v of variants) {
+        const cost = Number(v.costPerUnit) || 0;
+        if (cost > 0 && v.parentId) {
+          const cur = cheapestVariantCost.get(v.parentId);
+          if (cur == null || cost < cur) cheapestVariantCost.set(v.parentId, cost);
+        }
+      }
+    }
+
+    const costMargin = settings?.customMenuCostMargin?.toNumber() ?? 0;
+    const maxMargin = settings?.customMenuMaxMargin?.toNumber() ?? null;
+
+    const snapshot: Array<{ ingredientId: string; ingredientName: string; quantity: number; unit: string; surcharge: number }> = [];
+    const deductions: Array<{ ingredientId: string; quantity: number; unit: string }> = [];
+    let extraUnitPrice = 0;
+
+    for (const a of additions) {
+      if (!(a.quantity > 0)) {
+        throw new BadRequestException('Added ingredient quantity must be positive');
+      }
+      const ing = byId.get(a.ingredientId)!;
+      // Compute COGS for this addition in the unit the cashier picked.
+      // The recipe-line unit may differ from the ingredient's stock unit,
+      // so convert through UnitConversionService before multiplying.
+      const lineUnit = (a.unit || ing.unit).toUpperCase();
+      let costPerStockUnit = Number(ing.costPerUnit) || 0;
+      if (costPerStockUnit === 0 && ing.hasVariants) {
+        costPerStockUnit = cheapestVariantCost.get(ing.id) ?? 0;
+      }
+      let qtyInStockUnit = a.quantity;
+      if (lineUnit !== ing.unit) {
+        try {
+          qtyInStockUnit = await this.recipeService.convertUnitsForBranch(branchId, a.quantity, lineUnit, ing.unit);
+        } catch {
+          // Fallback: trust the cashier's quantity 1:1 if conversion fails
+          // (rare — ingredient has no conversion rule for this unit). The
+          // band is then computed off raw qty, which is still a sane
+          // sanity check.
+          qtyInStockUnit = a.quantity;
+        }
+      }
+      const cogs = Math.round(costPerStockUnit * qtyInStockUnit);
+      const floor = Math.round(cogs * (1 + costMargin / 100));
+      const ceiling = maxMargin != null ? Math.round(cogs * (1 + maxMargin / 100)) : null;
+
+      if (cogs > 0 && a.surcharge < floor) {
+        throw new BadRequestException(
+          `Surcharge ${(a.surcharge / 100).toFixed(2)} for ${ing.name} is below the cost-margin floor ${(floor / 100).toFixed(2)}.`,
+        );
+      }
+      if (ceiling != null && a.surcharge > ceiling) {
+        throw new BadRequestException(
+          `Surcharge ${(a.surcharge / 100).toFixed(2)} for ${ing.name} is above the maximum-margin ceiling ${(ceiling / 100).toFixed(2)}.`,
+        );
+      }
+
+      snapshot.push({
+        ingredientId: ing.id,
+        ingredientName: ing.name,
+        quantity: a.quantity,
+        unit: lineUnit,
+        surcharge: a.surcharge,
+      });
+      deductions.push({ ingredientId: ing.id, quantity: a.quantity, unit: lineUnit });
+      extraUnitPrice += a.surcharge;
+    }
+
+    return { snapshot, extraUnitPrice, deductions };
+  }
+
   async create(branchId: string, cashierId: string, dto: CreateOrderDto) {
     // Fetch menu items to get prices and names
     const menuItemIds = dto.items.map((i) => i.menuItemId);
@@ -292,6 +404,14 @@ export class OrderService {
       };
     };
 
+    // Branch margin settings power the customMenu cost-floor / max-
+    // ceiling validation in resolveAddedIngredientsForLine below.
+    // Loaded once per create() call rather than once per line.
+    const branchMarginSettings = await this.prisma.branchSetting.findUnique({
+      where: { branchId },
+      select: { customMenuCostMargin: true, customMenuMaxMargin: true },
+    });
+
     // Calculate totals with discounted prices + resolve any addon
     // selections per line. Addon picks are validated against the
     // parent menu item's addon groups; their recipes feed the stock-
@@ -300,9 +420,16 @@ export class OrderService {
     const itemsData = await Promise.all(dto.items.map(async (item) => {
       const menuItem = menuItems.find((m) => m.id === item.menuItemId)!;
       const baseUnit = getDiscountedPrice(item.menuItemId, menuItem.price.toNumber());
-      const mods = buildModsSnapshot(item.removedIngredientIds);
+      const removedMods = buildModsSnapshot(item.removedIngredientIds);
       const addonRes = await this.resolveAddonsForLine(branchId, item.menuItemId, item.quantity, item.addons ?? []);
-      const unitPrice = baseUnit + addonRes.extraUnitPrice;
+      const addedRes = await this.resolveAddedIngredientsForLine(branchId, branchMarginSettings, item.addedIngredients ?? []);
+      // Merge the two mod snapshots into a single OrderItem.modifications
+      // value — null when both branches are empty so we don't write a
+      // useless `{}` for plain orders.
+      const mods = (removedMods || addedRes.snapshot.length > 0)
+        ? { ...(removedMods ?? {}), ...(addedRes.snapshot.length > 0 ? { addedIngredients: addedRes.snapshot } : {}) }
+        : null;
+      const unitPrice = baseUnit + addonRes.extraUnitPrice + addedRes.extraUnitPrice;
       return {
         menuItemId: item.menuItemId,
         menuItemName: menuItem.name,
@@ -315,6 +442,7 @@ export class OrderService {
         // Carry the deduction list on a non-persisted property; we
         // pull it back out below before passing to the recipe engine.
         _addonRecipeItems: addonRes.addonRecipeItems,
+        _addedIngredientDeductions: addedRes.deductions.map((d) => ({ ...d, quantity: d.quantity * item.quantity })),
       };
     }));
 
@@ -358,10 +486,10 @@ export class OrderService {
       }
     }
 
-    // Strip the helper-only _addonRecipeItems before passing to Prisma.
+    // Strip the helper-only fields before passing to Prisma.
     const itemsForCreate = itemsData.map((row) => {
-      const { _addonRecipeItems, ...rest } = row;
-      void _addonRecipeItems; // referenced solely to satisfy TS noUnused
+      const { _addonRecipeItems, _addedIngredientDeductions, ...rest } = row;
+      void _addonRecipeItems; void _addedIngredientDeductions;
       return rest;
     });
     const order = await this.prisma.order.create({
@@ -411,6 +539,15 @@ export class OrderService {
       order.id,
       [...baseRecipeItems, ...addonRecipeItems],
     );
+
+    // Ad-hoc cashier-added ingredients deduct directly (no MenuItem
+    // proxy). Quantity in the deductions list is already line-total
+    // (per-unit × orderItem.quantity), in the cashier-picked unit;
+    // recipe service converts to stock unit before decrementing.
+    const addedDeductions = itemsData.flatMap((i) => i._addedIngredientDeductions ?? []);
+    if (addedDeductions.length > 0) {
+      void this.recipeService.deductRawIngredientsForOrder(branchId, order.id, addedDeductions);
+    }
 
     return order;
   }
@@ -873,7 +1010,7 @@ export class OrderService {
     return updated;
   }
 
-  async addItemsToOrder(id: string, branchId: string, items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: AddonSelectionInput[] }[], needsApproval = false) {
+  async addItemsToOrder(id: string, branchId: string, items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: AddonSelectionInput[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[] }[], needsApproval = false) {
     const order = await this.findOne(id, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') {
       throw new BadRequestException('Cannot add items to this order');
@@ -934,12 +1071,21 @@ export class OrderService {
       };
     };
 
+    const branchMarginSettings = await this.prisma.branchSetting.findUnique({
+      where: { branchId },
+      select: { customMenuCostMargin: true, customMenuMaxMargin: true },
+    });
+
     const newItems = await Promise.all(items.map(async (item) => {
       const menuItem = menuItems.find((m) => m.id === item.menuItemId)!;
       const baseUnit = getDiscountedPrice(item.menuItemId, menuItem.price.toNumber());
-      const mods = buildModsSnapshot(item.removedIngredientIds);
+      const removedMods = buildModsSnapshot(item.removedIngredientIds);
       const addonRes = await this.resolveAddonsForLine(branchId, item.menuItemId, item.quantity, item.addons ?? []);
-      const unitPrice = baseUnit + addonRes.extraUnitPrice;
+      const addedRes = await this.resolveAddedIngredientsForLine(branchId, branchMarginSettings, item.addedIngredients ?? []);
+      const mods = (removedMods || addedRes.snapshot.length > 0)
+        ? { ...(removedMods ?? {}), ...(addedRes.snapshot.length > 0 ? { addedIngredients: addedRes.snapshot } : {}) }
+        : null;
+      const unitPrice = baseUnit + addonRes.extraUnitPrice + addedRes.extraUnitPrice;
       return {
         orderId: id,
         menuItemId: item.menuItemId,
@@ -952,12 +1098,13 @@ export class OrderService {
         modifications: mods as Prisma.InputJsonValue | undefined,
         addons: addonRes.snapshot.length > 0 ? (addonRes.snapshot as unknown as Prisma.InputJsonValue) : undefined,
         _addonRecipeItems: addonRes.addonRecipeItems,
+        _addedIngredientDeductions: addedRes.deductions.map((d) => ({ ...d, quantity: d.quantity * item.quantity })),
       };
     }));
 
     const newItemsForCreate = newItems.map((row) => {
-      const { _addonRecipeItems, ...rest } = row;
-      void _addonRecipeItems;
+      const { _addonRecipeItems, _addedIngredientDeductions, ...rest } = row;
+      void _addonRecipeItems; void _addedIngredientDeductions;
       return rest;
     });
     await this.prisma.orderItem.createMany({ data: newItemsForCreate });
@@ -988,6 +1135,10 @@ export class OrderService {
         branchId, id,
         [...baseRecipeItems, ...addonRecipeItems],
       );
+      const addedDeductions = newItems.flatMap((i) => i._addedIngredientDeductions ?? []);
+      if (addedDeductions.length > 0) {
+        void this.recipeService.deductRawIngredientsForOrder(branchId, id, addedDeductions);
+      }
     }
 
     return updated;
