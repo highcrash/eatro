@@ -29,6 +29,28 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The codecanyon edition pulls @restora/license-client as a git
+      # tarball. The package's `prepare: tsc` script is supposed to
+      # build its `dist/` after install, but on CI that prepare hook
+      # has been silently leaving dist/ empty across every 1.0.x
+      # release since 1.0.5 (works locally because the dev environment
+      # provides typescript globally). The main-branch (no
+      # license-client dep) loop matches no dirs and is a no-op, so
+      # this step is safe to run on both branches.
+      - name: Ensure license-client dist exists (codecanyon only)
+        shell: bash
+        run: |
+          set -e
+          shopt -s nullglob
+          for pkg_dir in node_modules/.pnpm/@restora+license-client@*/node_modules/@restora/license-client; do
+            if [ ! -f "$pkg_dir/dist/index.js" ]; then
+              echo "Building license-client at $pkg_dir"
+              (cd "$pkg_dir" && npx --yes typescript@5.6 tsc)
+            else
+              echo "license-client dist already present at $pkg_dir"
+            fi
+          done
+
       - name: Build installer
         run: pnpm --filter @restora/pos-desktop dist
         env:
