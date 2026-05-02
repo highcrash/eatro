@@ -3,6 +3,15 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.55 — Build: split CI dist step to surface failure (2026-05-02)
+
+CI debug pass — 1.0.54 still failed at the combined "Build
+installer" step but with no log access we couldn't see WHICH
+sub-command broke. Split fetch-resources / electron-rebuild /
+electron-vite / electron-builder into discrete workflow steps
+so the next failure pinpoints the breaking sub-step. No code
+changes.
+
 ## 1.0.54 — Build: rebundle 1.0.46–1.0.53 + CI license-client fix (2026-05-02)
 
 Re-cuts every codecanyon release from 1.0.46 onwards in a single

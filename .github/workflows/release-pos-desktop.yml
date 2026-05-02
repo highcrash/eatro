@@ -51,8 +51,21 @@ jobs:
             fi
           done
 
-      - name: Build installer
-        run: pnpm --filter @restora/pos-desktop dist
+      # Split the desktop's `dist` script into discrete steps so a
+      # failure surfaces which sub-command broke instead of the
+      # opaque "Build installer / exit code 1" the previous combined
+      # step kept producing.
+      - name: Fetch SumatraPDF resource
+        run: pnpm --filter @restora/pos-desktop fetch-resources
+
+      - name: Rebuild native modules for Electron
+        run: pnpm --filter @restora/pos-desktop rebuild:native
+
+      - name: electron-vite build (renderer + main bundles)
+        run: pnpm --filter @restora/pos-desktop exec electron-vite build
+
+      - name: electron-builder package
+        run: pnpm --filter @restora/pos-desktop exec electron-builder --win --config electron-builder.yml
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
