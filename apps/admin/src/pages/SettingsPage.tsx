@@ -566,6 +566,7 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
     tableTimerOrderToStartMin?: number | null;
     tableTimerStartToDoneMin?: number | null;
     tableTimerServedToClearMin?: number | null;
+    autoMinStockDays?: number;
   }
 
   const { data: settings, isLoading } = useQuery<KitchenSettings>({
@@ -727,6 +728,58 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
             />
           </label>
         </div>
+      </div>
+
+      {/* Auto Min-Stock window — drives the nightly cron + the
+          "Recompute Min Stock" button on the Inventory page. 0
+          disables the feature (admin keeps hand-set minimums). */}
+      <AutoMinStockBlock settings={settings} isOwner={isOwner} updateMut={updateMut} />
+    </div>
+  );
+}
+
+function AutoMinStockBlock({ settings, isOwner, updateMut }: {
+  settings: { autoMinStockDays?: number };
+  isOwner: boolean;
+  updateMut: { mutate: (data: Record<string, number>) => void; isPending: boolean };
+}) {
+  const initial = settings.autoMinStockDays ?? 0;
+  const [days, setDays] = useState(String(initial));
+  const [touched, setTouched] = useState(false);
+  const dispDays = touched ? days : String(initial);
+  const parsed = Math.max(0, Math.floor(Number(dispDays) || 0));
+  return (
+    <div className="bg-[#161616] border border-[#2A2A2A]">
+      <div className="px-5 py-4 border-b border-[#2A2A2A]">
+        <p className="text-sm font-body text-white font-medium mb-1">Auto Min-Stock Window</p>
+        <p className="text-xs font-body text-[#999] leading-relaxed">
+          When set to N (e.g. 30), every ingredient's <strong>minimum stock</strong> is auto-set
+          to the total quantity consumed in the last N days. The recompute runs nightly at 3am
+          and can be triggered immediately from <em>Inventory → Recompute Min Stock</em>.
+          Items with zero consumption in the window go to 0.
+          <br /><br />
+          <strong>Set 0 to disable</strong> — minimums stay whatever you typed by hand.
+          Per-ingredient opt-out is available on the Inventory page (a small lock icon next to each item).
+        </p>
+      </div>
+      <div className="px-5 py-4 flex items-end gap-3">
+        <div className="flex-1 max-w-[200px]">
+          <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Days</label>
+          <input
+            type="number" step="1" min="0" max="365"
+            value={dispDays}
+            onChange={(e) => { setDays(e.target.value); setTouched(true); }}
+            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]"
+          />
+          <p className="text-[10px] text-[#555] mt-1">{parsed === 0 ? 'Disabled' : `Min = ${parsed}-day consumption total`}</p>
+        </div>
+        <button
+          disabled={!isOwner || !touched || updateMut.isPending}
+          onClick={() => { updateMut.mutate({ autoMinStockDays: parsed }); setTouched(false); }}
+          className="bg-[#D62B2B] hover:bg-[#F03535] disabled:opacity-40 text-white font-body text-xs px-4 py-2 tracking-widest uppercase transition-colors"
+        >
+          {updateMut.isPending ? 'Saving…' : 'Save Window'}
+        </button>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import type { CreateIngredientDto, UpdateIngredientDto, AdjustStockDto, CreateVariantDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../ws-gateway/realtime.gateway';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 /**
  * Auto-generate a unique short code for use as an itemCode or sku when
@@ -35,6 +36,7 @@ export class IngredientService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ws: RealtimeGateway,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   private readonly ingredientInclude = {
@@ -245,6 +247,162 @@ export class IngredientService {
     return { resynced: parents.length };
   }
 
+  /**
+   * Auto-recompute every eligible ingredient's minimumStock from its
+   * recent SALE + OPERATIONAL_USE consumption. Drives both the
+   * nightly IngredientScheduler and the manual "Recompute Min Stock"
+   * button on the Inventory page.
+   *
+   * Behaviour:
+   *  - Window resolves from `daysOverride ?? branchSetting.autoMinStockDays`.
+   *    A 0/null window short-circuits with `{updated: 0}` so the
+   *    feature is OFF until admin opts in.
+   *  - Only walks ingredients with `autoMinStock=true` — opt-out rows
+   *    are skipped silently and keep their hand-set minimums.
+   *  - Standalone + variant CHILDREN: newMin = sum of |movement.quantity|
+   *    over the window for that ingredient.
+   *  - Variant PARENTS: newMin = sum of consumption across all their
+   *    children (the parent itself rarely receives movements
+   *    directly, but if it does they get added).
+   *  - Ingredients with zero consumption in the window → newMin = 0.
+   *  - Idempotent: skip-when-equal so re-running is a no-op and
+   *    activity-log noise stays low.
+   *  - Single fire-and-forget activity-log entry summarises the run.
+   */
+  async recomputeMinimumStock(
+    branchId: string,
+    daysOverride?: number,
+    actor: { sub: string; role: string; name?: string } | null = null,
+  ): Promise<{
+    scanned: number;
+    updated: number;
+    skipped: number;
+    window: number;
+    changes: Array<{ ingredientId: string; name: string; from: number; to: number }>;
+  }> {
+    // Resolve window — admin's saved value, or an explicit override
+    // (lets the manual button experiment with "what would 60 days
+    // look like?" without changing the saved BranchSetting).
+    let window = daysOverride;
+    if (window == null) {
+      const settings = await this.prisma.branchSetting.findUnique({
+        where: { branchId },
+        select: { autoMinStockDays: true } as any,
+      });
+      window = (settings as { autoMinStockDays?: number } | null)?.autoMinStockDays ?? 0;
+    }
+    if (!window || window <= 0) {
+      return { scanned: 0, updated: 0, skipped: 0, window: 0, changes: [] };
+    }
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - window);
+
+    // Eligible ingredients: opted into auto-management, not deleted.
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { branchId, deletedAt: null, autoMinStock: true } as any,
+      select: { id: true, name: true, parentId: true, hasVariants: true, minimumStock: true },
+    });
+
+    // One range query → in-memory sum-by-ingredient map. Mirrors the
+    // existing reports.service.getDailyConsumption pattern but
+    // without the per-day grouping.
+    const movements = await this.prisma.stockMovement.findMany({
+      where: {
+        branchId,
+        createdAt: { gte: cutoff },
+        type: { in: ['SALE', 'OPERATIONAL_USE'] },
+      },
+      select: { ingredientId: true, quantity: true },
+    });
+    const consumedByIng = new Map<string, number>();
+    for (const m of movements) {
+      const q = Math.abs(Number(m.quantity));
+      consumedByIng.set(m.ingredientId, (consumedByIng.get(m.ingredientId) ?? 0) + q);
+    }
+
+    // Parent aggregation: sum each parent's variants' consumption so
+    // the parent row's minimum reflects the ALL-children total. This
+    // matches how the existing low-stock alert checks the parent's
+    // aggregate stock against parent.minimumStock.
+    const variantsByParent = new Map<string, string[]>();
+    for (const ing of ingredients) {
+      if (ing.parentId) {
+        const arr = variantsByParent.get(ing.parentId) ?? [];
+        arr.push(ing.id);
+        variantsByParent.set(ing.parentId, arr);
+      }
+    }
+
+    const updates: Array<{ ingredientId: string; name: string; from: number; to: number }> = [];
+    let skipped = 0;
+
+    for (const ing of ingredients) {
+      let newMin: number;
+      if (ing.hasVariants) {
+        // Parent: sum variant consumption + the rare parent-direct movements.
+        const variantIds = variantsByParent.get(ing.id) ?? [];
+        const variantSum = variantIds.reduce((s, id) => s + (consumedByIng.get(id) ?? 0), 0);
+        newMin = variantSum + (consumedByIng.get(ing.id) ?? 0);
+      } else {
+        newMin = consumedByIng.get(ing.id) ?? 0;
+      }
+      // Round to 4dp to match column precision and avoid float-noise
+      // false-positives in the equality check.
+      newMin = Math.round(newMin * 10000) / 10000;
+      const currentMin = Math.round(Number(ing.minimumStock) * 10000) / 10000;
+      if (newMin === currentMin) {
+        skipped++;
+        continue;
+      }
+      updates.push({
+        ingredientId: ing.id,
+        name: ing.name,
+        from: currentMin,
+        to: newMin,
+      });
+    }
+
+    // Per-row updates. No transaction wrapper — each row is
+    // independent and a partial failure shouldn't roll back the
+    // successful ones.
+    for (const u of updates) {
+      try {
+        await this.prisma.ingredient.update({
+          where: { id: u.ingredientId },
+          data: { minimumStock: u.to },
+        });
+      } catch {
+        // Skip silently and log via activity-log summary; one
+        // failure shouldn't bail the entire sweep.
+      }
+    }
+
+    // Single bulk-summary activity-log entry. Don't emit per-row;
+    // would flood the audit feed.
+    if (updates.length > 0) {
+      void this.activityLog.log({
+        branchId,
+        actor,
+        category: 'INGREDIENT',
+        action: 'UPDATE',
+        entityType: 'ingredients',
+        entityId: 'bulk-recompute-min-stock',
+        entityName: 'Auto Min-Stock Recompute',
+        after: { window, updated: updates.length, skipped, sample: updates.slice(0, 10) } as any,
+        summary: `Auto-recomputed minimum stock for ${updates.length} ingredient(s) (${window}-day window)`,
+      });
+    }
+
+    return {
+      scanned: ingredients.length,
+      updated: updates.length,
+      skipped,
+      window,
+      changes: updates,
+    };
+  }
+
   async getVariants(id: string, branchId: string) {
     await this.findOne(id, branchId);
     return this.prisma.ingredient.findMany({
@@ -362,7 +520,7 @@ export class IngredientService {
     return created;
   }
 
-  async update(id: string, branchId: string, dto: UpdateIngredientDto & { brandName?: string; packSize?: string | null; piecesPerPack?: number | null; sku?: string | null }) {
+  async update(id: string, branchId: string, dto: UpdateIngredientDto & { brandName?: string; packSize?: string | null; piecesPerPack?: number | null; sku?: string | null; autoMinStock?: boolean }) {
     const existing = await this.findOne(id, branchId);
     // Cast the data object wholesale so Prisma picks the unchecked-update
     // overload. Broadening StockUnit to accept custom strings narrowed
@@ -386,6 +544,7 @@ export class IngredientService {
       ...(dto.sku !== undefined ? { sku: dto.sku } : {}),
       ...((dto as any).imageUrl !== undefined ? { imageUrl: (dto as any).imageUrl } : {}),
       ...((dto as any).showOnWebsite !== undefined ? { showOnWebsite: (dto as any).showOnWebsite } : {}),
+      ...(dto.autoMinStock !== undefined ? { autoMinStock: dto.autoMinStock } : {}),
     };
 
     // websiteDisplayName: written via raw SQL so this works against a
