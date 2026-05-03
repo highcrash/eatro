@@ -77,7 +77,7 @@ export default function MenuCarousel({ items, onItemClick }: MenuCarouselProps) 
             <button
               key={item.id}
               onClick={() => onItemClick((item as any).slug || item.id)}
-              className="flex-shrink-0 w-56 bg-card border border-border hover:border-accent/40 transition-colors text-left group/card"
+              className="flex-shrink-0 w-32 sm:w-56 bg-card border border-border hover:border-accent/40 transition-colors text-left group/card"
             >
               <div className="aspect-square bg-hover relative overflow-hidden">
                 {hasDiscount && (
