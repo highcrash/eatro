@@ -361,6 +361,19 @@ model BranchSetting {
   /// the same {PLACEHOLDER} substitutions documented in that file.
   fbCaptionTemplate  String?   @db.Text
 
+  /// WhatsApp Cloud API integration for sending Purchase Order PDFs to
+  /// suppliers. Off by default; the "Send via WhatsApp" button on PO
+  /// detail is hidden until enabled AND all three credential fields
+  /// are populated. Token plaintext mirrors smsApiKey/tipsoiApiToken
+  /// — masked in non-OWNER reads, stripped from activity-log diffs
+  /// via SENSITIVE_FIELDS.
+  whatsappEnabled         Boolean @default(false)
+  whatsappPhoneNumberId   String?
+  whatsappWabaId          String?
+  whatsappAccessToken     String?
+  whatsappPoTemplate      String  @default("purchase_order_v1")
+  whatsappPoTemplateLang  String  @default("en_US")
+
   branch Branch @relation(fields: [branchId], references: [id])
 
   @@map("branch_settings")
@@ -1430,6 +1443,11 @@ model Supplier {
   name             String
   contactName      String?
   phone            String?
+  /// WhatsApp number in E.164 format (e.g. +8801712345678). Separate
+  /// from `phone` because Meta requires the international form with
+  /// no spaces or dashes. Null = supplier has no WhatsApp on file —
+  /// "Send PO via WhatsApp" button is disabled for this supplier.
+  whatsappNumber   String?
   email            String?
   address          String?
   notes            String?
@@ -1767,6 +1785,11 @@ model PurchaseOrder {
   receiptDiscountReason  String?
   /// JSON array of { label: string; amount: number } in paisa.
   receiptExtraFees       Json?
+  /// Meta message id returned when this PO PDF was last sent over
+  /// WhatsApp. Null = never sent. Useful for tracing back to Meta
+  /// Business Manager and a future delivery-receipt webhook hookup.
+  whatsappMessageId      String?
+  whatsappSentAt         DateTime?
   createdById String
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt

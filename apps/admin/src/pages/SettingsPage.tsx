@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/auth.store';
 import BrandingSection from './settings/BrandingSection';
 import ThemingSection from './settings/ThemingSection';
 import TipsoiSettingsSection from './settings/TipsoiSettingsSection';
+import WhatsAppSettingsSection from './settings/WhatsAppSettingsSection';
 import SocialSettingsSection from './settings/SocialSettingsSection';
 import { useStockUnits } from '../lib/units';
 
@@ -347,7 +348,12 @@ export default function SettingsPage() {
 
       {tab === 'reservations' && <ReservationSettingsSection />}
 
-      {tab === 'notifications' && <SmsSettingsSection isOwner={isOwner} />}
+      {tab === 'notifications' && (
+        <>
+          <SmsSettingsSection isOwner={isOwner} />
+          <WhatsAppSettingsSection isOwner={isOwner} />
+        </>
+      )}
 
       {tab === 'attendance' && <TipsoiSettingsSection isOwner={isOwner} />}
       {tab === 'marketing' && <SocialSettingsSection isOwner={isOwner} />}

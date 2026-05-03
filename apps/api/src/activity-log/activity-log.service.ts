@@ -20,6 +20,7 @@ const SENSITIVE_FIELDS = new Set(
     'fbPageAccessToken',
     'tipsoiApiToken',
     'smsApiKey',
+    'whatsappAccessToken',
     'licenseKey',
     'hmacSecretB64u',
     'jwtSecret',
