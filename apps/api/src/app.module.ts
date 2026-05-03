@@ -14,6 +14,7 @@ import { WsGatewayModule } from './ws-gateway/ws-gateway.module';
 import { SupplierModule } from './supplier/supplier.module';
 import { CreditorModule } from './creditor/creditor.module';
 import { TipsoiModule } from './tipsoi/tipsoi.module';
+import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { SocialModule } from './social/social.module';
 import { ActivityLogModule } from './activity-log/activity-log.module';
 import { IngredientModule } from './ingredient/ingredient.module';
@@ -176,6 +177,10 @@ import { ScheduleModule } from '@nestjs/schedule';
     // Tipsoi attendance integration — hourly sync of biometric clock
     // events into Attendance rows + branch/per-staff shift rules.
     TipsoiModule,
+
+    // WhatsApp Cloud API — admin-config surface (settings + test ping)
+    // and the shared service used by PurchasingService to send PO PDFs.
+    WhatsAppModule,
 
     // Auto-Facebook-post pipeline for menu discounts. Settings
     // tab + queue panel + per-minute cron worker. Default off

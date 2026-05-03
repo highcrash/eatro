@@ -24,6 +24,8 @@ export interface Supplier {
   name: string;
   contactName: string | null;
   phone: string | null;
+  /** E.164 international format, used to send PO PDFs via WhatsApp. */
+  whatsappNumber: string | null;
   email: string | null;
   address: string | null;
   notes: string | null;
@@ -150,6 +152,8 @@ export interface CreateSupplierDto {
   name: string;
   contactName?: string;
   phone?: string;
+  /** E.164 international format, e.g. "+8801712345678". */
+  whatsappNumber?: string;
   email?: string;
   address?: string;
   notes?: string;
@@ -161,6 +165,8 @@ export interface UpdateSupplierDto {
   name?: string;
   contactName?: string;
   phone?: string;
+  /** E.164 international format. Pass empty string to clear. */
+  whatsappNumber?: string | null;
   email?: string;
   address?: string;
   notes?: string;

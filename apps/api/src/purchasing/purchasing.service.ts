@@ -1,9 +1,12 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import type { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, ReceiveGoodsDto } from '@restora/types';
+import type { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, ReceiveGoodsDto, JwtPayload } from '@restora/types';
 import { formatVariantLabel } from '@restora/utils';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
 import { IngredientService } from '../ingredient/ingredient.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
+import { buildPurchaseOrderPdf } from './po-pdf';
 
 @Injectable()
 export class PurchasingService {
@@ -11,6 +14,8 @@ export class PurchasingService {
     private readonly prisma: PrismaService,
     private readonly unitConversion: UnitConversionService,
     private readonly ingredientService: IngredientService,
+    private readonly whatsApp: WhatsAppService,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   findAll(branchId: string, status?: string) {
@@ -21,7 +26,7 @@ export class PurchasingService {
         ...(status ? { status: status as never } : {}),
       },
       include: {
-        supplier: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true, whatsappNumber: true } },
         createdBy: { select: { id: true, name: true } },
         items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
@@ -34,7 +39,7 @@ export class PurchasingService {
     const po = await this.prisma.purchaseOrder.findFirst({
       where: { id, branchId, deletedAt: null },
       include: {
-        supplier: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true, whatsappNumber: true } },
         createdBy: { select: { id: true, name: true } },
         items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
@@ -61,7 +66,7 @@ export class PurchasingService {
         },
       },
       include: {
-        supplier: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true, whatsappNumber: true } },
         createdBy: { select: { id: true, name: true } },
         items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
@@ -107,7 +112,7 @@ export class PurchasingService {
         expectedAt: dto.expectedAt ? new Date(dto.expectedAt) : undefined,
       },
       include: {
-        supplier: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true, whatsappNumber: true } },
         createdBy: { select: { id: true, name: true } },
         items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
@@ -123,7 +128,7 @@ export class PurchasingService {
       where: { id },
       data: { status: 'SENT', orderedAt: new Date() },
       include: {
-        supplier: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true, whatsappNumber: true } },
         createdBy: { select: { id: true, name: true } },
         items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
@@ -139,7 +144,7 @@ export class PurchasingService {
       where: { id },
       data: { status: 'CANCELLED' },
       include: {
-        supplier: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true, whatsappNumber: true } },
         createdBy: { select: { id: true, name: true } },
         items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
@@ -632,7 +637,7 @@ export class PurchasingService {
       where: { id },
       data: { status: 'RECEIVED', receivedAt: new Date() },
       include: {
-        supplier: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true, whatsappNumber: true } },
         createdBy: { select: { id: true, name: true } },
         items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, purchaseUnitQty: true, currentStock: true, packSize: true, brandName: true } } } },
       },
@@ -809,5 +814,119 @@ export class PurchasingService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Render the PO as a PDF, upload it to Meta, and send a pre-approved
+   * utility template message to the supplier's WhatsApp number with the
+   * PDF attached as the document header. Records the returned Meta
+   * message id on the PO row for traceability + future webhook hookup.
+   */
+  async sendWhatsApp(user: JwtPayload, poId: string) {
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id: poId, branchId: user.branchId, deletedAt: null },
+      include: {
+        supplier: true,
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, packSize: true, brandName: true } } } },
+        branch: { select: { id: true, name: true, address: true, phone: true } },
+      },
+    });
+    if (!po) throw new NotFoundException(`Purchase order ${poId} not found`);
+
+    const settings = await this.prisma.branchSetting.findUnique({ where: { branchId: user.branchId } });
+    if (!settings?.whatsappEnabled) {
+      throw new BadRequestException('WhatsApp integration is not enabled for this branch. Configure it in Settings → Notifications.');
+    }
+    const phoneNumberId = settings.whatsappPhoneNumberId?.trim();
+    const accessToken = settings.whatsappAccessToken?.trim();
+    const templateName = settings.whatsappPoTemplate?.trim();
+    const languageCode = settings.whatsappPoTemplateLang?.trim() || 'en_US';
+    if (!phoneNumberId || !accessToken || !templateName) {
+      throw new BadRequestException('WhatsApp credentials incomplete. Set Phone Number ID, Access Token, and Template Name in Settings.');
+    }
+
+    const waNumberRaw = po.supplier?.whatsappNumber?.trim();
+    if (!waNumberRaw) {
+      throw new BadRequestException(`Supplier "${po.supplier?.name ?? ''}" has no WhatsApp number on file. Add one in Suppliers first.`);
+    }
+    // Meta wants bare digits — strip +, spaces, dashes, parens.
+    const to = waNumberRaw.replace(/[^\d]/g, '');
+    if (to.length < 10 || to.length > 15) {
+      throw new BadRequestException(`Supplier WhatsApp number "${waNumberRaw}" is not a valid international number.`);
+    }
+
+    const poNumber = po.id.slice(-8).toUpperCase();
+    const poDate = (po.createdAt instanceof Date ? po.createdAt : new Date(po.createdAt));
+    const formattedDate = poDate.toLocaleDateString('en-GB');
+    const grandTotalPaisa = po.items.reduce(
+      (sum, item) => sum + Number(item.quantityOrdered) * Number(item.unitCost),
+      0,
+    );
+    const formattedTotal = `Tk ${(grandTotalPaisa / 100).toFixed(2)}`;
+
+    const pdf = await buildPurchaseOrderPdf({
+      id: po.id,
+      poNumber,
+      status: String(po.status),
+      createdAt: poDate,
+      expectedAt: po.expectedAt,
+      notes: po.notes,
+      branch: {
+        name: po.branch?.name ?? '',
+        address: po.branch?.address ?? null,
+        phone: po.branch?.phone ?? null,
+      },
+      supplier: {
+        name: po.supplier?.name ?? '',
+        contactName: po.supplier?.contactName ?? null,
+        phone: po.supplier?.phone ?? null,
+        address: po.supplier?.address ?? null,
+      },
+      items: po.items.map((item) => ({
+        name: item.ingredient?.name ?? '',
+        quantityOrdered: Number(item.quantityOrdered),
+        unit: item.unit ?? item.ingredient?.purchaseUnit ?? item.ingredient?.unit ?? '',
+        unitCostPaisa: Number(item.unitCost),
+      })),
+    });
+
+    const filename = `PO-${poNumber}.pdf`;
+    const { mediaId } = await this.whatsApp.uploadMedia({
+      phoneNumberId,
+      accessToken,
+      buffer: pdf,
+      filename,
+      mimeType: 'application/pdf',
+    });
+
+    const { messageId } = await this.whatsApp.sendDocumentTemplate({
+      phoneNumberId,
+      accessToken,
+      to,
+      templateName,
+      languageCode,
+      bodyParams: [po.supplier?.name ?? '', poNumber, formattedDate, formattedTotal],
+      mediaId,
+      documentFilename: filename,
+    });
+
+    const sentAt = new Date();
+    await this.prisma.purchaseOrder.update({
+      where: { id: po.id },
+      data: { whatsappMessageId: messageId, whatsappSentAt: sentAt },
+    });
+
+    void this.activityLog.log({
+      branchId: user.branchId,
+      actor: user,
+      category: 'PURCHASING',
+      action: 'UPDATE',
+      entityType: 'purchase_orders',
+      entityId: po.id,
+      entityName: `PO #${poNumber}`,
+      summary: `Sent PO PDF to ${po.supplier?.name ?? 'supplier'} via WhatsApp`,
+    });
+
+    return { messageId, sentAt: sentAt.toISOString() };
   }
 }

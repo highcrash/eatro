@@ -75,6 +75,12 @@ export class PurchasingController {
     return this.purchasingService.send(id, user.branchId);
   }
 
+  @Post(':id/send-whatsapp')
+  @Roles('OWNER', 'MANAGER')
+  sendWhatsApp(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.purchasingService.sendWhatsApp(user, id);
+  }
+
   @Post(':id/cancel')
   cancel(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.purchasingService.cancel(id, user.branchId);

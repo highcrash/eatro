@@ -189,6 +189,29 @@ export default function PurchasingPage() {
     queryFn: () => api.get('/purchasing/returns'),
   });
 
+  // Tells the "Send via WhatsApp" button whether the integration is even
+  // configured for this branch. When disabled the button is hidden — no
+  // point teasing a feature the owner hasn't set up yet.
+  const { data: whatsappSettings } = useQuery<{ whatsappEnabled: boolean }>({
+    queryKey: ['whatsapp-settings-purchasing'],
+    queryFn: () => api.get('/whatsapp/settings'),
+    staleTime: 5 * 60_000,
+  });
+
+  const [whatsappResult, setWhatsappResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const sendWhatsAppMutation = useMutation({
+    mutationFn: (id: string) => api.post<{ messageId: string; sentAt: string }>(`/purchasing/${id}/send-whatsapp`, {}),
+    onSuccess: (res) => {
+      setWhatsappResult({ ok: true, message: `Sent (Meta msg id ${res.messageId.slice(-12)}…)` });
+      void qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      // Refresh selected PO so the "last sent" timestamp updates.
+      if (selectedPO) {
+        api.get<PurchaseOrder>(`/purchasing/${selectedPO.id}`).then(setSelectedPO).catch(() => {});
+      }
+    },
+    onError: (err: Error) => setWhatsappResult({ ok: false, message: err.message }),
+  });
+
   const createMutation = useMutation({
     mutationFn: (dto: CreatePurchaseOrderDto) => api.post('/purchasing', dto),
     onSuccess: () => {
@@ -787,8 +810,36 @@ export default function PurchasingPage() {
               >
                 Print
               </button>
+              {whatsappSettings?.whatsappEnabled && (
+                <button
+                  onClick={() => { setWhatsappResult(null); sendWhatsAppMutation.mutate(selectedPO.id); }}
+                  disabled={sendWhatsAppMutation.isPending || !selectedPO.supplier?.whatsappNumber}
+                  title={
+                    !selectedPO.supplier?.whatsappNumber
+                      ? 'Add a WhatsApp number to this supplier first'
+                      : `Send PO PDF to ${selectedPO.supplier?.name} via WhatsApp`
+                  }
+                  className="bg-[#1a3a1a] hover:bg-[#225a22] text-[#4CAF50] hover:text-white font-body text-sm px-4 py-2 transition-colors disabled:opacity-40"
+                >
+                  {sendWhatsAppMutation.isPending ? 'Sending…' : 'Send via WhatsApp'}
+                </button>
+              )}
             </div>
           </div>
+          {(whatsappResult || (selectedPO as any).whatsappSentAt) && (
+            <div className="-mt-3 mb-2 text-xs font-body">
+              {whatsappResult && (
+                <p className={whatsappResult.ok ? 'text-green-500' : 'text-[#F03535]'}>
+                  {whatsappResult.ok ? '✓ ' : '✗ '}{whatsappResult.message}
+                </p>
+              )}
+              {!whatsappResult && (selectedPO as any).whatsappSentAt && (
+                <p className="text-[#666]">
+                  Last sent via WhatsApp: {new Date((selectedPO as any).whatsappSentAt).toLocaleString()}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Items */}
           <div className="bg-[#161616] border border-[#2A2A2A] p-6">

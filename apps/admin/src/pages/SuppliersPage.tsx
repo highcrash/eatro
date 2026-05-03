@@ -20,6 +20,7 @@ interface SupplierForm {
   name: string;
   contactName: string;
   phone: string;
+  whatsappNumber: string;
   email: string;
   address: string;
   notes: string;
@@ -95,7 +96,7 @@ interface LedgerData {
   adjustments: LedgerAdjustment[];
 }
 
-const emptyForm: SupplierForm = { name: '', contactName: '', phone: '', email: '', address: '', notes: '', category: 'GENERAL', openingBalance: '' };
+const emptyForm: SupplierForm = { name: '', contactName: '', phone: '', whatsappNumber: '', email: '', address: '', notes: '', category: 'GENERAL', openingBalance: '' };
 const emptyPaymentForm: PaymentForm = { amount: '', paymentMethod: 'CASH', reference: '', notes: '' };
 
 
@@ -192,7 +193,7 @@ export default function SuppliersPage() {
   const openAdd = () => { setEditing(null); setForm(emptyForm); setShowDialog(true); };
   const openEdit = (s: Supplier) => {
     setEditing(s);
-    setForm({ name: s.name, contactName: s.contactName ?? '', phone: s.phone ?? '', email: s.email ?? '', address: s.address ?? '', notes: s.notes ?? '', category: s.category ?? 'GENERAL', openingBalance: '' });
+    setForm({ name: s.name, contactName: s.contactName ?? '', phone: s.phone ?? '', whatsappNumber: s.whatsappNumber ?? '', email: s.email ?? '', address: s.address ?? '', notes: s.notes ?? '', category: s.category ?? 'GENERAL', openingBalance: '' });
     setShowDialog(true);
   };
   const closeDialog = () => { setShowDialog(false); setEditing(null); };
@@ -278,7 +279,14 @@ export default function SuppliersPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-[#999] font-body text-sm">{s.contactName ?? '--'}</td>
-                  <td className="px-4 py-3 text-[#999] font-body text-sm">{s.phone ?? '--'}</td>
+                  <td className="px-4 py-3 text-[#999] font-body text-sm">
+                    <div className="flex items-center gap-2">
+                      <span>{s.phone ?? '--'}</span>
+                      {s.whatsappNumber ? (
+                        <span title={`WhatsApp: ${s.whatsappNumber}`} className="text-[#25D366] text-xs">●</span>
+                      ) : null}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 font-body text-sm">
                     <span className={s.totalDue > 0 ? 'text-[#F03535]' : 'text-[#4CAF50]'}>
                       {formatCurrency(s.totalDue ?? 0)}
@@ -331,20 +339,23 @@ export default function SuppliersPage() {
             </h2>
             <div className="space-y-4">
               {([
-                ['name', 'Name *'],
-                ['contactName', 'Contact Name'],
-                ['phone', 'Phone'],
-                ['email', 'Email'],
-                ['address', 'Address'],
-                ['notes', 'Notes'],
-              ] as [keyof SupplierForm, string][]).map(([key, label]) => (
+                ['name', 'Name *', undefined, undefined],
+                ['contactName', 'Contact Name', undefined, undefined],
+                ['phone', 'Phone', undefined, undefined],
+                ['whatsappNumber', 'WhatsApp Number', '+8801712345678', 'International format. Used to send Purchase Orders via WhatsApp.'],
+                ['email', 'Email', undefined, undefined],
+                ['address', 'Address', undefined, undefined],
+                ['notes', 'Notes', undefined, undefined],
+              ] as [keyof SupplierForm, string, string | undefined, string | undefined][]).map(([key, label, placeholder, hint]) => (
                 <div key={key} className="flex flex-col gap-1">
                   <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">{label}</label>
                   <input
                     value={form[key]}
+                    placeholder={placeholder}
                     onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                     className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
                   />
+                  {hint ? <span className="text-[#555] text-[11px] font-body">{hint}</span> : null}
                 </div>
               ))}
               <div className="flex flex-col gap-1">

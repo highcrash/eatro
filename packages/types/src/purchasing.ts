@@ -36,7 +36,10 @@ export interface PurchaseOrder {
   receiptDiscount?: number;
   receiptDiscountReason?: string | null;
   receiptExtraFees?: ReceiptExtraFee[] | null;
-  supplier?: { id: string; name: string };
+  /** Meta message id of the last "Send PO via WhatsApp" — null = never sent. */
+  whatsappMessageId?: string | null;
+  whatsappSentAt?: Date | string | null;
+  supplier?: { id: string; name: string; whatsappNumber?: string | null };
   createdBy?: { id: string; name: string };
   items: PurchaseOrderItem[];
 }

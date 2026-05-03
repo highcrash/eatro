@@ -41,10 +41,11 @@ export class SupplierService {
   }
 
   create(branchId: string, dto: CreateSupplierDto) {
-    const { openingBalance, ...rest } = dto;
+    const { openingBalance, whatsappNumber, ...rest } = dto;
     const ob = openingBalance ? Math.round(openingBalance) : 0;
+    const normalisedWa = this.normaliseWhatsApp(whatsappNumber);
     return this.prisma.supplier.create({
-      data: { branchId, ...rest, openingBalance: ob, totalDue: ob },
+      data: { branchId, ...rest, ...(normalisedWa !== undefined ? { whatsappNumber: normalisedWa } : {}), openingBalance: ob, totalDue: ob },
     });
   }
 
@@ -53,7 +54,7 @@ export class SupplierService {
 
     // Handle visibleToCashier via raw SQL so it works even when the generated
     // Prisma client is stale (column was added to the DB after the API started).
-    const { visibleToCashier, ...rest } = dto as UpdateSupplierDto & { visibleToCashier?: boolean };
+    const { visibleToCashier, whatsappNumber, ...rest } = dto as UpdateSupplierDto & { visibleToCashier?: boolean };
     if (typeof visibleToCashier === 'boolean') {
       await this.prisma.$executeRaw`
         UPDATE "suppliers"
@@ -62,11 +63,34 @@ export class SupplierService {
       `;
     }
 
-    if (Object.keys(rest).length === 0) {
+    const data: Record<string, unknown> = { ...rest };
+    if (whatsappNumber !== undefined) {
+      data.whatsappNumber = this.normaliseWhatsApp(whatsappNumber);
+    }
+
+    if (Object.keys(data).length === 0) {
       return this.findOne(id, branchId);
     }
 
-    return this.prisma.supplier.update({ where: { id }, data: rest });
+    return this.prisma.supplier.update({ where: { id }, data });
+  }
+
+  /**
+   * Trim + light-validate an E.164 WhatsApp number. Accepts an optional
+   * leading "+", then 10–15 digits. Empty/null clears the column.
+   * Throws on a non-empty non-conforming string so admin sees the error
+   * immediately instead of finding it later when "Send via WhatsApp"
+   * fails on Meta.
+   */
+  private normaliseWhatsApp(value: string | null | undefined): string | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    const trimmed = String(value).trim();
+    if (!trimmed) return null;
+    if (!/^\+?\d{10,15}$/.test(trimmed.replace(/[\s-]/g, ''))) {
+      throw new BadRequestException('WhatsApp number must be in international format (e.g. +8801712345678).');
+    }
+    return trimmed;
   }
 
   async remove(id: string, branchId: string) {
