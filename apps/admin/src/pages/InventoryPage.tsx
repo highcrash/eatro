@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Lock, Unlock } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 import type { Ingredient, Supplier, StockMovement, StockUnit, IngredientCategory } from '@restora/types';
@@ -514,6 +515,33 @@ export default function InventoryPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['ingredients'] }),
   });
 
+  // Auto Min-Stock recompute — manual trigger that mirrors the
+  // nightly cron. Result modal lists the most-changed items so admin
+  // can sanity-check before relying on the new thresholds.
+  type MinStockReport = {
+    scanned: number;
+    updated: number;
+    skipped: number;
+    window: number;
+    changes: Array<{ ingredientId: string; name: string; from: number; to: number }>;
+  };
+  const [minStockReport, setMinStockReport] = useState<MinStockReport | null>(null);
+  const recomputeMinStockMut = useMutation({
+    mutationFn: () => api.post<MinStockReport>('/ingredients/recompute-minimum-stock', {}),
+    onSuccess: (r) => {
+      setMinStockReport(r);
+      void qc.invalidateQueries({ queryKey: ['ingredients'] });
+    },
+  });
+
+  // Per-row toggle: flip Ingredient.autoMinStock without opening the
+  // edit dialog. Optimistic — invalidate on success.
+  const toggleAutoMinStockMut = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) =>
+      api.patch(`/ingredients/${id}`, { autoMinStock: value }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ingredients'] }),
+  });
+
   const stockBulkMutation = useMutation({
     mutationFn: (items: Array<{ itemCode?: string; sku?: string; currentStock: number }>) =>
       api.post<{ total: number; updated: number; skipped: number; results: { itemCode: string; status: string; reason?: string; delta?: number }[] }>(
@@ -833,6 +861,17 @@ export default function InventoryPage() {
             </div>
             <input ref={csvFileRef} type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
             <input ref={stockCsvFileRef} type="file" accept=".csv" onChange={handleStockCSVUpload} className="hidden" />
+            <button
+              onClick={() => {
+                if (!confirm("Recompute every ingredient's minimum stock from the consumption window saved in Settings → Auto Min-Stock Window. Items with their per-row Auto toggle OFF are skipped. Re-running is safe.")) return;
+                recomputeMinStockMut.mutate();
+              }}
+              disabled={recomputeMinStockMut.isPending}
+              title="Auto-set min stock for every ingredient based on the saved consumption window"
+              className="border border-[#4CAF50] text-[#4CAF50] hover:bg-[#4CAF50] hover:text-black font-body text-sm px-4 py-2 transition-colors disabled:opacity-50"
+            >
+              {recomputeMinStockMut.isPending ? 'Recomputing…' : 'Recompute Min Stock'}
+            </button>
             <button onClick={openAddIng} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">
               + ADD INGREDIENT
             </button>
@@ -1063,7 +1102,26 @@ export default function InventoryPage() {
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3 text-[#999] font-body text-sm">{Number(ing.minimumStock).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-[#999] font-body text-sm">
+                        <span className="inline-flex items-center gap-1.5">
+                          {Number(ing.minimumStock).toFixed(2)}
+                          <button
+                            type="button"
+                            onClick={() => toggleAutoMinStockMut.mutate({ id: ing.id, value: !((ing as { autoMinStock?: boolean }).autoMinStock !== false) })}
+                            disabled={toggleAutoMinStockMut.isPending}
+                            title={(ing as { autoMinStock?: boolean }).autoMinStock !== false
+                              ? 'Auto: nightly recompute will rewrite this min from consumption. Click to lock to a manual value.'
+                              : 'Manual: nightly recompute skips this row. Click to re-enable auto.'}
+                            className="p-0.5 hover:bg-[#1F1F1F] rounded transition-colors"
+                          >
+                            {(ing as { autoMinStock?: boolean }).autoMinStock !== false ? (
+                              <Unlock size={11} className="text-[#4CAF50]" />
+                            ) : (
+                              <Lock size={11} className="text-[#FFA726]" />
+                            )}
+                          </button>
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-[#999] font-body text-sm">৳{(Number(ing.costPerUnit) / 100).toFixed(2)}</td>
                       <td className="px-4 py-3 text-[#999] font-body text-xs">
                         {ing.suppliers && ing.suppliers.length > 0
@@ -1749,6 +1807,64 @@ export default function InventoryPage() {
           </div>
         );
       })()}
+
+      {/* Auto Min-Stock recompute report — opens after the manual
+          "Recompute Min Stock" button finishes. Lists the most-changed
+          rows so admin can sanity-check before relying on the new
+          thresholds. Same pattern as the Pre-Ready "Auto-Link All"
+          report. */}
+      {minStockReport && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setMinStockReport(null)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-lg p-6 max-h-[85vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-xl text-white tracking-widest mb-4">MIN-STOCK RECOMPUTE</h2>
+            {minStockReport.window === 0 ? (
+              <p className="text-[#FFA726] font-body text-sm">
+                Auto Min-Stock is disabled. Set a non-zero <strong>Auto Min-Stock Window</strong> in Settings → Kitchen → Auto Min-Stock Window first.
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 text-center">
+                    <p className="text-2xl font-display text-white">{minStockReport.scanned}</p>
+                    <p className="text-[10px] tracking-widest uppercase text-[#666] mt-1">Scanned</p>
+                  </div>
+                  <div className="bg-[#0D0D0D] border border-[#4CAF50] p-3 text-center">
+                    <p className="text-2xl font-display text-[#4CAF50]">{minStockReport.updated}</p>
+                    <p className="text-[10px] tracking-widest uppercase text-[#666] mt-1">Updated</p>
+                  </div>
+                  <div className="bg-[#0D0D0D] border border-[#FFA726] p-3 text-center">
+                    <p className="text-2xl font-display text-[#FFA726]">{minStockReport.skipped}</p>
+                    <p className="text-[10px] tracking-widest uppercase text-[#666] mt-1">Unchanged</p>
+                  </div>
+                </div>
+                <p className="text-[#999] font-body text-xs mb-3">Window: last <strong className="text-white">{minStockReport.window}</strong> days of SALE + OPERATIONAL_USE consumption.</p>
+                {minStockReport.changes.length > 0 && (
+                  <div>
+                    <p className="text-[#4CAF50] text-xs font-body tracking-widest uppercase mb-2">Changes</p>
+                    <ul className="text-[#DDD] font-body text-xs space-y-1 max-h-64 overflow-auto">
+                      {minStockReport.changes
+                        .slice()
+                        .sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from))
+                        .map((c) => (
+                          <li key={c.ingredientId} className="flex justify-between gap-3">
+                            <span className="truncate">· {c.name}</span>
+                            <span className="text-[#666] text-[10px] shrink-0">{c.from.toFixed(2)} → <span className={c.to > c.from ? 'text-[#4CAF50]' : 'text-[#FFA726]'}>{c.to.toFixed(2)}</span></span>
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+            <button
+              onClick={() => setMinStockReport(null)}
+              className="mt-4 w-full bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

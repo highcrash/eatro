@@ -28,6 +28,7 @@ export class BranchSettingsService {
       tableTimerOrderToStartMin?: number | null;
       tableTimerStartToDoneMin?: number | null;
       tableTimerServedToClearMin?: number | null;
+      autoMinStockDays?: number;
     },
   ) {
     await this.getOrCreate(branchId);
@@ -42,6 +43,7 @@ export class BranchSettingsService {
         ...(dto.tableTimerOrderToStartMin !== undefined ? { tableTimerOrderToStartMin: dto.tableTimerOrderToStartMin } : {}),
         ...(dto.tableTimerStartToDoneMin !== undefined ? { tableTimerStartToDoneMin: dto.tableTimerStartToDoneMin } : {}),
         ...(dto.tableTimerServedToClearMin !== undefined ? { tableTimerServedToClearMin: dto.tableTimerServedToClearMin } : {}),
+        ...(dto.autoMinStockDays !== undefined ? { autoMinStockDays: Math.max(0, Math.floor(dto.autoMinStockDays)) } as any : {}),
       },
     });
     this.cache.delete(branchId);

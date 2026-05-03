@@ -89,7 +89,7 @@ export class IngredientController {
 
   @Patch(':id')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  async update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpdateIngredientDto) {
+  async update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpdateIngredientDto & { autoMinStock?: boolean }) {
     const before = await this.ingredientService.findOne(id, user.branchId).catch(() => null);
     const updated = await this.ingredientService.update(id, user.branchId, dto);
     void this.activityLog.log({
@@ -189,5 +189,30 @@ export class IngredientController {
   @Roles('OWNER')
   resyncVariantParents(@CurrentUser() user: JwtPayload) {
     return this.ingredientService.resyncAllVariantParents(user.branchId);
+  }
+
+  /**
+   * Recompute every eligible ingredient's minimumStock from its
+   * recent SALE + OPERATIONAL_USE consumption. Drives the manual
+   * "Recompute Min Stock" button on the Inventory page; mirrors the
+   * nightly IngredientScheduler (same service method).
+   *
+   * Optional `days` body field overrides the saved
+   * BranchSetting.autoMinStockDays for one-off "what would 60 days
+   * look like?" experiments without changing the saved setting.
+   * OWNER + MANAGER (it can rewrite hundreds of minimums in one
+   * click — keep it gated tighter than read-only operations).
+   */
+  @Post('recompute-minimum-stock')
+  @Roles('OWNER', 'MANAGER')
+  recomputeMinimumStock(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { days?: number } = {},
+  ) {
+    return this.ingredientService.recomputeMinimumStock(
+      user.branchId,
+      dto?.days,
+      { sub: user.sub, role: user.role },
+    );
   }
 }

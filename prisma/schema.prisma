@@ -304,6 +304,16 @@ model BranchSetting {
   tableTimerStartToDoneMin   Int? @default(40)
   tableTimerServedToClearMin Int? @default(35)
 
+  /// Lookback window (days) for the auto-min-stock recompute. When 0
+  /// (default) the feature is OFF — minimum stock stays whatever
+  /// admin manually set. When > 0, the nightly cron + the manual
+  /// "Recompute Min Stock" button both rewrite each ingredient's
+  /// minimumStock to the total quantity consumed (SALE +
+  /// OPERATIONAL_USE movements) over the last N days. Per-row
+  /// `Ingredient.autoMinStock` opts an individual ingredient out of
+  /// the rewrite.
+  autoMinStockDays           Int       @default(0)
+
   // ── Tipsoi attendance integration (Phase: HR) ──
   /// When true, hourly cron pulls Tipsoi /api/v1/logs and writes
   /// Attendance rows. Default off — existing branches keep their
@@ -1603,6 +1613,12 @@ model Ingredient {
   purchaseUnitQty Decimal   @default(1) @db.Decimal(14, 4)  // 1 purchaseUnit = X stock units (e.g., 1 PACK = 200 G)
   currentStock    Decimal   @default(0) @db.Decimal(14, 4)  // in stock unit
   minimumStock    Decimal   @default(0) @db.Decimal(14, 4)
+  /// When true (default), the nightly auto-min-stock cron + manual
+  /// "Recompute Min Stock" button will overwrite this row's
+  /// minimumStock with the auto-calculated value. Flip false on
+  /// items the admin wants to manage by hand (seasonal, slow-movers,
+  /// safety-stock items) so the recompute leaves them alone.
+  autoMinStock    Boolean   @default(true)
   costPerUnit     Decimal   @default(0) @db.Decimal(14, 4)  // cost in paisa per STOCK unit
   costPerPurchaseUnit Decimal @default(0) @db.Decimal(14, 4) // cost in paisa per PURCHASE unit
   isActive        Boolean   @default(true)
