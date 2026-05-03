@@ -126,7 +126,18 @@ export default function PreReadyPage() {
     });
   };
   const [editingItem, setEditingItem] = useState<PreReadyItem | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', minimumStock: '0', unit: 'PCS', autoDeductInputs: true });
+  const [editForm, setEditForm] = useState<{
+    name: string;
+    minimumStock: string;
+    unit: string;
+    autoDeductInputs: boolean;
+    /**
+     * Tri-state: undefined = field untouched (don't send), null = unlink,
+     * string = link to that ingredient id. Lets the API distinguish a
+     * deliberate unlink from "form just doesn't include this field".
+     */
+    producesIngredientId: string | null | undefined;
+  }>({ name: '', minimumStock: '0', unit: 'PCS', autoDeductInputs: true, producesIngredientId: undefined });
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRows, setBulkRows] = useState<{ preReadyItemName: string; yieldQuantity?: number; yieldUnit?: string; ingredientName: string; quantity: number; unit?: string }[]>([]);
@@ -365,6 +376,10 @@ export default function PreReadyPage() {
       // Only include unit when admin actually changed it — unchanged
       // units skip the strict gates on the server side.
       ...(editingItem && editForm.unit !== editingItem.unit ? { unit: editForm.unit } : {}),
+      // Only send the link field when admin touched it (tri-state on
+      // the form). Sending undefined leaves the existing pairing
+      // intact; null clears it; string sets/changes it.
+      ...(editForm.producesIngredientId !== undefined ? { producesIngredientId: editForm.producesIngredientId } : {}),
     }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['pre-ready-items'] });
@@ -524,6 +539,9 @@ Fried Onion,500,G,Oil,100,ML`;
       minimumStock: String(Number(item.minimumStock)),
       unit: item.unit,
       autoDeductInputs: (item as { autoDeductInputs?: boolean }).autoDeductInputs !== false,
+      // undefined = "untouched" — only send producesIngredientId on the
+      // PATCH if admin actually picked or cleared it in the dialog.
+      producesIngredientId: undefined,
     });
   };
 
@@ -1230,8 +1248,8 @@ function EditItemDialog({
   onSave,
 }: {
   item: PreReadyItem;
-  form: { name: string; minimumStock: string; unit: string; autoDeductInputs: boolean };
-  setForm: React.Dispatch<React.SetStateAction<{ name: string; minimumStock: string; unit: string; autoDeductInputs: boolean }>>;
+  form: { name: string; minimumStock: string; unit: string; autoDeductInputs: boolean; producesIngredientId: string | null | undefined };
+  setForm: React.Dispatch<React.SetStateAction<{ name: string; minimumStock: string; unit: string; autoDeductInputs: boolean; producesIngredientId: string | null | undefined }>>;
   units: string[];
   saving: boolean;
   error: Error | null;
@@ -1288,36 +1306,32 @@ function EditItemDialog({
             )}
           </div>
 
-          {/* Inventory ↔ Pre-Ready link explanation. The link is set
-              automatically the first time a production batch finishes
-              (the system creates / reuses an "[PR] <name>" Ingredient
-              row and stamps the link). After that, every menu sale
-              that consumes the linked Ingredient also decrements
-              this PreReadyItem so the two counters stay in sync. */}
-          <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-2">
-            <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase">
-              Linked Inventory Ingredient
-            </p>
-            <p className="text-[#999] font-body text-[11px]">
-              {(item as { producesIngredientId?: string | null }).producesIngredientId
-                ? 'Linked. Production bumps the linked inventory row; menu sales that consume it also decrement this pre-ready stock so both counters stay in sync.'
-                : 'Not yet linked. The link is created automatically the first time you complete a production batch — an "[PR] <name>" inventory row gets created (or reused) and paired with this pre-ready item.'}
-            </p>
-            <label className="flex items-start gap-2 pt-1 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.autoDeductInputs}
-                onChange={(e) => setForm((f) => ({ ...f, autoDeductInputs: e.target.checked }))}
-                className="mt-0.5"
-              />
-              <span className="text-[#DDD] font-body text-xs">
-                Auto-deduct input ingredients on production
-                <span className="block text-[#666] text-[10px]">
-                  When OFF, completing a production batch only adds the produced output and skips deducting the recipe's input ingredients from inventory. Use only if you reconcile raw stock manually.
-                </span>
+          {/* Inventory ↔ Pre-Ready link panel.
+              Auto-link: the link gets stamped automatically the first
+              time a production batch finishes (system creates / reuses
+              an "[PR] <name>" Ingredient row).
+              Manual link: this picker lets admin point the pre-ready
+              at any inventory ingredient — useful when the auto-link
+              never ran, the names diverged from the "[PR] <name>"
+              convention, or admin wants to repoint after a rename.
+              Once linked, every menu sale that consumes the linked
+              Ingredient also decrements this PreReadyItem. */}
+          <PreReadyLinkPanel item={item} form={form} setForm={setForm} />
+
+          <label className="flex items-start gap-2 pt-1 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.autoDeductInputs}
+              onChange={(e) => setForm((f) => ({ ...f, autoDeductInputs: e.target.checked }))}
+              className="mt-0.5"
+            />
+            <span className="text-[#DDD] font-body text-xs">
+              Auto-deduct input ingredients on production
+              <span className="block text-[#666] text-[10px]">
+                When OFF, completing a production batch only adds the produced output and skips deducting the recipe's input ingredients from inventory. Use only if you reconcile raw stock manually.
               </span>
-            </label>
-          </div>
+            </span>
+          </label>
         </div>
 
         {/* Menu-recipe impact warning. The [PR] mirror ingredient's
@@ -1351,6 +1365,147 @@ function EditItemDialog({
           <button onClick={onSave} disabled={!form.name || saving} className="flex-1 bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm py-2.5 transition-colors disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Inventory ↔ Pre-Ready manual link panel embedded inside the
+ * EditItemDialog. Reads /ingredients (admins already have access),
+ * lets admin pick / change / clear the pairing. Tri-state form
+ * value (undefined / null / id) lets the parent skip the field on
+ * the PATCH when admin didn't touch it — preserving any existing
+ * auto-stamped link.
+ */
+function PreReadyLinkPanel({
+  item,
+  form,
+  setForm,
+}: {
+  item: PreReadyItem;
+  form: { producesIngredientId: string | null | undefined };
+  setForm: React.Dispatch<React.SetStateAction<{ name: string; minimumStock: string; unit: string; autoDeductInputs: boolean; producesIngredientId: string | null | undefined }>>;
+}) {
+  const { data: ingredients = [] } = useQuery<Ingredient[]>({
+    queryKey: ['ingredients'],
+    queryFn: () => api.get('/ingredients'),
+  });
+
+  // Persisted value on the PreReadyItem row (stamped by auto-link or
+  // by a previous manual save). The picker reads this when the form
+  // hasn't been touched yet (form.producesIngredientId === undefined).
+  const persistedLinkId = (item as { producesIngredientId?: string | null }).producesIngredientId ?? null;
+  const effectiveId = form.producesIngredientId !== undefined
+    ? form.producesIngredientId
+    : persistedLinkId;
+  const linked = ingredients.find((i) => i.id === effectiveId) || null;
+
+  const [search, setSearch] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Guard: linking a variant-parent ingredient won't work cleanly —
+  // production yield needs to land on a single Ingredient row, not
+  // be split across variants. Strip parents from the picker.
+  const pickable = ingredients.filter((i) => !(i as { hasVariants?: boolean }).hasVariants);
+  const filtered = search.trim()
+    ? pickable.filter((i) => i.name.toLowerCase().includes(search.trim().toLowerCase()))
+    : pickable.slice(0, 50);
+
+  const dirty = form.producesIngredientId !== undefined && form.producesIngredientId !== persistedLinkId;
+
+  return (
+    <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-[#D62B2B] text-xs font-body font-medium tracking-widest uppercase">
+          Linked Inventory Ingredient
+        </p>
+        {dirty && <span className="text-[#FFA726] text-[10px] font-body uppercase tracking-widest">unsaved</span>}
+      </div>
+
+      {linked ? (
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-white font-body text-sm truncate">{linked.name}</p>
+            <p className="text-[#666] font-body text-[10px] uppercase tracking-widest">
+              {(linked as { itemCode?: string | null }).itemCode ?? linked.unit} · stock {Number(linked.currentStock).toFixed(2)} {linked.unit}
+            </p>
+          </div>
+          <div className="flex gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => { setSearch(''); setPickerOpen(true); }}
+              className="bg-[#161616] border border-[#2A2A2A] text-white text-[10px] font-body uppercase tracking-widest px-2.5 py-1 hover:border-[#D62B2B]"
+            >
+              Change
+            </button>
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, producesIngredientId: null }))}
+              className="bg-[#161616] border border-[#2A2A2A] text-[#FFA726] text-[10px] font-body uppercase tracking-widest px-2.5 py-1 hover:border-[#FFA726]"
+            >
+              Unlink
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[#999] font-body text-[11px]">
+            Not linked. Either complete a production batch (auto-creates the link),
+            or pick an existing inventory ingredient manually below.
+          </p>
+          <button
+            type="button"
+            onClick={() => { setSearch(''); setPickerOpen(true); }}
+            className="bg-[#161616] border border-[#2A2A2A] text-white text-[10px] font-body uppercase tracking-widest px-2.5 py-1 hover:border-[#D62B2B] shrink-0"
+          >
+            Link
+          </button>
+        </div>
+      )}
+
+      <p className="text-[#666] font-body text-[10px]">
+        Once linked, every menu sale that consumes the linked Ingredient also decrements
+        this pre-ready stock. <strong className="text-[#FFA726]">Be careful</strong>: if both
+        counters already hold stock, linking will cause future sales to deduct twice the visible
+        rate until reconciled. Take a one-time stock count after linking.
+      </p>
+
+      {pickerOpen && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]" onClick={() => setPickerOpen(false)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md p-4 max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-display text-lg text-white tracking-widest mb-3">PICK INVENTORY INGREDIENT</h3>
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search ingredients…"
+              className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] mb-3"
+            />
+            <div className="flex-1 overflow-auto space-y-1">
+              {filtered.length === 0 ? (
+                <p className="text-[#666] text-xs text-center py-6">No matches.</p>
+              ) : filtered.map((ing) => (
+                <button
+                  key={ing.id}
+                  onClick={() => { setForm((f) => ({ ...f, producesIngredientId: ing.id })); setPickerOpen(false); }}
+                  className="w-full text-left px-3 py-2 bg-[#0D0D0D] hover:bg-[#1A1A1A] border border-transparent hover:border-[#D62B2B]"
+                >
+                  <p className="text-white text-sm font-body">{ing.name}</p>
+                  <p className="text-[#666] text-[10px] uppercase tracking-widest">
+                    stock {Number(ing.currentStock).toFixed(2)} {ing.unit} · cost {(Number(ing.costPerUnit) / 100).toFixed(2)} / {ing.unit}
+                  </p>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setPickerOpen(false)}
+              className="mt-3 bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
