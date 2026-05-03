@@ -404,6 +404,21 @@ export default function PreReadyPage() {
     },
   });
 
+  const [backfillReport, setBackfillReport] = useState<{
+    scanned: number;
+    linkedCount: number;
+    skippedCount: number;
+    linked: Array<{ preReadyName: string }>;
+    skipped: Array<{ preReadyName: string; reason: string }>;
+  } | null>(null);
+  const backfillLinksMut = useMutation({
+    mutationFn: () => api.post<typeof backfillReport>('/pre-ready/items/backfill-links', {}),
+    onSuccess: (r) => {
+      setBackfillReport(r);
+      void qc.invalidateQueries({ queryKey: ['pre-ready-items'] });
+    },
+  });
+
   const deleteItemMut = useMutation({
     mutationFn: (id: string) => api.delete(`/pre-ready/items/${id}`),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['pre-ready-items'] }); setDeleteError(null); },
@@ -575,6 +590,17 @@ Fried Onion,500,G,Oil,100,ML`;
                 className="border border-[#FFA726] text-[#FFA726] hover:bg-[#FFA726] hover:text-black font-body text-sm px-4 py-2 transition-colors disabled:opacity-50"
               >
                 {recalcAllCostMut.isPending ? 'Recalculating…' : 'Recalculate Costs'}
+              </button>
+              <button
+                onClick={() => {
+                  if (!confirm('Auto-link every unlinked pre-ready item to its matching "[PR] <name>" inventory ingredient. Items already linked, name-collisions, and variant-parent ingredients are skipped silently. Re-running is safe.')) return;
+                  backfillLinksMut.mutate();
+                }}
+                disabled={backfillLinksMut.isPending}
+                title="One-shot retro-link: pair every unlinked pre-ready item with its matching inventory ingredient"
+                className="border border-[#4CAF50] text-[#4CAF50] hover:bg-[#4CAF50] hover:text-black font-body text-sm px-4 py-2 transition-colors disabled:opacity-50"
+              >
+                {backfillLinksMut.isPending ? 'Linking…' : 'Auto-Link All'}
               </button>
               <button onClick={() => setShowAddItem(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">+ ADD ITEM</button>
             </>
@@ -801,6 +827,62 @@ Fried Onion,500,G,Oil,100,ML`;
       )}
 
       {/* Edit Item Dialog */}
+      {/* Backfill-links report modal — shown after the "Auto-Link All"
+          button finishes. Lists every PR that got linked + every PR
+          that was skipped with the reason, so admin can decide which
+          skipped items need manual attention via the picker. */}
+      {backfillReport && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setBackfillReport(null)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-lg p-6 max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-xl text-white tracking-widest mb-4">AUTO-LINK REPORT</h2>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 text-center">
+                <p className="text-2xl font-display text-white">{backfillReport.scanned}</p>
+                <p className="text-[10px] tracking-widest uppercase text-[#666] mt-1">Scanned</p>
+              </div>
+              <div className="bg-[#0D0D0D] border border-[#4CAF50] p-3 text-center">
+                <p className="text-2xl font-display text-[#4CAF50]">{backfillReport.linkedCount}</p>
+                <p className="text-[10px] tracking-widest uppercase text-[#666] mt-1">Linked</p>
+              </div>
+              <div className="bg-[#0D0D0D] border border-[#FFA726] p-3 text-center">
+                <p className="text-2xl font-display text-[#FFA726]">{backfillReport.skippedCount}</p>
+                <p className="text-[10px] tracking-widest uppercase text-[#666] mt-1">Skipped</p>
+              </div>
+            </div>
+            {backfillReport.linked.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[#4CAF50] text-xs font-body tracking-widest uppercase mb-2">Newly linked</p>
+                <ul className="text-[#DDD] font-body text-xs space-y-1 max-h-32 overflow-auto">
+                  {backfillReport.linked.map((l, i) => <li key={i}>· {l.preReadyName}</li>)}
+                </ul>
+              </div>
+            )}
+            {backfillReport.skipped.length > 0 && (
+              <div>
+                <p className="text-[#FFA726] text-xs font-body tracking-widest uppercase mb-2">Skipped — manual decision needed</p>
+                <ul className="text-[#DDD] font-body text-xs space-y-1 max-h-40 overflow-auto">
+                  {backfillReport.skipped.map((s, i) => (
+                    <li key={i} className="flex justify-between gap-3">
+                      <span>· {s.preReadyName}</span>
+                      <span className="text-[#666] text-[10px]">{s.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[#666] font-body text-[10px] mt-2">
+                  Use the manual picker on each pre-ready item's edit dialog to resolve these.
+                </p>
+              </div>
+            )}
+            <button
+              onClick={() => setBackfillReport(null)}
+              className="mt-4 w-full bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm py-2"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
       {editingItem && <EditItemDialog
         item={editingItem}
         form={editForm}

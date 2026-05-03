@@ -47,13 +47,33 @@ export class PreReadyService {
       data: { branchId, name: dto.name, unit: dto.unit as any, minimumStock: dto.minimumStock ?? 0 },
     });
 
+    // Auto-link the new PreReadyItem to its inventory mirror immediately
+    // — no need to wait for the first production. Resolution order:
+    //   1) Existing "[PR] <name>" Ingredient — but ONLY if it isn't
+    //      already paired with another PreReadyItem AND isn't a
+    //      variant-parent (production yield can't split across variants).
+    //   2) Otherwise create a fresh "[PR] <name>" Ingredient.
+    // Either way, stamp the link on the PreReadyItem so menu sales
+    // mirror back into the correct counter from day one.
     const ingredientName = `[PR] ${item.name}`;
-    const existing = await this.prisma.ingredient.findFirst({
+    let mirror = await this.prisma.ingredient.findFirst({
       where: { branchId, name: ingredientName, deletedAt: null },
-      select: { id: true },
+      select: { id: true, hasVariants: true },
     });
-    if (!existing) {
-      await this.prisma.ingredient.create({
+    if (mirror) {
+      const claimed = await this.prisma.preReadyItem.findFirst({
+        where: { producesIngredientId: mirror.id, id: { not: item.id }, deletedAt: null },
+        select: { id: true },
+      });
+      // Skip the link silently when the Ingredient is already paired to
+      // another PreReadyItem or is a variant-parent — admin can wire
+      // it manually via the picker if they really intend to repoint.
+      if (claimed || mirror.hasVariants) {
+        mirror = null;
+      }
+    }
+    if (!mirror) {
+      const created = await this.prisma.ingredient.create({
         data: {
           branchId,
           name: ingredientName,
@@ -64,10 +84,74 @@ export class PreReadyService {
           costPerUnit: 0,
           itemCode: `PR-${item.id.slice(-6).toUpperCase()}`,
         },
+        select: { id: true, hasVariants: true },
       });
+      mirror = created;
     }
+    await this.prisma.preReadyItem.update({
+      where: { id: item.id },
+      data: { producesIngredientId: mirror.id } as any,
+    });
 
     return item;
+  }
+
+  /**
+   * One-shot retro-link sweep. Walks every PreReadyItem on the branch
+   * that doesn't have producesIngredientId set, finds the matching
+   * "[PR] <name>" Ingredient (when one exists, isn't already claimed,
+   * and isn't a variant-parent), and stamps the link. Returns a
+   * report so admin can see what got linked, what was skipped, and
+   * which items still need a manual decision.
+   *
+   * Idempotent — running it twice is a no-op the second time
+   * because the WHERE filter excludes items already linked.
+   */
+  async backfillLinks(branchId: string) {
+    const candidates = await this.prisma.preReadyItem.findMany({
+      where: { branchId, deletedAt: null, producesIngredientId: null } as any,
+      select: { id: true, name: true },
+    });
+
+    const linked: Array<{ preReadyId: string; preReadyName: string; ingredientId: string }> = [];
+    const skipped: Array<{ preReadyId: string; preReadyName: string; reason: string }> = [];
+
+    for (const pr of candidates) {
+      const ingredientName = `[PR] ${pr.name}`;
+      const mirror = await this.prisma.ingredient.findFirst({
+        where: { branchId, name: ingredientName, deletedAt: null },
+        select: { id: true, hasVariants: true },
+      });
+      if (!mirror) {
+        skipped.push({ preReadyId: pr.id, preReadyName: pr.name, reason: `No "${ingredientName}" ingredient found` });
+        continue;
+      }
+      if (mirror.hasVariants) {
+        skipped.push({ preReadyId: pr.id, preReadyName: pr.name, reason: 'Matched ingredient is a variant-parent (would split production yield)' });
+        continue;
+      }
+      const claimed = await this.prisma.preReadyItem.findFirst({
+        where: { producesIngredientId: mirror.id, deletedAt: null } as any,
+        select: { id: true, name: true },
+      });
+      if (claimed) {
+        skipped.push({ preReadyId: pr.id, preReadyName: pr.name, reason: `Ingredient already linked to "${claimed.name}"` });
+        continue;
+      }
+      await this.prisma.preReadyItem.update({
+        where: { id: pr.id },
+        data: { producesIngredientId: mirror.id } as any,
+      });
+      linked.push({ preReadyId: pr.id, preReadyName: pr.name, ingredientId: mirror.id });
+    }
+
+    return {
+      scanned: candidates.length,
+      linkedCount: linked.length,
+      skippedCount: skipped.length,
+      linked,
+      skipped,
+    };
   }
 
   async updateItem(
