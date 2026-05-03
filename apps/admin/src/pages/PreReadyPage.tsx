@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link2, Link2Off } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 import type { PreReadyItem, ProductionOrder, PreReadyBatch, Ingredient, ProductionStatus, Recipe } from '@restora/types';
@@ -685,7 +686,28 @@ Fried Onion,500,G,Oil,100,ML`;
                 const cost = calcPreReadyCost(item, ingredients);
                 return (
                   <tr key={item.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
-                    <td className="px-4 py-3 text-white font-body text-sm">{item.name}</td>
+                    <td className="px-4 py-3 text-white font-body text-sm">
+                      <span className="inline-flex items-center gap-1.5">
+                        {(item as { producesIngredientId?: string | null }).producesIngredientId ? (
+                          <Link2
+                            size={12}
+                            className="text-[#4CAF50] shrink-0"
+                            aria-label="Linked to inventory"
+                          >
+                            <title>Linked to inventory — stock mirrored from the [PR] ingredient</title>
+                          </Link2>
+                        ) : (
+                          <Link2Off
+                            size={12}
+                            className="text-[#666] shrink-0"
+                            aria-label="Not linked to inventory"
+                          >
+                            <title>Not linked — open Edit and pick (or run Auto-Link All)</title>
+                          </Link2Off>
+                        )}
+                        {item.name}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-[#999] font-body text-xs">{item.unit}</td>
                     <td className="px-4 py-3"><span className={`font-body text-sm ${isLow ? 'text-[#D62B2B]' : 'text-white'}`}>{Number(item.currentStock).toFixed(2)}{isLow && ' \u25bc'}</span></td>
                     <td className="px-4 py-3 text-[#999] font-body text-xs">{Number(item.minimumStock).toFixed(2)}</td>
