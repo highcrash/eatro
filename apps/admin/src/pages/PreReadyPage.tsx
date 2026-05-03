@@ -1546,10 +1546,9 @@ function PreReadyLinkPanel({
       )}
 
       <p className="text-[#666] font-body text-[10px]">
-        Once linked, every menu sale that consumes the linked Ingredient also decrements
-        this pre-ready stock. <strong className="text-[#FFA726]">Be careful</strong>: if both
-        counters already hold stock, linking will cause future sales to deduct twice the visible
-        rate until reconciled. Take a one-time stock count after linking.
+        Inventory is the single source of truth. The moment you link, this pre-ready item's stock
+        snaps to whatever the linked inventory ingredient holds and follows it from then on. Any
+        previous pre-ready stock value is discarded.
       </p>
 
       {pickerOpen && (

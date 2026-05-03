@@ -14,12 +14,19 @@ export class PreReadyService {
 
   // ── Pre-Ready Items ───────────────────────────────────────────────────────
 
-  findAllItems(branchId: string) {
-    return this.prisma.preReadyItem.findMany({
+  async findAllItems(branchId: string) {
+    const items = await this.prisma.preReadyItem.findMany({
       where: { branchId, deletedAt: null },
-      include: { recipe: { include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true } } } } } } },
+      include: {
+        recipe: { include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true } } } } } },
+        // Pull the linked Ingredient's currentStock so we can overlay
+        // it onto PreReadyItem.currentStock — see overlayLinkedStock
+        // for the why.
+        producesIngredient: { select: { id: true, currentStock: true } },
+      },
       orderBy: { name: 'asc' },
     });
+    return items.map((it) => this.overlayLinkedStock(it));
   }
 
   async findOneItem(id: string, branchId: string) {
@@ -28,10 +35,26 @@ export class PreReadyService {
       include: {
         recipe: { include: { items: { include: { ingredient: { select: { id: true, name: true, unit: true } } } } } },
         batches: { where: { remainingQty: { gt: 0 } }, orderBy: { expiryDate: 'asc' } },
+        producesIngredient: { select: { id: true, currentStock: true } },
       },
     });
     if (!item) throw new NotFoundException(`Pre-ready item ${id} not found`);
-    return item;
+    return this.overlayLinkedStock(item);
+  }
+
+  /**
+   * When a PreReadyItem is linked to an inventory Ingredient, the
+   * Ingredient is the single source of truth — every menu sale
+   * deducts it directly. The PreReadyItem.currentStock column may be
+   * stale (legacy data, drift before linking, etc.) so we overlay
+   * the linked Ingredient's currentStock onto the response so the UI
+   * always shows the true value. Unlinked items return as-is.
+   */
+  private overlayLinkedStock<T extends { producesIngredient?: { currentStock: unknown } | null; currentStock: unknown }>(it: T): T {
+    if (it.producesIngredient && it.producesIngredient.currentStock != null) {
+      return { ...it, currentStock: it.producesIngredient.currentStock };
+    }
+    return it;
   }
 
   /**
@@ -72,6 +95,7 @@ export class PreReadyService {
         mirror = null;
       }
     }
+    let snapStock = 0;
     if (!mirror) {
       const created = await this.prisma.ingredient.create({
         data: {
@@ -87,10 +111,19 @@ export class PreReadyService {
         select: { id: true, hasVariants: true },
       });
       mirror = created;
+    } else {
+      // Existing mirror — read its currentStock so the new
+      // PreReadyItem.currentStock can snap to it. Keeps inventory as
+      // the single source of truth from the moment the link is made.
+      const full = await this.prisma.ingredient.findUnique({
+        where: { id: mirror.id },
+        select: { currentStock: true },
+      });
+      if (full) snapStock = Number(full.currentStock);
     }
     await this.prisma.preReadyItem.update({
       where: { id: item.id },
-      data: { producesIngredientId: mirror.id } as any,
+      data: { producesIngredientId: mirror.id, currentStock: snapStock } as any,
     });
 
     return item;
@@ -138,9 +171,16 @@ export class PreReadyService {
         skipped.push({ preReadyId: pr.id, preReadyName: pr.name, reason: `Ingredient already linked to "${claimed.name}"` });
         continue;
       }
+      // Snap PreReadyItem.currentStock to match the inventory side at
+      // link time — inventory is now the single source of truth.
+      const ingFull = await this.prisma.ingredient.findUnique({
+        where: { id: mirror.id },
+        select: { currentStock: true },
+      });
+      const snapStock = ingFull ? Number(ingFull.currentStock) : 0;
       await this.prisma.preReadyItem.update({
         where: { id: pr.id },
-        data: { producesIngredientId: mirror.id } as any,
+        data: { producesIngredientId: mirror.id, currentStock: snapStock } as any,
       });
       linked.push({ preReadyId: pr.id, preReadyName: pr.name, ingredientId: mirror.id });
     }
@@ -198,6 +238,21 @@ export class PreReadyService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // When admin sets a NEW link (or changes it), snap
+      // PreReadyItem.currentStock to match the linked Ingredient's
+      // currentStock immediately. Inventory is the single source of
+      // truth — so the moment the link is established, the
+      // PreReadyItem column adopts the inventory value. Previously
+      // both counters could hold different stock at link time, which
+      // caused the "double-deduct until reconciled" footgun.
+      let snapStock: number | null = null;
+      if (dto.producesIngredientId && dto.producesIngredientId !== (item as { producesIngredientId?: string | null }).producesIngredientId) {
+        const target = await tx.ingredient.findFirst({
+          where: { id: dto.producesIngredientId, branchId, deletedAt: null },
+          select: { currentStock: true },
+        });
+        if (target) snapStock = Number(target.currentStock);
+      }
       const updated = await tx.preReadyItem.update({
         where: { id },
         data: {
@@ -206,6 +261,7 @@ export class PreReadyService {
           ...(unitChanged ? { unit: dto.unit as any } : {}),
           ...(dto.autoDeductInputs !== undefined ? { autoDeductInputs: dto.autoDeductInputs } as any : {}),
           ...(dto.producesIngredientId !== undefined ? { producesIngredientId: dto.producesIngredientId } as any : {}),
+          ...(snapStock !== null ? { currentStock: snapStock } : {}),
         },
       });
 
