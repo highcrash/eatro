@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { PreReadyService } from './pre-ready.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -9,7 +10,10 @@ import type { JwtPayload, CreatePreReadyItemDto, UpsertPreReadyRecipeDto, Create
 @Controller('pre-ready')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PreReadyController {
-  constructor(private readonly preReadyService: PreReadyService) {}
+  constructor(
+    private readonly preReadyService: PreReadyService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   // Items
   @Get('items')
@@ -26,18 +30,33 @@ export class PreReadyController {
 
   @Post('items')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  createItem(@CurrentUser() user: JwtPayload, @Body() dto: CreatePreReadyItemDto) {
-    return this.preReadyService.createItem(user.branchId, dto);
+  async createItem(@CurrentUser() user: JwtPayload, @Body() dto: CreatePreReadyItemDto) {
+    const created = await this.preReadyService.createItem(user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'PRE_READY', action: 'CREATE',
+      entityType: 'preReadyItem', entityId: (created as any).id, entityName: (created as any).name,
+      after: created as any,
+      summary: `Created pre-ready "${(created as any).name}"`,
+    });
+    return created;
   }
 
   @Patch('items/:id')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  updateItem(
+  async updateItem(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: { name?: string; minimumStock?: number; unit?: string; autoDeductInputs?: boolean; producesIngredientId?: string | null },
   ) {
-    return this.preReadyService.updateItem(id, user.branchId, dto);
+    const before = await this.preReadyService.findOneItem(id, user.branchId).catch(() => null);
+    const updated = await this.preReadyService.updateItem(id, user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'PRE_READY', action: 'UPDATE',
+      entityType: 'preReadyItem', entityId: (updated as any).id, entityName: (updated as any).name,
+      before: before as any, after: updated as any,
+      summary: `Updated pre-ready "${(updated as any).name}"`,
+    });
+    return updated;
   }
 
   // Surfaces the menu recipes that reference this pre-ready's `[PR]`
@@ -52,8 +71,18 @@ export class PreReadyController {
 
   @Delete('items/:id')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  removeItem(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.preReadyService.removeItem(id, user.branchId);
+  async removeItem(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    const before = await this.preReadyService.findOneItem(id, user.branchId).catch(() => null);
+    const result = await this.preReadyService.removeItem(id, user.branchId);
+    if (before) {
+      void this.activityLog.log({
+        branchId: user.branchId, actor: user, category: 'PRE_READY', action: 'DELETE',
+        entityType: 'preReadyItem', entityId: (before as any).id, entityName: (before as any).name,
+        before: before as any,
+        summary: `Deleted pre-ready "${(before as any).name}"`,
+      });
+    }
+    return result;
   }
 
   @Post('items/:id/recalc-cost')
@@ -71,13 +100,26 @@ export class PreReadyController {
   // Recipes
   @Put('items/:id/recipe')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  upsertRecipe(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpsertPreReadyRecipeDto) {
-    return this.preReadyService.upsertRecipe(id, user.branchId, dto);
+  async upsertRecipe(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpsertPreReadyRecipeDto) {
+    // Capture the prior recipe so the activity log carries a real
+    // before/after diff (the headline use-case is "who added that
+    // missing 200ml of garlic to the Curry Sauce recipe last night?").
+    const beforeItem = await this.preReadyService.findOneItem(id, user.branchId).catch(() => null);
+    const before = (beforeItem as any)?.recipe ?? null;
+    const updated = await this.preReadyService.upsertRecipe(id, user.branchId, dto);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'PRE_READY', action: 'UPDATE',
+      entityType: 'preReadyRecipe', entityId: id,
+      entityName: (beforeItem as any)?.name ?? `pre-ready ${id}`,
+      before: before as any, after: updated as any,
+      summary: `Updated pre-ready recipe (${(dto as any)?.items?.length ?? 0} ingredient lines, yield ${(dto as any)?.yieldQuantity ?? '?'} ${(dto as any)?.yieldUnit ?? ''})`,
+    });
+    return updated;
   }
 
   @Post('recipes/bulk')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
-  bulkUpsertRecipes(
+  async bulkUpsertRecipes(
     @CurrentUser() user: JwtPayload,
     @Body() dto: {
       rows: {
@@ -90,7 +132,15 @@ export class PreReadyController {
       }[];
     },
   ) {
-    return this.preReadyService.bulkUpsertRecipes(user.branchId, dto.rows);
+    const result = await this.preReadyService.bulkUpsertRecipes(user.branchId, dto.rows);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'PRE_READY', action: 'UPDATE',
+      entityType: 'preReadyRecipe', entityId: 'bulk',
+      entityName: `Bulk recipe import (${dto.rows.length} rows)`,
+      after: result as any,
+      summary: `Bulk pre-ready recipe import: ${dto.rows.length} row(s)`,
+    });
+    return result;
   }
 
   // Production Orders
@@ -120,8 +170,18 @@ export class PreReadyController {
 
   @Post('productions/:id/complete')
   @Roles('OWNER', 'MANAGER', 'KITCHEN', 'CASHIER', 'ADVISOR')
-  completeProduction(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: CompleteProductionDto) {
-    return this.preReadyService.completeProduction(id, user.branchId, dto);
+  async completeProduction(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: CompleteProductionDto) {
+    const result = await this.preReadyService.completeProduction(id, user.branchId, dto);
+    const itemName = (result as any)?.preReadyItem?.name ?? (result as any)?.preReadyItemId ?? id;
+    const qty = (result as any)?.quantity ?? '?';
+    const unit = (result as any)?.preReadyItem?.unit ?? '';
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'PRE_READY', action: 'UPDATE',
+      entityType: 'productionOrder', entityId: id, entityName: `${itemName} batch`,
+      after: result as any,
+      summary: `Production completed: ${itemName} ×${qty}${unit ? ' ' + unit : ''}`,
+    });
+    return result;
   }
 
   @Post('productions/:id/cancel')
