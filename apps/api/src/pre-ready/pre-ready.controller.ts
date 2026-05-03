@@ -97,6 +97,26 @@ export class PreReadyController {
     return this.preReadyService.recalcAllCosts(user.branchId);
   }
 
+  /**
+   * One-shot retro-link: walks every unlinked PreReadyItem and stamps
+   * producesIngredientId when a matching "[PR] <name>" Ingredient
+   * exists, isn't already claimed, and isn't a variant-parent. Returns
+   * a report so admin sees what got linked + which items need manual
+   * attention. Idempotent — re-running is safe.
+   */
+  @Post('items/backfill-links')
+  @Roles('OWNER', 'MANAGER')
+  async backfillLinks(@CurrentUser() user: JwtPayload) {
+    const result = await this.preReadyService.backfillLinks(user.branchId);
+    void this.activityLog.log({
+      branchId: user.branchId, actor: user, category: 'PRE_READY', action: 'UPDATE',
+      entityType: 'preReadyItem', entityId: 'backfill-links', entityName: 'Backfill PR ↔ Inventory links',
+      after: result as any,
+      summary: `Backfill linked ${result.linkedCount} of ${result.scanned} unlinked pre-ready items (${result.skippedCount} skipped)`,
+    });
+    return result;
+  }
+
   // Recipes
   @Put('items/:id/recipe')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
