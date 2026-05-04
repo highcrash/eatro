@@ -130,7 +130,19 @@ export default function QrOrderApp() {
   }, [resolvedBranchId, checkGate]);
 
   if (resolvedBranchId === 'resolving') return <Checking />;
-  if (resolvedBranchId === null) return <Checking />;
+  // Fresh visit, no /table/:id in URL, no session — there's nothing
+  // to gate yet. Send them straight to /scan so they can capture a
+  // table tent. Without this branch the app sat on <Checking/> forever
+  // and the in-app scanner was unreachable for true cold-start users.
+  if (resolvedBranchId === null) {
+    return (
+      <Routes>
+        <Route path="/scan" element={<ScanPage />} />
+        <Route path="/table/:tableId" element={<TableEntry />} />
+        <Route path="*" element={<Navigate to="/scan" replace />} />
+      </Routes>
+    );
+  }
   if (gate === null || gate === 'loading') return <Checking />;
   if (!gate.allowed) {
     return <WifiGate payload={gate} onAllowed={() => setGate({ ...gate, allowed: true })} />;

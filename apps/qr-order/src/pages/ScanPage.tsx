@@ -42,18 +42,35 @@ export default function ScanPage() {
     };
   }, []);
 
+  /**
+   * Pull a tableId out of a scanned/pasted payload. Accepts:
+   *   - bare cuid (e.g. "cl1234567890abcdef") — used as-is
+   *   - URL containing /table/{cuid} — extracts the cuid
+   * Anything else (a URL with no /table/ segment, junk QR code,
+   * empty string) returns null so the caller can show "not a table
+   * code" instead of navigating to /table/garbage and 404'ing.
+   */
+  const extractTableId = (decoded: string): string | null => {
+    const trimmed = decoded.trim();
+    if (!trimmed) return null;
+    const match = /\/table\/([a-z0-9-]+)/i.exec(trimmed);
+    if (match) return match[1];
+    // Bare-cuid path: must look like an opaque identifier (no scheme,
+    // no slashes, plausible length). Reject `https://...` style URLs
+    // that didn't match the /table/ pattern — navigating to
+    // /table/{full-url} would just 404.
+    if (/^[a-z0-9_-]{8,}$/i.test(trimmed)) return trimmed;
+    return null;
+  };
+
   const handleDecoded = async (decoded: string) => {
     // Stop the scanner before navigating so the camera releases —
     // otherwise the next route briefly shows a frozen viewfinder.
     const s = scannerRef.current;
     if (s) await s.stop().catch(() => {});
 
-    // Two accepted shapes: a full URL (https://qr.example.com/table/cuid)
-    // or just the bare tableId. We extract / accept either, then
-    // hand off to TableEntry which owns all the auth + dedupe logic.
-    const match = /\/table\/([a-z0-9-]+)/i.exec(decoded);
-    const tableId = match ? match[1] : decoded.trim();
-    if (!tableId || tableId.length < 6) {
+    const tableId = extractTableId(decoded);
+    if (!tableId) {
       setErrorMsg('That QR code doesn\'t look like a table code. Try again.');
       setPhase('error');
       return;
@@ -63,11 +80,33 @@ export default function ScanPage() {
 
   const startScanner = async () => {
     setErrorMsg(null);
-    if (!containerRef.current) return;
+    // Container is now ALWAYS rendered (just hidden until phase
+    // flips to scanning) — earlier we conditionally mounted it on
+    // phase === 'scanning' which meant the ref was null when the
+    // button click ran startScanner from the idle screen, and the
+    // function silently bailed on `if (!containerRef.current) return`.
+    // That was the "Start camera button does nothing" bug.
+    if (!containerRef.current) {
+      setErrorMsg('Scanner failed to mount. Reload the page.');
+      setPhase('error');
+      return;
+    }
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      // Older browsers / non-secure context (http:// without
+      // localhost) — getUserMedia is undefined. Surface a helpful
+      // message instead of a cryptic "is not a function".
+      setErrorMsg('Your browser blocked camera access. Open this page over HTTPS or use the manual entry below.');
+      setPhase('error');
+      return;
+    }
     try {
       // Mounted DIV must have a stable id — html5-qrcode targets it
       // by id (not by ref). Set it once before instantiation.
       containerRef.current.id = 'qr-scanner-region';
+      // Flip UI first so the viewfinder slot is visible while the
+      // camera spins up (1–2 s on cold WebView). Otherwise users
+      // tap the button, see no UI change for a beat, and tap again.
+      setPhase('scanning');
       const scanner = new Html5Qrcode('qr-scanner-region', { verbose: false });
       scannerRef.current = scanner;
 
@@ -81,9 +120,9 @@ export default function ScanPage() {
         (decoded) => { void handleDecoded(decoded); },
         () => { /* per-frame failures are noisy and not actionable */ },
       );
-      setPhase('scanning');
     } catch (e) {
       const msg = (e as Error)?.message ?? 'Camera failed';
+      scannerRef.current = null;
       // The browser throws a NotAllowedError when the user denied or
       // dismissed the permission prompt. Surface a different fallback
       // path (manual paste) instead of the generic error screen.
@@ -97,8 +136,13 @@ export default function ScanPage() {
   };
 
   const submitManual = () => {
-    if (manualId.trim().length < 6) return;
-    void navigate(`/table/${manualId.trim()}`, { replace: true });
+    const tableId = extractTableId(manualId);
+    if (!tableId) {
+      setErrorMsg('That doesn\'t look like a table code. Paste either the bare id or a /table/{id} URL.');
+      setPhase('error');
+      return;
+    }
+    void navigate(`/table/${tableId}`, { replace: true });
   };
 
   return (
@@ -122,6 +166,18 @@ export default function ScanPage() {
       </div>
 
       <div className="px-5 pb-10 space-y-5">
+        {/* The viewfinder div is ALWAYS in the DOM — html5-qrcode
+            targets it by id, and earlier we mounted it conditionally
+            on phase === 'scanning' which made the ref null at the
+            moment the user tapped Start (the button's startScanner
+            silently bailed). Hide via display:none until scanning so
+            the layout stays clean in idle/denied/error states. */}
+        <div
+          ref={containerRef}
+          className="w-full aspect-square bg-black border border-[#2A2A2A] overflow-hidden"
+          style={{ display: phase === 'scanning' ? 'block' : 'none' }}
+        />
+
         {phase === 'idle' && (
           <>
             <div className="bg-[#1A1A1A] border border-[#2A2A2A] p-5 text-center space-y-4">
@@ -146,12 +202,9 @@ export default function ScanPage() {
         )}
 
         {phase === 'scanning' && (
-          <div className="space-y-4">
-            <div ref={containerRef} className="w-full aspect-square bg-black border border-[#2A2A2A] overflow-hidden" />
-            <p className="text-center text-xs font-body text-[#888]">
-              Centre the QR code in the frame. The page jumps when it's read.
-            </p>
-          </div>
+          <p className="text-center text-xs font-body text-[#888]">
+            Centre the QR code in the frame. The page jumps when it's read.
+          </p>
         )}
 
         {phase === 'denied' && (
