@@ -132,9 +132,17 @@ export default function OrderStatusPage() {
     retry: 1,
   });
 
-  // Clear active order when cancelled/voided
+  // Clear active order on EVERY terminal status — paid, served,
+  // voided, cancelled, refunded. Used to only clear on VOID /
+  // CANCELLED, which left activeOrderId pointing at the just-paid
+  // order in localStorage; the customer would land back on /menu,
+  // see "View active order", tap it, and the cart would happily
+  // POST new items into a closed order. Anything that's no longer
+  // editable from the QR side gets the local pointer cleared.
   useEffect(() => {
-    if (order && (order.status === 'VOID' || order.status === 'CANCELLED')) {
+    if (!order) return;
+    const terminal = ['PAID', 'SERVED', 'VOID', 'CANCELLED', 'REFUNDED'];
+    if (terminal.includes(order.status)) {
       setActiveOrder(null);
     }
   }, [order?.status, setActiveOrder]);
