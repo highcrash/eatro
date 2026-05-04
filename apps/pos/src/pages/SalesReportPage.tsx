@@ -43,27 +43,42 @@ interface SalesData {
 // shortCode moved to @restora/utils as shortOrderCode so the receipt
 // print + sales report show the same opaque order code.
 
-// Pick ~10% random orders per month from a list, seeded by month for consistency
-function sampleByMonth(orders: SalesOrder[]): SalesOrder[] {
-  const byMonth: Record<string, SalesOrder[]> = {};
+// Pick ~12% random orders PER DAY from a list, deterministic per
+// (day, id). The previous implementation grouped by month, which made
+// short ranges (e.g. 01–04 May) look like they only had orders on a
+// single day — the deterministic sort by char-sum collapsed the
+// sample onto whichever day had the lowest hash. Sampling per day
+// guarantees every day with orders is represented.
+//
+// Math: take ceil(dayCount * 0.12), clamped to ≥1 (so a day with 5
+// orders shows 1, a day with 50 shows 6). 12% sits in the requested
+// 10–15% band and rounds up so a "1 order in the day" case still
+// shows that order.
+function sampleByDay(orders: SalesOrder[]): SalesOrder[] {
+  const byDay: Record<string, SalesOrder[]> = {};
   for (const o of orders) {
-    const key = o.paidAt.slice(0, 7); // YYYY-MM
-    (byMonth[key] ??= []).push(o);
+    const key = o.paidAt.slice(0, 10); // YYYY-MM-DD
+    (byDay[key] ??= []).push(o);
   }
 
+  const SAMPLE_RATE = 0.12;
   const result: SalesOrder[] = [];
-  for (const [, monthOrders] of Object.entries(byMonth)) {
-    const count = Math.max(1, Math.ceil(monthOrders.length * 0.1));
-    // Deterministic shuffle using order IDs
-    const shuffled = [...monthOrders].sort((a, b) => {
-      const ha = a.id.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
-      const hb = b.id.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
-      return ha - hb;
-    });
+  for (const [, dayOrders] of Object.entries(byDay)) {
+    const count = Math.min(dayOrders.length, Math.max(1, Math.ceil(dayOrders.length * SAMPLE_RATE)));
+    // Deterministic shuffle by full ID hash (same algorithm as
+    // shortOrderCode) — much better mix than the old char-sum sort
+    // which biased toward orders with low-ASCII ids.
+    const shuffled = [...dayOrders].sort((a, b) => hashId(a.id) - hashId(b.id));
     result.push(...shuffled.slice(0, count));
   }
 
   return result.sort((a, b) => new Date(a.paidAt).getTime() - new Date(b.paidAt).getTime());
+}
+
+function hashId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  return Math.abs(h);
 }
 
 function formatTime(dateStr: string): string {
@@ -298,10 +313,11 @@ export default function SalesReportPage() {
       return allOrders;
     }
 
-    // Date range: skip today's data, show 10% random per month
+    // Date range: skip today's data, show ~12% per day so every day
+    // in the selected window is represented in the sample.
     const todayStr = today;
     const filtered = allOrders.filter((o) => !o.paidAt.startsWith(todayStr));
-    return sampleByMonth(filtered);
+    return sampleByDay(filtered);
   }, [data, mode, today]);
 
   const isToday = mode === 'today';
@@ -451,7 +467,15 @@ export default function SalesReportPage() {
           )}
           <span className="text-xs text-theme-text-muted ml-auto font-semibold">
             {displayOrders.length} order{displayOrders.length !== 1 ? 's' : ''}
-            {!isToday && data ? ` (sampled from ${data.orders.filter((o) => !o.paidAt.startsWith(today)).length})` : ''}
+            {(() => {
+              if (isToday || !data) return '';
+              const totalEligible = data.orders.filter((o) => !o.paidAt.startsWith(today)).length;
+              // Hide the parenthetical when there's nothing to sample
+              // OR when the sample equals the source (trivial case);
+              // it just adds noise in both cases.
+              if (totalEligible === 0 || totalEligible === displayOrders.length) return '';
+              return ` (sampled from ${totalEligible})`;
+            })()}
           </span>
         </div>
       ) : (
