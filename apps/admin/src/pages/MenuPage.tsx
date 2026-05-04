@@ -225,6 +225,7 @@ function ItemDialog({
     prepTime: initial?.prepTime ?? '',
     spiceLevel: initial?.spiceLevel ?? '',
     websiteVisible: initial?.websiteVisible ?? true,
+    excludeFromTopSelling: (initial as any)?.excludeFromTopSelling ?? false,
     seoTitle: (initial as any)?.seoTitle ?? '',
     seoDescription: (initial as any)?.seoDescription ?? '',
     isVariantParent: initial?.isVariantParent ?? false,
@@ -298,6 +299,7 @@ function ItemDialog({
         prepTime: form.prepTime || null,
         spiceLevel: form.spiceLevel || null,
         websiteVisible: form.websiteVisible,
+        excludeFromTopSelling: form.excludeFromTopSelling,
         seoTitle: form.seoTitle || null,
         seoDescription: form.seoDescription || null,
       };
@@ -528,6 +530,15 @@ function ItemDialog({
             <label className="flex items-center gap-2 text-sm font-body text-[#999]">
               <input type="checkbox" checked={form.websiteVisible} onChange={(e) => set('websiteVisible', e.target.checked)} className="accent-[#D62B2B]" />
               Show on website
+            </label>
+            <label className="flex items-start gap-2 text-sm font-body text-[#999]" title="Hide from the Top Selling slider on QR + website (item still appears in its category and elsewhere). Use for high-volume utility items like water, cola, plain rice that always dominate the top-N and crowd out the dishes you want to merchandise.">
+              <input type="checkbox" checked={form.excludeFromTopSelling} onChange={(e) => set('excludeFromTopSelling', e.target.checked)} className="accent-[#D62B2B] mt-0.5" />
+              <span>
+                Exclude from Top Selling
+                <span className="block text-[10px] text-[#666] font-body mt-0.5">
+                  Hides this item from the Top Selling slider only — still shows in its category. Useful for water, cola, etc.
+                </span>
+              </span>
             </label>
             <div className="border-t border-[#2A2A2A] pt-2 mt-2 space-y-2">
               <p className="text-[#666] text-[10px] font-body tracking-widest uppercase">SEO (optional)</p>

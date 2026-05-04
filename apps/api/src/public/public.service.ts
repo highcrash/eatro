@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Fields safe to expose on the public website. Keep this list tight —
@@ -609,6 +610,67 @@ export class PublicService {
       select: { ...PUBLIC_MENU_ITEM_SELECT, category: { select: PUBLIC_CATEGORY_SELECT } },
     });
     return this.applyDiscounts(branchId, fallbackItems);
+  }
+
+  /**
+   * Pure top-selling — items ranked by total paid quantity, with
+   * the per-item `excludeFromTopSelling` flag honoured so utility
+   * items (water, cola, plain rice) don't crowd out the actually-
+   * interesting dishes admin wants to merchandise. Uses raw SQL for
+   * the exclude check + over-fetches the aggregation by 2× (then
+   * trims to `take` after filtering) so the result still has `take`
+   * rows even when several top sellers are excluded.
+   *
+   * Distinct from `getRecommended`: that endpoint has a "Chef
+   * Special" tag fallback that REPLACES top-selling when any item
+   * is tagged. The QR/web sliders need actual top-selling, so this
+   * is the dedicated path.
+   */
+  async getTopSelling(branchId: string, take = 10) {
+    const overFetch = take * 2;
+    const grouped = await this.prisma.orderItem.groupBy({
+      by: ['menuItemId'],
+      where: {
+        order: { branchId, status: 'PAID' },
+        menuItem: {
+          deletedAt: null,
+          isAvailable: true,
+          websiteVisible: true,
+          isVariantParent: false,
+          isAddon: false,
+        },
+      },
+      _sum: { quantity: true },
+      orderBy: { _sum: { quantity: 'desc' } },
+      take: overFetch,
+    });
+    if (grouped.length === 0) return [];
+    const ids = grouped.map((g) => g.menuItemId);
+
+    // Filter out excludeFromTopSelling rows. Prisma 5.x include in
+    // findMany honours the flag now that the migration ran, but we
+    // route via raw SQL for the same stale-client safety net the
+    // qrGate fields use — a missing-migration error is loud here
+    // instead of a silent "exclude flag ignored" bug.
+    const excluded = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "menu_items"
+      WHERE "id" IN (${Prisma.join(ids)}) AND "excludeFromTopSelling" = true
+    `;
+    const excludeSet = new Set(excluded.map((r) => r.id));
+
+    // Preserve the popularity order while filtering — Map of
+    // menuItemId → rank so the final select is sorted to match the
+    // groupBy order, not Prisma's default (which is by id).
+    const orderedIds = ids.filter((id) => !excludeSet.has(id)).slice(0, take);
+    if (orderedIds.length === 0) return [];
+
+    const items = await this.prisma.menuItem.findMany({
+      where: { id: { in: orderedIds }, deletedAt: null },
+      select: { ...PUBLIC_MENU_ITEM_SELECT, category: { select: PUBLIC_CATEGORY_SELECT } },
+    });
+    const byId = new Map(items.map((it) => [it.id, it]));
+    const sorted = orderedIds.map((id) => byId.get(id)).filter(Boolean) as typeof items;
+    return this.applyDiscounts(branchId, sorted);
   }
 
   /**
