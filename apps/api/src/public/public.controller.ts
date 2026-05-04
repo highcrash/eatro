@@ -36,6 +36,21 @@ export class PublicController {
   }
 
   /**
+   * Pure top-selling — highest paid quantity, no Chef-Special tag
+   * fallback. Drives the Top Selling sliders on QR + website. The
+   * existing `/recommended` endpoint conflates "Chef Special" tagged
+   * items with top-selling and showed the wrong rows when admin
+   * tagged anything. Items with `excludeFromTopSelling = true`
+   * (e.g. water, cola) are filtered out so high-volume utility items
+   * don't crowd out the actually-interesting dishes admin wants to
+   * merchandise on the homepage.
+   */
+  @Get('menu/:branchId/top-selling')
+  getTopSelling(@Param('branchId') branchId: string) {
+    return this.publicService.getTopSelling(branchId);
+  }
+
+  /**
    * Newly-added menu items, ordered by createdAt desc. Used by the
    * QR app's New Items strip + the website's New Items slider so
    * customers can spot fresh additions without scrolling the entire

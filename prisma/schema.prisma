@@ -689,6 +689,14 @@ model MenuItem {
   prepTime         String? // e.g. "15 min"
   spiceLevel       String? // e.g. "Mild", "Medium", "Hot"
   websiteVisible   Boolean @default(true) // hide from website without affecting POS
+  /// When true, this item is excluded from the "Top Selling" surface
+  /// on QR + website. Item still appears in its category and on the
+  /// New Items strip — only the popularity-by-paid-quantity slider
+  /// hides it. Use for high-volume utility items (water, soft drinks,
+  /// rice) that always dominate the top-N and crowd out the actually-
+  /// interesting dishes admin wants to merchandise. Default false →
+  /// existing items show normally until admin opts each one out.
+  excludeFromTopSelling Boolean @default(false)
   /// True for items created via POS Customised Menu. UI uses this to
   /// hide them from the admin Menu page filter and to bypass website /
   /// QR feeds (websiteVisible=false handles the latter; this is the

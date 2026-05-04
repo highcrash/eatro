@@ -63,13 +63,16 @@ export default function MenuPage() {
     enabled: !!branchId,
   });
 
-  // Top Selling — global highest-quantity items based on PAID orders.
-  // Fetched separately so the section can render before the full menu
-  // payload arrives (and so an empty branch hides the strip cleanly).
+  // Top Selling — pure popularity by PAID quantity, with the per-item
+  // excludeFromTopSelling flag honoured so utility items (water, cola)
+  // don't crowd the slider. The previous endpoint (/recommended) had
+  // a "Chef Special" tag fallback that REPLACED top-selling when admin
+  // tagged anything, surfacing the wrong rows. /top-selling is the
+  // dedicated path.
   const { data: topSelling = [] } = useQuery<MenuItem[]>({
     queryKey: ['qr-top-selling', branchId],
     queryFn: async () => {
-      const res = await fetch(apiUrl(`/public/menu/${branchId}/recommended`));
+      const res = await fetch(apiUrl(`/public/menu/${branchId}/top-selling`));
       if (!res.ok) return [];
       return res.json();
     },

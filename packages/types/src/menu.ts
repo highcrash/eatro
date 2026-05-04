@@ -154,6 +154,13 @@ export interface UpdateMenuItemDto extends Partial<CreateMenuItemDto> {
   prepTime?: string | null;
   spiceLevel?: string | null;
   websiteVisible?: boolean;
+  /** When true, hide this item from the Top Selling slider on QR +
+   *  website. Item still appears in its category and on the New
+   *  Items strip. Use for high-volume utility items (water, cola,
+   *  rice) so they don't crowd the popularity slider. */
+  excludeFromTopSelling?: boolean;
+  seoTitle?: string | null;
+  seoDescription?: string | null;
 }
 
 /** Reorder / rename a parent's child variants in one call. */

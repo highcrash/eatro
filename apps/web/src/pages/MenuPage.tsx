@@ -121,13 +121,17 @@ export default function MenuPage() {
     queryFn: () => api.getMenu<PublicMenu>(branchId),
   });
 
-  // Top Selling — global highest-quantity items (PAID orders aggregated
-  // server-side). Powers the slider that sits ABOVE the menu category
-  // carousels in the All view. Empty branch with no paid orders →
-  // sliders self-hide so the layout stays clean for fresh restaurants.
+  // Top Selling — pure popularity by PAID quantity. Honours the per-
+  // item excludeFromTopSelling flag so utility items (water, cola,
+  // plain rice) don't crowd out the actually-interesting dishes
+  // admin wants to merchandise on the homepage. Earlier this hit
+  // /recommended which mixed top-selling with a "Chef Special" tag
+  // fallback and surfaced the wrong rows when admin tagged anything.
+  // /top-selling is the dedicated path. Empty branch with no paid
+  // orders → slider self-hides so the layout stays clean.
   const { data: topSelling = [] } = useQuery<MenuItem[]>({
     queryKey: ['public-top-selling', branchId],
-    queryFn: () => api.getJson<MenuItem[]>(`/public/menu/${branchId}/recommended`),
+    queryFn: () => api.getJson<MenuItem[]>(`/public/menu/${branchId}/top-selling`),
     staleTime: 5 * 60_000,
   });
 
