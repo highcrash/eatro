@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { getActiveBranchId, useWebsiteContent, useBranding } from '../lib/cms';
 import { formatCurrency } from '@restora/utils';
 import SEO from '../components/SEO';
-import MenuCarousel from '../components/MenuCarousel';
+import MenuCarousel, { type MenuItem } from '../components/MenuCarousel';
 
 // Inline chevron — web app has no icon dep, no point adding one for two
 // glyphs. Stroke-currentColor lets the existing nav color tokens drive it.
@@ -115,9 +115,31 @@ interface PublicMenu {
 
 export default function MenuPage() {
   const navigate = useNavigate();
+  const branchId = getActiveBranchId();
   const { data: menu, isLoading } = useQuery<PublicMenu>({
-    queryKey: ['public-menu', getActiveBranchId()],
-    queryFn: () => api.getMenu<PublicMenu>(getActiveBranchId()),
+    queryKey: ['public-menu', branchId],
+    queryFn: () => api.getMenu<PublicMenu>(branchId),
+  });
+
+  // Top Selling — global highest-quantity items (PAID orders aggregated
+  // server-side). Powers the slider that sits ABOVE the menu category
+  // carousels in the All view. Empty branch with no paid orders →
+  // sliders self-hide so the layout stays clean for fresh restaurants.
+  const { data: topSelling = [] } = useQuery<MenuItem[]>({
+    queryKey: ['public-top-selling', branchId],
+    queryFn: () => api.getJson<MenuItem[]>(`/public/menu/${branchId}/recommended`),
+    staleTime: 5 * 60_000,
+  });
+
+  // New Items — last 10 menu items by createdAt desc. Slider sits AFTER
+  // the Top Selling row in the All view (the user's brief asked for
+  // "after today's deal section" — deals only show as their own tab on
+  // the website, so the cleanest read is "second slider on the All
+  // landing", which keeps both rows together for discovery).
+  const { data: newItems = [] } = useQuery<MenuItem[]>({
+    queryKey: ['public-new-items', branchId],
+    queryFn: () => api.getJson<MenuItem[]>(`/public/menu/${branchId}/new-items`),
+    staleTime: 5 * 60_000,
   });
 
   const [active, setActive] = useState<string | null>(null);
@@ -403,6 +425,32 @@ export default function MenuPage() {
         ) : (
           /* ── All categories — carousel per parent ── */
           <div className="space-y-12">
+            {/* Top Selling — appears BEFORE the menu category sections.
+                Hidden when empty so a fresh branch with no paid orders
+                doesn't show an empty heading. */}
+            {topSelling.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-display text-3xl tracking-wider">TOP SELLING</h2>
+                </div>
+                <MenuCarousel items={topSelling as MenuItem[]} onItemClick={(id) => navigate(`/menu/${id}`)} />
+              </div>
+            )}
+
+            {/* New Items — second slider, sits after Top Selling. The
+                user's brief asked for "after today's deals" — deals
+                only appear as their own tab on the website, so this
+                positioning keeps both discovery rows together at the
+                top of the All view. Same self-hide on empty data. */}
+            {newItems.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-display text-3xl tracking-wider">NEW ITEMS</h2>
+                </div>
+                <MenuCarousel items={newItems as MenuItem[]} onItemClick={(id) => navigate(`/menu/${id}`)} />
+              </div>
+            )}
+
             {parentCategories.map((parent) => {
               // Collect items from parent + all its children
               const ids = getCategoryIds(parent.id);

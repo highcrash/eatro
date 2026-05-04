@@ -60,6 +60,40 @@ export class CustomerPublicController {
     return this.customerService.getActiveOrder(branchId, dto.customerId);
   }
 
+  /**
+   * QR My Account — last N PAID/SERVED orders for a customer plus
+   * the customer record itself in one round-trip. The customer
+   * snapshot drives the lifetime-stats strip (totalSpent /
+   * totalOrders / lastVisit) so the page doesn't need a separate
+   * /me endpoint and stays in sync with whatever the order list
+   * shows. customerId in the body is the same trust shape as the
+   * existing auth/active-order endpoint.
+   */
+  @Post('auth/order-history')
+  getOrderHistory(
+    @Headers('x-branch-id') branchId: string,
+    @Body() dto: { customerId: string; limit?: number },
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    if (!dto.customerId) throw new BadRequestException('customerId required');
+    return this.customerService.getOrderHistory(branchId, dto.customerId, dto.limit);
+  }
+
+  /**
+   * QR My Account — chronological list of reviews this customer
+   * wrote, with the related order's number + paidAt for context.
+   * Drives the "My reviews" section.
+   */
+  @Post('auth/customer-reviews')
+  getCustomerReviewHistory(
+    @Headers('x-branch-id') branchId: string,
+    @Body() dto: { customerId: string },
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    if (!dto.customerId) throw new BadRequestException('customerId required');
+    return this.customerService.getCustomerReviewHistory(branchId, dto.customerId);
+  }
+
   @Post('reviews')
   createReview(
     @Headers('x-branch-id') branchId: string,

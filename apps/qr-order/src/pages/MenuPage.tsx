@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, Search, ClipboardList, ChevronLeft, ChevronRight, Camera } from 'lucide-react';
+import { ShoppingCart, Search, ClipboardList, ChevronLeft, ChevronRight, Camera, User, UserCircle2 } from 'lucide-react';
 
 import type { MenuItem, MenuCategory } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { useCartStore } from '../store/cart.store';
 import { apiUrl } from '../lib/api';
 import { useSessionStore } from '../store/session.store';
+import HomepageItemStrip from '../components/HomepageItemStrip';
+import RecentOrdersStrip from '../components/RecentOrdersStrip';
 
 function resolveImg(url: string | null) {
   if (!url) return '';
@@ -21,6 +23,7 @@ export default function MenuPage() {
   const tableNumber = useSessionStore((s) => s.tableNumber);
   const activeOrderId = useSessionStore((s) => s.activeOrderId);
   const setActiveOrder = useSessionStore((s) => s.setActiveOrder);
+  const customer = useSessionStore((s) => s.customer);
 
   // Self-heal stale activeOrderId. localStorage outlives the order
   // that created it — when the cashier marks PAID, the customer's
@@ -58,6 +61,32 @@ export default function MenuPage() {
       return res.json();
     },
     enabled: !!branchId,
+  });
+
+  // Top Selling — global highest-quantity items based on PAID orders.
+  // Fetched separately so the section can render before the full menu
+  // payload arrives (and so an empty branch hides the strip cleanly).
+  const { data: topSelling = [] } = useQuery<MenuItem[]>({
+    queryKey: ['qr-top-selling', branchId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/public/menu/${branchId}/recommended`));
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!branchId,
+    staleTime: 5 * 60_000,
+  });
+
+  // New Items — last 10 menu items by createdAt desc.
+  const { data: newItems = [] } = useQuery<MenuItem[]>({
+    queryKey: ['qr-new-items', branchId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/public/menu/${branchId}/new-items`));
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!branchId,
+    staleTime: 5 * 60_000,
   });
 
   const categories = data?.categories ?? [];
@@ -194,6 +223,33 @@ export default function MenuPage() {
             {tableNumber && <p className="text-xs text-[#666] font-body">Table {tableNumber}</p>}
           </div>
           <div className="flex items-center gap-2">
+            {/* Sign-in / My Account toggle. Logged out → "Sign in"
+                pill that routes to /login with ?next=/menu so the
+                customer lands back here. Logged in → first name +
+                avatar icon that routes to /account. Sits LEFT of
+                the camera + cart so it's always reachable even when
+                the cart pill expands. */}
+            {customer ? (
+              <button
+                onClick={() => void navigate('/account')}
+                title="My account"
+                aria-label="My account"
+                className="h-11 px-3 bg-[#1A1A1A] border border-[#2A2A2A] hover:border-[#C8FF00] flex items-center gap-1.5 text-white transition-colors"
+              >
+                <UserCircle2 size={18} className="text-[#C8FF00]" />
+                <span className="font-body text-xs font-medium max-w-[80px] truncate">{customer.name.split(' ')[0]}</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => void navigate('/login?next=/menu')}
+                title="Sign in"
+                aria-label="Sign in"
+                className="h-11 px-3 bg-[#1A1A1A] border border-[#2A2A2A] hover:border-[#C8FF00] flex items-center gap-1.5 text-white transition-colors"
+              >
+                <User size={16} className="text-[#C8FF00]" />
+                <span className="font-body text-xs font-medium tracking-widest uppercase">Sign in</span>
+              </button>
+            )}
             {/* In-app QR scanner — useful when the customer is at a
                 fresh device (no tableId in session yet) or wants to
                 start a fresh order at a different table. The cart +
@@ -287,6 +343,19 @@ export default function MenuPage() {
           )}
         </div>
       </div>
+
+      {/* Merchandising strips — only in the default "All / no
+          search" view so the strips don't clutter a narrowed list.
+          Each strip self-hides on empty data, so a fresh branch
+          with no paid orders / no recently-added items doesn't show
+          empty section headers. */}
+      {!showFlat && (
+        <div className="pt-4">
+          <HomepageItemStrip label="Top selling" items={topSelling} />
+          <HomepageItemStrip label="New items" items={newItems} />
+          <RecentOrdersStrip />
+        </div>
+      )}
 
       {/* Content */}
       {isLoading ? (
