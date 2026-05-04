@@ -6,6 +6,7 @@ import { CheckCircle, Clock, ChefHat, Plus, ArrowLeft, XCircle, Trash2, Pencil, 
 import { formatCurrency } from '@restora/utils';
 import { useSessionStore } from '../store/session.store';
 import { apiUrl, qrFetch } from '../lib/api';
+import { joinOrderRoom } from '../lib/realtime';
 
 interface OrderItem {
   id: string;
@@ -33,6 +34,11 @@ interface QrOrder {
   customerName?: string | null;
   billRequested?: boolean;
   items: OrderItem[];
+  /** Multi-device share anchors. Null on legacy / POS-created orders
+   *  — those render as fully-editable for backwards compatibility. */
+  primaryDeviceId?: string | null;
+  /** JSON-encoded string array of approved device UUIDs. */
+  sharedDeviceIds?: string | null;
 }
 
 const ORDER_STEPS = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'SERVED'];
@@ -66,6 +72,16 @@ export default function OrderStatusPage() {
   const branchId = useSessionStore((s) => s.branchId);
   const customer = useSessionStore((s) => s.customer);
   const setCustomer = useSessionStore((s) => s.setCustomer);
+  const myDeviceId = useSessionStore((s) => s.deviceId);
+  // Multi-device share state. `shareRequest` populates when the
+  // primary device receives an order:share-request WS event from
+  // another device — render the approve/deny modal. `shareStatus`
+  // tracks THIS device's pending request when it's on the
+  // requesting side ("idle" | "pending" | "approved" | "denied" |
+  // "timeout") so the read-only banner can swap in a spinner /
+  // success / failure message without losing scroll position.
+  const [shareRequest, setShareRequest] = useState<null | { deviceId: string; deviceLabel: string | null; expiresAt: number }>(null);
+  const [shareStatus, setShareStatus] = useState<'idle' | 'pending' | 'approved' | 'denied' | 'timeout'>('idle');
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [editingNoteFor, setEditingNoteFor] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
@@ -122,6 +138,118 @@ export default function OrderStatusPage() {
       setActiveOrder(null);
     }
   }, [order?.status, setActiveOrder]);
+
+  // Compute "is this device a participant on this order?" — drives
+  // the read-only / editable branch in the JSX. Legacy orders with
+  // null primaryDeviceId are treated as fully editable (matches the
+  // server-side participant guard's open-by-default behaviour).
+  const isParticipant = (() => {
+    if (!order) return true; // Optimistic during load — avoids flash of read-only.
+    if (!order.primaryDeviceId) return true;
+    if (order.primaryDeviceId === myDeviceId) return true;
+    if (order.sharedDeviceIds) {
+      try {
+        const shared = JSON.parse(order.sharedDeviceIds) as string[];
+        if (Array.isArray(shared) && shared.includes(myDeviceId)) return true;
+      } catch { /* fallthrough → not a participant */ }
+    }
+    if (customer && order.customerId && order.customerId === customer.id) return true;
+    return false;
+  })();
+  const isPrimaryDevice = !!(order && order.primaryDeviceId && order.primaryDeviceId === myDeviceId);
+
+  // WS subscription on the per-order room. Primary device receives
+  // share-request popups; requesting device receives approved/denied
+  // outcomes. Handlers are stable (callbacks read fresh state via
+  // setX(prev => …) closures) so the effect doesn't churn the
+  // socket on every re-render.
+  useEffect(() => {
+    if (!orderId) return;
+    const cleanup = joinOrderRoom(orderId, {
+      onShareRequest: (data) => {
+        // Only render the popup on the primary device. Other
+        // already-shared devices ignore — only the primary decides.
+        if (!isPrimaryDevice) return;
+        // Ignore self-emits (server filters this anyway, defence in depth).
+        if (data.deviceId === myDeviceId) return;
+        setShareRequest({ deviceId: data.deviceId, deviceLabel: data.deviceLabel, expiresAt: data.expiresAt });
+      },
+      onShareApproved: (data) => {
+        if (data.deviceId !== myDeviceId) return;
+        setShareStatus('approved');
+        // Refetch the order so primaryDeviceId/sharedDeviceIds update
+        // and isParticipant flips to true on the next render.
+        void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+      },
+      onShareDenied: (data) => {
+        if (data.deviceId !== myDeviceId) return;
+        setShareStatus('denied');
+      },
+      onOrderUpdated: () => {
+        void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+      },
+    });
+    return cleanup;
+    // isPrimaryDevice toggles when the order loads, hence the dep —
+    // when it flips true we want the share-request handler in scope.
+  }, [orderId, isPrimaryDevice, myDeviceId, qc]);
+
+  // 60s timeout for THIS device's pending share request — flips the
+  // read-only banner to "no answer; ask staff" when the primary
+  // device never responds. Server-side TTL is the source of truth;
+  // this is just the UX hint.
+  useEffect(() => {
+    if (shareStatus !== 'pending') return;
+    const t = setTimeout(() => {
+      setShareStatus((prev) => (prev === 'pending' ? 'timeout' : prev));
+    }, 60_000);
+    return () => clearTimeout(t);
+  }, [shareStatus]);
+
+  const requestShare = async () => {
+    if (!orderId) return;
+    setShareStatus('pending');
+    try {
+      const res = await qrFetch(`/orders/qr/${orderId}/request-share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Failed to request access' })) as { message?: string };
+        throw new Error(err.message ?? 'Failed to request access');
+      }
+      const data = (await res.json()) as { status: string };
+      // Server may short-circuit with already-primary / already-shared.
+      if (data.status !== 'pending') {
+        setShareStatus('approved');
+        void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+      }
+    } catch (e) {
+      setShareStatus('denied');
+      alert((e as Error).message);
+    }
+  };
+
+  const respondShare = async (approve: boolean) => {
+    if (!orderId || !shareRequest) return;
+    const reqDeviceId = shareRequest.deviceId;
+    setShareRequest(null); // Close modal optimistically.
+    try {
+      const res = await qrFetch(`/orders/qr/${orderId}/approve-share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
+        body: JSON.stringify({ deviceId: reqDeviceId, approve }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Failed to respond' })) as { message?: string };
+        throw new Error(err.message ?? 'Failed to respond');
+      }
+      if (approve) void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
 
   if (isError) {
     return (
@@ -233,7 +361,11 @@ export default function OrderStatusPage() {
   const currentStep = ORDER_STEPS.indexOf(order.status);
   const activeItems = order.items.filter((i) => !i.voidedAt);
   const isFinished = order.status === 'SERVED' || order.status === 'PAID';
-  const canAddItems = order.status === 'PENDING' || order.status === 'CONFIRMED' || order.status === 'PREPARING';
+  // Multi-device gate: a non-participant device can VIEW but not
+  // add/cancel/notes/bill until the primary device approves a share
+  // request. Combined with the existing status gate so closed orders
+  // also stay non-editable.
+  const canAddItems = isParticipant && (order.status === 'PENDING' || order.status === 'CONFIRMED' || order.status === 'PREPARING');
 
   const handleRemoveItem = async (itemId: string) => {
     if (!confirm('Remove this item?')) return;
@@ -337,6 +469,41 @@ export default function OrderStatusPage() {
         <div className="mx-5 mt-3 bg-[#FFA726]/15 border border-[#FFA726]/40 px-4 py-3 flex items-start gap-3">
           <p className="text-xs font-body text-[#FFA726] flex-1">{toast}</p>
           <button onClick={() => setToast(null)} className="text-[#FFA726] hover:text-white text-xs font-body">×</button>
+        </div>
+      )}
+
+      {/* Multi-device share banner — shown only on devices that
+          aren't yet a participant on this order. Lets the second
+          diner request access from the device that placed the
+          order; until approved (or denied), edits are blocked
+          server-side and we hide the action affordances below. */}
+      {!isParticipant && !isFinished && (
+        <div className="mx-5 mt-3 bg-[#29B6F6]/10 border border-[#29B6F6]/40 px-4 py-3">
+          {shareStatus === 'idle' && (
+            <>
+              <p className="text-xs font-body text-[#29B6F6] mb-2">
+                This table already has an open order — view-only on this device. Tap below to ask the device that started it for access to add items.
+              </p>
+              <button
+                onClick={requestShare}
+                className="w-full bg-[#29B6F6] hover:bg-[#4FC3F7] text-[#0D0D0D] font-body font-medium text-xs tracking-widest uppercase py-2 transition-colors"
+              >
+                Request access
+              </button>
+            </>
+          )}
+          {shareStatus === 'pending' && (
+            <p className="text-xs font-body text-[#29B6F6]">Waiting for the other device to approve… (60s)</p>
+          )}
+          {shareStatus === 'approved' && (
+            <p className="text-xs font-body text-[#4CAF50]">Access granted ✓ You can now add items and edit the order.</p>
+          )}
+          {shareStatus === 'denied' && (
+            <p className="text-xs font-body text-[#F03535]">Access denied. Ask the original device's owner to share, or hand them this device.</p>
+          )}
+          {shareStatus === 'timeout' && (
+            <p className="text-xs font-body text-[#FFA726]">No answer from the other device. Ask them to share from their order screen, or order separately from staff.</p>
+          )}
         </div>
       )}
 
@@ -604,8 +771,9 @@ export default function OrderStatusPage() {
 
         {/* Ask for Bill — show whenever the order is past PENDING and
             not yet paid. Disabled + label-flipped once requested so the
-            customer sees confirmation. */}
-        {order.status !== 'PENDING' && order.status !== 'PAID' && order.status !== 'VOID' && order.status !== 'CANCELLED' && (
+            customer sees confirmation. Hidden for non-participants —
+            they can view but not settle (server enforces too). */}
+        {isParticipant && order.status !== 'PENDING' && order.status !== 'PAID' && order.status !== 'VOID' && order.status !== 'CANCELLED' && (
           order.billRequested ? (
             <div className="w-full bg-[#1A1A1A] border border-[#C8FF00]/40 text-[#C8FF00] py-3 text-center font-body text-xs flex items-center justify-center gap-2">
               <Receipt size={14} />
@@ -646,6 +814,43 @@ export default function OrderStatusPage() {
           </p>
         )}
       </div>
+
+      {/* Multi-device share-request modal — primary device only.
+          Renders when another device's request lands via the
+          order:share-request WS event. Non-dismissable backdrop so
+          the diner makes a deliberate choice. Approve flips the
+          requester into sharedDeviceIds; deny stays read-only. */}
+      {shareRequest && (
+        <div className="fixed inset-0 bg-black/80 flex items-end sm:items-center justify-center z-50 p-4">
+          <div className="bg-[#1A1A1A] border border-[#29B6F6]/40 w-full max-w-sm p-5 space-y-4">
+            <div>
+              <p className="text-[10px] text-[#29B6F6] font-body tracking-widest uppercase mb-1">
+                Join request
+              </p>
+              <h2 className="font-display text-lg text-white tracking-wide">
+                Another device wants to add to your order
+              </h2>
+              <p className="text-xs text-[#888] font-body mt-2">
+                Approving lets that device add items, edit notes, and request the bill on this same order. Deny if you don't recognise the request.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => void respondShare(false)}
+                className="flex-1 bg-[#1A1A1A] border border-[#666] text-[#666] hover:text-white hover:border-white py-3 font-body font-medium text-sm tracking-widest uppercase transition-colors"
+              >
+                Deny
+              </button>
+              <button
+                onClick={() => void respondShare(true)}
+                className="flex-1 bg-[#29B6F6] hover:bg-[#4FC3F7] text-[#0D0D0D] py-3 font-body font-bold text-sm tracking-widest uppercase transition-colors"
+              >
+                Approve
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

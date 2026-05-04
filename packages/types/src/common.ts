@@ -47,6 +47,19 @@ export type WsEvent =
   | 'order:cancelled'
   | 'order:paid'
   | 'order:items-pending'
+  /** Multi-device QR share workflow: a second device asked to join an
+   *  existing order. Emitted to room `order:{id}` so the primary
+   *  device (already in that room) renders the approve/deny popup. */
+  | 'order:share-request'
+  /** Primary device approved a share request. Server has added the
+   *  requesting device to `Order.sharedDeviceIds`. Emitted to
+   *  `order:{id}` so the requesting device drops out of read-only
+   *  mode and starts editing. */
+  | 'order:share-approved'
+  /** Primary device denied a share request, OR the request expired
+   *  (60s timeout). Emitted to `order:{id}` so the requesting device
+   *  surfaces the rejection toast. */
+  | 'order:share-denied'
   | 'table:updated'
   | 'kds:ticket:new'
   | 'kds:ticket:done'

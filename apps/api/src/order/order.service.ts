@@ -54,6 +54,17 @@ function computeTotals(branch: TaxableBranch, subtotal: number, discountAmount =
 
 @Injectable()
 export class OrderService {
+  /**
+   * Multi-device QR-share workflow: in-memory map of pending share
+   * requests keyed by `${orderId}::${requestingDeviceId}`. Value is
+   * the request's expiresAt epoch (60s window). Used to gate
+   * approve-share so only an actually-pending request can flip a
+   * device into `sharedDeviceIds` — replay protection without a DB
+   * trip on every approve. Bounded growth: every entry expires
+   * within 60s and is reaped on each request-share call.
+   */
+  private pendingShareRequests = new Map<string, number>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ws: RestoraPosGateway,
@@ -1044,6 +1055,99 @@ export class OrderService {
     }
 
     return pendingOrder;
+  }
+
+  /**
+   * Multi-device QR share: a second device asks the order's primary
+   * device for permission to join. Server records the pending request
+   * with a 60s TTL, emits `order:share-request` to room `order:{id}`
+   * (the primary device is already there because it joined when it
+   * created the order), and returns the expiry. The primary device's
+   * UI renders an approve/deny modal on receipt.
+   *
+   * No-op + early-return when the requesting device is ALREADY the
+   * primary or already in sharedDeviceIds — saves a round-trip when
+   * the second device is actually the same diner reopening their tab.
+   */
+  async requestShare(orderId: string, branchId: string, deviceId: string, deviceLabel?: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, branchId, deletedAt: null },
+      select: { id: true, primaryDeviceId: true, sharedDeviceIds: true } as never,
+    }) as { id: string; primaryDeviceId: string | null; sharedDeviceIds: string | null } | null;
+    if (!order) throw new NotFoundException('Order not found');
+    if (!deviceId) throw new BadRequestException('deviceId required');
+    if (order.primaryDeviceId === deviceId) {
+      return { status: 'already-primary', expiresAt: null };
+    }
+    if (order.sharedDeviceIds) {
+      try {
+        const shared = JSON.parse(order.sharedDeviceIds) as string[];
+        if (shared.includes(deviceId)) return { status: 'already-shared', expiresAt: null };
+      } catch { /* malformed JSON ignored */ }
+    }
+    // Reap expired entries on every request — keeps the map bounded.
+    const now = Date.now();
+    for (const [k, exp] of this.pendingShareRequests) {
+      if (exp <= now) this.pendingShareRequests.delete(k);
+    }
+    const expiresAt = now + 60_000;
+    this.pendingShareRequests.set(`${orderId}::${deviceId}`, expiresAt);
+
+    this.ws.emitToOrder(orderId, 'order:share-request', {
+      orderId,
+      deviceId,
+      deviceLabel: deviceLabel ?? null,
+      expiresAt,
+    });
+    return { status: 'pending', expiresAt };
+  }
+
+  /**
+   * Primary-device approve/deny for a pending share request. Approve
+   * pushes the requesting device into `Order.sharedDeviceIds`. Either
+   * outcome emits a WS event so the requesting device drops its
+   * "waiting…" spinner immediately.
+   *
+   * Authorization: caller must already be the primary device on the
+   * order. The controller verifies this via `requireOrderParticipant`
+   * which short-circuits to "primary OK" before this method runs.
+   */
+  async approveShare(orderId: string, branchId: string, deviceId: string, approve: boolean) {
+    if (!deviceId) throw new BadRequestException('deviceId required');
+    const key = `${orderId}::${deviceId}`;
+    const expiresAt = this.pendingShareRequests.get(key);
+    this.pendingShareRequests.delete(key);
+    if (!expiresAt || expiresAt <= Date.now()) {
+      // Either no pending request, or it timed out. Surface as 410 so
+      // the primary device knows the popup it just answered was stale.
+      throw new BadRequestException('Share request expired or never received. Ask the other device to request again.');
+    }
+
+    if (!approve) {
+      this.ws.emitToOrder(orderId, 'order:share-denied', { orderId, deviceId });
+      return { approved: false };
+    }
+
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, branchId, deletedAt: null },
+      select: { sharedDeviceIds: true } as never,
+    }) as { sharedDeviceIds: string | null } | null;
+    if (!order) throw new NotFoundException('Order not found');
+
+    let shared: string[] = [];
+    if (order.sharedDeviceIds) {
+      try { shared = JSON.parse(order.sharedDeviceIds) as string[]; } catch { /* reset */ }
+    }
+    if (!Array.isArray(shared)) shared = [];
+    if (!shared.includes(deviceId)) shared.push(deviceId);
+
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { sharedDeviceIds: JSON.stringify(shared) },
+    });
+
+    this.ws.emitToOrder(orderId, 'order:share-approved', { orderId, deviceId });
+    return { approved: true };
   }
 
   async acceptOrder(id: string, branchId: string) {
