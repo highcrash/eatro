@@ -4,7 +4,7 @@ import { ArrowLeft, Printer, Wrench, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import type { CorrectPaymentDto, ItemsSoldReport } from '@restora/types';
-import { formatCurrency, renderMushakSlipHtml, type MushakSnapshot } from '@restora/utils';
+import { formatCurrency, renderMushakSlipHtml, shortOrderCode, type MushakSnapshot } from '@restora/utils';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/auth.store';
 
@@ -40,21 +40,8 @@ interface SalesData {
   orders: SalesOrder[];
 }
 
-// Generate a short random code for display instead of actual order number
-function shortCode(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
-  }
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let result = '';
-  let h = Math.abs(hash);
-  for (let i = 0; i < 6; i++) {
-    result += chars[h % chars.length];
-    h = Math.floor(h / chars.length) + i;
-  }
-  return result;
-}
+// shortCode moved to @restora/utils as shortOrderCode so the receipt
+// print + sales report show the same opaque order code.
 
 // Pick ~10% random orders per month from a list, seeded by month for consistency
 function sampleByMonth(orders: SalesOrder[]): SalesOrder[] {
@@ -644,7 +631,7 @@ export default function SalesReportPage() {
                   <tr key={order.id}>
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10 }}>{idx + 1}</td>
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>
-                      {order.orderNumber || shortCode(order.id)}
+                      {shortOrderCode(order.id)}
                     </td>
                     {isToday && (
                       <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>

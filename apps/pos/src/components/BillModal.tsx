@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { X, Printer } from 'lucide-react';
 
 import type { Order } from '@restora/types';
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, shortOrderCode } from '@restora/utils';
 import { useBranding } from '../lib/branding';
 import { printReceiptSmart } from '../lib/print-receipt';
 
@@ -43,7 +43,7 @@ export default function BillModal({ order, onClose }: BillModalProps) {
               Bill Preview
             </p>
             <h2 className="font-display text-2xl tracking-wide text-[#111]">
-              #{order.orderNumber}
+              #{shortOrderCode(order.id)}
             </h2>
           </div>
           <button onClick={onClose} className="text-[#999] hover:text-[#111] transition-colors">
@@ -67,7 +67,7 @@ export default function BillModal({ order, onClose }: BillModalProps) {
             <span>{order.tableNumber ? `Table ${order.tableNumber}` : 'Takeaway'}</span>
             <span>{now}</span>
           </div>
-          <p className="text-xs text-[#999]">Order #{order.orderNumber}</p>
+          <p className="text-xs text-[#999]">Order #{shortOrderCode(order.id)}</p>
 
           {/* Items */}
           <div className="border-t border-dashed border-[#DDD9D3] pt-3 space-y-2">

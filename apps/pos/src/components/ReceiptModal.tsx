@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Printer } from 'lucide-react';
 
 import type { Order } from '@restora/types';
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, shortOrderCode } from '@restora/utils';
 import { useBranding } from '../lib/branding';
 import { isDesktop, printReceiptSmart } from '../lib/print-receipt';
 
@@ -56,7 +56,7 @@ export default function ReceiptModal({ order, cashReceived, onDone }: ReceiptMod
               Receipt
             </p>
             <h2 className="font-display text-2xl tracking-wide text-[#111]">
-              #{order.orderNumber}
+              #{shortOrderCode(order.id)}
             </h2>
           </div>
           <button onClick={onDone} className="text-[#999] hover:text-[#111] transition-colors">

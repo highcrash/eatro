@@ -8,6 +8,7 @@
  * unchanged.
  */
 import type { Order } from '@restora/types';
+import { shortOrderCode } from '@restora/utils';
 
 interface Branding {
   name?: string | null;
@@ -130,7 +131,11 @@ export function orderToReceiptInput(
     wifiPass: branding?.wifiPass ?? undefined,
     logoUrl: branding?.logoUrl ?? undefined,
     logoWidthPct: branding?.billLogoWidthPct != null ? Number(branding.billLogoWidthPct) : undefined,
-    orderNumber: order.orderNumber,
+    // Customer-facing prints use the deterministic short code
+    // (e.g. "A4K2P9") instead of the verbose ORD-YYYYMMDD-XXXX so
+    // the date/sequence isn't leaked on the receipt. The internal
+    // POS UI keeps using order.orderNumber for operational lookups.
+    orderNumber: shortOrderCode(order.id),
     tableNumber: order.tableNumber ?? null,
     type: order.type,
     createdAt: order.paidAt ?? order.createdAt ?? new Date().toISOString(),
