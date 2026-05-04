@@ -1102,11 +1102,31 @@ function QrGateSection({ isOwner }: { isOwner: boolean }) {
               >
                 refresh
               </button>
+              {/* One-click "add to allowlist" — saves the admin from
+                  copying the IP into the textarea by hand. Appends only
+                  if not already present (case-insensitive). Disabled
+                  when the IP is already covered by an existing entry
+                  (incl. CIDR match — the live probe verdict tells us). */}
+              {gateProbe?.clientIp && isOwner && !gateProbe.allowed && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ip = gateProbe.clientIp!;
+                    const existing = form.qrAllowedIps.split(',').map((s) => s.trim()).filter(Boolean);
+                    if (existing.includes(ip)) return;
+                    setForm((f) => ({ ...f, qrAllowedIps: [...existing, ip].join(', ') }));
+                  }}
+                  className="ml-2 text-[10px] text-[#C8FF00] hover:text-white underline"
+                >
+                  + add to allowlist
+                </button>
+              )}
             </p>
             <p className="text-[#666]">
               Open this page from a phone <em>on the restaurant Wi-Fi</em> to see the public IP
               your guests' requests will carry. Add that IP (or the CIDR block for your whole
-              network) to the allowlist above.
+              network) to the allowlist above. Both IPv4 and IPv6 addresses + CIDR blocks are
+              accepted — useful if your guests are on cellular / IPv6-only carriers.
             </p>
             {form.qrGateEnabled && gateProbe?.clientIp && (
               <p className={gateProbe.allowed ? 'text-[#4CAF50]' : 'text-[#D62B2B]'}>

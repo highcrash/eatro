@@ -11,7 +11,6 @@ import LoginPage from './pages/LoginPage';
 import ScanPage from './pages/ScanPage';
 import WifiGate, { type GatePayload } from './pages/WifiGate';
 import { useSessionStore } from './store/session.store';
-import { useCartStore } from './store/cart.store';
 import { apiUrl } from './lib/api';
 
 // Shown to a guest whose network can't be verified. Fail-closed: we don't
@@ -80,7 +79,6 @@ function useResolvedBranchId(): string | null | 'resolving' {
 export default function QrOrderApp() {
   const resolvedBranchId = useResolvedBranchId();
   const [gate, setGate] = useState<GatePayload | null | 'loading'>(null);
-  const clearCart = useCartStore((s) => s.clearCart);
 
   const checkGate = useCallback(async (branchId: string) => {
     try {
@@ -105,14 +103,15 @@ export default function QrOrderApp() {
       setGate((g) => (g === null ? 'loading' : g));
       const next = await checkGate(resolvedBranchId);
       if (cancelled) return;
-      // Flipping from allowed → blocked mid-session: wipe the cart so the
-      // guest doesn't carry items they can no longer order.
-      setGate((prev) => {
-        if (prev && prev !== 'loading' && prev.allowed && !next.allowed) {
-          clearCart();
-        }
-        return next;
-      });
+      // Gate flicker (5s poll picks up a transient blip on a flaky
+      // hotel Wi-Fi or NAT rotation) used to nuke the cart — losing
+      // 20 minutes of menu browsing on a single dropped packet. Now
+      // we just flip the gate state; the WifiGate page renders the
+      // "reconnect to {wifiSsid}" banner instead, and the cart waits
+      // intact for the gate to come back. Checkout itself still
+      // double-checks server-side via the 403 handler, so a truly-
+      // off-network device can't sneak an order through.
+      setGate(next);
     };
 
     void run();
@@ -128,7 +127,7 @@ export default function QrOrderApp() {
       window.removeEventListener(GATE_RECHECK_EVENT, onRecheck);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [resolvedBranchId, checkGate, clearCart]);
+  }, [resolvedBranchId, checkGate]);
 
   if (resolvedBranchId === 'resolving') return <Checking />;
   if (resolvedBranchId === null) return <Checking />;
