@@ -687,6 +687,17 @@ export class PublicService {
    * Recipe ingredients (id + name only) for the QR Customise picker.
    * Quantities, costs, and supplier info are stripped — the customer
    * just needs the names of what's in the dish to tick what to remove.
+   *
+   * Honours the same two ingredient flags the website respects:
+   *   - `Ingredient.showOnWebsite = false` → skip the row entirely
+   *     (admin uses this for back-of-house items the diner shouldn't
+   *     even see on the menu, e.g. "MSG", "stabiliser").
+   *   - `Ingredient.websiteDisplayName` → render this customer-
+   *     friendly alias instead of the internal `name` (e.g. "Aromatic
+   *     Garlic" instead of "Garlic Powder Type B").
+   * Earlier the QR customise list rendered the raw internal name and
+   * showed every recipe row, leaking the kitchen's vocabulary onto
+   * the customer screen.
    */
   async getPublicRecipe(menuItemId: string) {
     const recipe = await this.prisma.recipe.findUnique({
@@ -695,11 +706,31 @@ export class PublicService {
         items: {
           select: {
             id: true,
-            ingredient: { select: { id: true, name: true } },
+            ingredient: {
+              select: {
+                id: true,
+                name: true,
+                showOnWebsite: true,
+                websiteDisplayName: true,
+              } as never,
+            },
           },
         },
       },
     });
-    return recipe ?? { items: [] };
+    if (!recipe) return { items: [] };
+    type Row = { id: string; ingredient: { id: string; name: string; showOnWebsite?: boolean; websiteDisplayName?: string | null } };
+    const filtered = (recipe.items as unknown as Row[])
+      .filter((ri) => ri.ingredient.showOnWebsite !== false)
+      .map((ri) => ({
+        id: ri.id,
+        ingredient: {
+          id: ri.ingredient.id,
+          // Display the customer-facing alias when admin set one;
+          // fall back to the raw name when null/empty.
+          name: (ri.ingredient.websiteDisplayName?.trim() || ri.ingredient.name),
+        },
+      }));
+    return { items: filtered };
   }
 }
