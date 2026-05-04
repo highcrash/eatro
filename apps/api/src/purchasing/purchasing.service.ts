@@ -858,10 +858,16 @@ export class PurchasingService {
     const poNumber = po.id.slice(-8).toUpperCase();
     const poDate = (po.createdAt instanceof Date ? po.createdAt : new Date(po.createdAt));
     const formattedDate = poDate.toLocaleDateString('en-GB');
-    const grandTotalPaisa = po.items.reduce(
+    const itemsSubtotalPaisa = po.items.reduce(
       (sum, item) => sum + Number(item.quantityOrdered) * Number(item.unitCost),
       0,
     );
+    const discountPaisa = Number((po as any).receiptDiscount ?? 0);
+    const feesPaisa = Array.isArray((po as any).receiptExtraFees)
+      ? ((po as any).receiptExtraFees as Array<{ amount: number }>)
+          .reduce((s, f) => s + (Number(f?.amount) > 0 ? Number(f.amount) : 0), 0)
+      : 0;
+    const grandTotalPaisa = itemsSubtotalPaisa + feesPaisa - discountPaisa;
     const formattedTotal = `Tk ${(grandTotalPaisa / 100).toFixed(2)}`;
 
     const pdf = await buildPurchaseOrderPdf({
@@ -888,6 +894,11 @@ export class PurchasingService {
         unit: item.unit ?? item.ingredient?.purchaseUnit ?? item.ingredient?.unit ?? '',
         unitCostPaisa: Number(item.unitCost),
       })),
+      receiptDiscountPaisa: Number((po as any).receiptDiscount ?? 0),
+      receiptDiscountReason: (po as any).receiptDiscountReason ?? null,
+      receiptExtraFees: Array.isArray((po as any).receiptExtraFees)
+        ? ((po as any).receiptExtraFees as Array<{ label: string; amount: number }>)
+        : [],
     });
 
     const filename = `PO-${poNumber}.pdf`;
