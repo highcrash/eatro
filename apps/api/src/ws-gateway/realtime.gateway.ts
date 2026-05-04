@@ -143,4 +143,19 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   emitToOrder(orderId: string, event: WsEvent, data: unknown): void {
     this.server.to(`order:${orderId}`).emit(event, data);
   }
+
+  /**
+   * Emit an order-scoped event to BOTH the branch room (so POS
+   * terminals get the ticket update) AND the per-order room (so QR
+   * devices joined to that order see the live update without
+   * waiting for the 3s status poll). Use this for events where
+   * sibling QR devices on a shared order benefit from immediate
+   * visibility — primarily addItems-driven `order:updated` /
+   * `order:items-pending`. Single-room helpers (emitToBranch /
+   * emitToOrder) stay around for events that don't fit both shapes.
+   */
+  emitOrderUpdate(orderId: string, branchId: string, event: WsEvent, data: unknown): void {
+    this.server.to(`branch:${branchId}`).emit(event, data);
+    this.server.to(`order:${orderId}`).emit(event, data);
+  }
 }

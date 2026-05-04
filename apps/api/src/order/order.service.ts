@@ -653,7 +653,12 @@ export class OrderService {
       this.ws.emitToBranch(branchId, 'table:updated', { id: order.tableId, status: 'CLEANING' });
     }
 
-    this.ws.emitToBranch(branchId, 'order:paid', updated);
+    // Emit to per-order room as well so QR devices clear their
+    // activeOrderId immediately on PAID instead of waiting up to 3s
+    // for the next poll. The OrderStatusPage's existing onOrderUpdated
+    // handler invalidates the status query, which in turn flips the
+    // useEffect that nulls activeOrderId on terminal status.
+    this.ws.emitOrderUpdate(id, branchId, 'order:paid', updated);
     this.ws.emitToKds(branchId, 'kds:ticket:done', id);
 
     // Update customer stats
@@ -1283,7 +1288,12 @@ export class OrderService {
       include: { items: true, payments: true },
     });
 
-    this.ws.emitToBranch(branchId, needsApproval ? 'order:items-pending' : 'order:updated', updated);
+    // Emit to BOTH the branch room (POS) AND the per-order room (QR
+    // sibling devices on a shared order). Without the order-room
+    // emit, a Device B that just got share-approval would only see
+    // Device A's added items via the 3s poll — janky enough that
+    // diners would tap "refresh" themselves.
+    this.ws.emitOrderUpdate(id, branchId, needsApproval ? 'order:items-pending' : 'order:updated', updated);
 
     // Only deduct stock for immediately approved items. Mods + addon
     // recipes flow through.
