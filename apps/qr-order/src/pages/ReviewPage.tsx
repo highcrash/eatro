@@ -77,13 +77,29 @@ export default function ReviewPage() {
     }
   }, [customer, navigate, orderId]);
 
-  const allScored = foodScore > 0 && serviceScore > 0 && atmosphereScore > 0 && priceScore > 0;
+  // Food quality is the only REQUIRED row — that's the headline number
+  // that drives the kitchen's star average and the social-proof badge
+  // on the website. Service / Atmosphere / Price are optional; if the
+  // diner skips them we backfill with the food score before submit so
+  // the server-side payload (which expects all four) stays valid AND
+  // we don't silently average the missing dimensions to zero.
+  // Earlier behaviour required all four — diners filled food + maybe
+  // one other and couldn't figure out why submit was greyed out.
+  const canSubmit = foodScore > 0;
 
   const submit = async () => {
-    if (!allScored || !orderId || !branchId || !customer) return;
+    if (!canSubmit || !orderId || !branchId || !customer) return;
     setBusy(true);
     setError(null);
     try {
+      // Backfill any unscored row with the food score so the server
+      // payload (which still expects all four) doesn't see a 0 and
+      // pull the average down. The customer's intent on a skipped
+      // dimension is "no opinion" — closer to the food score than to
+      // a 1-star punishment.
+      const inheritedService = serviceScore > 0 ? serviceScore : foodScore;
+      const inheritedAtmosphere = atmosphereScore > 0 ? atmosphereScore : foodScore;
+      const inheritedPrice = priceScore > 0 ? priceScore : foodScore;
       const res = await fetch(apiUrl('/customers/reviews'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId },
@@ -91,9 +107,9 @@ export default function ReviewPage() {
           orderId,
           customerId: customer.id,
           foodScore,
-          serviceScore,
-          atmosphereScore,
-          priceScore,
+          serviceScore: inheritedService,
+          atmosphereScore: inheritedAtmosphere,
+          priceScore: inheritedPrice,
           notes: notes.trim() || undefined,
         }),
       });
@@ -151,10 +167,13 @@ export default function ReviewPage() {
       </div>
 
       <div className="px-5 py-5 space-y-6">
-        <ScoreRow label="Food quality" value={foodScore} onChange={setFoodScore} />
+        <ScoreRow label="Food quality *" value={foodScore} onChange={setFoodScore} />
         <ScoreRow label="Service" value={serviceScore} onChange={setServiceScore} />
         <ScoreRow label="Atmosphere" value={atmosphereScore} onChange={setAtmosphereScore} />
         <ScoreRow label="Price / value" value={priceScore} onChange={setPriceScore} />
+        <p className="text-[11px] font-body text-[#666]">
+          Only Food quality is required. Skipped rows take the same rating as Food.
+        </p>
 
         <div className="space-y-2">
           <p className="font-body text-sm text-white">Tell us more (optional)</p>
@@ -173,10 +192,10 @@ export default function ReviewPage() {
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-[#0D0D0D] border-t border-[#2A2A2A] px-5 py-4 z-20">
         <button
           onClick={() => void submit()}
-          disabled={!allScored || busy}
+          disabled={!canSubmit || busy}
           className="w-full bg-[#C8FF00] text-[#0D0D0D] py-3.5 font-body font-medium text-sm disabled:opacity-40"
         >
-          {busy ? 'Submitting…' : allScored ? 'Submit Review' : 'Tap a star on each row'}
+          {busy ? 'Submitting…' : canSubmit ? 'Submit Review' : 'Rate Food quality to submit'}
         </button>
       </div>
     </div>
