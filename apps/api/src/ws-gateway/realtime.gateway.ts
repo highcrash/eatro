@@ -52,6 +52,19 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     void client.join(`kds:${branchId}`);
   }
 
+  /**
+   * QR app subscribes per-order so the multi-device share workflow
+   * (request / approve / deny) can target only the devices on this
+   * order — without spamming every POS terminal in the branch.
+   */
+  @SubscribeMessage('join:order')
+  handleJoinOrder(
+    @MessageBody() orderId: string,
+    @ConnectedSocket() client: IoSocket,
+  ): void {
+    void client.join(`order:${orderId}`);
+  }
+
   @SubscribeMessage('kds:ticket:preparing')
   async handleTicketPreparing(
     @MessageBody() orderId: string,
@@ -124,5 +137,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   emitToKds(branchId: string, event: WsEvent, data: unknown): void {
     this.server.to(`kds:${branchId}`).emit(event, data);
+  }
+
+  /** Per-order targeting for the QR multi-device share workflow. */
+  emitToOrder(orderId: string, event: WsEvent, data: unknown): void {
+    this.server.to(`order:${orderId}`).emit(event, data);
   }
 }

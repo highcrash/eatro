@@ -370,6 +370,14 @@ export class QrOrderController {
       // "Apply Coupon" directly or a phone-identify modal first.
       customerId: order.customerId,
       customerName: order.customerName,
+      // Multi-device QR-share: expose the order's device-anchor + the
+      // approved shared list so the QR app can compute "am I a
+      // participant?" client-side and either render the editable view
+      // or the read-only-with-Request-Access view. Null for legacy /
+      // POS-created orders, which the client treats as fully editable
+      // (matches the participant guard's open-by-default behaviour).
+      primaryDeviceId: (order as { primaryDeviceId?: string | null }).primaryDeviceId ?? null,
+      sharedDeviceIds: (order as { sharedDeviceIds?: string | null }).sharedDeviceIds ?? null,
       items: order.items.map((i) => ({
         id: i.id,
         name: i.menuItemName,
@@ -581,5 +589,48 @@ export class QrOrderController {
     await this.ensureGateOpen(branchId, req);
     await this.requireOrderParticipant(id, branchId, deviceId);
     return this.orderService.removeDiscount(id, branchId);
+  }
+
+  /**
+   * Multi-device QR-share workflow. Second device asks the primary
+   * device for permission to join an existing order. NO participant
+   * check — by definition the requester isn't a participant yet.
+   * Wi-Fi gate still applies + the device-id is required so the
+   * server can target the approve/deny event back at this device.
+   */
+  @Post('qr/:id/request-share')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async requestShare(
+    @Param('id') id: string,
+    @Headers('x-branch-id') branchId: string,
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Body() dto: { deviceLabel?: string },
+    @Req() req: Request,
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    if (!deviceId) throw new BadRequestException('x-qr-device-id header required');
+    await this.ensureGateOpen(branchId, req);
+    return this.orderService.requestShare(id, branchId, deviceId, dto?.deviceLabel);
+  }
+
+  /**
+   * Primary device approves or denies a pending share request. The
+   * requireOrderParticipant guard restricts this to the order's
+   * primary or already-shared devices, so a stranger can't approve a
+   * share for someone else's order.
+   */
+  @Post('qr/:id/approve-share')
+  async approveShare(
+    @Param('id') id: string,
+    @Headers('x-branch-id') branchId: string,
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Body() dto: { deviceId: string; approve: boolean },
+    @Req() req: Request,
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
+    await this.requireOrderParticipant(id, branchId, deviceId);
+    if (!dto?.deviceId) throw new BadRequestException('deviceId required');
+    return this.orderService.approveShare(id, branchId, dto.deviceId, !!dto.approve);
   }
 }
