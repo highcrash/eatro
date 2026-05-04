@@ -46,6 +46,14 @@ export function setupAutoUpdater(): void {
   autoUpdater.logger = log;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false; // we prompt the cashier first
+  // Force the consumer-side channel name. electron-builder.yml sets
+  // `publish.channel: stable` which renames the published manifest to
+  // latest-stable.yml, BUT it doesn't always propagate the channel into
+  // the bundled app-update.yml — electron-updater then falls back to
+  // polling latest.yml and 404s. Setting it explicitly here pins the
+  // installed app to its branch's manifest forever, regardless of how
+  // electron-builder generates app-update.yml.
+  autoUpdater.channel = 'stable';
 
   autoUpdater.on('checking-for-update', () => broadcast({ kind: 'checking' }));
   autoUpdater.on('update-available', (info) =>
