@@ -367,6 +367,19 @@ function FoodCard({ item, onAdd, onTap }: { item: MenuItem; onAdd: (item: MenuIt
   // item.price — that's the signal that picks affect the actual price.
   const showFromPrefix = computedFloor > basePrice;
   const displayPrice = computedFloor > 0 ? computedFloor : basePrice;
+  // Per-item discount stamped by the public menu endpoint via
+  // applyDiscounts(). Render only when there's a real markdown
+  // (discountedPrice strictly less than base) — null/equal means no
+  // active discount on this item. Variant parents currently don't
+  // get a parent-level discounted price (their children carry their
+  // own); skip the badge in that case so we don't lie about a sale.
+  const rawDiscounted = (item as any).discountedPrice;
+  const hasDiscount = !isVariantParent
+    && rawDiscounted != null
+    && Number(rawDiscounted) < basePrice
+    && basePrice > 0;
+  const discountedPrice = hasDiscount ? Number(rawDiscounted) : null;
+  const discountPct = hasDiscount ? Math.round((1 - discountedPrice! / basePrice) * 100) : 0;
 
   return (
     <div className="bg-[#1A1A1A] border border-[#2A2A2A] overflow-hidden" onClick={onTap}>
@@ -378,6 +391,13 @@ function FoodCard({ item, onAdd, onTap }: { item: MenuItem; onAdd: (item: MenuIt
           <div className="w-full h-full flex items-center justify-center text-3xl opacity-30">
             {item.type === 'BEVERAGE' ? '🥤' : '🍽️'}
           </div>
+        )}
+        {/* Discount badge — overlay top-left so it survives the next
+            redesign without colliding with the quick-add button. */}
+        {hasDiscount && (
+          <span className="absolute top-2 left-2 bg-[#D62B2B] text-white text-[10px] font-body font-bold px-1.5 py-0.5 tracking-widest">
+            -{discountPct}%
+          </span>
         )}
         {/* Quick add */}
         <button
@@ -397,10 +417,21 @@ function FoodCard({ item, onAdd, onTap }: { item: MenuItem; onAdd: (item: MenuIt
             ))}
           </div>
         )}
-        <p className="font-display text-base text-white tracking-wide mt-1.5">
-          {showFromPrefix && <span className="text-[10px] text-[#888] font-body font-normal mr-1">From</span>}
-          {formatCurrency(displayPrice)}
-        </p>
+        {hasDiscount ? (
+          <div className="flex items-baseline gap-2 mt-1.5">
+            <span className="font-display text-base text-[#C8FF00] tracking-wide">
+              {formatCurrency(discountedPrice!)}
+            </span>
+            <span className="font-body text-[11px] text-[#666] line-through">
+              {formatCurrency(basePrice)}
+            </span>
+          </div>
+        ) : (
+          <p className="font-display text-base text-white tracking-wide mt-1.5">
+            {showFromPrefix && <span className="text-[10px] text-[#888] font-body font-normal mr-1">From</span>}
+            {formatCurrency(displayPrice)}
+          </p>
+        )}
       </div>
     </div>
   );
