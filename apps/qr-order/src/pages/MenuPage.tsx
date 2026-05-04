@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, Search, ClipboardList, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ShoppingCart, Search, ClipboardList, ChevronLeft, ChevronRight, Camera } from 'lucide-react';
 
 import type { MenuItem, MenuCategory } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
@@ -167,17 +167,32 @@ export default function MenuPage() {
             <h1 className="font-display text-3xl text-white tracking-wider">{branchName || 'Your Restaurant'}</h1>
             {tableNumber && <p className="text-xs text-[#666] font-body">Table {tableNumber}</p>}
           </div>
-          {cartCount > 0 && (
+          <div className="flex items-center gap-2">
+            {/* In-app QR scanner — useful when the customer is at a
+                fresh device (no tableId in session yet) or wants to
+                start a fresh order at a different table. The cart +
+                active order on this device aren't touched until they
+                actually scan a NEW table. */}
             <button
-              onClick={() => void navigate('/cart')}
-              className="relative w-11 h-11 bg-[#C8FF00] flex items-center justify-center"
+              onClick={() => void navigate('/scan')}
+              title="Scan a table QR code"
+              aria-label="Scan QR"
+              className="w-11 h-11 bg-[#1A1A1A] border border-[#2A2A2A] hover:border-[#C8FF00] flex items-center justify-center text-[#C8FF00] transition-colors"
             >
-              <ShoppingCart size={18} className="text-[#0D0D0D]" />
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-[#0D0D0D] text-[#C8FF00] text-[10px] font-body font-medium flex items-center justify-center border border-[#C8FF00]">
-                {cartCount}
-              </span>
+              <Camera size={18} />
             </button>
-          )}
+            {cartCount > 0 && (
+              <button
+                onClick={() => void navigate('/cart')}
+                className="relative w-11 h-11 bg-[#C8FF00] flex items-center justify-center"
+              >
+                <ShoppingCart size={18} className="text-[#0D0D0D]" />
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-[#0D0D0D] text-[#C8FF00] text-[10px] font-body font-medium flex items-center justify-center border border-[#C8FF00]">
+                  {cartCount}
+                </span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Search */}

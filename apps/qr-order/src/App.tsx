@@ -8,6 +8,7 @@ import CartPage from './pages/CartPage';
 import OrderStatusPage from './pages/OrderStatusPage';
 import ReviewPage from './pages/ReviewPage';
 import LoginPage from './pages/LoginPage';
+import ScanPage from './pages/ScanPage';
 import WifiGate, { type GatePayload } from './pages/WifiGate';
 import { useSessionStore } from './store/session.store';
 import { useCartStore } from './store/cart.store';
@@ -145,9 +146,18 @@ export default function QrOrderApp() {
       <Route path="/cart" element={<CartPage />} />
       <Route path="/order/:orderId" element={<OrderStatusPage />} />
       <Route path="/review/:orderId" element={<ReviewPage />} />
-      <Route path="*" element={<Navigate to="/menu" replace />} />
+      <Route path="/scan" element={<ScanPage />} />
+      {/* Catch-all: route to /menu when there's a known branch context
+       *  (came in via a /table/:id scan earlier this session); otherwise
+       *  send them to /scan so they can capture a table tent. */}
+      <Route path="*" element={<TableAwareLanding />} />
     </Routes>
   );
+}
+
+function TableAwareLanding() {
+  const tableId = useSessionStore((s) => s.tableId);
+  return <Navigate to={tableId ? '/menu' : '/scan'} replace />;
 }
 
 function Checking() {
