@@ -76,15 +76,38 @@ When reviewing PRs that touch `prisma/schema.prisma`, always re-run
 - macOS and Linux builds. `electron-builder.yml` is Windows-only by design.
 - Direct database access. The desktop app only ever talks to the API.
 
-## Release flow (once Phase 6 is live)
+## Release flow
 
-1. Bump `version` in `apps/pos-desktop/package.json`.
+Two release channels — keep them isolated:
+
+- **main branch** (2.0.x, no license-client): publishes to channel
+  `stable` → `latest-stable.yml`.
+- **codecanyon branch** (1.0.x, license-client): publishes to channel
+  `codecanyon` → `latest-codecanyon.yml`. Only updates installs that
+  were also built from that branch.
+
+Why: without channels, `electron-updater` does a plain semver compare
+against the shared `latest.yml` and the higher version always wins —
+in May 2026 main users were briefly auto-updated onto the codecanyon
+build with its license screen. The `channel:` line in
+`electron-builder.yml` fixes this.
+
+To cut a release on EITHER branch:
+
+1. Bump `version` in `apps/pos-desktop/package.json` (main stays in
+   2.0.x; codecanyon stays in 1.0.x).
 2. Append a section to `CHANGELOG.md`.
 3. `git tag pos-desktop-v{version} && git push --tags`.
-4. GitHub Actions builds `RestoraPOS-Setup-{version}.exe` + `latest.yml` and
-   publishes them to the GitHub release named `pos-desktop-v{version}`.
+4. GitHub Actions builds `RestoraPOS-Setup-{version}.exe` +
+   `latest-{channel}.yml` and publishes them to the GitHub release
+   named `pos-desktop-v{version}`.
 5. Installed terminals pick up the new build on next launch via
-   `electron-updater` reading `latest.yml`.
+   `electron-updater` reading their channel's manifest.
+
+NEVER cross-version: don't bump the codecanyon trajectory above the
+main trajectory or vice versa even though channels protect us — the
+clean version split (2.x vs 1.x) is also a useful eyeball signal in
+GitHub Releases.
 
 ## Dev-run
 

@@ -58,9 +58,19 @@ nsis:
   deleteAppDataOnUninstall: false   # preserve paired config + PIN hashes
 
 # Auto-update feed. electron-updater fetches https://github.com/<owner>/<repo>/releases/latest
-# and looks for latest.yml + the matching .exe + .blockmap.
+# and looks for latest-<channel>.yml + the matching .exe + .blockmap.
+#
+# CHANNEL ISOLATION: this branch (main, 2.0.x, no license-client) publishes
+# to channel `stable` so its `latest-stable.yml` only updates installs that
+# were also built from this branch. The `codecanyon` branch (1.0.x, with
+# license-client) publishes to channel `codecanyon` (`latest-codecanyon.yml`).
+# Without channel isolation, electron-updater does a plain semver compare
+# against the shared `latest.yml` and the higher version always wins — main
+# users were briefly auto-updated onto the codecanyon build with its
+# license screen. Channels stop that for good.
 publish:
   - provider: github
     owner: highcrash
     repo: eatro
     releaseType: release
+    channel: stable
