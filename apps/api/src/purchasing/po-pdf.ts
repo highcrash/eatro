@@ -18,6 +18,13 @@ export interface POPdfInput {
     unit: string;
     unitCostPaisa: number;
   }>;
+  /** Receipt-level adjustments captured at delivery — supplier
+   *  discount + extra fees (delivery, labour, packaging). All amounts
+   *  in paisa. Shown beneath the line items so the supplier can
+   *  reconcile the grand total to their own bill. */
+  receiptDiscountPaisa?: number;
+  receiptDiscountReason?: string | null;
+  receiptExtraFees?: Array<{ label: string; amount: number }>;
 }
 
 const PAGE_MARGIN = 40;
@@ -93,7 +100,7 @@ export async function buildPurchaseOrderPdf(po: POPdfInput): Promise<Buffer> {
 
     let y = tableTop + 20;
     doc.font('Helvetica').fontSize(9).fillColor('#000');
-    let grandTotal = 0;
+    let itemsSubtotal = 0;
 
     po.items.forEach((item, idx) => {
       if (y > 760) {
@@ -101,7 +108,7 @@ export async function buildPurchaseOrderPdf(po: POPdfInput): Promise<Buffer> {
         y = PAGE_MARGIN;
       }
       const lineTotal = item.quantityOrdered * item.unitCostPaisa;
-      grandTotal += lineTotal;
+      itemsSubtotal += lineTotal;
 
       doc.text(String(idx + 1), cols.idx.x, y);
       doc.text(item.name, cols.name.x, y, { width: cols.name.w });
@@ -114,6 +121,44 @@ export async function buildPurchaseOrderPdf(po: POPdfInput): Promise<Buffer> {
       y += Math.max(14, rowH + 4);
       doc.moveTo(PAGE_MARGIN, y - 2).lineTo(PAGE_MARGIN + 472, y - 2).strokeColor('#eee').stroke();
     });
+
+    // ── Receipt-level adjustments (only when present) ────────────
+    // Supplier discount + extra fees captured at delivery. Render a
+    // labelled subtotal → fees → discount → grand total ladder so the
+    // supplier can reconcile the figure on screen to their own bill.
+    const discount = Number(po.receiptDiscountPaisa ?? 0);
+    const fees = Array.isArray(po.receiptExtraFees) ? po.receiptExtraFees : [];
+    const positiveFees = fees.filter((f) => Number(f?.amount) > 0);
+    const hasAdjustments = discount > 0 || positiveFees.length > 0;
+    const grandTotal = itemsSubtotal + positiveFees.reduce((s, f) => s + Number(f.amount), 0) - discount;
+
+    if (hasAdjustments) {
+      y += 4;
+      doc.moveTo(PAGE_MARGIN + 200, y).lineTo(PAGE_MARGIN + 472, y).strokeColor('#999').stroke();
+      y += 6;
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#000');
+      doc.text('Items subtotal', PAGE_MARGIN + 200, y, { width: 242, align: 'right' });
+      doc.text(fmtMoney(itemsSubtotal), cols.total.x, y, { width: cols.total.w, align: cols.total.align });
+      y += 14;
+
+      doc.font('Helvetica').fontSize(9);
+      for (const f of positiveFees) {
+        doc.fillColor('#c62828');
+        doc.text(`+ ${f.label || 'Extra fee'}`, PAGE_MARGIN + 200, y, { width: 242, align: 'right' });
+        doc.text(`+${fmtMoney(Number(f.amount))}`, cols.total.x, y, { width: cols.total.w, align: cols.total.align });
+        y += 13;
+      }
+      if (discount > 0) {
+        doc.fillColor('#2e7d32');
+        const label = po.receiptDiscountReason
+          ? `- Supplier discount (${po.receiptDiscountReason})`
+          : '- Supplier discount';
+        doc.text(label, PAGE_MARGIN + 200, y, { width: 242, align: 'right' });
+        doc.text(`-${fmtMoney(discount)}`, cols.total.x, y, { width: cols.total.w, align: cols.total.align });
+        y += 13;
+      }
+      doc.fillColor('#000');
+    }
 
     // ── Grand total ──────────────────────────────────────────────
     y += 8;

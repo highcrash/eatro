@@ -63,9 +63,33 @@ function printPO(po: PurchaseOrder, includePrice: boolean) {
     </tr>`;
   }).join('');
 
-  const grandTotal = includePrice
+  // Items subtotal is computed off the same per-line shape the table
+  // already shows (received qty when present, ordered qty otherwise).
+  // Receipt-level adjustments captured at delivery — supplier discount
+  // + extra fees (delivery, labour, packaging) — are persisted on the
+  // PurchaseOrder by purchasing.service.receiveGoods. They settle the
+  // supplier ledger as: items_subtotal + extra_fees − discount, so the
+  // printed PO needs to show the same breakdown or the supplier sees
+  // a "Grand Total" they can't reconcile to their own bill.
+  const itemsSubtotal = includePrice
     ? po.items.reduce((s, i) => s + (Number(i.unitCost) / 100) * Number(i.quantityReceived || i.quantityOrdered), 0)
     : 0;
+  const discountTk = Number((po as any).receiptDiscount ?? 0) / 100;
+  const discountReason = (po as any).receiptDiscountReason as string | null | undefined;
+  const extraFees = Array.isArray((po as any).receiptExtraFees) ? ((po as any).receiptExtraFees as Array<{ label: string; amount: number }>) : [];
+  const extraFeesTk = extraFees.reduce((s, f) => s + (Number(f?.amount) || 0), 0) / 100;
+  const grandTotal = itemsSubtotal + extraFeesTk - discountTk;
+  const hasAdjustments = includePrice && (discountTk > 0 || extraFees.some((f) => Number(f?.amount) > 0));
+
+  const adjustmentRowsHtml = hasAdjustments ? `
+    <tr><td colspan="${hasReceived ? 3 : 2}" style="text-align:right;border-top:1px solid #999;padding:4px 8px;font-weight:bold">Items subtotal</td><td style="text-align:right;border-top:1px solid #999;padding:4px 8px;font-weight:bold" colspan="2">৳${itemsSubtotal.toFixed(2)}</td></tr>
+    ${extraFees.filter((f) => Number(f?.amount) > 0).map((f) => `
+      <tr><td colspan="${hasReceived ? 3 : 2}" style="text-align:right;color:#c62828;padding:4px 8px">+ ${f.label || 'Extra fee'}</td><td colspan="2" style="text-align:right;color:#c62828;padding:4px 8px">+৳${(Number(f.amount) / 100).toFixed(2)}</td></tr>
+    `).join('')}
+    ${discountTk > 0 ? `
+      <tr><td colspan="${hasReceived ? 3 : 2}" style="text-align:right;color:#2e7d32;padding:4px 8px">− Supplier discount${discountReason ? ` <span style="color:#666;font-size:10px">(${discountReason})</span>` : ''}</td><td colspan="2" style="text-align:right;color:#2e7d32;padding:4px 8px">−৳${discountTk.toFixed(2)}</td></tr>
+    ` : ''}
+  ` : '';
 
   const statusLabel = po.status === 'RECEIVED' ? 'RECEIVED' : po.status === 'PARTIAL' ? 'PARTIALLY RECEIVED' : po.status;
 
@@ -74,7 +98,7 @@ function printPO(po: PurchaseOrder, includePrice: boolean) {
   w.document.write(`<!DOCTYPE html><html><head><title>PO ${po.id.slice(-8).toUpperCase()}</title><style>body{font-family:sans-serif;padding:20px;font-size:13px}table{width:100%;border-collapse:collapse}th{text-align:left;padding:6px 8px;border-bottom:2px solid #333;font-size:11px;text-transform:uppercase;letter-spacing:1px}h2{margin:0}p{margin:4px 0}.status{display:inline-block;padding:2px 8px;font-size:11px;font-weight:bold;letter-spacing:1px}</style></head><body>
     <h2>Purchase Order <span class="status">${statusLabel}</span></h2>
     <p style="color:#666;margin-bottom:16px">PO# ${po.id.slice(-8).toUpperCase()} | ${po.supplier?.name ?? ''} | ${new Date(po.createdAt).toLocaleDateString()}${po.receivedAt ? ` | Received: ${new Date(po.receivedAt).toLocaleDateString()}` : ''}</p>
-    <table><thead><tr><th>Ingredient</th><th style="text-align:right">Ordered</th>${hasReceived ? '<th style="text-align:right">Received</th>' : ''}${includePrice ? '<th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>Ingredient</th><th style="text-align:right">Ordered</th>${hasReceived ? '<th style="text-align:right">Received</th>' : ''}${includePrice ? '<th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th>' : ''}</tr></thead><tbody>${rows}${adjustmentRowsHtml}</tbody></table>
     ${includePrice ? `<p style="text-align:right;font-size:18px;font-weight:bold;margin-top:16px;border-top:2px solid #333;padding-top:8px">Grand Total: ৳${grandTotal.toFixed(2)}</p>` : ''}
     ${po.notes ? `<p style="color:#666;margin-top:12px">Notes: ${po.notes}</p>` : ''}
   </body></html>`);
