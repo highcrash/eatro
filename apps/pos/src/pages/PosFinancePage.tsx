@@ -9,6 +9,7 @@ import { useIsOnline } from '../lib/online';
 import { OfflineBanner } from '../components/OfflineHint';
 import { useCashierPermissions } from '../lib/permissions';
 import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
+import { PaymentMethodSelect } from '../components/PaymentMethodSelect';
 
 type Tab = 'expense' | 'payroll';
 
@@ -23,41 +24,9 @@ const ALL_CATEGORIES: ExpenseCategory[] = [
   'FOOD_COST', 'STAFF_FOOD', 'MISCELLANEOUS',
 ];
 
-// Payment-method dropdown wired to the SAME /payment-methods endpoint
-// the order PaymentModal uses. Sending a configured PaymentOption.code
-// (rather than the legacy hard-coded enum) is what
-// account.service.updateAccountForPayment looks up against, so an
-// expense paid via bKash actually posts to the bKash Account row and
-// shows up in its statement.
-type PMOption = { code: string; name: string; isActive: boolean; isDefault: boolean };
-type PMCategory = { id: string; code: string; name: string; isActive: boolean; options: PMOption[] };
-
-function PaymentMethodSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const { data: categories = [] } = useQuery<PMCategory[]>({
-    queryKey: ['payment-methods'],
-    queryFn: () => api.get('/payment-methods'),
-    select: (d) => d.filter((c) => c.isActive && c.options.some((o) => o.isActive)),
-  });
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full bg-theme-bg rounded-theme px-3 py-2.5 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
-    >
-      {categories.length === 0 ? (
-        <option value="CASH">Cash</option>
-      ) : (
-        categories.map((c) => (
-          <optgroup key={c.id} label={c.name}>
-            {c.options.filter((o) => o.isActive).map((o) => (
-              <option key={o.code} value={o.code}>{o.name}</option>
-            ))}
-          </optgroup>
-        ))
-      )}
-    </select>
-  );
-}
+// Payment-method dropdown moved to ../components/PaymentMethodSelect so
+// PosPurchasingPage's "Pay Supplier" tab can re-use the same wiring —
+// hardcoded literal codes there were skipping the bKash account post.
 
 export default function PosFinancePage() {
   const qc = useQueryClient();

@@ -108,6 +108,26 @@ export default function AccountsPage() {
     },
   });
 
+  // One-shot retro-fit for past supplier payments that never wrote an
+  // AccountTransaction (e.g. bKash payments before the resolver fix).
+  // Always runs dryRun first so admin sees the count + sample before
+  // committing.
+  const [backfillReport, setBackfillReport] = useState<null | {
+    dryRun: boolean; scanned: number; posted: number; skippedAlreadyPosted: number; skippedNoAccount: number;
+    byAccount: Array<{ accountId: string; accountName: string; count: number; total: number }>;
+    samples: Array<{ paymentId: string; supplier: string; method: string; amount: number; createdAt: string; resolvedAccount: string | null; action: string }>;
+  }>(null);
+  const backfillMutation = useMutation({
+    mutationFn: (dryRun: boolean) => api.post(`/accounts/backfill-supplier-payments${dryRun ? '?dryRun=1' : ''}`, {}),
+    onSuccess: (res: any) => {
+      setBackfillReport(res);
+      if (!res.dryRun) {
+        void qc.invalidateQueries({ queryKey: ['accounts'] });
+        void qc.invalidateQueries({ queryKey: ['account-transactions'] });
+      }
+    },
+  });
+
   const totalBalance = accounts.reduce((s, a) => s + Number(a.balance), 0);
 
   return (
@@ -116,6 +136,14 @@ export default function AccountsPage() {
         <h1 className="font-display text-3xl text-white tracking-widest">ACCOUNTS</h1>
         {tab === 'accounts' && (
           <div className="flex gap-2">
+            <button
+              onClick={() => { setBackfillReport(null); backfillMutation.mutate(true); }}
+              disabled={backfillMutation.isPending}
+              title="Scan past supplier payments and post any missing AccountTransactions (dry-run preview first)"
+              className="bg-[#2A2A2A] hover:bg-[#FFA726] text-[#999] hover:text-[#0D0D0D] font-body text-sm px-4 py-2 transition-colors disabled:opacity-50"
+            >
+              {backfillMutation.isPending ? 'Scanning…' : 'Backfill Supplier Postings'}
+            </button>
             <button onClick={() => setShowTransfer(true)} className="bg-[#2A2A2A] hover:bg-[#29B6F6] text-[#999] hover:text-[#0D0D0D] font-body text-sm px-4 py-2 transition-colors">Transfer</button>
             <button onClick={() => setShowAddDialog(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">+ ADD ACCOUNT</button>
           </div>
@@ -426,6 +454,103 @@ export default function AccountsPage() {
           onToChange={setStatementTo}
           onClose={() => setStatementAccount(null)}
         />
+      )}
+
+      {/* Backfill Supplier Postings dialog */}
+      {backfillReport && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setBackfillReport(null)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-[#2A2A2A] flex items-center justify-between">
+              <div>
+                <h2 className="font-display text-lg text-white tracking-widest">
+                  {backfillReport.dryRun ? 'BACKFILL PREVIEW (DRY RUN)' : 'BACKFILL COMPLETE'}
+                </h2>
+                <p className="text-[#666] font-body text-xs mt-1">
+                  Retroactive posting of supplier payments that never wrote an AccountTransaction.
+                </p>
+              </div>
+              <button onClick={() => setBackfillReport(null)} className="text-[#666] hover:text-white text-2xl leading-none">×</button>
+            </div>
+            <div className="px-6 py-4 grid grid-cols-4 gap-4 border-b border-[#2A2A2A]">
+              <div>
+                <p className="text-[10px] text-[#666] font-body uppercase tracking-widest">Scanned</p>
+                <p className="text-white font-display text-2xl">{backfillReport.scanned}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-[#666] font-body uppercase tracking-widest">{backfillReport.dryRun ? 'Would post' : 'Posted'}</p>
+                <p className="text-[#4CAF50] font-display text-2xl">{backfillReport.posted}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-[#666] font-body uppercase tracking-widest">Already posted</p>
+                <p className="text-[#999] font-display text-2xl">{backfillReport.skippedAlreadyPosted}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-[#666] font-body uppercase tracking-widest">No account</p>
+                <p className="text-[#FFA726] font-display text-2xl">{backfillReport.skippedNoAccount}</p>
+              </div>
+            </div>
+            <div className="px-6 py-4 overflow-y-auto flex-1">
+              {backfillReport.byAccount.length > 0 && (
+                <>
+                  <p className="text-[#999] font-body text-xs tracking-widest uppercase mb-2">By account</p>
+                  <table className="w-full mb-4">
+                    <thead>
+                      <tr className="border-b border-[#2A2A2A]">
+                        <th className="text-left py-2 text-[#666] font-body text-[11px] tracking-widest uppercase">Account</th>
+                        <th className="text-right py-2 text-[#666] font-body text-[11px] tracking-widest uppercase">Count</th>
+                        <th className="text-right py-2 text-[#666] font-body text-[11px] tracking-widest uppercase">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {backfillReport.byAccount.map((b) => (
+                        <tr key={b.accountId} className="border-b border-[#2A2A2A]/50">
+                          <td className="py-2 text-white font-body text-sm">{b.accountName}</td>
+                          <td className="py-2 text-[#999] font-body text-sm text-right">{b.count}</td>
+                          <td className="py-2 text-[#D62B2B] font-body text-sm text-right">−{formatCurrency(b.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+              {backfillReport.skippedNoAccount > 0 && (
+                <p className="text-[#FFA726] font-body text-xs mb-3">
+                  ⚠ {backfillReport.skippedNoAccount} payment{backfillReport.skippedNoAccount === 1 ? '' : 's'} couldn't be linked to an account — check that the payment method (e.g. bKash) has either a PaymentOption with an Account link, or an Account with <code>linkedPaymentMethod</code> set to its category code.
+                </p>
+              )}
+              {backfillReport.samples.length > 0 && (
+                <>
+                  <p className="text-[#999] font-body text-xs tracking-widest uppercase mb-2">Sample (first {Math.min(backfillReport.samples.length, 12)})</p>
+                  <div className="text-[11px] font-mono text-[#999] space-y-1">
+                    {backfillReport.samples.slice(0, 12).map((s) => (
+                      <div key={s.paymentId} className="flex justify-between gap-2 border-b border-[#2A2A2A]/30 pb-1">
+                        <span className="truncate">{new Date(s.createdAt).toLocaleDateString()} · {s.supplier} · {s.method}</span>
+                        <span className="shrink-0">
+                          {formatCurrency(s.amount)} → {s.resolvedAccount ?? '—'} ·{' '}
+                          <span className={s.action === 'POST' ? 'text-[#4CAF50]' : s.action === 'SKIP_NO_ACCOUNT' ? 'text-[#FFA726]' : 'text-[#666]'}>{s.action}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-[#2A2A2A] flex gap-2 justify-end">
+              {backfillReport.dryRun && backfillReport.posted > 0 && (
+                <button
+                  onClick={() => backfillMutation.mutate(false)}
+                  disabled={backfillMutation.isPending}
+                  className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors disabled:opacity-50"
+                >
+                  {backfillMutation.isPending ? 'Posting…' : `Post ${backfillReport.posted} backfill row${backfillReport.posted === 1 ? '' : 's'}`}
+                </button>
+              )}
+              <button onClick={() => setBackfillReport(null)} className="bg-[#2A2A2A] hover:bg-[#1F1F1F] text-white font-body text-sm px-4 py-2 transition-colors">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -10,6 +10,7 @@ import { OfflineBanner } from '../components/OfflineHint';
 import { useCashierPermissions } from '../lib/permissions';
 import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
 import VariantPickerModal from '../components/VariantPickerModal';
+import { PaymentMethodSelect } from '../components/PaymentMethodSelect';
 
 interface Supplier { id: string; name: string; totalDue: number }
 interface Ingredient {
@@ -1221,17 +1222,7 @@ function PayTab({ suppliers, guardAndRun, qc }: {
         </div>
         <div>
           <label className="block text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-1">Payment Method</label>
-          <select
-            value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value)}
-            className="w-full bg-theme-bg rounded-theme px-3 py-2.5 text-sm text-theme-text outline-none border border-transparent focus:border-theme-accent"
-          >
-            <option value="CASH">Cash</option>
-            <option value="BKASH">bKash</option>
-            <option value="NAGAD">Nagad</option>
-            <option value="CARD">Card</option>
-            <option value="BANK">Bank Transfer</option>
-          </select>
+          <PaymentMethodSelect value={paymentMethod} onChange={setPaymentMethod} />
         </div>
         <div>
           <label className="block text-[10px] font-bold uppercase tracking-wider text-theme-text-muted mb-1">Reference / Tx ID</label>

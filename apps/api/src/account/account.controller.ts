@@ -96,4 +96,31 @@ export class AccountController {
     const defaultTo = now.toISOString().split('T')[0];
     return this.accountService.getPnl(user.branchId, from ?? defaultFrom, to ?? defaultTo);
   }
+
+  /**
+   * One-shot retroactive sweep that posts an AccountTransaction for any
+   * SupplierPayment that resolves to an Account but never had a ledger
+   * entry written. Use after the bKash/MFS dropdown fix to fix up
+   * historical balances. Idempotent — re-running is a no-op.
+   * Pass `?dryRun=1` to preview without writing.
+   */
+  @Post('backfill-supplier-payments')
+  @Roles('OWNER')
+  async backfillSupplierPayments(
+    @CurrentUser() user: JwtPayload,
+    @Query('dryRun') dryRun?: string,
+  ) {
+    const result = await this.accountService.backfillSupplierPaymentPostings(user.branchId, {
+      dryRun: dryRun === '1' || dryRun === 'true',
+    });
+    if (!result.dryRun && result.posted > 0) {
+      void this.activityLog.log({
+        branchId: user.branchId, actor: user, category: 'ACCOUNT', action: 'UPDATE',
+        entityType: 'account', entityId: 'bulk-backfill', entityName: 'Supplier-payment backfill',
+        after: { posted: result.posted, byAccount: result.byAccount } as any,
+        summary: `Backfilled ${result.posted} supplier-payment postings (skipped ${result.skippedAlreadyPosted} existing, ${result.skippedNoAccount} unlinked)`,
+      });
+    }
+    return result;
+  }
 }

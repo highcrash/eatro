@@ -284,6 +284,157 @@ export class AccountService {
     });
   }
 
+  /**
+   * One-shot retroactive sweep that posts an AccountTransaction for any
+   * SupplierPayment whose payment method resolves to an Account but never
+   * had a corresponding ledger entry written.
+   *
+   * Why this exists: prior to the bKash/MFS resolver fix (commit 84023de)
+   * AND prior to the POS Pay-Supplier dropdown using configured
+   * PaymentOption codes, supplier payments via bKash/MFS silently
+   * skipped the AccountTransaction post. Real cash drained from the
+   * bKash account but the POS-side balance kept inflating, producing
+   * a misleading "expected vs actual" reconciliation gap.
+   *
+   * Idempotency: skip a SupplierPayment when an AccountTransaction
+   * already exists on the resolved account whose description starts
+   * with "Supplier payment" AND whose absolute amount matches AND whose
+   * createdAt is within ±10 minutes of the SupplierPayment.createdAt.
+   * That window covers fire-and-forget ordering jitter without risking
+   * a double-post for legitimate same-amount payments because the
+   * description discriminator is enough.
+   *
+   * dryRun: when true, returns the would-post list without writing.
+   */
+  async backfillSupplierPaymentPostings(branchId: string, opts: { dryRun?: boolean } = {}) {
+    const dryRun = !!opts.dryRun;
+
+    const payments = await this.prisma.supplierPayment.findMany({
+      where: { branchId },
+      include: { supplier: { select: { name: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    let scanned = 0;
+    let posted = 0;
+    let skippedAlreadyPosted = 0;
+    let skippedNoAccount = 0;
+    const postsByAccount = new Map<string, { accountName: string; count: number; total: number }>();
+    const samples: Array<{ paymentId: string; supplier: string; method: string; amount: number; createdAt: string; resolvedAccount: string | null; action: 'POST' | 'SKIP_EXISTS' | 'SKIP_NO_ACCOUNT' }> = [];
+
+    for (const p of payments) {
+      scanned++;
+      const method = String((p as unknown as { paymentMethod?: string }).paymentMethod ?? 'CASH');
+      const amount = Number(p.amount);
+      const description = `Supplier payment — ${p.supplier?.name ?? 'Unknown'}${p.reference ? ` (Ref: ${p.reference})` : ''}`;
+
+      const account = await this.resolveAccountForMethod(branchId, method);
+      if (!account) {
+        skippedNoAccount++;
+        if (samples.length < 50) samples.push({ paymentId: p.id, supplier: p.supplier?.name ?? '', method, amount, createdAt: p.createdAt.toISOString(), resolvedAccount: null, action: 'SKIP_NO_ACCOUNT' });
+        continue;
+      }
+
+      // Idempotency: anything we'd post that already exists?
+      const lo = new Date(p.createdAt.getTime() - 10 * 60 * 1000);
+      const hi = new Date(p.createdAt.getTime() + 10 * 60 * 1000);
+      const existing = await this.prisma.accountTransaction.findFirst({
+        where: {
+          accountId: account.id,
+          createdAt: { gte: lo, lte: hi },
+          amount: -amount,
+          description: { startsWith: 'Supplier payment' },
+        },
+      });
+      if (existing) {
+        skippedAlreadyPosted++;
+        if (samples.length < 50) samples.push({ paymentId: p.id, supplier: p.supplier?.name ?? '', method, amount, createdAt: p.createdAt.toISOString(), resolvedAccount: account.name, action: 'SKIP_EXISTS' });
+        continue;
+      }
+
+      if (!dryRun) {
+        await this.prisma.account.update({
+          where: { id: account.id },
+          data: { balance: { increment: -amount } },
+        });
+        await this.prisma.accountTransaction.create({
+          data: {
+            branchId,
+            accountId: account.id,
+            type: 'EXPENSE',
+            amount: -amount,
+            description: `[BACKFILL] ${description}`,
+            createdAt: p.createdAt,
+          },
+        });
+      }
+
+      posted++;
+      const bucket = postsByAccount.get(account.id) ?? { accountName: account.name, count: 0, total: 0 };
+      bucket.count++;
+      bucket.total += amount;
+      postsByAccount.set(account.id, bucket);
+      if (samples.length < 50) samples.push({ paymentId: p.id, supplier: p.supplier?.name ?? '', method, amount, createdAt: p.createdAt.toISOString(), resolvedAccount: account.name, action: 'POST' });
+    }
+
+    return {
+      dryRun,
+      scanned,
+      posted,
+      skippedAlreadyPosted,
+      skippedNoAccount,
+      byAccount: Array.from(postsByAccount.entries()).map(([accountId, v]) => ({ accountId, ...v })),
+      samples,
+    };
+  }
+
+  /**
+   * Internal helper that mirrors the resolver chain in
+   * updateAccountForPayment but returns the resolved Account row instead
+   * of mutating its balance. Used by the backfill sweep so the
+   * idempotency check + the eventual post can target the same row.
+   */
+  private async resolveAccountForMethod(branchId: string, paymentOptionCode: string) {
+    const option = await this.prisma.paymentOption.findFirst({
+      where: { branchId, code: paymentOptionCode, isActive: true },
+      select: { accountId: true, categoryId: true },
+    });
+
+    let account = null;
+    if (option?.accountId) {
+      account = await this.prisma.account.findFirst({ where: { id: option.accountId, isActive: true } });
+    }
+    if (!account) {
+      account = await this.prisma.account.findFirst({
+        where: { branchId, linkedPaymentMethod: paymentOptionCode, isActive: true },
+      });
+    }
+    if (!account && option?.categoryId) {
+      const cat = await this.prisma.paymentMethodConfig.findFirst({
+        where: { id: option.categoryId },
+        include: { options: { where: { isDefault: true, isActive: true }, select: { accountId: true } } },
+      });
+      if (cat?.options[0]?.accountId) {
+        account = await this.prisma.account.findFirst({ where: { id: cat.options[0].accountId, isActive: true } });
+      }
+      if (!account && cat) {
+        account = await this.prisma.account.findFirst({
+          where: { branchId, linkedPaymentMethod: cat.code, isActive: true },
+        });
+      }
+    }
+    if (!account) {
+      const cat = await this.prisma.paymentMethodConfig.findFirst({
+        where: { branchId, code: paymentOptionCode },
+        include: { options: { where: { isDefault: true, isActive: true }, select: { accountId: true } } },
+      });
+      if (cat?.options[0]?.accountId) {
+        account = await this.prisma.account.findFirst({ where: { id: cat.options[0].accountId, isActive: true } });
+      }
+    }
+    return account;
+  }
+
   async getPnl(branchId: string, from: string, to: string) {
     const fromDate = new Date(from);
     const toDate = new Date(to);
