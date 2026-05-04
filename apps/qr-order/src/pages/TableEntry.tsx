@@ -83,8 +83,29 @@ export default function TableEntry() {
         } catch { /* network blip — fall through; user keeps any in-memory active order */ }
       }
       // Fall back to the locally-persisted activeOrderId if the server
-      // didn't return one (e.g. anonymous-cart device).
-      if (!activeOrderId) activeOrderId = prev.activeOrderId;
+      // didn't return one (e.g. anonymous-cart device that placed an
+      // order earlier this session). The persisted value lives in
+      // localStorage and survives across days, so we MUST verify it's
+      // still actually open before trusting it — otherwise yesterday's
+      // PAID order from the same device gets re-shown to today's diner
+      // because the cleanup at OrderStatusPage only runs when that page
+      // is mounted at payment time (the customer usually closes the tab
+      // first). Hit /orders/qr/:id/status; if it's PAID / VOID /
+      // REFUNDED / 404, drop the stale id.
+      if (!activeOrderId && prev.activeOrderId) {
+        try {
+          const res = await fetch(apiUrl(`/orders/qr/${prev.activeOrderId}/status`));
+          if (res.ok) {
+            const data = (await res.json()) as { status?: string } | null;
+            const stillOpen = data && data.status && !['PAID', 'VOID', 'REFUNDED', 'CANCELLED'].includes(data.status);
+            if (stillOpen) activeOrderId = prev.activeOrderId;
+          }
+          // Any non-ok response (404 etc.) leaves activeOrderId null.
+        } catch {
+          // Network blip — better to land on /menu than show a stale
+          // paid order from yesterday.
+        }
+      }
 
       // Cross-device rescan: another diner already at this table has an
       // open order. The customer-keyed lookup above only finds orders
