@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, Clock, ChefHat, Plus, ArrowLeft, XCircle, Trash2, Pencil, Receipt, Star } from 'lucide-react';
+import { CheckCircle, Clock, ChefHat, Plus, ArrowLeft, XCircle, Trash2, Pencil, Receipt, Star, Camera } from 'lucide-react';
 
 import { formatCurrency } from '@restora/utils';
 import { useSessionStore } from '../store/session.store';
@@ -459,7 +459,23 @@ export default function OrderStatusPage() {
           <h1 className="font-display text-xl text-white tracking-wider">ORDER STATUS</h1>
           <p className="text-[10px] font-body text-[#666] tracking-widest uppercase">{order.orderNumber}</p>
         </div>
-        <div className="w-9" />
+        {/* Change-table — only meaningful while the order is still
+            open AND the diner is on a participant device. Routes
+            into the QR scanner with the change-table intent so the
+            success path runs through TableEntry's existing move-table
+            flow (with its 409 conflict handling). */}
+        {!isFinished && isParticipant ? (
+          <button
+            onClick={() => void navigate('/scan?intent=change-table')}
+            title="Change table"
+            aria-label="Change table"
+            className="w-9 h-9 bg-[#1A1A1A] border border-[#2A2A2A] hover:border-[#C8FF00] flex items-center justify-center text-[#C8FF00] transition-colors"
+          >
+            <Camera size={14} />
+          </button>
+        ) : (
+          <div className="w-9" />
+        )}
       </div>
 
       {/* Soft-fail toast surfaced when a TableEntry scan tried to
