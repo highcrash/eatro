@@ -611,8 +611,13 @@ export default function SalesReportPage() {
               <thead>
                 <tr className="text-left">
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>#</th>
-                  {/* "Mushak Register Serial #" replaces the legacy short-code Ref. Clicking the value reprints the Mushak 6.3 invoice slip. */}
-                  <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Mushak Serial #</th>
+                  {/* "Mushak Register Serial #" — only meaningful when
+                      cashiers are reprinting today's invoices from the
+                      register. Hidden in the Date Range view (Mushak
+                      reprints aren't part of historical reporting). */}
+                  {isToday && (
+                    <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Mushak Serial #</th>
+                  )}
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>{isToday ? 'Time' : 'Date & Time'}</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Type</th>
                   <th style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, color: '#666', borderBottom: '1px solid #DDD', padding: '6px 4px', fontWeight: 600 }}>Table</th>
@@ -632,20 +637,22 @@ export default function SalesReportPage() {
                 {displayOrders.map((order, idx) => (
                   <tr key={order.id}>
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10 }}>{idx + 1}</td>
-                    <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>
-                      {order.mushakInvoice ? (
-                        <button
-                          onClick={() => void openMushakInvoice(order.id)}
-                          title="Reprint Mushak 6.3 invoice"
-                          className="text-theme-accent hover:underline"
-                          style={{ background: 'none', border: 0, padding: 0, fontFamily: 'monospace', letterSpacing: 1, cursor: 'pointer' }}
-                        >
-                          {order.mushakInvoice.serial}
-                        </button>
-                      ) : (
-                        <span style={{ color: '#999' }}>{shortCode(order.id)}</span>
-                      )}
-                    </td>
+                    {isToday && (
+                      <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>
+                        {order.mushakInvoice ? (
+                          <button
+                            onClick={() => void openMushakInvoice(order.id)}
+                            title="Reprint Mushak 6.3 invoice"
+                            className="text-theme-accent hover:underline"
+                            style={{ background: 'none', border: 0, padding: 0, fontFamily: 'monospace', letterSpacing: 1, cursor: 'pointer' }}
+                          >
+                            {order.mushakInvoice.serial}
+                          </button>
+                        ) : (
+                          <span style={{ color: '#999' }}>{shortCode(order.id)}</span>
+                        )}
+                      </td>
+                    )}
                     <td style={{ padding: '5px 4px', borderBottom: '1px solid #F2F1EE', fontSize: 10 }}>
                       {isToday ? formatTime(order.paidAt) : formatDateTime(order.paidAt)}
                     </td>
@@ -683,12 +690,13 @@ export default function SalesReportPage() {
                     )}
                   </tr>
                 ))}
-                {/* Grand total row — colSpan covers #, Mushak Serial,
-                    Time, Type, Table = 5 columns. Then Subtotal,
+                {/* Grand total row — colSpan covers #, (Mushak Serial),
+                    Time, Type, Table = 5 cols on Today, 4 on Date Range
+                    (Mushak column hidden there). Then Subtotal,
                     Discount, SD, VAT, Total, Payment, (Fix). */}
                 {displayOrders.length > 0 && (
                   <tr>
-                    <td colSpan={5} style={{ borderTop: '2px solid #111', fontWeight: 600, fontSize: 11, paddingTop: 8, padding: '8px 4px' }}>
+                    <td colSpan={isToday ? 5 : 4} style={{ borderTop: '2px solid #111', fontWeight: 600, fontSize: 11, paddingTop: 8, padding: '8px 4px' }}>
                       GRAND TOTAL
                     </td>
                     <td style={{ borderTop: '2px solid #111', fontWeight: 600, fontSize: 11, paddingTop: 8, textAlign: 'right', padding: '8px 4px' }}>
