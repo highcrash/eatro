@@ -33,12 +33,13 @@ export default function ScanPage() {
 
   useEffect(() => {
     return () => {
-      // Stop the camera when the user leaves the page so the LED
-      // turns off and other apps can grab the lens.
+      // Stop the camera + clear the injected DOM when the user leaves
+      // the page so the LED turns off and the viewfinder doesn't
+      // leak. Same teardown used after a successful scan.
       const s = scannerRef.current;
-      if (s) {
-        s.stop().catch(() => {}).then(() => s.clear()).catch(() => {});
-      }
+      scannerRef.current = null;
+      if (!s) return;
+      s.stop().catch(() => {}).then(() => { try { s.clear(); } catch { /* ignore */ } });
     };
   }, []);
 
@@ -63,18 +64,36 @@ export default function ScanPage() {
     return null;
   };
 
-  const handleDecoded = async (decoded: string) => {
-    // Stop the scanner before navigating so the camera releases —
-    // otherwise the next route briefly shows a frozen viewfinder.
+  /**
+   * Tear the scanner down completely — stop the stream, clear the
+   * library's injected DOM nodes (video + overlay canvas), null the
+   * ref. Without `clear()` the html5-qrcode-managed video tag
+   * persists inside the container and paints a black/frozen frame
+   * over whatever route mounts next. That was the "black screen,
+   * need refresh" symptom after a successful scan.
+   */
+  const teardownScanner = async (): Promise<void> => {
     const s = scannerRef.current;
-    if (s) await s.stop().catch(() => {});
+    scannerRef.current = null;
+    if (!s) return;
+    try { await s.stop(); } catch { /* already stopped */ }
+    try { s.clear(); } catch { /* already cleared */ }
+  };
 
+  const handleDecoded = async (decoded: string) => {
     const tableId = extractTableId(decoded);
     if (!tableId) {
-      setErrorMsg('That QR code doesn\'t look like a table code. Try again.');
-      setPhase('error');
+      // Unknown payload — keep the camera running so the user can
+      // try again without re-tapping Start. Just surface an error
+      // banner; viewfinder stays live.
+      setErrorMsg('That QR code doesn\'t look like a table code. Try another.');
       return;
     }
+    // Tear down the scanner BEFORE navigating so its injected DOM
+    // doesn't leak into the next route's paint. setPhase('idle') so
+    // a Back-button return lands on a clean Start screen.
+    await teardownScanner();
+    setPhase('idle');
     void navigate(`/table/${tableId}`, { replace: true });
   };
 
@@ -114,8 +133,13 @@ export default function ScanPage() {
         { facingMode: 'environment' }, // Rear camera by default.
         {
           fps: 10,
+          // Square aim overlay drawn on top of the live video. Don't
+          // force aspectRatio:1 on the stream itself — rear cameras
+          // are 4:3 / 16:9 natively, and forcing a square stream
+          // letterboxes the preview into a tiny rectangle inside the
+          // container. The qrbox prop alone gives the user the
+          // "centre your QR here" target without distorting the feed.
           qrbox: { width: 240, height: 240 },
-          aspectRatio: 1,
         },
         (decoded) => { void handleDecoded(decoded); },
         () => { /* per-frame failures are noisy and not actionable */ },
@@ -171,11 +195,16 @@ export default function ScanPage() {
             on phase === 'scanning' which made the ref null at the
             moment the user tapped Start (the button's startScanner
             silently bailed). Hide via display:none until scanning so
-            the layout stays clean in idle/denied/error states. */}
+            the layout stays clean in idle/denied/error states.
+            Width-only constraint here — let the library's video tag
+            size itself to its native aspect ratio (4:3 / 16:9) so the
+            preview fills the box instead of letterboxing inside a
+            forced square. The qrbox overlay still gives the user the
+            "centre your QR here" target. */}
         <div
           ref={containerRef}
-          className="w-full aspect-square bg-black border border-[#2A2A2A] overflow-hidden"
-          style={{ display: phase === 'scanning' ? 'block' : 'none' }}
+          className="w-full bg-black border border-[#2A2A2A] overflow-hidden"
+          style={{ display: phase === 'scanning' ? 'block' : 'none', minHeight: phase === 'scanning' ? 320 : 0 }}
         />
 
         {phase === 'idle' && (
