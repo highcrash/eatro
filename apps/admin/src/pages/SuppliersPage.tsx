@@ -798,17 +798,50 @@ export default function SuppliersPage() {
                     const tdr = `${td};text-align:right`;
                     const thStyle = 'text-align:left;padding:6px 8px;border-bottom:2px solid #333;font-size:11px;text-transform:uppercase;letter-spacing:1px';
 
-                    // Purchase Order History with items
+                    // Purchase Order History with items + receipt-level
+                    // adjustments captured at delivery (supplier discount,
+                    // delivery / labour / packaging fees). These actually
+                    // settle on the supplier ledger so they need to print
+                    // alongside the line items — items_total + extra_fees
+                    // − discount = the PO total the supplier billed.
                     const poSections = ledgerData.purchaseOrders.map((po) => {
                       const itemRows = po.items.map((item) =>
                         `<tr><td style="${td}">${item.ingredientName}</td><td style="${tdr}">${item.quantityOrdered.toFixed(2)} ${item.unit}</td><td style="${tdr}">${item.quantityReceived.toFixed(2)}</td><td style="${tdr}">৳${(item.unitCost / 100).toFixed(2)}</td><td style="${tdr}">৳${(item.total / 100).toFixed(2)}</td></tr>`
                       ).join('');
+
+                      const itemsTotal = Number(po.itemsTotal ?? po.items.reduce((s, i) => s + i.total, 0));
+                      const discount = Number(po.receiptDiscount ?? 0);
+                      const fees = Array.isArray(po.receiptExtraFees) ? po.receiptExtraFees : [];
+                      const adjustmentRows: string[] = [];
+                      if (itemsTotal > 0 && (discount > 0 || fees.length > 0)) {
+                        adjustmentRows.push(
+                          `<tr><td colspan="4" style="${tdr};border-top:1px solid #999;font-weight:bold">Items subtotal</td><td style="${tdr};border-top:1px solid #999;font-weight:bold">৳${(itemsTotal / 100).toFixed(2)}</td></tr>`
+                        );
+                      }
+                      for (const f of fees) {
+                        const amt = Number(f?.amount ?? 0);
+                        if (!amt) continue;
+                        adjustmentRows.push(
+                          `<tr><td colspan="4" style="${tdr};color:#c62828">+ ${f?.label ?? 'Extra fee'}</td><td style="${tdr};color:#c62828">+৳${(amt / 100).toFixed(2)}</td></tr>`
+                        );
+                      }
+                      if (discount > 0) {
+                        adjustmentRows.push(
+                          `<tr><td colspan="4" style="${tdr};color:#2e7d32">− Supplier discount${po.receiptDiscountReason ? ` <span style="color:#666;font-size:10px">(${po.receiptDiscountReason})</span>` : ''}</td><td style="${tdr};color:#2e7d32">−৳${(discount / 100).toFixed(2)}</td></tr>`
+                        );
+                      }
+                      if (adjustmentRows.length > 0) {
+                        adjustmentRows.push(
+                          `<tr><td colspan="4" style="${tdr};border-top:2px solid #333;font-weight:bold">PO Total</td><td style="${tdr};border-top:2px solid #333;font-weight:bold">৳${(po.total / 100).toFixed(2)}</td></tr>`
+                        );
+                      }
+
                       return `<div style="margin-bottom:20px;page-break-inside:avoid">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                           <div><strong>${po.id.slice(-8).toUpperCase()}</strong> <span style="color:#666;margin-left:8px">${new Date(po.createdAt).toLocaleDateString()}</span> <span style="background:#eee;padding:1px 6px;font-size:10px;margin-left:8px">${po.status}</span></div>
                           <strong>৳${(po.total / 100).toFixed(2)}</strong>
                         </div>
-                        <table><thead><tr><th style="${thStyle}">Item</th><th style="${thStyle};text-align:right">Ordered</th><th style="${thStyle};text-align:right">Received</th><th style="${thStyle};text-align:right">Unit Price</th><th style="${thStyle};text-align:right">Total</th></tr></thead><tbody>${itemRows}</tbody></table>
+                        <table><thead><tr><th style="${thStyle}">Item</th><th style="${thStyle};text-align:right">Ordered</th><th style="${thStyle};text-align:right">Received</th><th style="${thStyle};text-align:right">Unit Price</th><th style="${thStyle};text-align:right">Total</th></tr></thead><tbody>${itemRows}${adjustmentRows.join('')}</tbody></table>
                       </div>`;
                     }).join('');
 
@@ -832,6 +865,22 @@ export default function SuppliersPage() {
                     ).join('');
                     const totalPaidPrint = ledgerData.payments.reduce((s, p) => s + Number(p.amount), 0);
 
+                    // Manual ledger adjustments — owner/manager corrections.
+                    // Negative = reduce debt (credit colour), positive = increase debt.
+                    const adjustments = ledgerData.adjustments ?? [];
+                    const adjRows = adjustments.map((a) => {
+                      const amt = Number(a.amount);
+                      const sign = amt < 0 ? '−' : '+';
+                      const colour = amt < 0 ? '#2e7d32' : '#c62828';
+                      return `<tr>
+                        <td style="${td}">${new Date(a.createdAt).toLocaleDateString()}</td>
+                        <td style="${td}">${a.reason}</td>
+                        <td style="${td}">${a.recordedBy?.name ?? '—'}</td>
+                        <td style="${tdr};color:${colour};font-weight:bold">${sign}${formatCurrency(Math.abs(amt))}</td>
+                      </tr>`;
+                    }).join('');
+                    const totalAdjPrint = adjustments.reduce((s, a) => s + Number(a.amount), 0);
+
                     w.document.write(`<!DOCTYPE html><html><head><title>Ledger - ${ledgerSupplier.name}</title>
                       <style>
                         body{font-family:sans-serif;padding:24px;font-size:13px;color:#333}
@@ -850,6 +899,7 @@ export default function SuppliersPage() {
                         <div><div class="label">Billed</div><div class="value">${formatCurrency(ledgerData.totalBilled)}</div></div>
                         <div><div class="label">Paid</div><div class="value" style="color:#2e7d32">${formatCurrency(ledgerData.totalPaid)}</div></div>
                         <div><div class="label">Returned</div><div class="value" style="color:#e65100">${formatCurrency(ledgerData.totalReturned)}</div></div>
+                        ${totalAdjPrint !== 0 ? `<div><div class="label">Adjustments</div><div class="value" style="color:${totalAdjPrint < 0 ? '#2e7d32' : '#c62828'}">${totalAdjPrint < 0 ? '−' : '+'}${formatCurrency(Math.abs(totalAdjPrint))}</div></div>` : ''}
                         <div><div class="label">Balance Due</div><div class="value" style="color:${ledgerData.balance > 0 ? '#c62828' : '#2e7d32'}">${formatCurrency(ledgerData.balance)}</div></div>
                         <div><div class="label">Orders</div><div class="value">${ledgerData.purchaseOrders.length}</div></div>
                       </div>
@@ -858,6 +908,12 @@ export default function SuppliersPage() {
                       ${poSections || '<p style="color:#999">No purchase orders.</p>'}
 
                       ${ledgerData.returns.length > 0 ? `<h3>Returns</h3>${returnSections}` : ''}
+
+                      ${adjustments.length > 0 ? `<h3>Ledger Adjustments</h3>
+                        <table><thead><tr><th style="${thStyle}">Date</th><th style="${thStyle}">Reason</th><th style="${thStyle}">Recorded By</th><th style="${thStyle};text-align:right">Amount</th></tr></thead>
+                        <tbody>${adjRows}</tbody>
+                        <tfoot><tr><td colspan="3" style="padding:8px;border-top:2px solid #333;font-weight:bold">Net Adjustment</td><td style="padding:8px;border-top:2px solid #333;text-align:right;font-weight:bold;color:${totalAdjPrint < 0 ? '#2e7d32' : totalAdjPrint > 0 ? '#c62828' : '#333'}">${totalAdjPrint < 0 ? '−' : totalAdjPrint > 0 ? '+' : ''}${formatCurrency(Math.abs(totalAdjPrint))}</td></tr></tfoot></table>
+                      ` : ''}
 
                       <h3>Payment History</h3>
                       ${ledgerData.payments.length > 0 ? `
