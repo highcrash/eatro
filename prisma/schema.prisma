@@ -185,6 +185,23 @@ model Branch {
   qrGateEnabled        Boolean   @default(false) // when true, QR ordering requires the client IP to match qrAllowedIps
   qrAllowedIps         String? // comma-separated IPs and CIDR blocks (e.g. "192.168.1.0/24,203.0.113.42")
   qrGateMessage        String? // optional instructions shown under Wi-Fi details on the gate page
+  /// Master kill switch for the QR ordering surface. When false, every
+  /// QR scan and every QR mutation lands on a "we are not accepting QR
+  /// orders right now, please ask staff" page — independent of the
+  /// Wi-Fi allowlist. Default true (ordering on) so existing branches
+  /// see no behaviour change until admin explicitly disables.
+  qrOrderingEnabled       Boolean @default(true)
+  /// Optional service window for QR ordering, expressed as HH:mm
+  /// strings in the branch's local timezone. When BOTH are set AND
+  /// the current local time falls outside the window, the QR app
+  /// shows "Sorry, we are not accepting orders right now" with the
+  /// hours rendered. When either is null, the window check is
+  /// skipped (QR is open whenever qrOrderingEnabled = true).
+  /// Stored as plain HH:mm strings (no Date objects) so daylight-
+  /// saving / cross-day windows (e.g. "22:00" → "02:00") stay
+  /// trivial to reason about.
+  qrOrderingWindowStart   String? // "HH:mm" 24h, branch local
+  qrOrderingWindowEnd     String? // "HH:mm" 24h, branch local
   billLogoWidthPct     Int       @default(80) // how wide the logo prints on the receipt (% of 80mm paper)
   facebookUrl          String?
   instagramUrl         String?

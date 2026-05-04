@@ -184,13 +184,34 @@ export class QrGateService {
     const b = branch as unknown as Record<string, unknown>;
     const gateEnabled = Boolean(b.qrGateEnabled);
     const allowlist = (b.qrAllowedIps as string | null) ?? null;
+    const orderingEnabled = b.qrOrderingEnabled === undefined ? true : Boolean(b.qrOrderingEnabled);
+    const windowStart = (b.qrOrderingWindowStart as string | null) ?? null;
+    const windowEnd = (b.qrOrderingWindowEnd as string | null) ?? null;
 
-    // Gate disabled → allow, regardless of IP.
-    const allowed = gateEnabled ? ipMatches(clientIp, allowlist) : true;
+    // Evaluate gates in priority order: master kill switch → service
+    // window → Wi-Fi allowlist. The first non-OK reason wins, so the
+    // customer always sees the most actionable message ("ordering
+    // closed for the day" beats "your Wi-Fi isn't on the allowlist").
+    let reason: 'OK' | 'DISABLED' | 'OUTSIDE_HOURS' | 'WIFI_BLOCKED' = 'OK';
+    let allowed = true;
+    if (!orderingEnabled) {
+      reason = 'DISABLED';
+      allowed = false;
+    } else if (windowStart && windowEnd && !insideWindow(new Date(), windowStart, windowEnd)) {
+      reason = 'OUTSIDE_HOURS';
+      allowed = false;
+    } else if (gateEnabled && !ipMatches(clientIp, allowlist)) {
+      reason = 'WIFI_BLOCKED';
+      allowed = false;
+    }
 
     return {
       allowed,
+      reason,
       gateEnabled,
+      orderingEnabled,
+      windowStart,
+      windowEnd,
       branchName: branch.name,
       wifiSsid: (b.wifiSsid as string | null) ?? null,
       wifiPass: branch.wifiPass ?? null,
@@ -202,4 +223,33 @@ export class QrGateService {
       clientIp,
     };
   }
+}
+
+/**
+ * Returns true when `now` falls inside [start, end) where start/end are
+ * "HH:mm" 24h strings. Supports cross-midnight windows (e.g. 22:00 →
+ * 02:00 means "open from 10pm to 2am the next morning"). Equal start +
+ * end is treated as "always open" — admin entering 00:00–00:00 should
+ * not lock everyone out by accident.
+ */
+export function insideWindow(now: Date, start: string, end: string): boolean {
+  const startMin = parseHHmm(start);
+  const endMin = parseHHmm(end);
+  if (startMin == null || endMin == null) return true; // malformed — fail-open
+  if (startMin === endMin) return true; // 24h
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  // Same-day window (e.g. 09:00 → 17:00).
+  if (startMin < endMin) return nowMin >= startMin && nowMin < endMin;
+  // Cross-midnight window (e.g. 22:00 → 02:00).
+  return nowMin >= startMin || nowMin < endMin;
+}
+
+function parseHHmm(s: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isInteger(h) || !Number.isInteger(min)) return null;
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
 }
