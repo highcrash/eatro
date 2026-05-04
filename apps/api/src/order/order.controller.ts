@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Headers, BadRequestException, ForbiddenException, NotFoundException, ConflictException, Req } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 
 import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, CorrectPaymentDto, JwtPayload } from '@restora/types';
@@ -200,8 +201,67 @@ export class QrOrderController {
     }
   }
 
+  /**
+   * Ensure the caller is a participant on the order. Match wins on
+   * EITHER device id (primary or shared) OR customer id. Orders with
+   * a null primaryDeviceId (POS-created, or QR orders from before the
+   * device-id rollout) short-circuit to "allowed" so legacy traffic
+   * isn't broken — only opt-in (orders that recorded a primaryDeviceId
+   * at create time) are gated.
+   *
+   * Throws 403 with code: 'NOT_ORDER_PARTICIPANT' when the caller
+   * matches neither the device anchor nor the customer link.
+   */
+  private async requireOrderParticipant(
+    orderId: string,
+    branchId: string,
+    deviceId: string | undefined,
+    customerIdHint?: string | null,
+  ): Promise<void> {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, branchId, deletedAt: null },
+      select: {
+        id: true,
+        customerId: true,
+        primaryDeviceId: true,
+        sharedDeviceIds: true,
+      } as never,
+    }) as { id: string; customerId: string | null; primaryDeviceId: string | null; sharedDeviceIds: string | null } | null;
+    if (!order) throw new NotFoundException('Order not found');
+
+    // Legacy / POS-created order — no device anchor recorded. Allow
+    // through; the existing flow handled it before this guard existed.
+    if (!order.primaryDeviceId) return;
+
+    if (deviceId) {
+      if (order.primaryDeviceId === deviceId) return;
+      if (order.sharedDeviceIds) {
+        try {
+          const shared = JSON.parse(order.sharedDeviceIds) as string[];
+          if (Array.isArray(shared) && shared.includes(deviceId)) return;
+        } catch { /* malformed JSON falls through to deny */ }
+      }
+    }
+    if (customerIdHint && order.customerId && order.customerId === customerIdHint) return;
+
+    throw new ForbiddenException({
+      code: 'NOT_ORDER_PARTICIPANT',
+      message: 'This device is not a participant on this order. Ask the original device to share access from its order screen.',
+    });
+  }
+
   @Post('qr')
-  async createQr(@Headers('x-branch-id') branchId: string, @Body() dto: CreateOrderDto, @Req() req: Request) {
+  // Per-IP throttle on the create path. With the dedupe in
+  // OrderService.createQrOrder, three legitimate creates per 30 s on
+  // the same IP is generous; this catches scripted abuse + runaway
+  // double-tap loops. Existing global throttle (100/min) still applies.
+  @Throttle({ default: { limit: 3, ttl: 30_000 } })
+  async createQr(
+    @Headers('x-branch-id') branchId: string,
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Body() dto: CreateOrderDto,
+    @Req() req: Request,
+  ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
     // Strip self-service removals when the branch hasn't enabled them.
@@ -213,7 +273,7 @@ export class QrOrderController {
         items: dto.items.map((i) => ({ ...i, removedIngredientIds: undefined })),
       };
     }
-    return this.orderService.createQrOrder(branchId, dto);
+    return this.orderService.createQrOrder(branchId, dto, { primaryDeviceId: deviceId ?? null });
   }
 
   /**
@@ -430,11 +490,13 @@ export class QrOrderController {
   async addItems(
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
-    @Body() body: { items: { menuItemId: string; quantity: number; notes?: string; addons?: { groupId: string; addonItemId: string }[]; removedIngredientIds?: string[] }[] },
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Body() body: { items: { menuItemId: string; quantity: number; notes?: string; addons?: { groupId: string; addonItemId: string }[]; removedIngredientIds?: string[] }[]; customerId?: string },
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
+    await this.requireOrderParticipant(id, branchId, deviceId, body.customerId);
     // If order is already accepted (not PENDING), new items need cashier approval
     const order = await this.prisma.order.findFirst({ where: { id, deletedAt: null } });
     if (!order) throw new NotFoundException('Order not found');
@@ -457,17 +519,25 @@ export class QrOrderController {
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @Headers('x-branch-id') branchId: string,
+    @Headers('x-qr-device-id') deviceId: string | undefined,
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
+    await this.requireOrderParticipant(id, branchId, deviceId);
     return this.orderService.cancelItemByCustomer(id, itemId, branchId);
   }
 
   @Post('qr/:id/request-bill')
-  async requestBill(@Param('id') id: string, @Headers('x-branch-id') branchId: string, @Req() req: Request) {
+  async requestBill(
+    @Param('id') id: string,
+    @Headers('x-branch-id') branchId: string,
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Req() req: Request,
+  ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
+    await this.requireOrderParticipant(id, branchId, deviceId);
     return this.orderService.requestBill(id, branchId);
   }
 
@@ -475,30 +545,41 @@ export class QrOrderController {
   async applyCoupon(
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
-    @Body() dto: { code: string },
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Body() dto: { code: string; customerId?: string },
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
+    await this.requireOrderParticipant(id, branchId, deviceId, dto.customerId);
     return this.orderService.applyCoupon(id, branchId, dto.code);
   }
 
   @Patch('qr/:id/items/:itemId/notes')
   async updateItemNotesQr(
     @Param('id') id: string, @Param('itemId') itemId: string,
-    @Headers('x-branch-id') branchId: string, @Body() dto: { notes: string },
+    @Headers('x-branch-id') branchId: string,
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Body() dto: { notes: string },
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
+    await this.requireOrderParticipant(id, branchId, deviceId);
     // Customer-gated variant — blocks edits once the cashier accepts.
     return this.orderService.updateItemNotesByCustomer(id, itemId, branchId, dto.notes);
   }
 
   @Post('qr/:id/remove-coupon')
-  async removeCoupon(@Param('id') id: string, @Headers('x-branch-id') branchId: string, @Req() req: Request) {
+  async removeCoupon(
+    @Param('id') id: string,
+    @Headers('x-branch-id') branchId: string,
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Req() req: Request,
+  ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
+    await this.requireOrderParticipant(id, branchId, deviceId);
     return this.orderService.removeDiscount(id, branchId);
   }
 }

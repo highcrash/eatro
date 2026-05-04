@@ -5,7 +5,7 @@ import { CheckCircle, Clock, ChefHat, Plus, ArrowLeft, XCircle, Trash2, Pencil, 
 
 import { formatCurrency } from '@restora/utils';
 import { useSessionStore } from '../store/session.store';
-import { apiUrl } from '../lib/api';
+import { apiUrl, qrFetch } from '../lib/api';
 
 interface OrderItem {
   id: string;
@@ -166,7 +166,7 @@ export default function OrderStatusPage() {
     setCouponBusy(true);
     setCouponError(null);
     try {
-      const res = await fetch(apiUrl(`/orders/qr/${orderId}/apply-coupon`), {
+      const res = await qrFetch(`/orders/qr/${orderId}/apply-coupon`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
         body: JSON.stringify({ code: couponCode.trim().toUpperCase() }),
@@ -194,7 +194,7 @@ export default function OrderStatusPage() {
     if (!loginPhone.trim()) return;
     setLoginBusy(true);
     try {
-      const res = await fetch(apiUrl(`/orders/qr/${orderId}/identify-customer`), {
+      const res = await qrFetch(`/orders/qr/${orderId}/identify-customer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
         body: JSON.stringify({ phone: loginPhone.trim(), name: loginName.trim() || undefined }),
@@ -239,7 +239,7 @@ export default function OrderStatusPage() {
     if (!confirm('Remove this item?')) return;
     setRemovingId(itemId);
     try {
-      await fetch(apiUrl(`/orders/qr/${orderId}/items/${itemId}/cancel`), {
+      await qrFetch(`/orders/qr/${orderId}/items/${itemId}/cancel`, {
         method: 'POST',
         headers: { 'x-branch-id': branchId || '' },
       });
@@ -264,7 +264,7 @@ export default function OrderStatusPage() {
   const saveNote = async (itemId: string) => {
     setNoteBusy(true);
     try {
-      const res = await fetch(apiUrl(`/orders/qr/${orderId}/items/${itemId}/notes`), {
+      const res = await qrFetch(`/orders/qr/${orderId}/items/${itemId}/notes`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
         body: JSON.stringify({ notes: noteDraft }),
@@ -289,7 +289,7 @@ export default function OrderStatusPage() {
     if (billBusy) return;
     setBillBusy(true);
     try {
-      const res = await fetch(apiUrl(`/orders/qr/${orderId}/request-bill`), {
+      const res = await qrFetch(`/orders/qr/${orderId}/request-bill`, {
         method: 'POST',
         headers: { 'x-branch-id': branchId || '' },
       });

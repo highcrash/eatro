@@ -966,7 +966,52 @@ export class OrderService {
     return updatedOrder;
   }
 
-  async createQrOrder(branchId: string, dto: CreateOrderDto) {
+  async createQrOrder(
+    branchId: string,
+    dto: CreateOrderDto,
+    opts: { primaryDeviceId?: string | null } = {},
+  ) {
+    // ── Server-side dedupe ────────────────────────────────────────
+    // Same branch + same table with an open order created in the
+    // last 30s = treat this as a retry / same-table double-scan and
+    // ADD the new items to the existing order instead of creating a
+    // second one. Covers:
+    //   - double-tap on "Place Order" before the first POST returns
+    //   - Idempotency-Key path (which already returns the cached
+    //     response) PLUS the cross-cart case where two devices on
+    //     the same table both submit different carts within seconds
+    //   - flaky-network retry the client doesn't even know happened
+    // 30s is short enough that two genuine consecutive parties at
+    // the same table aren't merged. POS staff can split / void at
+    // the cashier as today if a real edge case slips through.
+    if (dto.tableId) {
+      const recent = await this.prisma.order.findFirst({
+        where: {
+          branchId,
+          tableId: dto.tableId,
+          deletedAt: null,
+          status: { notIn: ['PAID', 'VOID', 'REFUNDED'] },
+          createdAt: { gte: new Date(Date.now() - 30_000) },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, primaryDeviceId: true },
+      });
+      if (recent) {
+        // If the existing order's primaryDeviceId matches THIS device,
+        // it's a retry — short-circuit to add-items so the customer
+        // sees the same order instead of an unrelated PENDING one
+        // sitting next to theirs. If primaryDeviceId is null OR
+        // differs, this is the cross-cart "two diners, same table"
+        // race — still add to the existing order to avoid two
+        // tickets reaching the kitchen for the same table.
+        await this.addItemsToOrder(recent.id, branchId, dto.items as any, /* needsApproval */ false);
+        return await this.prisma.order.findFirstOrThrow({
+          where: { id: recent.id },
+          include: { items: true, payments: true },
+        });
+      }
+    }
+
     // Find any active cashier/owner for the branch to use as the cashier ID
     const cashier = await this.prisma.staff.findFirst({
       where: { branchId, isActive: true, role: { in: ['CASHIER', 'OWNER', 'MANAGER'] } },
@@ -979,7 +1024,16 @@ export class OrderService {
 
     const pendingOrder = await this.prisma.order.update({
       where: { id: order.id },
-      data: { status: 'PENDING' },
+      data: {
+        status: 'PENDING',
+        // Stamp the device that created this order — anchors the
+        // multi-device share workflow + the participant guard on
+        // subsequent mutations. Null when the QR app doesn't send
+        // x-qr-device-id (older client), in which case the
+        // participant guard short-circuits to allow-anyone for
+        // backwards compat.
+        ...(opts.primaryDeviceId ? { primaryDeviceId: opts.primaryDeviceId } : {}),
+      },
       include: { items: true, payments: true },
     });
 

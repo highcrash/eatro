@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSessionStore } from '../store/session.store';
-import { apiUrl } from '../lib/api';
+import { apiUrl, qrFetch } from '../lib/api';
 
 interface TableInfo {
   id: string;
@@ -155,7 +155,7 @@ export default function TableEntry() {
       //    their EXISTING table rather than clobber the occupant.
       const tryMove = async (orderId: string): Promise<{ moved: boolean; tableConflict: boolean; conflictMsg?: string }> => {
         try {
-          const res = await fetch(apiUrl(`/orders/qr/${orderId}/move-table`), {
+          const res = await qrFetch(`/orders/qr/${orderId}/move-table`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-branch-id': table.branchId },
             body: JSON.stringify({ tableId: table.id, customerId: customer!.id }),
