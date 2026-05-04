@@ -190,7 +190,19 @@ export default function ItemPage() {
   const variantBasePrice = isVariantParent
     ? Number((variantList.find((v) => v.id === selectedVariantId)?.price) ?? variantList[0]?.price ?? item.price)
     : Number(displayed?.price ?? item.price);
-  const unitPrice = variantBasePrice + addonsTotal;
+  // Per-item discount stamped by /public/menu via applyDiscounts().
+  // Apply only to the BASE price (not to addon prices) — addons stack
+  // on top at full price, matching how the cart line eventually
+  // settles server-side. When the customer picks a discounted variant,
+  // the variant's own discountedPrice should drive — but the public
+  // /menu/:item endpoint doesn't currently surface per-variant
+  // discounts, so we only render the badge on the standalone +
+  // single-price case to avoid lying to the customer.
+  const rawDiscounted = !isVariantParent ? (displayed as any)?.discountedPrice ?? (item as any)?.discountedPrice : null;
+  const hasDiscount = rawDiscounted != null && Number(rawDiscounted) < variantBasePrice && variantBasePrice > 0;
+  const discountedBase = hasDiscount ? Number(rawDiscounted) : variantBasePrice;
+  const discountPct = hasDiscount ? Math.round((1 - discountedBase / variantBasePrice) * 100) : 0;
+  const unitPrice = discountedBase + addonsTotal;
   const unmet = groups.filter((g) => (picksByGroup.get(g.id)?.length ?? 0) < g.minPicks);
   // Block add-to-cart on a variant parent until a variant is picked.
   const variantUnpicked = isVariantParent && !selectedVariantId;
@@ -337,9 +349,21 @@ export default function ItemPage() {
 
         {/* Price */}
         <div className="mt-6 border-t border-[#2A2A2A] pt-5">
-          <p className="font-display text-2xl text-white tracking-wider">{formatCurrency(unitPrice)}</p>
+          {hasDiscount ? (
+            <div className="flex items-center gap-3 flex-wrap">
+              <p className="font-display text-2xl text-[#C8FF00] tracking-wider">{formatCurrency(unitPrice)}</p>
+              <span className="font-body text-sm text-[#666] line-through">
+                {formatCurrency(variantBasePrice + addonsTotal)}
+              </span>
+              <span className="bg-[#D62B2B] text-white text-[10px] font-body font-bold px-1.5 py-0.5 tracking-widest">
+                -{discountPct}%
+              </span>
+            </div>
+          ) : (
+            <p className="font-display text-2xl text-white tracking-wider">{formatCurrency(unitPrice)}</p>
+          )}
           {addonsTotal > 0 && (
-            <p className="text-[11px] text-[#888] font-body mt-1">Base {formatCurrency(variantBasePrice)} + addons {formatCurrency(addonsTotal)}</p>
+            <p className="text-[11px] text-[#888] font-body mt-1">Base {formatCurrency(discountedBase)} + addons {formatCurrency(addonsTotal)}</p>
           )}
         </div>
 
