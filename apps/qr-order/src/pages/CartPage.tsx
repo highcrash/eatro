@@ -5,7 +5,7 @@ import { ArrowLeft, Minus, Plus, X, Loader2 } from 'lucide-react';
 import { formatCurrency } from '@restora/utils';
 import { useCartStore } from '../store/cart.store';
 import { useSessionStore } from '../store/session.store';
-import { apiUrl } from '../lib/api';
+import { qrFetch } from '../lib/api';
 import { triggerGateRecheck } from '../App';
 
 export default function CartPage() {
@@ -21,7 +21,7 @@ export default function CartPage() {
   const customer = useSessionStore((s) => s.customer);
   const [submitting, setSubmitting] = useState(false);
 
-  const { items: rawItems, removeItem, updateQuantity, clearCart } = useCartStore();
+  const { items: rawItems, removeItem, updateQuantity, clearCart, idempotencyKey } = useCartStore();
   // sessionStorage can carry stale entries from older app versions
   // (e.g. one whose menuItem snapshot got malformed by a JSON shape
   // change). Skip those so a single bad row doesn't crash the page
@@ -50,9 +50,9 @@ export default function CartPage() {
   const handleOrder = async () => {
     setSubmitting(true);
     try {
-      const url = activeOrderId
-        ? apiUrl(`/orders/qr/${activeOrderId}/items`)
-        : apiUrl('/orders/qr');
+      const path = activeOrderId
+        ? `/orders/qr/${activeOrderId}/items`
+        : '/orders/qr';
       const body = activeOrderId
         ? { items: items.map(lineToDto) }
         : {
@@ -67,10 +67,16 @@ export default function CartPage() {
             items: items.map(lineToDto),
           };
 
-      const res = await fetch(url, {
+      const res = await qrFetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
         body: JSON.stringify(body),
+        // Idempotency-Key only on the FIRST submit (new order).
+        // Replay = same key = server returns the cached response, no
+        // duplicate insert. Add-items has no idempotency key — adding
+        // the same items twice is a legitimate "I want two of those"
+        // intent and shouldn't be deduplicated.
+        ...(activeOrderId ? {} : { idempotencyKey }),
       });
 
       if (!res.ok) {

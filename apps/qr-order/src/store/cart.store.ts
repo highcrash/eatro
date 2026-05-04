@@ -38,6 +38,12 @@ export function cartLineKey(it: { menuItem: { id: string }; addons?: CartAddon[]
 
 interface CartStore {
   items: CartEntry[];
+  /** Idempotency key sent on the order-create POST. Generated lazily
+   *  on the first add-to-cart and reused for any retry of the same
+   *  cart submission, so a double-tap or network retry replays the
+   *  cached server response instead of creating a second order. Reset
+   *  to a fresh key by clearCart() once the cart actually ships. */
+  idempotencyKey: string;
   /** Add 1 unit of an item with optional addons + notes. Stacks on
    *  any existing line with the same key. */
   addItem: (item: MenuItem, opts?: { addons?: CartAddon[]; notes?: string; quantity?: number }) => void;
@@ -47,10 +53,20 @@ interface CartStore {
   clearCart: () => void;
 }
 
+function newIdempotencyKey(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch { /* fallthrough */ }
+  return 'k-' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
+
 export const useCartStore = create<CartStore>()(
   persist(
     (set) => ({
       items: [],
+      idempotencyKey: newIdempotencyKey(),
       addItem: (item, opts) =>
         set((s) => {
           const addons = opts?.addons;
@@ -88,7 +104,7 @@ export const useCartStore = create<CartStore>()(
           }
           return { items: s.items.map((c) => c.key === key ? { ...c, key: newKey, notes } : c) };
         }),
-      clearCart: () => set({ items: [] }),
+      clearCart: () => set({ items: [], idempotencyKey: newIdempotencyKey() }),
     }),
     {
       // localStorage so a refresh / accidental tab close doesn't wipe

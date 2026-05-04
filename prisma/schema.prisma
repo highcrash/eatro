@@ -934,6 +934,18 @@ model Order {
   voidReason          String?
   voidedById          String?
   voidedAt            DateTime?
+  /// UUID of the device that created this order from the QR app — set
+  /// from the x-qr-device-id header on POST /orders/qr. Null for POS-
+  /// created orders (those use the cashier-side auth guards). Anchors
+  /// the multi-device share workflow: only the primary device gets the
+  /// approval popup when another device requests to join, and edits
+  /// (add-items / cancel-item / request-bill) check this against the
+  /// requester's device id before allowing the mutation.
+  primaryDeviceId     String?
+  /// Device UUIDs that have been granted shared access by the primary
+  /// device. JSON-encoded string array. Each entry can edit the order
+  /// exactly like the primary device. Null = no shares yet.
+  sharedDeviceIds     String?     @db.Text
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt
   deletedAt           DateTime?
