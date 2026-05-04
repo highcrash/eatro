@@ -994,6 +994,9 @@ function QrGateSection({ isOwner }: { isOwner: boolean }) {
     qrGateEnabled: boolean;
     qrAllowedIps: string | null;
     qrGateMessage: string | null;
+    qrOrderingEnabled?: boolean;
+    qrOrderingWindowStart?: string | null;
+    qrOrderingWindowEnd?: string | null;
   }>({
     queryKey: ['branding'],
     queryFn: () => api.get('/branding'),
@@ -1020,6 +1023,9 @@ function QrGateSection({ isOwner }: { isOwner: boolean }) {
     wifiSsid: '',
     wifiPass: '',
     qrGateMessage: '',
+    qrOrderingEnabled: true,
+    qrOrderingWindowStart: '',
+    qrOrderingWindowEnd: '',
   });
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
@@ -1031,6 +1037,9 @@ function QrGateSection({ isOwner }: { isOwner: boolean }) {
       wifiSsid: branding.wifiSsid ?? '',
       wifiPass: branding.wifiPass ?? '',
       qrGateMessage: branding.qrGateMessage ?? '',
+      qrOrderingEnabled: branding.qrOrderingEnabled ?? true,
+      qrOrderingWindowStart: branding.qrOrderingWindowStart ?? '',
+      qrOrderingWindowEnd: branding.qrOrderingWindowEnd ?? '',
     });
   }, [branding]);
 
@@ -1042,6 +1051,12 @@ function QrGateSection({ isOwner }: { isOwner: boolean }) {
         wifiSsid: form.wifiSsid.trim() || null,
         wifiPass: form.wifiPass.trim() || null,
         qrGateMessage: form.qrGateMessage.trim() || null,
+        qrOrderingEnabled: form.qrOrderingEnabled,
+        // Empty strings → null on the wire so admin can clear the
+        // window with two backspaces (instead of having to type a
+        // sentinel value). Server treats null as "no window enforced".
+        qrOrderingWindowStart: form.qrOrderingWindowStart.trim() || null,
+        qrOrderingWindowEnd: form.qrOrderingWindowEnd.trim() || null,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['branding'] });
@@ -1064,6 +1079,70 @@ function QrGateSection({ isOwner }: { isOwner: boolean }) {
       </div>
 
       <div className="bg-[#161616] border border-[#2A2A2A] p-6 space-y-5">
+        {/* ── Master kill switch ─────────────────────────────────
+             Independent of the Wi-Fi gate. When OFF, every QR scan
+             + every QR mutation lands on a "we are not accepting QR
+             orders right now, please ask staff" page. Useful for
+             short-lived issues (kitchen overwhelmed, no cashier on
+             shift, etc.) without having to delete table QR codes. */}
+        <label className="flex items-start gap-3 cursor-pointer pb-5 border-b border-[#2A2A2A]">
+          <input
+            type="checkbox"
+            checked={form.qrOrderingEnabled}
+            onChange={(e) => setForm((f) => ({ ...f, qrOrderingEnabled: e.target.checked }))}
+            disabled={!isOwner}
+            className="mt-1 w-4 h-4 accent-[#C8FF00]"
+          />
+          <div>
+            <p className="text-sm font-body font-medium text-white">Accept QR orders</p>
+            <p className="text-xs font-body text-[#888] mt-0.5">
+              Master switch for the QR ordering surface. When off, every QR scan shows
+              "we are not accepting QR orders right now, please ask staff for assistance."
+              Use for short-lived issues without having to take down table QR codes.
+            </p>
+          </div>
+        </label>
+
+        {/* ── Service window ─────────────────────────────────────
+             Optional HH:mm window in branch-local time. Outside it,
+             the QR app shows "Sorry, we are not accepting orders
+             right now" with the configured hours. Clearing both
+             fields removes the window (QR is open whenever the
+             master switch is on). */}
+        <div className="pb-5 border-b border-[#2A2A2A] space-y-3">
+          <p className="text-sm font-body font-medium text-white">QR ordering hours (optional)</p>
+          <p className="text-xs font-body text-[#888]">
+            Restrict QR ordering to a daily window in your branch's local time. Leave both blank to accept QR orders any time the master switch above is on. Cross-midnight windows (e.g. 22:00 → 02:00) work.
+          </p>
+          <div className="grid grid-cols-2 gap-3 max-w-sm">
+            <div>
+              <label className="block text-[10px] font-body text-[#999] tracking-widest uppercase mb-1">Open</label>
+              <input
+                type="time"
+                value={form.qrOrderingWindowStart}
+                onChange={(e) => setForm((f) => ({ ...f, qrOrderingWindowStart: e.target.value }))}
+                disabled={!isOwner || !form.qrOrderingEnabled}
+                className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm font-body font-mono text-white outline-none focus:border-[#C8FF00] disabled:opacity-40"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-body text-[#999] tracking-widest uppercase mb-1">Close</label>
+              <input
+                type="time"
+                value={form.qrOrderingWindowEnd}
+                onChange={(e) => setForm((f) => ({ ...f, qrOrderingWindowEnd: e.target.value }))}
+                disabled={!isOwner || !form.qrOrderingEnabled}
+                className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm font-body font-mono text-white outline-none focus:border-[#C8FF00] disabled:opacity-40"
+              />
+            </div>
+          </div>
+          {form.qrOrderingWindowStart && form.qrOrderingWindowEnd && (
+            <p className="text-[11px] font-body text-[#C8FF00]">
+              QR orders will be accepted between {form.qrOrderingWindowStart} and {form.qrOrderingWindowEnd} (branch local time).
+            </p>
+          )}
+        </div>
+
         <label className="flex items-start gap-3 cursor-pointer">
           <input
             type="checkbox"

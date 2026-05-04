@@ -50,6 +50,13 @@ export class BrandingController {
       bin?: string | null;
       mushakVersion?: string | null;
       wifiPass?: string | null;
+      wifiSsid?: string | null;
+      qrGateEnabled?: boolean;
+      qrAllowedIps?: string | null;
+      qrGateMessage?: string | null;
+      qrOrderingEnabled?: boolean;
+      qrOrderingWindowStart?: string | null;
+      qrOrderingWindowEnd?: string | null;
       billLogoWidthPct?: number;
       facebookUrl?: string | null;
       instagramUrl?: string | null;

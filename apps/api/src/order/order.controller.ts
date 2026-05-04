@@ -184,10 +184,14 @@ export class QrOrderController {
   ) {}
 
   /**
-   * Reject QR mutations when the client IP doesn't pass the branch's gate.
-   * Frontend calls /public/qr-gate on boot and shows the Wi-Fi page, but
-   * an off-network client that skips the SPA could still hit these
-   * endpoints directly — this is the defense-in-depth check.
+   * Reject QR mutations when the branch's gate isn't open. Three
+   * independent reasons can block: Wi-Fi allowlist, master kill
+   * switch, service-window. Frontend calls /public/qr-gate on boot
+   * and renders the relevant page, but an off-network or out-of-
+   * hours client that skips the SPA could still hit these endpoints
+   * directly — this is the defense-in-depth check. The 403 carries
+   * a structured `code` so client toasts can render the right
+   * message without re-running the gate eval.
    */
   private async ensureGateOpen(branchId: string, req: Request) {
     // Use the same priority-aware extractor as /public/qr-gate so the
@@ -197,7 +201,13 @@ export class QrOrderController {
     const verdict = await this.qrGate.evaluate(branchId, extractClientIp(req));
     if (!verdict) throw new NotFoundException('Branch not found');
     if (!verdict.allowed) {
-      throw new ForbiddenException('QR ordering is restricted to the restaurant Wi-Fi network.');
+      const message =
+        verdict.reason === 'DISABLED'
+          ? 'QR ordering is paused right now. Please ask staff for assistance.'
+          : verdict.reason === 'OUTSIDE_HOURS'
+          ? `Sorry, we are not accepting orders right now${verdict.windowStart && verdict.windowEnd ? ` (open ${verdict.windowStart} – ${verdict.windowEnd}).` : '.'}`
+          : 'QR ordering is restricted to the restaurant Wi-Fi network.';
+      throw new ForbiddenException({ code: verdict.reason, message });
     }
   }
 

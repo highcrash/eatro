@@ -34,6 +34,11 @@ export interface Branch extends AuditFields {
   qrGateEnabled: boolean;
   qrAllowedIps: string | null;
   qrGateMessage: string | null;
+  /** Master kill switch for the QR ordering surface. Default true. */
+  qrOrderingEnabled?: boolean;
+  /** Optional service window (HH:mm 24h, branch local). */
+  qrOrderingWindowStart?: string | null;
+  qrOrderingWindowEnd?: string | null;
   billLogoWidthPct: number;
   facebookUrl: string | null;
   instagramUrl: string | null;
@@ -72,6 +77,9 @@ export interface UpdateBranchDto extends Partial<CreateBranchDto> {
   qrGateEnabled?: boolean;
   qrAllowedIps?: string | null;
   qrGateMessage?: string | null;
+  qrOrderingEnabled?: boolean;
+  qrOrderingWindowStart?: string | null;
+  qrOrderingWindowEnd?: string | null;
   billLogoWidthPct?: number;
   facebookUrl?: string | null;
   instagramUrl?: string | null;
@@ -137,6 +145,9 @@ export interface Branding {
   qrGateEnabled: boolean;
   qrAllowedIps: string | null;
   qrGateMessage: string | null;
+  qrOrderingEnabled?: boolean;
+  qrOrderingWindowStart?: string | null;
+  qrOrderingWindowEnd?: string | null;
   billLogoWidthPct: number;
   taxRate: number | null;
   vatEnabled: boolean;

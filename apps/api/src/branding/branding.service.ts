@@ -53,6 +53,9 @@ export class BrandingService {
       qrGateEnabled: (b.qrGateEnabled as boolean | undefined) ?? false,
       qrAllowedIps: (b.qrAllowedIps as string | null) ?? null,
       qrGateMessage: (b.qrGateMessage as string | null) ?? null,
+      qrOrderingEnabled: (b.qrOrderingEnabled as boolean | undefined) ?? true,
+      qrOrderingWindowStart: (b.qrOrderingWindowStart as string | null) ?? null,
+      qrOrderingWindowEnd: (b.qrOrderingWindowEnd as string | null) ?? null,
       billLogoWidthPct: (b.billLogoWidthPct as number | undefined) ?? 80,
       taxRate: Number(branch.taxRate),
       vatEnabled: branch.vatEnabled,
@@ -127,6 +130,9 @@ export class BrandingService {
       qrGateEnabled?: boolean;
       qrAllowedIps?: string | null;
       qrGateMessage?: string | null;
+      qrOrderingEnabled?: boolean;
+      qrOrderingWindowStart?: string | null;
+      qrOrderingWindowEnd?: string | null;
       billLogoWidthPct?: number;
       facebookUrl?: string | null;
       instagramUrl?: string | null;
@@ -134,11 +140,12 @@ export class BrandingService {
   ): Promise<Branding> {
     // Split the write: Prisma for fields that exist in the generated
     // client, raw SQL for fields that may not yet (qr gate + wifi SSID,
-    // added in migration 20260417100000). This means the endpoint keeps
-    // working even if `prisma generate` hasn't been run locally after
-    // pulling the migration — otherwise a stale client throws "Unknown
-    // argument qrGateEnabled" and the admin's toggle silently fails.
-    const { qrGateEnabled, qrAllowedIps, wifiSsid, qrGateMessage, ...rest } = dto;
+    // added in migration 20260417100000; ordering kill-switch + window
+    // added in 20260505000000). This means the endpoint keeps working
+    // even if `prisma generate` hasn't been run locally after pulling
+    // the migration — otherwise a stale client throws "Unknown argument
+    // qrGateEnabled" and the admin's toggle silently fails.
+    const { qrGateEnabled, qrAllowedIps, wifiSsid, qrGateMessage, qrOrderingEnabled, qrOrderingWindowStart, qrOrderingWindowEnd, ...rest } = dto;
 
     if (Object.keys(rest).length > 0) {
       await this.prisma.branch.update({
@@ -171,6 +178,24 @@ export class BrandingService {
     if (qrGateMessage !== undefined) {
       await this.prisma.$executeRaw`
         UPDATE "branches" SET "qrGateMessage" = ${qrGateMessage}
+        WHERE "id" = ${branchId}
+      `;
+    }
+    if (qrOrderingEnabled !== undefined) {
+      await this.prisma.$executeRaw`
+        UPDATE "branches" SET "qrOrderingEnabled" = ${qrOrderingEnabled}
+        WHERE "id" = ${branchId}
+      `;
+    }
+    if (qrOrderingWindowStart !== undefined) {
+      await this.prisma.$executeRaw`
+        UPDATE "branches" SET "qrOrderingWindowStart" = ${qrOrderingWindowStart}
+        WHERE "id" = ${branchId}
+      `;
+    }
+    if (qrOrderingWindowEnd !== undefined) {
+      await this.prisma.$executeRaw`
+        UPDATE "branches" SET "qrOrderingWindowEnd" = ${qrOrderingWindowEnd}
         WHERE "id" = ${branchId}
       `;
     }
