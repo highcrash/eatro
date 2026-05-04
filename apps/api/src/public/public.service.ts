@@ -611,6 +611,31 @@ export class PublicService {
     return this.applyDiscounts(branchId, fallbackItems);
   }
 
+  /**
+   * Newly-added menu items for the QR/web "New Items" strip — last
+   * 10 items by createdAt desc. Same visibility filters the main
+   * /menu endpoint applies (no addons, no variant parents, no
+   * hidden categories, no off-website rows). Discounted prices are
+   * stamped via applyDiscounts() so SALE badges render identically
+   * to the rest of the menu.
+   */
+  async getNewItems(branchId: string, take = 10) {
+    const items = await this.prisma.menuItem.findMany({
+      where: {
+        branchId,
+        deletedAt: null,
+        isAvailable: true,
+        websiteVisible: true,
+        isVariantParent: false,
+        isAddon: false,
+      },
+      orderBy: { createdAt: 'desc' },
+      take,
+      select: { ...PUBLIC_MENU_ITEM_SELECT, category: { select: PUBLIC_CATEGORY_SELECT } },
+    });
+    return this.applyDiscounts(branchId, items);
+  }
+
   async getDiscountedItems(branchId: string) {
     const now = new Date();
     const dayName = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];

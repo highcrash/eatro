@@ -171,6 +171,75 @@ export class CustomerService {
     return { order };
   }
 
+  /**
+   * QR My Account — last N PAID/SERVED orders + the customer
+   * record (totalSpent / totalOrders / lastVisit). Single round-
+   * trip drives both the lifetime stats strip + the order list,
+   * keeps them in sync, no separate /me endpoint needed.
+   *
+   * Items include only NON-voided lines + the linked review (or
+   * null) so the UI can render a "Leave a review" or "★ Reviewed"
+   * affordance per row without a follow-up request per order.
+   */
+  async getOrderHistory(branchId: string, customerId: string, limit?: number) {
+    const take = Math.min(Math.max(1, limit ?? 30), 100);
+    const [customer, orders] = await Promise.all([
+      this.prisma.customer.findFirst({
+        where: { id: customerId, branchId },
+        select: {
+          id: true, name: true, phone: true, email: true,
+          totalSpent: true, totalOrders: true, lastVisit: true,
+        },
+      }),
+      this.prisma.order.findMany({
+        where: {
+          branchId, customerId, deletedAt: null,
+          status: { in: ['PAID', 'SERVED'] },
+        },
+        include: {
+          items: {
+            where: { voidedAt: null },
+            select: {
+              id: true,
+              menuItemId: true,
+              menuItemName: true,
+              quantity: true,
+              unitPrice: true,
+              totalPrice: true,
+              notes: true,
+            },
+          },
+          review: {
+            select: {
+              id: true,
+              foodScore: true, serviceScore: true,
+              atmosphereScore: true, priceScore: true,
+              notes: true, createdAt: true,
+            },
+          },
+        },
+        orderBy: { paidAt: 'desc' },
+        take,
+      }),
+    ]);
+    return { customer, orders };
+  }
+
+  /**
+   * QR My Account — chronological list of reviews this customer
+   * wrote, joined to the order's number + paidAt for "from your
+   * visit on …" context.
+   */
+  async getCustomerReviewHistory(branchId: string, customerId: string) {
+    return this.prisma.review.findMany({
+      where: { branchId, customerId },
+      include: {
+        order: { select: { id: true, orderNumber: true, paidAt: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   // ─── Admin/POS endpoints ───────────────────────────────────────────────────
 
   findAll(branchId: string) {

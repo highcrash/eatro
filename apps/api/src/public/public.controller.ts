@@ -35,6 +35,18 @@ export class PublicController {
     return this.publicService.getRecommended(branchId, categoryId);
   }
 
+  /**
+   * Newly-added menu items, ordered by createdAt desc. Used by the
+   * QR app's New Items strip + the website's New Items slider so
+   * customers can spot fresh additions without scrolling the entire
+   * menu. Same visibility filters as the main /menu endpoint, plus
+   * the discount stamp so SALE badges appear when applicable.
+   */
+  @Get('menu/:branchId/new-items')
+  getNewItems(@Param('branchId') branchId: string) {
+    return this.publicService.getNewItems(branchId);
+  }
+
   @Get('menu/:branchId/item/:itemId')
   getMenuItem(@Param('branchId') branchId: string, @Param('itemId') itemId: string) {
     return this.publicService.getMenuItem(branchId, itemId);

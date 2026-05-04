@@ -8,6 +8,7 @@ import CartPage from './pages/CartPage';
 import OrderStatusPage from './pages/OrderStatusPage';
 import ReviewPage from './pages/ReviewPage';
 import LoginPage from './pages/LoginPage';
+import AccountPage from './pages/AccountPage';
 import ScanPage from './pages/ScanPage';
 import WifiGate, { type GatePayload } from './pages/WifiGate';
 import { useSessionStore } from './store/session.store';
@@ -154,6 +155,7 @@ export default function QrOrderApp() {
       <Route path="/menu" element={<MenuPage />} />
       <Route path="/item/:itemId" element={<ItemPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/account" element={<AccountPage />} />
       <Route path="/cart" element={<CartPage />} />
       <Route path="/order/:orderId" element={<OrderStatusPage />} />
       <Route path="/review/:orderId" element={<ReviewPage />} />
