@@ -188,6 +188,13 @@ export default function OrderStatusPage() {
       onOrderUpdated: () => {
         void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
       },
+      onOrderTerminal: () => {
+        // Order paid OR items-pending — refetch so the React Query
+        // cache picks up the new status and the existing terminal-
+        // status useEffect (line ~135) clears activeOrderId. Without
+        // this, payment shows ~3s late on the QR app.
+        void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+      },
     });
     return cleanup;
     // isPrimaryDevice toggles when the order loads, hence the dep —

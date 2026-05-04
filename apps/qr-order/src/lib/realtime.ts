@@ -38,6 +38,9 @@ export interface OrderRoomHandlers {
   onShareApproved?: (data: { orderId: string; deviceId: string }) => void;
   onShareDenied?: (data: { orderId: string; deviceId: string }) => void;
   onOrderUpdated?: (data: unknown) => void;
+  /** Order:paid + order:items-pending share the same handler today —
+   *  both just trigger a status-query invalidation in the QR app. */
+  onOrderTerminal?: (data: unknown) => void;
 }
 
 /**
@@ -57,11 +60,16 @@ export function joinOrderRoom(orderId: string, handlers: OrderRoomHandlers): () 
   const onShareApproved = handlers.onShareApproved ?? null;
   const onShareDenied = handlers.onShareDenied ?? null;
   const onOrderUpdated = handlers.onOrderUpdated ?? null;
+  const onOrderTerminal = handlers.onOrderTerminal ?? null;
 
   if (onShareRequest) s.on('order:share-request', onShareRequest);
   if (onShareApproved) s.on('order:share-approved', onShareApproved);
   if (onShareDenied) s.on('order:share-denied', onShareDenied);
   if (onOrderUpdated) s.on('order:updated', onOrderUpdated);
+  if (onOrderTerminal) {
+    s.on('order:paid', onOrderTerminal);
+    s.on('order:items-pending', onOrderTerminal);
+  }
 
   return () => {
     s.off('connect', onReconnect);
@@ -69,6 +77,10 @@ export function joinOrderRoom(orderId: string, handlers: OrderRoomHandlers): () 
     if (onShareApproved) s.off('order:share-approved', onShareApproved);
     if (onShareDenied) s.off('order:share-denied', onShareDenied);
     if (onOrderUpdated) s.off('order:updated', onOrderUpdated);
+    if (onOrderTerminal) {
+      s.off('order:paid', onOrderTerminal);
+      s.off('order:items-pending', onOrderTerminal);
+    }
     // We deliberately don't `s.emit('leave:order', orderId)` —
     // socket.io's leaveAll on disconnect handles cleanup, and a
     // page-rerender that resubscribes shouldn't briefly miss events
