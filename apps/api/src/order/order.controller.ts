@@ -508,6 +508,22 @@ export class QrOrderController {
     // If order is already accepted (not PENDING), new items need cashier approval
     const order = await this.prisma.order.findFirst({ where: { id, deletedAt: null } });
     if (!order) throw new NotFoundException('Order not found');
+    // Reject add-items into closed orders. Earlier the controller
+    // only computed needsApproval and let everything through —
+    // diners on a stale activeOrderId could push items into a PAID
+    // order, which then surfaced on the cashier as ghost items on a
+    // settled bill (the same misleading "View active order" button
+    // bug on the client side stems from the same root cause: PAID
+    // orders weren't treated as terminal). Server is the source of
+    // truth — block here too so a pre-update QR client can't
+    // bypass the new client-side cleanup.
+    const terminal = ['PAID', 'SERVED', 'VOID', 'CANCELLED', 'REFUNDED'];
+    if (terminal.includes(order.status as string)) {
+      throw new BadRequestException({
+        code: 'ORDER_CLOSED',
+        message: `This order is already ${String(order.status).toLowerCase()}. Place a new order from the menu.`,
+      });
+    }
     const needsApproval = order.status !== 'PENDING';
     // QR self-service ingredient removal — gated by branch setting.
     // When OFF, strip removedIngredientIds from each line; the

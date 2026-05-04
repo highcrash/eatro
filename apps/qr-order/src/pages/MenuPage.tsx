@@ -20,6 +20,32 @@ export default function MenuPage() {
   const branchName = useSessionStore((s) => s.branchName);
   const tableNumber = useSessionStore((s) => s.tableNumber);
   const activeOrderId = useSessionStore((s) => s.activeOrderId);
+  const setActiveOrder = useSessionStore((s) => s.setActiveOrder);
+
+  // Self-heal stale activeOrderId. localStorage outlives the order
+  // that created it — when the cashier marks PAID, the customer's
+  // device might be sitting on /menu without ever visiting the
+  // status page that nulls activeOrderId on terminal status. The
+  // "View active order" button (line ~303) keeps showing, the
+  // customer taps Add and lands a POST that the server now rejects
+  // with ORDER_CLOSED — confusing on every side. Validate on mount
+  // via the same /status endpoint TableEntry uses; null the local
+  // pointer if the order is closed.
+  useEffect(() => {
+    if (!activeOrderId) return;
+    let cancelled = false;
+    fetch(apiUrl(`/orders/qr/${activeOrderId}/status`))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { status?: string } | null) => {
+        if (cancelled) return;
+        const terminal = ['PAID', 'SERVED', 'VOID', 'CANCELLED', 'REFUNDED'];
+        if (!data || (data.status && terminal.includes(data.status))) {
+          setActiveOrder(null);
+        }
+      })
+      .catch(() => { /* network blip — leave it alone, OrderStatusPage will retry */ });
+    return () => { cancelled = true; };
+  }, [activeOrderId, setActiveOrder]);
 
   const [search, setSearch] = useState('');
   const [activeCat, setActiveCat] = useState<string | null>(null);
