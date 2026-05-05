@@ -1645,14 +1645,44 @@ export class OrderService {
     });
     const sSubtotal = srcItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     const sTotals = computeTotals(branch, sSubtotal, 0);
+    const sourceEmpty = srcItems.length === 0;
     const updatedSource = await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal: sSubtotal, taxAmount: sTotals.taxAmount, serviceChargeAmount: sTotals.serviceChargeAmount, totalAmount: sTotals.totalAmount, roundAdjustment: sTotals.roundAdjustment },
+      data: {
+        subtotal: sSubtotal,
+        taxAmount: sTotals.taxAmount,
+        serviceChargeAmount: sTotals.serviceChargeAmount,
+        totalAmount: sTotals.totalAmount,
+        roundAdjustment: sTotals.roundAdjustment,
+        // Auto-cancel when the last active item gets moved away. The
+        // moved items themselves are preserved on the target order
+        // (and StockMovement / KDS history points at THEM), so the
+        // empty source has no audit value — leaving it open just
+        // surfaces a ghost row in the Open Orders modal AND keeps the
+        // table-status timer counting up forever. Earlier comment said
+        // "don't auto-void to preserve audit trail" but the trail is
+        // on the items, not the empty shell.
+        ...(sourceEmpty
+          ? {
+              status: 'VOID' as const,
+              voidReason: 'All items moved to another table',
+              voidedAt: new Date(),
+            }
+          : {}),
+      },
       include: { items: true, payments: true },
     });
 
-    // If source has no remaining active items, leave the order but free the table
-    // (Cashier can void it manually if desired). Don't auto-void to preserve audit trail.
+    // Free the source table if we just cancelled the order and it had
+    // one assigned, so the POS Tables grid drops back to "vacant" /
+    // "cleaning" instead of holding the slot indefinitely.
+    if (sourceEmpty && order.tableId) {
+      await this.prisma.diningTable.update({
+        where: { id: order.tableId },
+        data: { status: 'CLEANING' },
+      });
+      this.ws.emitToBranch(branchId, 'table:updated', { id: order.tableId, status: 'CLEANING' });
+    }
 
     const updatedTarget = await this.prisma.order.findFirstOrThrow({
       where: { id: targetOrderId },

@@ -83,5 +83,14 @@ publish:
   - provider: github
     owner: highcrash
     repo: your-repo
-    releaseType: release
+    # Mark codecanyon GitHub releases as PRE-RELEASES so GitHub's
+    # /releases/latest endpoint skips them. Without this, a main-
+    # branch desktop install (channel: stable, separate repo same
+    # release feed) hits /releases/latest, gets redirected to the
+    # most-recently-published codecanyon tag, asks for stable.yml,
+    # 404s with "Update failed". Codecanyon installs disable auto-
+    # update entirely (DISABLE_AUTO_UPDATER = true in updater.ts)
+    # so being a pre-release doesn't matter — buyers re-download
+    # the EXE per their CodeCanyon licence anyway.
+    releaseType: prerelease
     channel: codecanyon
