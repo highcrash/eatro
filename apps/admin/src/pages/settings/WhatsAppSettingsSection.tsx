@@ -11,6 +11,7 @@ interface WhatsAppSettings {
   whatsappAccessTokenSet: boolean;
   whatsappPoTemplate: string;
   whatsappPoTemplateLang: string;
+  whatsappPoTemplateParams: string;
 }
 
 interface TestResult {
@@ -39,6 +40,7 @@ export default function WhatsAppSettingsSection({ isOwner }: { isOwner: boolean 
   const [token, setToken] = useState('');
   const [templateName, setTemplateName] = useState('');
   const [templateLang, setTemplateLang] = useState('');
+  const [templateParams, setTemplateParams] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -49,6 +51,7 @@ export default function WhatsAppSettingsSection({ isOwner }: { isOwner: boolean 
       setWabaId(settings.whatsappWabaId);
       setTemplateName(settings.whatsappPoTemplate);
       setTemplateLang(settings.whatsappPoTemplateLang);
+      setTemplateParams(settings.whatsappPoTemplateParams ?? 'supplierName,poNumber,date,total');
       setLoaded(true);
     }
   }, [settings, loaded]);
@@ -61,6 +64,7 @@ export default function WhatsAppSettingsSection({ isOwner }: { isOwner: boolean 
       whatsappAccessToken: string | null;
       whatsappPoTemplate: string;
       whatsappPoTemplateLang: string;
+      whatsappPoTemplateParams: string;
     }>) => api.patch('/whatsapp/settings', dto),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['whatsapp-settings'] }),
   });
@@ -83,6 +87,7 @@ export default function WhatsAppSettingsSection({ isOwner }: { isOwner: boolean 
       whatsappWabaId: wabaId.trim(),
       whatsappPoTemplate: templateName.trim() || undefined,
       whatsappPoTemplateLang: templateLang.trim() || undefined,
+      whatsappPoTemplateParams: templateParams.trim() || undefined,
     };
     // Empty token = leave existing alone (matches tipsoi convention).
     // Use the explicit "Clear saved token" button to nuke it.
@@ -196,6 +201,22 @@ export default function WhatsAppSettingsSection({ isOwner }: { isOwner: boolean 
                 className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm text-white font-body font-mono outline-none focus:border-[#D62B2B]"
               />
               <p className="text-[10px] text-[#555] mt-1">EXACT match required. Open WhatsApp Manager → Templates → your template → "Language" column. Most English templates are <span className="font-mono">en</span> (not <span className="font-mono">en_US</span>).</p>
+            </div>
+            <div>
+              <label className="text-xs text-[#999] font-body block mb-1">Template Body Params</label>
+              <input
+                type="text"
+                value={templateParams}
+                disabled={!isOwner}
+                onChange={(e) => setTemplateParams(e.target.value)}
+                placeholder="supplierName,poNumber,date,total"
+                className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm text-white font-body font-mono outline-none focus:border-[#D62B2B]"
+              />
+              <p className="text-[10px] text-[#555] mt-1">
+                Comma-separated, in <span className="text-[#999]">{'{{1}}, {{2}}, {{3}}…'}</span> order. Count must EXACTLY match the body placeholders in your approved template (Meta returns #132000 if not).
+                <br />
+                Available tokens: <span className="font-mono">supplierName</span>, <span className="font-mono">poNumber</span>, <span className="font-mono">date</span>, <span className="font-mono">total</span>, <span className="font-mono">branchName</span>, <span className="font-mono">itemCount</span>, <span className="font-mono">supplierContact</span>.
+              </p>
             </div>
           </div>
 

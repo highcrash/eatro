@@ -843,6 +843,7 @@ export class PurchasingService {
     const accessToken = settings.whatsappAccessToken?.trim();
     const templateName = settings.whatsappPoTemplate?.trim();
     const languageCode = settings.whatsappPoTemplateLang?.trim() || 'en_US';
+    const paramTokensRaw = (settings as any).whatsappPoTemplateParams?.trim() || 'supplierName,poNumber,date,total';
     if (!phoneNumberId || !accessToken || !templateName) {
       throw new BadRequestException('WhatsApp credentials incomplete. Set Phone Number ID, Access Token, and Template Name in Settings.');
     }
@@ -912,6 +913,27 @@ export class PurchasingService {
       mimeType: 'application/pdf',
     });
 
+    // Body params are built from the admin-configured ordered token
+    // list so a template with a different placeholder count (Meta
+    // returns #132000 when count mismatches) can be supported without
+    // a code change. Unknown tokens are skipped silently — the admin
+    // sees the param count + names in Settings, so a typo there will
+    // surface as a 132000 with a clearer follow-up message below.
+    const paramValues: Record<string, string> = {
+      supplierName: po.supplier?.name ?? '',
+      poNumber,
+      date: formattedDate,
+      total: formattedTotal,
+      branchName: po.branch?.name ?? '',
+      itemCount: String(po.items.length),
+      supplierContact: po.supplier?.contactName ?? po.supplier?.phone ?? '',
+    };
+    const bodyParams = paramTokensRaw
+      .split(',')
+      .map((t: string) => t.trim())
+      .filter((t: string) => t.length > 0)
+      .map((t: string) => paramValues[t] ?? '');
+
     // Meta's language code matching is exact-match — `en_US` and `en`
     // are NOT interchangeable. Templates created in WhatsApp Manager
     // without a region tag are usually approved as plain `en`, so when
@@ -925,7 +947,7 @@ export class PurchasingService {
       to,
       templateName,
       languageCode: code,
-      bodyParams: [po.supplier?.name ?? '', poNumber, formattedDate, formattedTotal],
+      bodyParams,
       mediaId,
       documentFilename: filename,
     });
@@ -942,6 +964,17 @@ export class PurchasingService {
     try {
       ({ messageId } = await sendOnce(languageCode));
     } catch (err: any) {
+      // 132000 → param count mismatch. Meta tells us in the message how
+      // many it expected; rewrite the error so the admin knows exactly
+      // which Settings field to trim. Don't auto-retry — guessing which
+      // params to drop would silently send a misleading message.
+      if (err?.metaCode === 132000) {
+        const expected = /expected number of params \((\d+)\)/.exec(String(err?.message ?? ''))?.[1];
+        throw new BadRequestException(
+          `WhatsApp template "${templateName}" expects ${expected ?? '?'} body parameter(s), but Restora is sending ${bodyParams.length} (${paramTokensRaw}). ` +
+          `Open Settings → Notifications and edit "Template Body Params" so its comma-separated list has exactly ${expected ?? 'the right'} entries — pick from: supplierName, poNumber, date, total, branchName, itemCount, supplierContact.`,
+        );
+      }
       const fallback = err?.metaCode === 132001 ? fallbackForLang(languageCode) : null;
       if (!fallback || fallback === languageCode) {
         // Re-throw with a friendlier hint when the failure is the
