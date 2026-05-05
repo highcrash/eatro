@@ -415,12 +415,24 @@ export default function TablesPage() {
   );
 
   // Latest active order per table → drives the per-table phase clock.
+  // Skip empty orders everywhere — same defensive filter the Open
+  // Orders modal uses. Pre-fix server builds could leave a source
+  // order in PENDING/CONFIRMED/etc. with all its items moved away to
+  // another table, which then drove a forever-counting table-status
+  // timer + showed up as "+1" stacked-order count. Server now auto-
+  // cancels on the last move-away; this strips legacy ghost shells.
+  const hasActiveItems = (o: Order): boolean => {
+    const items = (o as { items?: Array<{ voidedAt?: string | Date | null }> }).items ?? [];
+    return items.some((it) => !it.voidedAt);
+  };
+
   // pendingOrders + activeOrders cover every status that occupies a
   // table (PENDING + CONFIRMED + PREPARING + READY + SERVED).
   const orderByTable = useMemo(() => {
     const m = new Map<string, Order>();
     for (const o of [...pendingOrders, ...activeOrders]) {
       if (!o.tableId) continue;
+      if (!hasActiveItems(o)) continue;
       const cur = m.get(o.tableId);
       if (!cur || new Date(o.createdAt) > new Date(cur.createdAt)) m.set(o.tableId, o);
     }
@@ -435,6 +447,7 @@ export default function TablesPage() {
     const m = new Map<string, number>();
     for (const o of [...pendingOrders, ...activeOrders]) {
       if (!o.tableId) continue;
+      if (!hasActiveItems(o)) continue;
       m.set(o.tableId, (m.get(o.tableId) ?? 0) + 1);
     }
     return m;
@@ -442,18 +455,29 @@ export default function TablesPage() {
 
   // All currently-open orders for the branch, used by the "Open
   // Orders" recovery modal. Includes orders without a tableId
-  // (TAKEAWAY / QR_ONLINE without a table assignment).
+  // (TAKEAWAY / QR_ONLINE without a table assignment). Skips orders
+  // whose only items are voided — those are ghost rows left behind
+  // by the move-item-to-table flow on older API builds (pre-fix, the
+  // source order kept its OPEN status with 0 active items + drove a
+  // forever-counting table timer). Server now auto-cancels on the
+  // last move-away; this defensive filter handles any legacy empty
+  // shells already in the DB.
   const allOpenOrders = useMemo(() => {
     const merged = [...pendingOrders, ...activeOrders];
     // De-dupe by id (a status flip mid-poll could put the same order
     // in both buckets briefly).
     const byId = new Map<string, Order>();
     for (const o of merged) byId.set(o.id, o);
-    return Array.from(byId.values()).sort((a, b) => {
-      const da = new Date(a.createdAt).getTime();
-      const db = new Date(b.createdAt).getTime();
-      return db - da;
-    });
+    return Array.from(byId.values())
+      .filter((o) => {
+        const items = (o as { items?: Array<{ voidedAt?: string | Date | null }> }).items ?? [];
+        return items.some((it) => !it.voidedAt);
+      })
+      .sort((a, b) => {
+        const da = new Date(a.createdAt).getTime();
+        const db = new Date(b.createdAt).getTime();
+        return db - da;
+      });
   }, [pendingOrders, activeOrders]);
 
   const [showOpenOrders, setShowOpenOrders] = useState(false);
