@@ -843,7 +843,7 @@ export class PurchasingService {
     const accessToken = settings.whatsappAccessToken?.trim();
     const templateName = settings.whatsappPoTemplate?.trim();
     const languageCode = settings.whatsappPoTemplateLang?.trim() || 'en_US';
-    const paramTokensRaw = (settings as any).whatsappPoTemplateParams?.trim() || 'supplierName,poNumber,date,total';
+    const paramTokensRaw = (settings as any).whatsappPoTemplateParams?.trim() || 'supplierName,poNumber,date';
     if (!phoneNumberId || !accessToken || !templateName) {
       throw new BadRequestException('WhatsApp credentials incomplete. Set Phone Number ID, Access Token, and Template Name in Settings.');
     }
