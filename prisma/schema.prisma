@@ -384,12 +384,22 @@ model BranchSetting {
   /// are populated. Token plaintext mirrors smsApiKey/tipsoiApiToken
   /// — masked in non-OWNER reads, stripped from activity-log diffs
   /// via SENSITIVE_FIELDS.
-  whatsappEnabled         Boolean @default(false)
-  whatsappPhoneNumberId   String?
-  whatsappWabaId          String?
-  whatsappAccessToken     String?
-  whatsappPoTemplate      String  @default("purchase_order_v1")
-  whatsappPoTemplateLang  String  @default("en_US")
+  whatsappEnabled          Boolean @default(false)
+  whatsappPhoneNumberId    String?
+  whatsappWabaId           String?
+  whatsappAccessToken      String?
+  whatsappPoTemplate       String  @default("purchase_order_v1")
+  whatsappPoTemplateLang   String  @default("en_US")
+  /// Comma-separated ordered list of body-param tokens the approved
+  /// template expects. Each token maps to a piece of the PO context;
+  /// the service builds the bodyParams array in this exact order.
+  /// Recognised tokens: supplierName, poNumber, date, total,
+  /// branchName, itemCount, supplierContact. The default matches the
+  /// 4-param shape the original `purchase_order_v1` template used —
+  /// admins whose approved template has a different placeholder count
+  /// (Meta returns #132000 when they don't match) can edit this here
+  /// without touching code.
+  whatsappPoTemplateParams String  @default("supplierName,poNumber,date,total")
 
   branch Branch @relation(fields: [branchId], references: [id])
 

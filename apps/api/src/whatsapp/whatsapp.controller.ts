@@ -45,6 +45,7 @@ export class WhatsAppSettingsController {
       whatsappAccessTokenSet: !!settings.whatsappAccessToken,
       whatsappPoTemplate: settings.whatsappPoTemplate,
       whatsappPoTemplateLang: settings.whatsappPoTemplateLang,
+      whatsappPoTemplateParams: (settings as any).whatsappPoTemplateParams ?? 'supplierName,poNumber,date,total',
     };
   }
 
@@ -59,6 +60,7 @@ export class WhatsAppSettingsController {
       whatsappAccessToken?: string | null;
       whatsappPoTemplate?: string;
       whatsappPoTemplateLang?: string;
+      whatsappPoTemplateParams?: string;
     },
   ) {
     const data: Record<string, unknown> = {};
@@ -81,6 +83,16 @@ export class WhatsAppSettingsController {
     }
     if (dto.whatsappPoTemplateLang !== undefined && dto.whatsappPoTemplateLang.trim()) {
       data.whatsappPoTemplateLang = dto.whatsappPoTemplateLang.trim();
+    }
+    if (dto.whatsappPoTemplateParams !== undefined && dto.whatsappPoTemplateParams.trim()) {
+      // Normalise: strip whitespace around tokens, drop empties, preserve
+      // order. Storing the cleaned form means the service can split-trim
+      // straight from the column.
+      data.whatsappPoTemplateParams = dto.whatsappPoTemplateParams
+        .split(',')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+        .join(',');
     }
 
     await this.prisma.branchSetting.upsert({
