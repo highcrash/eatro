@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import type { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, ReceiveGoodsDto, JwtPayload } from '@restora/types';
 import { formatVariantLabel } from '@restora/utils';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,6 +10,8 @@ import { buildPurchaseOrderPdf } from './po-pdf';
 
 @Injectable()
 export class PurchasingService {
+  private readonly logger = new Logger(PurchasingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly unitConversion: UnitConversionService,
@@ -910,16 +912,53 @@ export class PurchasingService {
       mimeType: 'application/pdf',
     });
 
-    const { messageId } = await this.whatsApp.sendDocumentTemplate({
+    // Meta's language code matching is exact-match — `en_US` and `en`
+    // are NOT interchangeable. Templates created in WhatsApp Manager
+    // without a region tag are usually approved as plain `en`, so when
+    // the configured code returns 132001 ("template name does not exist
+    // in the translation"), retry once with the most likely fallback
+    // before giving up. Saves the admin a Settings round-trip the first
+    // time they hit this.
+    const sendOnce = (code: string) => this.whatsApp.sendDocumentTemplate({
       phoneNumberId,
       accessToken,
       to,
       templateName,
-      languageCode,
+      languageCode: code,
       bodyParams: [po.supplier?.name ?? '', poNumber, formattedDate, formattedTotal],
       mediaId,
       documentFilename: filename,
     });
+
+    const fallbackForLang = (lc: string): string | null => {
+      const norm = lc.toLowerCase().replace('-', '_');
+      // en_US / en_GB / en_IN → en (the most common WhatsApp default).
+      if (norm.startsWith('en_')) return 'en';
+      // Plain "en" → no further fallback worth trying automatically.
+      return null;
+    };
+
+    let messageId: string;
+    try {
+      ({ messageId } = await sendOnce(languageCode));
+    } catch (err: any) {
+      const fallback = err?.metaCode === 132001 ? fallbackForLang(languageCode) : null;
+      if (!fallback || fallback === languageCode) {
+        // Re-throw with a friendlier hint when the failure is the
+        // language-mismatch that the admin can fix in Settings. The
+        // raw Meta message ("(#132001) Template name does not exist
+        // in the translation") doesn't tell them WHERE to fix it.
+        if (err?.metaCode === 132001) {
+          throw new BadRequestException(
+            `WhatsApp template "${templateName}" is not approved in language "${languageCode}". ` +
+            `Open Settings → Notifications and set "Template Language" to the exact code shown in WhatsApp Manager (commonly "en", "en_US", or "bn").`,
+          );
+        }
+        throw err;
+      }
+      this.logger.warn(`WhatsApp PO send: template not in ${languageCode}; retrying with ${fallback}`);
+      ({ messageId } = await sendOnce(fallback));
+    }
 
     const sentAt = new Date();
     await this.prisma.purchaseOrder.update({
