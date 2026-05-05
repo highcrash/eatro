@@ -134,16 +134,26 @@ export class WhatsAppService {
     if (!res.ok) {
       const meta = json?.error;
       const detail = meta?.error_data?.details ?? meta?.error_user_msg;
-      const code = Number(meta?.code ?? 0);
       const msg = meta?.message
         ? `${meta.message}${detail ? ` — ${detail}` : ''}`
         : text || `Meta API HTTP ${res.status}`;
       this.logger.warn(`Meta API failed [${res.status}]: ${msg}`);
-      // Stamp the Meta error code on the exception so callers can react
-      // selectively (e.g. retry-with-fallback-language on 132001) without
-      // string-matching the message.
+      // Resolve the WhatsApp-specific error code. Meta puts it in three
+      // possible places and which one is populated varies by endpoint:
+      //   1. error_subcode  — the most specific code (e.g. 132000/132001)
+      //   2. (#NNNNNN) prefix in the message — present on every WA error
+      //   3. error.code     — sometimes a parent group (e.g. 100), so we
+      //                       only use it as a last resort
+      // Without (2) we'd miss the fallback path because `code` is often
+      // `100` instead of `132000`. Match the parens-prefix anywhere in
+      // message so we recover the real subcode regardless of layout.
+      const subFromMsg = /\(#(\d+)\)/.exec(String(meta?.message ?? ''))?.[1];
+      const metaCode =
+        Number(meta?.error_subcode ?? 0) ||
+        Number(subFromMsg ?? 0) ||
+        Number(meta?.code ?? 0);
       const ex = new BadRequestException(`WhatsApp API: ${msg}`) as BadRequestException & { metaCode?: number };
-      ex.metaCode = code;
+      ex.metaCode = metaCode;
       throw ex;
     }
 
