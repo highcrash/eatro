@@ -395,7 +395,7 @@ model BranchSetting {
   /// admins whose approved template has a different placeholder count
   /// (Meta returns #132000 when they don't match) can edit this here
   /// without touching code.
-  whatsappPoTemplateParams String @default("supplierName,poNumber,date,total")
+  whatsappPoTemplateParams String @default("supplierName,poNumber,date")
 
   branch Branch @relation(fields: [branchId], references: [id])
 

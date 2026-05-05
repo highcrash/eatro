@@ -51,7 +51,7 @@ export default function WhatsAppSettingsSection({ isOwner }: { isOwner: boolean 
       setWabaId(settings.whatsappWabaId);
       setTemplateName(settings.whatsappPoTemplate);
       setTemplateLang(settings.whatsappPoTemplateLang);
-      setTemplateParams(settings.whatsappPoTemplateParams ?? 'supplierName,poNumber,date,total');
+      setTemplateParams(settings.whatsappPoTemplateParams ?? 'supplierName,poNumber,date');
       setLoaded(true);
     }
   }, [settings, loaded]);
@@ -209,7 +209,7 @@ export default function WhatsAppSettingsSection({ isOwner }: { isOwner: boolean 
                 value={templateParams}
                 disabled={!isOwner}
                 onChange={(e) => setTemplateParams(e.target.value)}
-                placeholder="supplierName,poNumber,date,total"
+                placeholder="supplierName,poNumber,date"
                 className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm text-white font-body font-mono outline-none focus:border-[#D62B2B]"
               />
               <p className="text-[10px] text-[#555] mt-1">

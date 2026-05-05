@@ -45,7 +45,7 @@ export class WhatsAppSettingsController {
       whatsappAccessTokenSet: !!settings.whatsappAccessToken,
       whatsappPoTemplate: settings.whatsappPoTemplate,
       whatsappPoTemplateLang: settings.whatsappPoTemplateLang,
-      whatsappPoTemplateParams: (settings as any).whatsappPoTemplateParams ?? 'supplierName,poNumber,date,total',
+      whatsappPoTemplateParams: (settings as any).whatsappPoTemplateParams ?? 'supplierName,poNumber,date',
     };
   }
 
