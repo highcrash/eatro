@@ -134,11 +134,17 @@ export class WhatsAppService {
     if (!res.ok) {
       const meta = json?.error;
       const detail = meta?.error_data?.details ?? meta?.error_user_msg;
+      const code = Number(meta?.code ?? 0);
       const msg = meta?.message
         ? `${meta.message}${detail ? ` — ${detail}` : ''}`
         : text || `Meta API HTTP ${res.status}`;
       this.logger.warn(`Meta API failed [${res.status}]: ${msg}`);
-      throw new BadRequestException(`WhatsApp API: ${msg}`);
+      // Stamp the Meta error code on the exception so callers can react
+      // selectively (e.g. retry-with-fallback-language on 132001) without
+      // string-matching the message.
+      const ex = new BadRequestException(`WhatsApp API: ${msg}`) as BadRequestException & { metaCode?: number };
+      ex.metaCode = code;
+      throw ex;
     }
 
     return json;

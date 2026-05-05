@@ -192,10 +192,10 @@ export default function WhatsAppSettingsSection({ isOwner }: { isOwner: boolean 
                 value={templateLang}
                 disabled={!isOwner}
                 onChange={(e) => setTemplateLang(e.target.value)}
-                placeholder="en_US"
+                placeholder="en"
                 className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2 text-sm text-white font-body font-mono outline-none focus:border-[#D62B2B]"
               />
-              <p className="text-[10px] text-[#555] mt-1">Match the language code on the approved template (e.g. en_US, en, bn).</p>
+              <p className="text-[10px] text-[#555] mt-1">EXACT match required. Open WhatsApp Manager → Templates → your template → "Language" column. Most English templates are <span className="font-mono">en</span> (not <span className="font-mono">en_US</span>).</p>
             </div>
           </div>
 
