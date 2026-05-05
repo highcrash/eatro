@@ -13,6 +13,11 @@ interface SessionStore {
   branchId: string | null;
   branchName: string;
   tableNumber: string;
+  /** IANA tz the server reports for this branch (default Asia/Dhaka).
+   *  All customer-facing time renders go through this so the diner
+   *  always sees restaurant wall-clock time, not their device's local
+   *  time — important for travelers and devices with a wrong clock. */
+  branchTimezone: string;
   activeOrderId: string | null;
   /** Stable per-device UUID. Generated on first mount, persisted in
    *  localStorage so the SAME phone is always the same device across
@@ -27,7 +32,13 @@ interface SessionStore {
    *  so a tab refresh keeps the user logged in until they close the
    *  tab. Cleared when admin restarts the QR session via setSession. */
   customer: QrCustomer | null;
-  setSession: (data: { tableId: string; branchId: string; branchName: string; tableNumber: string }) => void;
+  setSession: (data: {
+    tableId: string;
+    branchId: string;
+    branchName: string;
+    tableNumber: string;
+    branchTimezone?: string;
+  }) => void;
   setActiveOrder: (orderId: string | null) => void;
   setCustomer: (c: QrCustomer | null) => void;
 }
@@ -55,6 +66,7 @@ export const useSessionStore = create<SessionStore>()(
       branchId: null,
       branchName: 'Restaurant',
       tableNumber: '',
+      branchTimezone: 'Asia/Dhaka',
       activeOrderId: null,
       // Lazy-init: zustand persist hydrates from localStorage if the
       // key already exists; otherwise the initial value here is what
@@ -67,7 +79,12 @@ export const useSessionStore = create<SessionStore>()(
       // table-transfer + active-order rehydration on top of this.
       // Different customers = different devices = different localStorage
       // keys per device, so cross-customer leakage isn't a concern.
-      setSession: (data) => set({ ...data }),
+      setSession: (data) => set({
+        ...data,
+        // Default tz preserved when the caller (e.g. a legacy code path
+        // that hasn't been updated to forward branchTimezone) omits it.
+        branchTimezone: data.branchTimezone ?? 'Asia/Dhaka',
+      }),
       setActiveOrder: (orderId) => set({ activeOrderId: orderId }),
       setCustomer: (c) => set({ customer: c }),
     }),
@@ -80,11 +97,18 @@ export const useSessionStore = create<SessionStore>()(
       // Older sessions in the wild don't have a deviceId — bump the
       // store version + migrate so we mint one on first load instead
       // of leaving it undefined (which would 403 every QR mutation).
-      version: 2,
+      version: 3,
       migrate: (persisted, version) => {
         const state = (persisted as Partial<SessionStore>) ?? {};
         if (version < 2 && !state.deviceId) {
           state.deviceId = newDeviceId();
+        }
+        // v3: branchTimezone added so customer-facing time renders use
+        // the restaurant's wall-clock instead of the device's. Legacy
+        // sessions don't have it — seed the default so the first render
+        // doesn't crash on `.toLocaleString(..., { timeZone: undefined })`.
+        if (version < 3 && !state.branchTimezone) {
+          state.branchTimezone = 'Asia/Dhaka';
         }
         return state as SessionStore;
       },

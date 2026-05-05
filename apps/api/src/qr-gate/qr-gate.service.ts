@@ -188,6 +188,14 @@ export class QrGateService {
     const windowStart = (b.qrOrderingWindowStart as string | null) ?? null;
     const windowEnd = (b.qrOrderingWindowEnd as string | null) ?? null;
 
+    // The window strings are HH:mm in the BRANCH's local timezone (see
+    // schema comment on qrOrderingWindowStart). Evaluating them with
+    // `new Date().getHours()` would use the SERVER's local time —
+    // DigitalOcean App Platform runs in UTC, so a 10:00–22:00 Dhaka
+    // window would silently shift to 16:00–04:00 Dhaka. Always pass the
+    // branch's tz through.
+    const tz = (branch.timezone || 'Asia/Dhaka') as string;
+
     // Evaluate gates in priority order: master kill switch → service
     // window → Wi-Fi allowlist. The first non-OK reason wins, so the
     // customer always sees the most actionable message ("ordering
@@ -197,7 +205,7 @@ export class QrGateService {
     if (!orderingEnabled) {
       reason = 'DISABLED';
       allowed = false;
-    } else if (windowStart && windowEnd && !insideWindow(new Date(), windowStart, windowEnd)) {
+    } else if (windowStart && windowEnd && !insideWindow(new Date(), windowStart, windowEnd, tz)) {
       reason = 'OUTSIDE_HOURS';
       allowed = false;
     } else if (gateEnabled && !ipMatches(clientIp, allowlist)) {
@@ -212,6 +220,7 @@ export class QrGateService {
       orderingEnabled,
       windowStart,
       windowEnd,
+      timezone: tz,
       branchName: branch.name,
       wifiSsid: (b.wifiSsid as string | null) ?? null,
       wifiPass: branch.wifiPass ?? null,
@@ -227,21 +236,47 @@ export class QrGateService {
 
 /**
  * Returns true when `now` falls inside [start, end) where start/end are
- * "HH:mm" 24h strings. Supports cross-midnight windows (e.g. 22:00 →
- * 02:00 means "open from 10pm to 2am the next morning"). Equal start +
- * end is treated as "always open" — admin entering 00:00–00:00 should
- * not lock everyone out by accident.
+ * "HH:mm" 24h strings interpreted in `tz` (default Asia/Dhaka). Supports
+ * cross-midnight windows (e.g. 22:00 → 02:00 means "open from 10pm to
+ * 2am the next morning"). Equal start + end is treated as "always
+ * open" — admin entering 00:00–00:00 should not lock everyone out by
+ * accident.
+ *
+ * `tz` is required in practice — `Branch.timezone` defaults to
+ * `Asia/Dhaka` so callers always have one. We keep the param defaulted
+ * so unit tests can still pass start/end without conjuring a tz.
  */
-export function insideWindow(now: Date, start: string, end: string): boolean {
+export function insideWindow(now: Date, start: string, end: string, tz = 'Asia/Dhaka'): boolean {
   const startMin = parseHHmm(start);
   const endMin = parseHHmm(end);
   if (startMin == null || endMin == null) return true; // malformed — fail-open
   if (startMin === endMin) return true; // 24h
-  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const { h, mi } = branchLocalHourMinute(now, tz);
+  const nowMin = h * 60 + mi;
   // Same-day window (e.g. 09:00 → 17:00).
   if (startMin < endMin) return nowMin >= startMin && nowMin < endMin;
   // Cross-midnight window (e.g. 22:00 → 02:00).
   return nowMin >= startMin || nowMin < endMin;
+}
+
+/**
+ * Render the wall-clock hour + minute of `at` in the branch's timezone.
+ * Mirrors the helper used by tipsoi.sync — Asia/Dhaka has no DST so the
+ * offset is +360 year-round, but going through Intl makes us correct
+ * for any zone the admin types into Branch.timezone in the future.
+ */
+function branchLocalHourMinute(at: Date, tz: string): { h: number; mi: number } {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(at);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? '0');
+  // en-CA renders midnight as "24" on some platforms; collapse to 0.
+  const rawH = get('hour');
+  return { h: rawH === 24 ? 0 : rawH, mi: get('minute') };
 }
 
 function parseHHmm(s: string): number | null {
