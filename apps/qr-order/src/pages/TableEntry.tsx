@@ -8,6 +8,10 @@ interface TableInfo {
   branchId: string;
   branchName: string;
   tableNumber: string;
+  // Server-reported IANA timezone for the branch (e.g. "Asia/Dhaka").
+  // Optional in the type so a stale cached response from before the API
+  // shipped the field doesn't blow up the parse.
+  branchTimezone?: string;
 }
 
 interface ActiveOrderResponse {
@@ -145,6 +149,7 @@ export default function TableEntry() {
         branchId: table.branchId,
         branchName: table.branchName,
         tableNumber: table.tableNumber,
+        branchTimezone: table.branchTimezone,
       });
 
       // 4. If there's an active order AND the scanned table differs
@@ -203,6 +208,7 @@ export default function TableEntry() {
               branchId: t.branchId,
               branchName: t.branchName,
               tableNumber: t.tableNumber,
+              branchTimezone: t.branchTimezone,
             });
           }
         } catch { /* if this lookup fails, the wrong tableNumber is shown but the order is still correct */ }

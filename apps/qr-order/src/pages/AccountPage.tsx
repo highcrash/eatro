@@ -8,6 +8,7 @@ import { formatCurrency, shortOrderCode } from '@restora/utils';
 import { useSessionStore } from '../store/session.store';
 import { useCartStore } from '../store/cart.store';
 import { apiUrl, qrFetch } from '../lib/api';
+import { formatBranchDate } from '../lib/time';
 
 interface OrderHistoryItem {
   id: string;
@@ -326,7 +327,7 @@ export default function AccountPage() {
           {history?.orders.map((order) => {
             const expanded = expandedOrderId === order.id;
             const review = reviewByOrderId.get(order.id);
-            const dateLabel = order.paidAt ? new Date(order.paidAt).toLocaleDateString() : new Date(order.createdAt).toLocaleDateString();
+            const dateLabel = formatBranchDate(order.paidAt ?? order.createdAt);
             return (
               <div key={order.id} className="bg-[#1A1A1A] border border-[#2A2A2A]">
                 <button
@@ -393,7 +394,7 @@ export default function AccountPage() {
               <div key={r.id} className="bg-[#1A1A1A] border border-[#2A2A2A] p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] font-body text-[#666] tracking-widest uppercase">
-                    {r.order.paidAt ? new Date(r.order.paidAt).toLocaleDateString() : new Date(r.createdAt).toLocaleDateString()}
+                    {formatBranchDate(r.order.paidAt ?? r.createdAt)}
                   </p>
                   <p className="font-mono text-[11px] text-[#888]">{shortOrderCode(r.order.id)}</p>
                 </div>

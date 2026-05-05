@@ -279,6 +279,11 @@ export class PublicService {
       tableNumber: table.tableNumber,
       branchId: table.branchId,
       branchName: table.branch.name,
+      // Surface the branch's wall-clock timezone so the QR app can render
+      // order/receipt times in restaurant-local time instead of the
+      // diner's device timezone (which may differ when traveling, or
+      // when the device clock is set wrong).
+      branchTimezone: table.branch.timezone || 'Asia/Dhaka',
       status: table.status,
       activeOrderId: activeOrder?.id ?? null,
     };

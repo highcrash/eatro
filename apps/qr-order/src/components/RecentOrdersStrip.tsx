@@ -7,6 +7,7 @@ import { formatCurrency, shortOrderCode } from '@restora/utils';
 import { useSessionStore } from '../store/session.store';
 import { useCartStore } from '../store/cart.store';
 import { qrFetch } from '../lib/api';
+import { formatBranchDate } from '../lib/time';
 
 interface OrderRow {
   id: string;
@@ -90,7 +91,7 @@ export default function RecentOrdersStrip() {
       </div>
       <div className="flex gap-3 overflow-x-auto px-5 pb-1 snap-x snap-mandatory" style={{ scrollbarWidth: 'none' }}>
         {orders.map((order) => {
-          const dateLabel = order.paidAt ? new Date(order.paidAt).toLocaleDateString() : new Date(order.createdAt).toLocaleDateString();
+          const dateLabel = formatBranchDate(order.paidAt ?? order.createdAt);
           const summary = order.items.slice(0, 2).map((it) => `${it.quantity}× ${it.menuItemName}`).join(' · ');
           const more = order.items.length > 2 ? ` +${order.items.length - 2} more` : '';
           return (
