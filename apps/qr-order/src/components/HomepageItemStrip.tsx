@@ -35,11 +35,24 @@ export default function HomepageItemStrip({ label, items }: Props) {
       <div className="flex gap-3 overflow-x-auto px-5 pb-1 snap-x snap-mandatory" style={{ scrollbarWidth: 'none' }}>
         {items.map((item) => {
           const basePrice = Number(item.price);
+          // Variant parents store price=0 because the variants hold
+          // the actual price. Fall back to the cheapest variant + a
+          // "From" prefix so the strip never reads ৳0. Mirrors the
+          // FoodCard logic on the main grid.
+          const variants = Array.isArray((item as any).variants)
+            ? ((item as any).variants as Array<{ price: number }>)
+            : [];
+          const isVariantParent = !!(item as any).isVariantParent && variants.length > 0;
+          const cheapestVariantPrice = isVariantParent
+            ? variants.reduce((min, v) => Math.min(min, Number(v.price)), Number(variants[0].price))
+            : 0;
+          const showFromPrefix = isVariantParent && cheapestVariantPrice > basePrice;
+          const displayPrice = isVariantParent && basePrice === 0 ? cheapestVariantPrice : basePrice;
           const rawDiscounted = (item as any).discountedPrice;
           const hasDiscount = rawDiscounted != null
             && Number(rawDiscounted) < basePrice
             && basePrice > 0
-            && !(item as any).isVariantParent;
+            && !isVariantParent;
           const discountedPrice = hasDiscount ? Number(rawDiscounted) : null;
           return (
             <button
@@ -67,7 +80,10 @@ export default function HomepageItemStrip({ label, items }: Props) {
                     <span className="font-body text-[10px] text-[#666] line-through">{formatCurrency(basePrice)}</span>
                   </div>
                 ) : (
-                  <p className="font-display text-xs text-white mt-1">{formatCurrency(basePrice)}</p>
+                  <p className="font-display text-xs text-white mt-1">
+                    {showFromPrefix && <span className="text-[9px] text-[#888] font-body font-normal mr-1">From</span>}
+                    {formatCurrency(displayPrice)}
+                  </p>
                 )}
               </div>
             </button>
