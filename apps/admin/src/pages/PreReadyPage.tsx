@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, Unlink } from 'lucide-react';
 import { api } from '../lib/api';
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, printPreReadyStockSheet } from '@restora/utils';
 import type { PreReadyItem, ProductionOrder, PreReadyBatch, Ingredient, ProductionStatus, Recipe } from '@restora/types';
 import type { MenuItem } from '@restora/types';
 import { useStockUnits } from '../lib/units';
@@ -578,6 +578,33 @@ Fried Onion,500,G,Oil,100,ML`;
         <div className="flex gap-2">
           {tab === 'items' && (
             <>
+              <button
+                onClick={() => {
+                  // Print whatever the admin is currently looking at —
+                  // filteredSortedItems already honours the name +
+                  // ingredient filters so a chef can print "just my
+                  // PG-prefix items" by filtering first. Falls back to
+                  // every active row when there's no filter.
+                  const rows = (filteredSortedItems.length > 0 ? filteredSortedItems : items)
+                    .filter((i) => i.isActive);
+                  if (rows.length === 0) {
+                    alert('No items to print.');
+                    return;
+                  }
+                  const ok = printPreReadyStockSheet({
+                    items: rows.map((i) => ({
+                      name: i.name,
+                      currentStock: Number(i.currentStock),
+                      unit: i.unit,
+                    })),
+                  });
+                  if (!ok) alert('Print failed — popup was blocked. Please allow popups for this site.');
+                }}
+                title="Print an A4 stock sheet with empty Batch-1 / Batch-2 / Batch-3 columns so the kitchen can fill in production by hand."
+                className="bg-[#2A2A2A] hover:bg-[#D62B2B] text-[#999] hover:text-white font-body text-xs px-4 py-2 tracking-widest uppercase transition-colors"
+              >
+                Print Stock Sheet
+              </button>
               <button
                 onClick={() => { setBulkOpen(true); setBulkRows([]); setBulkResult(null); }}
                 className="bg-[#2A2A2A] hover:bg-[#D62B2B] text-[#999] hover:text-white font-body text-xs px-4 py-2 tracking-widest uppercase transition-colors"
