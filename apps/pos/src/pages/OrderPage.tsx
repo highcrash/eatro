@@ -6,6 +6,7 @@ import { Plus, Minus, ArrowLeft, ShoppingBag, X, Printer, Search } from 'lucide-
 import type { MenuItem, Order, OrderItem, CreateOrderDto, VoidOrderItemDto, WasteReason } from '@restora/types';
 import { formatCurrency, printKitchenTicket as printKitchenTicketUtil } from '@restora/utils';
 import { useBranchSettings } from '../hooks/useBranchSettings';
+import { useKtRecipes, attachRecipesToTicket } from '../lib/kt-recipes';
 import { useBranding } from '../lib/branding';
 import { isPlainCharKey } from '../lib/keyboard';
 import { useIsOnline } from '../lib/online';
@@ -828,6 +829,7 @@ function ActiveOrderView({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: branchSettings } = useBranchSettings();
+  const { data: ktRecipes } = useKtRecipes();
   const { data: branding } = useBranding();
   const online = useIsOnline();
   const isCashier = user?.role === 'CASHIER' || user?.role === 'KITCHEN' || user?.role === 'WAITER';
@@ -873,12 +875,16 @@ function ActiveOrderView({
   async function maybePrintKitchenTicket(order: Order) {
     // Only auto-print when KDS is disabled — otherwise the KDS screen handles it.
     if (branchSettings && branchSettings.useKds) return;
+    // Decorate the order with each item's recipe block + the branch's
+    // master kotShowRecipe toggle so the renderer can draw the small
+    // recipe rows under each line.
+    const ticket = attachRecipesToTicket(order, ktRecipes, branchSettings);
     // Desktop path — await the IPC so a printer failure actually surfaces
     // instead of being swallowed into a fire-and-forget promise.
     const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
     if (desktopPrint) {
       try {
-        const res = await desktopPrint(order);
+        const res = await desktopPrint(ticket);
         if (!res?.ok) {
           alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
         }
@@ -888,7 +894,7 @@ function ActiveOrderView({
       return;
     }
     // Browser fallback — popup window + auto-print.
-    const ok = printKitchenTicketUtil(order as any);
+    const ok = printKitchenTicketUtil(ticket);
     if (!ok) {
       alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
     }
@@ -950,22 +956,31 @@ function ActiveOrderView({
     // browser fallback rendered only quantity + name, so customise
     // ("NO GARLIC") and addon ("+ Cheese Sauce") lines vanished from
     // the +ADD ticket.
+    // Build a map of menuItemId → recipe row so the +ADD ticket
+    // gets the same recipe-attached treatment as a fresh KOT.
+    const recipeById = new Map((ktRecipes ?? []).map((r) => [r.menuItemId, r] as const));
     const ticket = {
       orderNumber: `${ord.orderNumber} (+ADD)`,
       tableNumber: ord.tableNumber,
       type: ord.type,
       createdAt: new Date().toISOString(),
-      items: newItems.map((c) => ({
-        quantity: c.quantity,
-        menuItemName: c.menuItem.name,
-        menuItemId: c.menuItem.id,
-        notes: c.notes ?? null,
-        removedIngredients: c.removedNames && c.removedNames.length > 0 ? c.removedNames : undefined,
-        selectedAddons: c.addons && c.addons.length > 0 ? c.addons.map((a) => a.addonName) : undefined,
-        addedIngredients: c.addedIngredients && c.addedIngredients.length > 0
-          ? c.addedIngredients.map((a) => ({ ingredientName: a.ingredientName, quantity: a.quantity, unit: a.unit }))
-          : undefined,
-      })),
+      hideRecipe: branchSettings?.kotShowRecipe === false,
+      items: newItems.map((c) => {
+        const r = recipeById.get(c.menuItem.id);
+        return {
+          quantity: c.quantity,
+          menuItemName: c.menuItem.name,
+          menuItemId: c.menuItem.id,
+          notes: c.notes ?? null,
+          removedIngredients: c.removedNames && c.removedNames.length > 0 ? c.removedNames : undefined,
+          selectedAddons: c.addons && c.addons.length > 0 ? c.addons.map((a) => a.addonName) : undefined,
+          addedIngredients: c.addedIngredients && c.addedIngredients.length > 0
+            ? c.addedIngredients.map((a) => ({ ingredientName: a.ingredientName, quantity: a.quantity, unit: a.unit }))
+            : undefined,
+          recipe: r?.recipe ?? null,
+          hideRecipe: r?.kotHideRecipe ?? false,
+        };
+      }),
     };
     const ok = printKitchenTicketUtil(ticket);
     if (!ok) {
@@ -2161,6 +2176,7 @@ function NewOrderView({
   };
 
   const { data: newOrderBranchSettings } = useBranchSettings();
+  const { data: newOrderKtRecipes } = useKtRecipes();
 
   // Local copy of the helper — NewOrderView is a separate function
   // component so it can't see the one declared in ActiveOrderView.
@@ -2168,17 +2184,18 @@ function NewOrderView({
   // otherwise pop a print window in the browser.
   async function maybePrintKitchenTicket(order: Order) {
     if (newOrderBranchSettings && newOrderBranchSettings.useKds) return;
+    const ticket = attachRecipesToTicket(order, newOrderKtRecipes, newOrderBranchSettings);
     const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
     if (desktopPrint) {
       try {
-        const res = await desktopPrint(order);
+        const res = await desktopPrint(ticket);
         if (!res?.ok) alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
       } catch (err) {
         alert(`Kitchen print failed: ${(err as Error).message}`);
       }
       return;
     }
-    const ok = printKitchenTicketUtil(order as any);
+    const ok = printKitchenTicketUtil(ticket);
     if (!ok) alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
   }
 

@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 
 import type { Order, LoginResponse } from '@restora/types';
 import { formatElapsed, elapsedSeconds, printKitchenTicket } from '@restora/utils';
+import type { KitchenTicketInput } from '@restora/utils';
 import { useAuthStore } from './store/auth.store';
 import { api } from './lib/api';
 
@@ -106,13 +107,28 @@ function KdsDisplay() {
   const [, setTick] = useState(0);
   const [clock, setClock] = useState(new Date());
   const [kdsEnabled, setKdsEnabled] = useState<boolean | null>(null);
+  const [kotShowRecipe, setKotShowRecipe] = useState<boolean>(true);
+  const [ktRecipes, setKtRecipes] = useState<Array<{
+    menuItemId: string;
+    kotHideRecipe: boolean;
+    recipe: Array<{ ingredientName: string; quantity: number; unit: string }>;
+  }>>([]);
 
-  // Check branch-level KDS toggle on mount
+  // Check branch-level KDS toggle + recipe-on-KT setting on mount.
+  // The recipe payload is also pre-fetched so a chef hitting "Print"
+  // doesn't pay a round-trip per click.
   useEffect(() => {
     api
-      .get<{ useKds: boolean }>('/branch-settings')
-      .then((s) => setKdsEnabled(s.useKds))
+      .get<{ useKds: boolean; kotShowRecipe?: boolean }>('/branch-settings')
+      .then((s) => {
+        setKdsEnabled(s.useKds);
+        setKotShowRecipe(s.kotShowRecipe !== false);
+      })
       .catch(() => setKdsEnabled(true)); // fail open
+    api
+      .get<Array<{ menuItemId: string; kotHideRecipe: boolean; recipe: Array<{ ingredientName: string; quantity: number; unit: string }> }>>('/menu/kt-recipes')
+      .then(setKtRecipes)
+      .catch(() => { /* leave empty — print just falls back to old behaviour */ });
   }, []);
 
   // Fetch existing active orders on mount
@@ -175,8 +191,24 @@ function KdsDisplay() {
   }, []);
 
   const printTicket = useCallback((ticket: Order) => {
-    printKitchenTicket(ticket as any);
-  }, []);
+    // Decorate the ticket with recipe data + the branch's master
+    // toggle so the renderer draws the small recipe block under each
+    // item line.
+    const byId = new Map(ktRecipes.map((r) => [r.menuItemId, r]));
+    const decorated: KitchenTicketInput = {
+      ...(ticket as unknown as KitchenTicketInput),
+      hideRecipe: !kotShowRecipe,
+      items: (ticket.items ?? []).map((it) => {
+        const r = byId.get(it.menuItemId);
+        return {
+          ...(it as unknown as KitchenTicketInput['items'][number]),
+          recipe: r?.recipe ?? null,
+          hideRecipe: r?.kotHideRecipe ?? false,
+        };
+      }),
+    };
+    printKitchenTicket(decorated);
+  }, [ktRecipes, kotShowRecipe]);
 
   if (kdsEnabled === false) {
     return (

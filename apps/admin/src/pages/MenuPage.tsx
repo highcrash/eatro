@@ -226,6 +226,7 @@ function ItemDialog({
     spiceLevel: initial?.spiceLevel ?? '',
     websiteVisible: initial?.websiteVisible ?? true,
     excludeFromTopSelling: (initial as any)?.excludeFromTopSelling ?? false,
+    kotHideRecipe: (initial as any)?.kotHideRecipe ?? false,
     seoTitle: (initial as any)?.seoTitle ?? '',
     seoDescription: (initial as any)?.seoDescription ?? '',
     isVariantParent: initial?.isVariantParent ?? false,
@@ -300,6 +301,7 @@ function ItemDialog({
         spiceLevel: form.spiceLevel || null,
         websiteVisible: form.websiteVisible,
         excludeFromTopSelling: form.excludeFromTopSelling,
+        kotHideRecipe: form.kotHideRecipe,
         seoTitle: form.seoTitle || null,
         seoDescription: form.seoDescription || null,
       };
@@ -537,6 +539,15 @@ function ItemDialog({
                 Exclude from Top Selling
                 <span className="block text-[10px] text-[#666] font-body mt-0.5">
                   Hides this item from the Top Selling slider only — still shows in its category. Useful for water, cola, etc.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm font-body text-[#999]" title="Suppresses the recipe block under this item on every Kitchen Ticket — even when the branch's master 'Print recipe on KT' setting is on. Use for drinks / sides where the recipe is too obvious to be worth printing.">
+              <input type="checkbox" checked={form.kotHideRecipe} onChange={(e) => set('kotHideRecipe', e.target.checked)} className="accent-[#D62B2B] mt-0.5" />
+              <span>
+                Hide recipe on Kitchen Ticket
+                <span className="block text-[10px] text-[#666] font-body mt-0.5">
+                  Skips the small recipe block under this item on every KOT. Per-item override of the branch's master "Print recipe on KT" toggle.
                 </span>
               </span>
             </label>

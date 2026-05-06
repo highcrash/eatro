@@ -29,6 +29,7 @@ export class BranchSettingsService {
       tableTimerStartToDoneMin?: number | null;
       tableTimerServedToClearMin?: number | null;
       autoMinStockDays?: number;
+      kotShowRecipe?: boolean;
     },
   ) {
     await this.getOrCreate(branchId);
@@ -44,6 +45,7 @@ export class BranchSettingsService {
         ...(dto.tableTimerStartToDoneMin !== undefined ? { tableTimerStartToDoneMin: dto.tableTimerStartToDoneMin } : {}),
         ...(dto.tableTimerServedToClearMin !== undefined ? { tableTimerServedToClearMin: dto.tableTimerServedToClearMin } : {}),
         ...(dto.autoMinStockDays !== undefined ? { autoMinStockDays: Math.max(0, Math.floor(dto.autoMinStockDays)) } as any : {}),
+        ...(dto.kotShowRecipe !== undefined ? { kotShowRecipe: dto.kotShowRecipe } : {}),
       },
     });
     this.cache.delete(branchId);

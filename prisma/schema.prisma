@@ -401,6 +401,12 @@ model BranchSetting {
   /// without touching code.
   whatsappPoTemplateParams String  @default("supplierName,poNumber,date")
 
+  /// When TRUE the kitchen ticket prints each item's recipe (ingredients
+  /// + qty + unit) below the item name in a small font. Lets the cook
+  /// see exactly what to plate without checking a binder. Off by branch
+  /// toggle, or off per-item via MenuItem.kotHideRecipe.
+  kotShowRecipe Boolean @default(true)
+
   branch Branch @relation(fields: [branchId], references: [id])
 
   @@map("branch_settings")
@@ -707,6 +713,12 @@ model MenuItem {
   /// interesting dishes admin wants to merchandise. Default false →
   /// existing items show normally until admin opts each one out.
   excludeFromTopSelling Boolean @default(false)
+  /// Per-item override for the branch's kotShowRecipe setting. When
+  /// TRUE, this item's recipe is NEVER printed on the kitchen ticket
+  /// even if the branch toggle is on. Useful for trivially obvious
+  /// items (drinks, sides) so the chef isn't drowning in noise.
+  /// Default false → follow the branch setting.
+  kotHideRecipe Boolean @default(false)
   /// True for items created via POS Customised Menu. UI uses this to
   /// hide them from the admin Menu page filter and to bypass website /
   /// QR feeds (websiteVisible=false handles the latter; this is the

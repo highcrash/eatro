@@ -35,6 +35,7 @@ export class BranchSettingsController {
       tableTimerStartToDoneMin?: number | null;
       tableTimerServedToClearMin?: number | null;
       autoMinStockDays?: number;
+      kotShowRecipe?: boolean;
     },
   ) {
     const before = await this.svc.getOrCreate(user.branchId).catch(() => null);

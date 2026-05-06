@@ -38,6 +38,11 @@ export interface MenuItem extends AuditFields {
   prepTime: string | null;
   spiceLevel: string | null;
   websiteVisible: boolean;
+  /** Per-item override for the branch's kotShowRecipe toggle. When
+   *  true, this item's recipe is NEVER printed on the kitchen ticket
+   *  even if the branch has the master toggle on. Default false →
+   *  follow the branch setting. */
+  kotHideRecipe?: boolean;
   /** True when the item was created via POS Customised Menu. */
   isCustom?: boolean;
   /** Parent FK when this row is a sellable variant. Null on
@@ -159,6 +164,10 @@ export interface UpdateMenuItemDto extends Partial<CreateMenuItemDto> {
    *  Items strip. Use for high-volume utility items (water, cola,
    *  rice) so they don't crowd the popularity slider. */
   excludeFromTopSelling?: boolean;
+  /** Per-item override for the branch's kotShowRecipe toggle. When
+   *  true, this item's recipe is NEVER printed on the kitchen ticket
+   *  even if the branch has the master toggle on. */
+  kotHideRecipe?: boolean;
   seoTitle?: string | null;
   seoDescription?: string | null;
 }

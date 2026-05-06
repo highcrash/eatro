@@ -1,4 +1,5 @@
 import type { KitchenTicketInput } from '@restora/utils';
+import { effectiveRecipeRows } from '@restora/utils';
 import log from 'electron-log';
 import { getPrinters } from '../config/store';
 import type { PrinterSlot } from '../config/store';
@@ -108,6 +109,22 @@ function buildKitchenJob(ticket: KitchenTicketInput): ThermalJob {
       job.lines.push({ kind: 'text', text: `   -- NO ${name.toUpperCase()}`, bold: true });
     }
     if (it.notes) job.lines.push({ kind: 'text', text: `   -> ${it.notes}` });
+    // Recipe block — small (default-size, not bold), indented under
+    // the item line. Mirrors the HTML renderer's <div class="item-
+    // recipe-row"> output. effectiveRecipeRows already filters out
+    // removed ingredients and multiplies per-serving qty by line qty.
+    const eff = effectiveRecipeRows(it, ticket);
+    if (eff !== null) {
+      if (eff.kind === 'empty') {
+        job.lines.push({ kind: 'text', text: '   (no recipe - sold as-is)' });
+      } else {
+        job.lines.push({ kind: 'text', text: '   recipe:' });
+        for (const r of eff.rows) {
+          const qty = Math.round(r.qty * 100) / 100;
+          job.lines.push({ kind: 'text', text: `     . ${qty}${r.unit}  ${r.name}` });
+        }
+      }
+    }
     job.lines.push({ kind: 'divider' });
   }
 
