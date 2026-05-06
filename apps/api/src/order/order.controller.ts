@@ -389,6 +389,11 @@ export class QrOrderController {
       // (matches the participant guard's open-by-default behaviour).
       primaryDeviceId: (order as { primaryDeviceId?: string | null }).primaryDeviceId ?? null,
       sharedDeviceIds: (order as { sharedDeviceIds?: string | null }).sharedDeviceIds ?? null,
+      // Snapshot of unexpired pending share requests so the primary
+      // device can render the approve/deny modal via its 3s polling
+      // loop even when the original WS emit raced ahead of its
+      // socket join (page refresh, brief offline, late mount).
+      pendingShareRequests: this.orderService.getPendingShareRequests(id),
       items: order.items.map((i) => ({
         id: i.id,
         name: i.menuItemName,
