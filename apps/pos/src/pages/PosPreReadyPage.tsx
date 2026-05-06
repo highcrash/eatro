@@ -50,18 +50,14 @@ export default function PosPreReadyPage() {
     setPendingAction({ action, summary, run });
   };
 
-  if (!enabled) {
-    return (
-      <div className="h-full flex items-center justify-center bg-theme-bg">
-        <div className="text-center max-w-sm">
-          <ChefHat size={36} className="text-theme-text-muted mx-auto mb-3" />
-          <p className="text-sm font-semibold text-theme-text">Pre-Ready production not enabled</p>
-          <p className="text-xs text-theme-text-muted mt-1">Ask your administrator to enable cashier production tickets in admin → Cashier Permissions.</p>
-        </div>
-      </div>
-    );
-  }
-
+  // Read-only mode for cashiers without createPreReadyKT permission:
+  // they still get the items table + Print Stock Sheet button (the
+  // hand-fill A4 hardcopy is the whole reason kitchen-floor staff
+  // open this page on a desktop terminal at end-of-day), but the
+  // per-row "Create KT" button + the Active Production tab are
+  // hidden. This used to render an "ask your admin" empty state for
+  // every role, which left desktop terminals without a way to print
+  // the stock sheet from the floor.
   return (
     <div className="h-full flex flex-col bg-theme-bg">
       <header className="h-16 bg-theme-surface border-b border-theme-border flex items-center px-6 gap-4 shrink-0">
@@ -77,26 +73,37 @@ export default function PosPreReadyPage() {
         </div>
       )}
 
-      <div className="px-6 pt-5 pb-4 shrink-0 flex justify-center">
-        <div className="flex gap-1 bg-theme-surface rounded-theme p-1 border border-theme-border">
-          <button
-            onClick={() => setTab('items')}
-            className={`px-5 py-2 text-sm rounded-theme transition-colors ${tab === 'items' ? 'font-semibold text-theme-accent border-2 border-theme-accent' : 'font-medium text-theme-text-muted hover:text-theme-text'}`}
-          >
-            Items
-          </button>
-          <button
-            onClick={() => setTab('active')}
-            className={`px-5 py-2 text-sm rounded-theme transition-colors ${tab === 'active' ? 'font-semibold text-theme-accent border-2 border-theme-accent' : 'font-medium text-theme-text-muted hover:text-theme-text'}`}
-          >
-            Active Production ({activeProductions.length})
-          </button>
+      {enabled && (
+        <div className="px-6 pt-5 pb-4 shrink-0 flex justify-center">
+          <div className="flex gap-1 bg-theme-surface rounded-theme p-1 border border-theme-border">
+            <button
+              onClick={() => setTab('items')}
+              className={`px-5 py-2 text-sm rounded-theme transition-colors ${tab === 'items' ? 'font-semibold text-theme-accent border-2 border-theme-accent' : 'font-medium text-theme-text-muted hover:text-theme-text'}`}
+            >
+              Items
+            </button>
+            <button
+              onClick={() => setTab('active')}
+              className={`px-5 py-2 text-sm rounded-theme transition-colors ${tab === 'active' ? 'font-semibold text-theme-accent border-2 border-theme-accent' : 'font-medium text-theme-text-muted hover:text-theme-text'}`}
+            >
+              Active Production ({activeProductions.length})
+            </button>
+          </div>
         </div>
-      </div>
+      )}
+      {!enabled && (
+        <div className="px-6 pt-5 pb-2 shrink-0 max-w-4xl mx-auto w-full">
+          <div className="bg-theme-surface border border-theme-border rounded-theme px-4 py-3 text-xs text-theme-text-muted">
+            <ChefHat size={14} className="inline -mt-0.5 mr-1.5 text-theme-text-muted" />
+            View-only mode — production tickets are disabled for this role. The
+            kitchen can still print the stock sheet for hand-counting batches.
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto px-6 pb-6 flex justify-center">
         <div className="w-full max-w-4xl">
-          {tab === 'items' && (
+          {(!enabled || tab === 'items') && (
             <div className="bg-theme-surface rounded-theme border border-theme-border overflow-hidden">
               <div className="flex items-center justify-end px-4 py-3 border-b border-theme-border bg-theme-bg/40">
                 <button
@@ -126,7 +133,7 @@ export default function PosPreReadyPage() {
                     <th className="px-4 py-3 text-right">Stock</th>
                     <th className="px-4 py-3 text-right">Min</th>
                     <th className="px-4 py-3 text-right">Cost / Unit</th>
-                    <th className="px-4 py-3 text-right">Action</th>
+                    {enabled && <th className="px-4 py-3 text-right">Action</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -145,26 +152,28 @@ export default function PosPreReadyPage() {
                         <td className="px-4 py-3 text-right text-theme-text-muted">
                           {cost > 0 ? `${formatCurrency(cost)}/${it.unit}` : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={() => setCreateFor(it)}
-                            className="bg-theme-accent text-white text-xs font-bold px-3 py-1.5 rounded-theme hover:opacity-90 transition-opacity inline-flex items-center gap-1"
-                          >
-                            <Plus size={12} /> Create KT
-                          </button>
-                        </td>
+                        {enabled && (
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={() => setCreateFor(it)}
+                              className="bg-theme-accent text-white text-xs font-bold px-3 py-1.5 rounded-theme hover:opacity-90 transition-opacity inline-flex items-center gap-1"
+                            >
+                              <Plus size={12} /> Create KT
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
                   {items.filter((i) => i.isActive).length === 0 && (
-                    <tr><td colSpan={5} className="px-4 py-12 text-center text-theme-text-muted text-sm">No pre-ready items configured</td></tr>
+                    <tr><td colSpan={enabled ? 5 : 4} className="px-4 py-12 text-center text-theme-text-muted text-sm">No pre-ready items configured</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
           )}
 
-          {tab === 'active' && (
+          {enabled && tab === 'active' && (
             <div className="bg-theme-surface rounded-theme border border-theme-border overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-theme-bg">
