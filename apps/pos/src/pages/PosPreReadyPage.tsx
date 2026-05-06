@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChefHat, Plus, X, Check, Trash2 } from 'lucide-react';
+import { ChefHat, Plus, X, Check, Trash2, Printer } from 'lucide-react';
 
 import type { CashierAction, PreReadyItem, ProductionOrder } from '@restora/types';
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, printPreReadyStockSheet } from '@restora/utils';
 import { api } from '../lib/api';
 import { useIsOnline } from '../lib/online';
 import { OfflineBanner } from '../components/OfflineHint';
@@ -98,6 +98,27 @@ export default function PosPreReadyPage() {
         <div className="w-full max-w-4xl">
           {tab === 'items' && (
             <div className="bg-theme-surface rounded-theme border border-theme-border overflow-hidden">
+              <div className="flex items-center justify-end px-4 py-3 border-b border-theme-border bg-theme-bg/40">
+                <button
+                  onClick={() => {
+                    const ok = printPreReadyStockSheet({
+                      items: items
+                        .filter((i) => i.isActive)
+                        .map((i) => ({
+                          name: i.name,
+                          currentStock: Number(i.currentStock),
+                          unit: i.unit,
+                        })),
+                    });
+                    if (!ok) alert('Print failed — popup was blocked. Please allow popups for this site.');
+                  }}
+                  className="inline-flex items-center gap-1.5 bg-theme-bg border border-theme-border text-theme-text text-xs font-semibold px-3 py-1.5 rounded-theme hover:bg-theme-surface-alt transition-colors"
+                  title="Print an A4 stock sheet with empty Batch-1 / Batch-2 / Batch-3 columns so the kitchen can fill in production by hand."
+                >
+                  <Printer size={12} />
+                  Print Stock Sheet (A4)
+                </button>
+              </div>
               <table className="w-full text-sm">
                 <thead className="bg-theme-bg">
                   <tr className="text-[10px] uppercase tracking-wider text-theme-text-muted">

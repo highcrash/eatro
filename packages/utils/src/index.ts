@@ -4,5 +4,6 @@ export * from './string';
 export * from './order';
 export * from './units';
 export * from './kitchen-ticket';
+export * from './preready-stock-sheet';
 export * from './variant-label';
 export * from './mushak';
