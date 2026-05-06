@@ -632,7 +632,11 @@ export class PublicService {
    * is the dedicated path.
    */
   async getTopSelling(branchId: string, take = 10) {
-    const overFetch = take * 2;
+    // Over-fetch generously — once we roll variant children up to
+    // their parents the row count drops, and we may also lose rows
+    // to excludeFromTopSelling. 5× gives plenty of headroom without
+    // a perceptible cost on a paid-orders aggregate.
+    const overFetch = take * 5;
     const grouped = await this.prisma.orderItem.groupBy({
       by: ['menuItemId'],
       where: {
@@ -650,7 +654,30 @@ export class PublicService {
       take: overFetch,
     });
     if (grouped.length === 0) return [];
-    const ids = grouped.map((g) => g.menuItemId);
+    const childIds = grouped.map((g) => g.menuItemId);
+
+    // Roll variant children up to their parent for ranking. Without
+    // this the slider lists "Pizza Small", "Pizza Medium", "Pizza
+    // Large" as 3 cards while the rest of the website renders the
+    // shared parent shell — visually inconsistent and the customer
+    // sees the same dish thrice. Look up which of the grouped ids
+    // are children, sum their quantities under their parent's id,
+    // and emit one ranked row per parent / standalone.
+    const parentLookup = await this.prisma.menuItem.findMany({
+      where: { id: { in: childIds } },
+      select: { id: true, variantParentId: true },
+    });
+    const parentByChild = new Map(parentLookup.map((r) => [r.id, r.variantParentId] as const));
+
+    const rolledQty = new Map<string, number>();
+    const firstSeenIndex = new Map<string, number>();
+    grouped.forEach((g, idx) => {
+      const rollUpId = parentByChild.get(g.menuItemId) ?? g.menuItemId;
+      const qty = Number(g._sum.quantity ?? 0);
+      rolledQty.set(rollUpId, (rolledQty.get(rollUpId) ?? 0) + qty);
+      if (!firstSeenIndex.has(rollUpId)) firstSeenIndex.set(rollUpId, idx);
+    });
+    const rolledIds = Array.from(rolledQty.keys());
 
     // Filter out excludeFromTopSelling rows. Prisma 5.x include in
     // findMany honours the flag now that the migration ran, but we
@@ -659,14 +686,21 @@ export class PublicService {
     // instead of a silent "exclude flag ignored" bug.
     const excluded = await this.prisma.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "menu_items"
-      WHERE "id" IN (${Prisma.join(ids)}) AND "excludeFromTopSelling" = true
+      WHERE "id" IN (${Prisma.join(rolledIds)}) AND "excludeFromTopSelling" = true
     `;
     const excludeSet = new Set(excluded.map((r) => r.id));
 
-    // Preserve the popularity order while filtering — Map of
-    // menuItemId → rank so the final select is sorted to match the
-    // groupBy order, not Prisma's default (which is by id).
-    const orderedIds = ids.filter((id) => !excludeSet.has(id)).slice(0, take);
+    // Sort by rolled quantity desc, ties by first-seen-index (i.e.
+    // popularity stability), then trim to `take`.
+    const orderedIds = rolledIds
+      .filter((id) => !excludeSet.has(id))
+      .sort((a, b) => {
+        const qa = rolledQty.get(a) ?? 0;
+        const qb = rolledQty.get(b) ?? 0;
+        if (qa !== qb) return qb - qa;
+        return (firstSeenIndex.get(a) ?? 0) - (firstSeenIndex.get(b) ?? 0);
+      })
+      .slice(0, take);
     if (orderedIds.length === 0) return [];
 
     const items = await this.prisma.menuItem.findMany({
@@ -693,8 +727,12 @@ export class PublicService {
         deletedAt: null,
         isAvailable: true,
         websiteVisible: true,
-        isVariantParent: false,
         isAddon: false,
+        // Show parents + standalones; variant children are surfaced
+        // as tabs on the parent's detail page, so listing them flat
+        // here would double-render the same dish. Both standalones
+        // and variant parents have variantParentId = null.
+        variantParentId: null,
       },
       orderBy: { createdAt: 'desc' },
       take,
