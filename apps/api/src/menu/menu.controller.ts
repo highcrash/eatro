@@ -40,6 +40,19 @@ export class MenuController {
     return this.menuService.findCustomItems(user.branchId);
   }
 
+  /**
+   * Recipe bundle keyed by menuItemId, returned for every active item
+   * in the branch. Used by the POS at print time to attach the recipe
+   * block under each line on the kitchen ticket. Includes the per-item
+   * `kotHideRecipe` override so the renderer can suppress per-item
+   * without a second round-trip.
+   */
+  @Get('kt-recipes')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'KITCHEN', 'WAITER')
+  ktRecipes(@CurrentUser() user: JwtPayload) {
+    return this.menuService.findKtRecipes(user.branchId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.menuService.findOne(id, user.branchId);

@@ -59,7 +59,29 @@ export interface KitchenTicketInput {
      *  add-ons. Same printed shape as the `selectedAddons` rows so
      *  the chef can scan top-to-bottom without context-switching. */
     addedIngredients?: Array<{ ingredientName: string; quantity: number; unit: string }> | null;
+    /** Recipe attached for this item — printed below the item line in
+     *  a small font so the cook can see exactly what to plate without
+     *  flipping through a binder. Quantity is the per-1-serving figure;
+     *  the renderer multiplies by `quantity` so the total matches what
+     *  the recipe service deducts from stock. Optional — items with no
+     *  recipe row print "(no recipe — sold as-is)" below the item line.
+     *  Removed ingredients (`removedIngredients`) are filtered OUT of
+     *  this list before render so the chef doesn't see what was
+     *  already removed. */
+    recipe?: Array<{ ingredientName: string; quantity: number; unit: string }> | null;
+    /** Per-item override for the global `hideRecipe` flag. When TRUE,
+     *  this item's recipe is suppressed even if the ticket-level
+     *  `hideRecipe` is FALSE. Set on items where the recipe is too
+     *  obvious to be worth printing (drinks, plain sides). */
+    hideRecipe?: boolean;
   }>;
+  /** Branch-level kill switch. When TRUE every item's recipe is
+   *  suppressed regardless of the per-item flag — admin's master
+   *  "Print recipe on Kitchen Tickets" toggle in Settings. Defaults
+   *  to FALSE (= recipes print) when the caller doesn't pass it, so
+   *  legacy callers that never knew about this surface get the new
+   *  behaviour for free. */
+  hideRecipe?: boolean;
   /** Kitchen section label printed as a sub-header on sectioned KOTs
    *  (e.g. "-- FOOD --", "-- BEVERAGE --"). Desktop-only; web POS
    *  popup flow ignores it. */
@@ -88,7 +110,14 @@ export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {
       const addedHtml = added
         .map((a) => `<div class="item-addon">+ ${escapeHtml(`${a.quantity}${a.unit} ${a.ingredientName}`)}</div>`)
         .join('');
-      return `<div class="item"><div class="item-line">${i.quantity}-:${escapeHtml(i.menuItemName)}</div>${addonsHtml}${addedHtml}${removedHtml}${i.notes ? `<div class="item-note">&rarr; ${escapeHtml(i.notes)}</div>` : ''}<div class="item-sep"></div></div>`;
+      // Recipe block — small font, indented under the item. Filter out
+      // anything the customer asked to remove (case-insensitive name
+      // match) so the chef doesn't see "Onion" listed when the line
+      // already shouts "− NO ONION" above. Multiply per-serving qty by
+      // line quantity so the figure on the ticket matches what stock
+      // actually deducts.
+      const recipeHtml = renderRecipeBlock(i, ticket);
+      return `<div class="item"><div class="item-line">${i.quantity}-:${escapeHtml(i.menuItemName)}</div>${addonsHtml}${addedHtml}${removedHtml}${i.notes ? `<div class="item-note">&rarr; ${escapeHtml(i.notes)}</div>` : ''}${recipeHtml}<div class="item-sep"></div></div>`;
     })
     .join('');
 
@@ -115,6 +144,9 @@ export function renderKitchenTicketHtml(ticket: KitchenTicketInput): string {
     .item-note { font-size: 16px; font-style: italic; margin-top: 2px; margin-left: 16px; }
     .item-removed { font-size: 18px; font-weight: 900; margin-top: 2px; margin-left: 16px; letter-spacing: 1px; }
     .item-addon { font-size: 18px; font-weight: 700; margin-top: 2px; margin-left: 16px; }
+    .item-recipe-label { font-size: 10px; margin-top: 4px; margin-left: 16px; color: #333; letter-spacing: 1px; text-transform: lowercase; }
+    .item-recipe-row { font-size: 10px; margin-left: 24px; line-height: 1.4; color: #000; font-family: monospace; }
+    .item-recipe-empty { font-size: 10px; margin-top: 4px; margin-left: 16px; color: #555; font-style: italic; }
     .item-sep { border-top: 2px double #000; margin-top: 6px; }
     .notes { font-size: 14px; font-style: italic; margin-top: 10px; }
   </style></head><body>
@@ -165,4 +197,65 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * Effective recipe rows for a ticket item, ready to render. Filters
+ * out anything the customer asked to remove (case-insensitive on the
+ * ingredient name) and multiplies per-serving qty by the line
+ * quantity so the figure matches the actual stock deduction.
+ *
+ * Returns null when the recipe shouldn't print at all — branch toggle
+ * off, per-item override on, or the item simply has no recipe row.
+ * Callers distinguish "no recipe attached" (return value with
+ * `kind: 'empty'`) from "explicitly suppressed" (`null`) so they can
+ * draw the "(no recipe — sold as-is)" line vs. nothing.
+ */
+export function effectiveRecipeRows(
+  item: KitchenTicketInput['items'][number],
+  ticket: { hideRecipe?: boolean },
+): { kind: 'empty' } | { kind: 'rows'; rows: Array<{ name: string; qty: number; unit: string }> } | null {
+  // Branch-level kill switch beats everything.
+  if (ticket.hideRecipe) return null;
+  // Per-item override.
+  if (item.hideRecipe) return null;
+  const recipe = item.recipe ?? [];
+  if (recipe.length === 0) return { kind: 'empty' };
+  const removed = (item.removedIngredients ?? item.modifications?.removedNames ?? [])
+    .filter((n): n is string => !!n)
+    .map((n) => n.toLowerCase());
+  const filtered = recipe
+    .filter((r) => !removed.includes(r.ingredientName.toLowerCase()))
+    .map((r) => ({
+      name: r.ingredientName,
+      qty: r.quantity * item.quantity,
+      unit: r.unit,
+    }));
+  if (filtered.length === 0) return { kind: 'empty' };
+  return { kind: 'rows', rows: filtered };
+}
+
+function renderRecipeBlock(
+  item: KitchenTicketInput['items'][number],
+  ticket: KitchenTicketInput,
+): string {
+  const eff = effectiveRecipeRows(item, ticket);
+  if (eff === null) return '';
+  if (eff.kind === 'empty') {
+    return '<div class="item-recipe-empty">(no recipe &mdash; sold as-is)</div>';
+  }
+  const rows = eff.rows
+    .map((r) => `<div class="item-recipe-row">&middot; ${escapeHtml(formatRecipeQty(r.qty))}${escapeHtml(r.unit)}  ${escapeHtml(r.name)}</div>`)
+    .join('');
+  return `<div class="item-recipe-label">recipe:</div>${rows}`;
+}
+
+/** Trim trailing zeros so `150.0000` prints as `150` and `0.5000` as
+ *  `0.5`. Recipe quantities are stored at 4-decimal precision but
+ *  rarely use that many in practice. */
+function formatRecipeQty(n: number): string {
+  if (!Number.isFinite(n)) return '0';
+  // Round to 2 decimals max to keep the line short; trim trailing zeros.
+  const fixed = Math.round(n * 100) / 100;
+  return String(fixed);
 }

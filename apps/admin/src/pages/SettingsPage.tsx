@@ -573,6 +573,7 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
     tableTimerStartToDoneMin?: number | null;
     tableTimerServedToClearMin?: number | null;
     autoMinStockDays?: number;
+    kotShowRecipe?: boolean;
   }
 
   const { data: settings, isLoading } = useQuery<KitchenSettings>({
@@ -643,6 +644,24 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
               checked={settings.useKds}
               disabled={!isOwner || updateMut.isPending}
               onChange={(e) => updateMut.mutate({ useKds: e.target.checked })}
+              className="accent-[#D62B2B] w-4 h-4"
+            />
+          </label>
+        </div>
+        <div className="px-5 py-4 flex items-center justify-between border-t border-[#2A2A2A]">
+          <div className="pr-6">
+            <p className="text-sm font-body text-white font-medium mb-1">Print recipe on Kitchen Tickets</p>
+            <p className="text-xs font-body text-[#999] leading-relaxed">
+              Adds the per-item recipe (ingredients + qty + unit) under each line on every KOT, in a small font. Removed-ingredient names ("− NO ONION") are filtered out automatically. Drinks / sides where the recipe is obvious can be silenced individually via "Hide recipe on KT" on the menu item edit form.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+            <span className="text-xs font-body text-[#999]">{settings.kotShowRecipe !== false ? 'On' : 'Off'}</span>
+            <input
+              type="checkbox"
+              checked={settings.kotShowRecipe !== false}
+              disabled={!isOwner || updateMut.isPending}
+              onChange={(e) => updateMut.mutate({ kotShowRecipe: e.target.checked })}
               className="accent-[#D62B2B] w-4 h-4"
             />
           </label>

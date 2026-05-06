@@ -33,6 +33,44 @@ export class MenuService {
     private readonly unitConversion: UnitConversionService,
   ) {}
 
+  /**
+   * Per-item recipe bundle for the kitchen-ticket recipe-attach feature.
+   * Returns one row per active menu item in the branch with its (already-
+   * resolved) ingredient names, qty, and unit. The POS hits this once
+   * per session and looks up at print time. Items with no recipe row are
+   * still returned (with an empty `recipe` array) so the caller can
+   * distinguish "no recipe configured" from "lookup failed".
+   */
+  async findKtRecipes(branchId: string) {
+    const items = await this.prisma.menuItem.findMany({
+      where: { branchId, deletedAt: null, isCustom: false, isAddon: false },
+      select: {
+        id: true,
+        kotHideRecipe: true,
+        recipe: {
+          select: {
+            items: {
+              select: {
+                quantity: true,
+                unit: true,
+                ingredient: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    return items.map((m) => ({
+      menuItemId: m.id,
+      kotHideRecipe: m.kotHideRecipe,
+      recipe: (m.recipe?.items ?? []).map((ri) => ({
+        ingredientName: ri.ingredient.name,
+        quantity: Number(ri.quantity),
+        unit: ri.unit,
+      })),
+    }));
+  }
+
   async findAll(branchId: string, includeCustom = false, includeAddons = false) {
     const items = await this.prisma.menuItem.findMany({
       where: {
