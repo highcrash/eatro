@@ -79,6 +79,47 @@ export class OrderService {
     private readonly mushak: MushakService,
   ) {}
 
+  /**
+   * Re-evaluate a previously-applied discount or coupon against the
+   * current item set. Used by every flow that mutates items on an
+   * already-discounted order — addItems, voidItem, rejectItem,
+   * rejectItems, cancelItemByCustomer. Without this, the order's
+   * stored `discountAmount` stayed frozen at the value computed when
+   * the coupon was first applied, while `subtotal` + `totalAmount`
+   * recomputed on the new items — so adding food to a coupon-bearing
+   * order silently inflated the bill (subtotal+VAT, no discount line
+   * subtracted) and removing food undercharged.
+   *
+   * Percentage coupons SCALE with the new applicable subtotal; flat
+   * coupons stay at their face value but get capped at the new
+   * applicable subtotal so a remove-everything path doesn't go
+   * negative. SPECIFIC_ITEMS / ALL_EXCEPT scopes correctly track
+   * which items still match.
+   */
+  private async recomputeDiscountAmount(
+    branchId: string,
+    items: { menuItemId: string; totalPrice: number }[],
+    discountId: string | null,
+    couponId: string | null,
+  ): Promise<number> {
+    if (!discountId && !couponId) return 0;
+    const config = discountId
+      ? await this.prisma.discount.findFirst({ where: { id: discountId, branchId } })
+      : await this.prisma.coupon.findFirst({ where: { id: couponId!, branchId } });
+    if (!config) return 0; // discount/coupon was deleted — fall back to 0
+    const targets: string[] = config.targetItems ? JSON.parse(config.targetItems) : [];
+    let applicable = 0;
+    for (const it of items) {
+      if (config.scope === 'ALL_ITEMS') applicable += it.totalPrice;
+      else if (config.scope === 'SPECIFIC_ITEMS' && targets.includes(it.menuItemId)) applicable += it.totalPrice;
+      else if (config.scope === 'ALL_EXCEPT' && !targets.includes(it.menuItemId)) applicable += it.totalPrice;
+    }
+    if (config.type === 'FLAT') {
+      return Math.min(config.value.toNumber(), applicable);
+    }
+    return Math.round(applicable * (config.value.toNumber() / 100));
+  }
+
   findAll(branchId: string, tableId?: string, status?: string, from?: string, to?: string) {
     // Date range filter
     const dateFilter: { createdAt?: { gte?: Date; lte?: Date } } = {};
@@ -863,11 +904,19 @@ export class OrderService {
       data: { voidedAt: new Date(), voidReason: dto.reason, voidedById: dto.approverId },
     });
 
-    // Recalculate totals excluding voided items
+    // Recalculate totals excluding voided items + re-evaluate any
+    // coupon/discount on the surviving set (a void of a coupon-target
+    // item should shrink the saving accordingly).
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const remaining = order.items.filter((i) => i.id !== itemId && !i.voidedAt);
     const subtotal = remaining.reduce((s, i) => s + Number(i.totalPrice), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
+    const discountAmount = await this.recomputeDiscountAmount(
+      branchId,
+      remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: Number(i.totalPrice) })),
+      order.discountId ?? null,
+      order.couponId ?? null,
+    );
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
     // If ALL items are now voided, auto-void the entire order and free the table
     if (remaining.length === 0) {
@@ -920,7 +969,7 @@ export class OrderService {
 
     const updatedOrder = await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
+      data: { subtotal, discountAmount, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true },
     });
 
@@ -1277,14 +1326,23 @@ export class OrderService {
     });
     await this.prisma.orderItem.createMany({ data: newItemsForCreate });
 
-    // Recalculate totals (only count approved + non-voided items)
+    // Recalculate totals (only count approved + non-voided items).
+    // Re-evaluate any coupon/discount on the order against the new
+    // item set so adding items to a coupon-bearing order doesn't
+    // silently drop the discount line off the total.
     const allItems = await this.prisma.orderItem.findMany({ where: { orderId: id, voidedAt: null } });
     const subtotal = allItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
+    const discountAmount = await this.recomputeDiscountAmount(
+      branchId,
+      allItems.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      order.discountId ?? null,
+      order.couponId ?? null,
+    );
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
     const updated = await this.prisma.order.update({
       where: { id },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
+      data: { subtotal, discountAmount, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -1364,15 +1422,21 @@ export class OrderService {
       data: { voidedAt: new Date(), voidReason: 'Rejected by cashier' },
     });
 
-    // Recalculate totals
+    // Recalculate totals + re-evaluate discount on the surviving set.
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const remaining = await this.prisma.orderItem.findMany({ where: { orderId: id, voidedAt: null } });
     const subtotal = remaining.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
+    const discountAmount = await this.recomputeDiscountAmount(
+      branchId,
+      remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      order.discountId ?? null,
+      order.couponId ?? null,
+    );
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
     const updated = await this.prisma.order.update({
       where: { id },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
+      data: { subtotal, discountAmount, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -1428,15 +1492,21 @@ export class OrderService {
       data: { voidedAt: new Date(), voidReason: 'Rejected by cashier' },
     });
 
-    // Recalculate totals
+    // Recalculate totals + re-evaluate discount on the surviving set.
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const remaining = await this.prisma.orderItem.findMany({ where: { orderId, voidedAt: null } });
     const subtotal = remaining.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
+    const discountAmount = await this.recomputeDiscountAmount(
+      branchId,
+      remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      order.discountId ?? null,
+      order.couponId ?? null,
+    );
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
+      data: { subtotal, discountAmount, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -1462,15 +1532,21 @@ export class OrderService {
       data: { voidedAt: new Date(), voidReason: 'Cancelled by customer' },
     });
 
-    // Recalculate
+    // Recalculate + re-evaluate discount on the surviving set.
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const remaining = order.items.filter((i) => i.id !== itemId && !i.voidedAt);
     const subtotal = remaining.reduce((s, i) => s + Number(i.totalPrice), 0);
-    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
+    const discountAmount = await this.recomputeDiscountAmount(
+      branchId,
+      remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: Number(i.totalPrice) })),
+      order.discountId ?? null,
+      order.couponId ?? null,
+    );
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
+      data: { subtotal, discountAmount, taxAmount, serviceChargeAmount, totalAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
