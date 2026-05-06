@@ -96,7 +96,14 @@ export default function PosLayout() {
     (perms.createExpense.enabled && perms.createExpense.approval !== 'NONE') ||
     (perms.payPayroll.enabled    && perms.payPayroll.approval    !== 'NONE')
   );
-  const showPreReady = !!perms && perms.createPreReadyKT.enabled && perms.createPreReadyKT.approval !== 'NONE';
+  // Always show the Pre-Ready link in the sidebar — the page is
+  // self-gating: cashiers WITH createPreReadyKT see the full Items +
+  // Active Production UI; cashiers WITHOUT it see a read-only items
+  // table with the "Print Stock Sheet (A4)" button so kitchen-floor
+  // staff on a desktop terminal can still print the hand-fill sheet
+  // at end-of-day. Hiding the link entirely meant the print button
+  // existed in code but was unreachable from the floor.
+  const showPreReady = !!perms;
   const navItems = [
     ...NAV_ITEMS,
     ...(showPurchasing ? [PURCHASING_ITEM] : []),
