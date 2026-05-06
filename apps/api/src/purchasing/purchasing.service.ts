@@ -153,7 +153,7 @@ export class PurchasingService {
     });
   }
 
-  async receiveGoods(id: string, branchId: string, staffId: string, dto: ReceiveGoodsDto) {
+  async receiveGoods(id: string, branchId: string, staffId: string, dto: ReceiveGoodsDto, user?: JwtPayload) {
     const po = await this.findOne(id, branchId);
     if (po.status === 'RECEIVED') throw new BadRequestException('Order already fully received');
     if (po.status === 'CANCELLED') throw new BadRequestException('Cannot receive a cancelled order');
@@ -468,6 +468,20 @@ export class PurchasingService {
       ...(dto.additionalItems ?? []).map((x) => x.ingredientId).filter((x): x is string => !!x),
     ];
     await this.linkSupplierToIngredients(receivedIngredientIds, po.supplierId);
+
+    // Fire-and-forget WhatsApp confirmation to the supplier with the
+    // PRICED PDF + the new receipt status (PARTIAL / RECEIVED). The
+    // draft send earlier hid prices so the supplier could quote on
+    // delivery; now that the cashier has captured the agreed numbers
+    // (and any receipt-time discount / extra fees), the supplier
+    // gets an updated copy with the figures locked in. Wrapped in a
+    // try/catch — a missing WhatsApp config or a Meta API blip must
+    // never roll back the goods-received transaction itself.
+    if (user) {
+      void this.notifyReceiptViaWhatsApp(id, branchId, user, result).catch((err) => {
+        this.logger.warn(`PO receive WhatsApp confirmation failed (PO ${id}): ${(err as Error).message}`);
+      });
+    }
 
     return result;
   }
@@ -873,6 +887,12 @@ export class PurchasingService {
     const grandTotalPaisa = itemsSubtotalPaisa + feesPaisa - discountPaisa;
     const formattedTotal = `Tk ${(grandTotalPaisa / 100).toFixed(2)}`;
 
+    // Outgoing draft / sent PO to a supplier hides unit price + line
+    // total + grand total. Suppliers quote their own prices on
+    // delivery, so the draft copy is a request-for-quote / shopping
+    // list — internal margin negotiations stay internal until goods
+    // arrive and the cashier confirms the agreed numbers (at which
+    // point receiveGoods fires a separate priced confirmation copy).
     const pdf = await buildPurchaseOrderPdf({
       id: po.id,
       poNumber,
@@ -902,6 +922,7 @@ export class PurchasingService {
       receiptExtraFees: Array.isArray((po as any).receiptExtraFees)
         ? ((po as any).receiptExtraFees as Array<{ label: string; amount: number }>)
         : [],
+      hidePrices: true,
     });
 
     const filename = `PO-${poNumber}.pdf`;
@@ -1011,5 +1032,148 @@ export class PurchasingService {
     });
 
     return { messageId, sentAt: sentAt.toISOString() };
+  }
+
+  /**
+   * Goods-received confirmation to the supplier via WhatsApp. Sent
+   * automatically by `receiveGoods` once a receipt commits — full
+   * priced PDF (so the supplier can reconcile their delivery against
+   * what the cashier captured) plus a header line keyed by the new
+   * status (PARTIAL vs RECEIVED). Mirrors `sendWhatsApp`'s template
+   * + media flow but skips the rich error-rewrite path: any Meta
+   * failure here is caught by the caller and logged as a warning,
+   * never thrown — the underlying receipt has already committed.
+   *
+   * Skips silently when:
+   *   - WhatsApp integration is disabled for this branch.
+   *   - The WhatsApp template / credentials aren't configured.
+   *   - The supplier has no whatsappNumber on file.
+   * Each is a normal "admin hasn't set this up" state, not an error.
+   */
+  private async notifyReceiptViaWhatsApp(
+    poId: string,
+    branchId: string,
+    user: JwtPayload,
+    receivedPo: { status?: string } | null,
+  ): Promise<void> {
+    const settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
+    if (!settings?.whatsappEnabled) return;
+    const phoneNumberId = settings.whatsappPhoneNumberId?.trim();
+    const accessToken = settings.whatsappAccessToken?.trim();
+    const templateName = settings.whatsappPoTemplate?.trim();
+    const languageCode = settings.whatsappPoTemplateLang?.trim() || 'en';
+    const paramTokensRaw = (settings as any).whatsappPoTemplateParams?.trim() || 'supplierName,poNumber,date';
+    if (!phoneNumberId || !accessToken || !templateName) return;
+
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id: poId, branchId, deletedAt: null },
+      include: {
+        supplier: true,
+        items: { include: { ingredient: { select: { id: true, name: true, unit: true, purchaseUnit: true, packSize: true, brandName: true } } } },
+        branch: { select: { id: true, name: true, address: true, phone: true } },
+      },
+    });
+    if (!po) return;
+
+    const waNumberRaw = po.supplier?.whatsappNumber?.trim();
+    if (!waNumberRaw) return; // Supplier has no WA number configured — silent skip.
+    const to = waNumberRaw.replace(/[^\d]/g, '');
+    if (to.length < 10 || to.length > 15) return;
+
+    const poNumber = po.id.slice(-8).toUpperCase();
+    const poDate = po.createdAt instanceof Date ? po.createdAt : new Date(po.createdAt);
+    const formattedDate = poDate.toLocaleDateString('en-GB');
+    const itemsSubtotalPaisa = po.items.reduce(
+      (sum, item) => sum + Number(item.quantityOrdered) * Number(item.unitCost),
+      0,
+    );
+    const discountPaisa = Number((po as any).receiptDiscount ?? 0);
+    const feesPaisa = Array.isArray((po as any).receiptExtraFees)
+      ? ((po as any).receiptExtraFees as Array<{ amount: number }>)
+          .reduce((s, f) => s + (Number(f?.amount) > 0 ? Number(f.amount) : 0), 0)
+      : 0;
+    const grandTotalPaisa = itemsSubtotalPaisa + feesPaisa - discountPaisa;
+    const formattedTotal = `Tk ${(grandTotalPaisa / 100).toFixed(2)}`;
+    const status = receivedPo?.status ?? po.status ?? 'RECEIVED';
+    const statusLabel = status === 'PARTIAL' ? 'Partially Received' : 'Received';
+
+    const pdf = await buildPurchaseOrderPdf({
+      id: po.id,
+      poNumber,
+      // Reflect the post-receipt status on the PDF header so the
+      // supplier sees "Status: PARTIAL" / "Status: RECEIVED" instead
+      // of the stale DRAFT/SENT they saw on the first copy.
+      status: statusLabel,
+      createdAt: poDate,
+      expectedAt: po.expectedAt,
+      notes: po.notes,
+      branch: {
+        name: po.branch?.name ?? '',
+        address: po.branch?.address ?? null,
+        phone: po.branch?.phone ?? null,
+      },
+      supplier: {
+        name: po.supplier?.name ?? '',
+        contactName: po.supplier?.contactName ?? null,
+        phone: po.supplier?.phone ?? null,
+        address: po.supplier?.address ?? null,
+      },
+      items: po.items.map((item) => ({
+        name: item.ingredient?.name ?? '',
+        quantityOrdered: Number(item.quantityOrdered),
+        unit: item.unit ?? item.ingredient?.purchaseUnit ?? item.ingredient?.unit ?? '',
+        unitCostPaisa: Number(item.unitCost),
+      })),
+      receiptDiscountPaisa: discountPaisa,
+      receiptDiscountReason: (po as any).receiptDiscountReason ?? null,
+      receiptExtraFees: Array.isArray((po as any).receiptExtraFees)
+        ? ((po as any).receiptExtraFees as Array<{ label: string; amount: number }>)
+        : [],
+      // Receipt copy SHOWS prices — supplier needs to reconcile
+      // their delivery slip against the captured numbers.
+      hidePrices: false,
+    });
+
+    const filename = `PO-${poNumber}-receipt.pdf`;
+    const { mediaId } = await this.whatsApp.uploadMedia({
+      phoneNumberId, accessToken, buffer: pdf, filename, mimeType: 'application/pdf',
+    });
+
+    const paramValues: Record<string, string> = {
+      supplierName: po.supplier?.name ?? '',
+      poNumber,
+      date: formattedDate,
+      total: formattedTotal,
+      branchName: po.branch?.name ?? '',
+      itemCount: String(po.items.length),
+      supplierContact: po.supplier?.contactName ?? po.supplier?.phone ?? '',
+    };
+    const bodyParams = paramTokensRaw
+      .split(',')
+      .map((t: string) => t.trim())
+      .filter((t: string) => t.length > 0)
+      .map((t: string) => paramValues[t] ?? '');
+
+    await this.whatsApp.sendDocumentTemplate({
+      phoneNumberId,
+      accessToken,
+      to,
+      templateName,
+      languageCode,
+      bodyParams,
+      mediaId,
+      documentFilename: filename,
+    });
+
+    void this.activityLog.log({
+      branchId,
+      actor: user,
+      category: 'PURCHASING',
+      action: 'UPDATE',
+      entityType: 'purchase_orders',
+      entityId: po.id,
+      entityName: `PO #${poNumber}`,
+      summary: `Sent ${statusLabel.toLowerCase()} confirmation (with prices) to ${po.supplier?.name ?? 'supplier'} via WhatsApp`,
+    });
   }
 }

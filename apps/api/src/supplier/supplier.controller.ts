@@ -53,6 +53,19 @@ export class SupplierController {
     return this.supplierService.getSupplierLedger(id, user.branchId);
   }
 
+  /**
+   * Build the supplier ledger PDF and send it via WhatsApp using the
+   * branch's existing PO template + credentials. Activity-log entry
+   * is fired by the service. Owner/Manager only — keeps the same
+   * caller restriction as the makePayment / recordAdjustment routes
+   * since this surfaces full account balances to the supplier.
+   */
+  @Post(':id/send-ledger-whatsapp')
+  @Roles('OWNER', 'MANAGER')
+  sendLedgerWhatsApp(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.supplierService.sendLedgerWhatsApp(user.branchId, id, user);
+  }
+
   // Manual ledger correction. Owner/Manager only — Advisor/Cashier
   // are blocked even though they have read access. Pure ledger-only;
   // no cash account is touched (see SupplierService.recordAdjustment).

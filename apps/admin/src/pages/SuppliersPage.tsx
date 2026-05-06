@@ -166,6 +166,14 @@ export default function SuppliersPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['suppliers'] }),
   });
 
+  const sendLedgerWhatsAppMutation = useMutation({
+    mutationFn: (supplierId: string) => api.post<{ messageId: string; sentAt: string }>(`/suppliers/${supplierId}/send-ledger-whatsapp`, {}),
+    onSuccess: () => {
+      // Activity log writes server-side; no cache to invalidate.
+      // Surface success via the local toast state set by the click.
+    },
+  });
+
   const paymentMutation = useMutation({
     mutationFn: (data: { supplierId: string; amount: number; paymentMethod: string; reference?: string; notes?: string }) =>
       api.post('/suppliers/payments', data),
@@ -932,6 +940,25 @@ export default function SuppliersPage() {
                   className="bg-[#2A2A2A] hover:bg-[#333] text-[#999] hover:text-white font-body text-sm px-6 py-2.5 transition-colors"
                 >
                   Print Ledger
+                </button>
+              )}
+              {ledgerData && ledgerSupplier && (
+                <button
+                  onClick={() => {
+                    if (!ledgerSupplier.whatsappNumber?.trim()) {
+                      alert(`Supplier "${ledgerSupplier.name}" has no WhatsApp number on file. Edit the supplier and add one first.`);
+                      return;
+                    }
+                    sendLedgerWhatsAppMutation.mutate(ledgerSupplier.id, {
+                      onSuccess: () => alert(`Ledger sent to ${ledgerSupplier.name} on WhatsApp.`),
+                      onError: (err: unknown) => alert(`WhatsApp send failed: ${err instanceof Error ? err.message : 'unknown error'}`),
+                    });
+                  }}
+                  disabled={sendLedgerWhatsAppMutation.isPending}
+                  title={ledgerSupplier.whatsappNumber ? `Send the ledger PDF to ${ledgerSupplier.whatsappNumber} via WhatsApp.` : 'Add a WhatsApp number on the supplier first.'}
+                  className="bg-[#2A2A2A] hover:bg-[#25D366] text-[#999] hover:text-black font-body text-sm px-6 py-2.5 transition-colors disabled:opacity-50"
+                >
+                  {sendLedgerWhatsAppMutation.isPending ? 'Sending…' : 'Send via WhatsApp'}
                 </button>
               )}
             </div>

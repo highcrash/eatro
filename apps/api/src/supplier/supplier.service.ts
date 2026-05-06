@@ -1,14 +1,19 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import type { CreateSupplierDto, UpdateSupplierDto } from '@restora/types';
+import type { CreateSupplierDto, UpdateSupplierDto, JwtPayload } from '@restora/types';
 import { ingredientDisplayName } from '@restora/utils';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountService } from '../account/account.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
+import { buildSupplierLedgerPdf } from './ledger-pdf';
 
 @Injectable()
 export class SupplierService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accountService: AccountService,
+    private readonly whatsApp: WhatsAppService,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   async findAll(branchId: string, opts: { cashierVisibleOnly?: boolean } = {}) {
@@ -340,5 +345,171 @@ export class SupplierService {
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
+  }
+
+  /**
+   * Build the supplier's ledger PDF and send it on WhatsApp using
+   * the same Meta template + credentials as the PO send. Mirrors
+   * `PurchasingService.sendWhatsApp` — same retry-on-language fall-
+   * back, same metaCode-aware error rewrites — but builds a ledger
+   * PDF instead of a PO PDF and uses a stable filename so suppliers
+   * can save successive copies in WhatsApp without filename
+   * collisions on the same day.
+   */
+  async sendLedgerWhatsApp(branchId: string, supplierId: string, user: JwtPayload) {
+    const settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
+    if (!settings?.whatsappEnabled) {
+      throw new BadRequestException('WhatsApp integration is not enabled for this branch. Configure it in Settings → Notifications.');
+    }
+    const phoneNumberId = settings.whatsappPhoneNumberId?.trim();
+    const accessToken = settings.whatsappAccessToken?.trim();
+    const templateName = settings.whatsappPoTemplate?.trim();
+    const languageCode = settings.whatsappPoTemplateLang?.trim() || 'en';
+    const paramTokensRaw = (settings as any).whatsappPoTemplateParams?.trim() || 'supplierName,poNumber,date';
+    if (!phoneNumberId || !accessToken || !templateName) {
+      throw new BadRequestException('WhatsApp credentials incomplete. Set Phone Number ID, Access Token, and Template Name in Settings.');
+    }
+
+    const ledger = await this.getSupplierLedger(supplierId, branchId);
+    const supplier = ledger.supplier as { name: string; contactName?: string | null; phone?: string | null; address?: string | null; whatsappNumber?: string | null };
+    const waNumberRaw = supplier.whatsappNumber?.trim();
+    if (!waNumberRaw) {
+      throw new BadRequestException(`Supplier "${supplier.name}" has no WhatsApp number on file. Add one in the Supplier edit form.`);
+    }
+    const to = waNumberRaw.replace(/[^\d]/g, '');
+    if (to.length < 10 || to.length > 15) {
+      throw new BadRequestException(`Supplier WhatsApp number "${waNumberRaw}" is not a valid international number.`);
+    }
+
+    const branch = await this.prisma.branch.findFirstOrThrow({
+      where: { id: branchId },
+      select: { name: true, address: true, phone: true },
+    });
+
+    // Returns the ledger payload omits per-PO computed totals — the
+    // PDF builder reconstructs from itemsTotal/discount/fees so the
+    // same numbers admin sees in the on-screen ledger end up on
+    // paper.
+    const ledgerForPdf = {
+      branch: { name: branch.name, address: branch.address ?? null, phone: branch.phone ?? null },
+      supplier: {
+        name: supplier.name,
+        contactName: supplier.contactName ?? null,
+        phone: supplier.phone ?? null,
+        address: supplier.address ?? null,
+      },
+      openingBalance: ledger.openingBalance,
+      totalBilled: ledger.totalBilled,
+      totalPaid: ledger.totalPaid,
+      totalReturned: ledger.totalReturned,
+      totalAdjustments: ledger.totalAdjustments,
+      balance: ledger.balance,
+      purchaseOrders: ledger.purchaseOrders.map((po: any) => ({
+        id: po.id,
+        status: po.status,
+        createdAt: po.createdAt,
+        receivedAt: po.receivedAt,
+        itemsTotal: po.itemsTotal ?? po.items?.reduce((s: number, i: any) => s + Number(i.unitPrice ?? 0) * Number(i.quantityReceived ?? 0), 0) ?? 0,
+        discount: po.receiptDiscount ?? 0,
+        discountReason: po.receiptDiscountReason ?? null,
+        fees: po.receiptExtraFees ?? [],
+        poNumber: po.id.slice(-8).toUpperCase(),
+      })),
+      returns: (ledger as any).returns?.map((r: any) => ({
+        id: r.id,
+        createdAt: r.createdAt,
+        total: Number(r.total ?? r.items?.reduce((s: number, i: any) => s + Number(i.unitPrice ?? 0) * Number(i.quantity ?? 0), 0) ?? 0),
+        reason: r.reason ?? null,
+      })) ?? [],
+      payments: (ledger as any).payments?.map((p: any) => ({
+        id: p.id,
+        createdAt: p.createdAt,
+        amount: Number(p.amount ?? 0),
+        method: p.method ?? null,
+        notes: p.notes ?? null,
+      })) ?? [],
+      adjustments: (ledger as any).adjustments?.map((a: any) => ({
+        id: a.id,
+        createdAt: a.createdAt,
+        amount: Number(a.amount ?? 0),
+        reason: a.reason ?? null,
+      })) ?? [],
+    };
+
+    const pdf = await buildSupplierLedgerPdf(ledgerForPdf);
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const filename = `Ledger-${supplier.name.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 24)}-${dateStamp}.pdf`;
+
+    const { mediaId } = await this.whatsApp.uploadMedia({
+      phoneNumberId, accessToken, buffer: pdf, filename, mimeType: 'application/pdf',
+    });
+
+    // Reuse the PO template since it's already approved and has the
+    // generic "supplier + reference + date" body. The reference for
+    // a ledger send is the formatted current balance (negotiated as
+    // the `total` token's value below) when admin's template
+    // includes it; otherwise just date + supplier.
+    const formattedDate = new Date().toLocaleDateString('en-GB');
+    const formattedBalance = `Tk ${(ledger.balance / 100).toFixed(2)}`;
+    const paramValues: Record<string, string> = {
+      supplierName: supplier.name,
+      poNumber: `LEDGER-${dateStamp}`,
+      date: formattedDate,
+      total: formattedBalance,
+      branchName: branch.name,
+      itemCount: String(ledger.purchaseOrders.length),
+      supplierContact: supplier.contactName ?? supplier.phone ?? '',
+    };
+    const bodyParams = paramTokensRaw
+      .split(',')
+      .map((t: string) => t.trim())
+      .filter((t: string) => t.length > 0)
+      .map((t: string) => paramValues[t] ?? '');
+
+    const sendOnce = (code: string) => this.whatsApp.sendDocumentTemplate({
+      phoneNumberId, accessToken, to, templateName, languageCode: code, bodyParams, mediaId, documentFilename: filename,
+    });
+    const fallbackForLang = (lc: string): string | null => {
+      const norm = lc.toLowerCase().replace('-', '_');
+      if (norm.startsWith('en_')) return 'en';
+      return null;
+    };
+
+    let messageId: string;
+    try {
+      ({ messageId } = await sendOnce(languageCode));
+    } catch (err: any) {
+      if (err?.metaCode === 132000) {
+        const expected = /expected number of params \((\d+)\)/.exec(String(err?.message ?? ''))?.[1];
+        throw new BadRequestException(
+          `WhatsApp template "${templateName}" expects ${expected ?? '?'} body parameter(s), but Restora is sending ${bodyParams.length} (${paramTokensRaw}). ` +
+          `Open Settings → Notifications and edit "Template Body Params" so its comma-separated list has exactly ${expected ?? 'the right'} entries.`,
+        );
+      }
+      const fallback = err?.metaCode === 132001 ? fallbackForLang(languageCode) : null;
+      if (!fallback || fallback === languageCode) {
+        if (err?.metaCode === 132001) {
+          throw new BadRequestException(
+            `WhatsApp template "${templateName}" is not approved in language "${languageCode}". ` +
+            `Open Settings → Notifications and set "Template Language" to the exact code shown in WhatsApp Manager (commonly "en", "en_US", or "bn").`,
+          );
+        }
+        throw err;
+      }
+      ({ messageId } = await sendOnce(fallback));
+    }
+
+    void this.activityLog.log({
+      branchId,
+      actor: user,
+      category: 'PURCHASING',
+      action: 'UPDATE',
+      entityType: 'suppliers',
+      entityId: supplierId,
+      entityName: `Supplier ${supplier.name}`,
+      summary: `Sent ledger PDF to ${supplier.name} via WhatsApp (balance ${formattedBalance})`,
+    });
+
+    return { messageId, sentAt: new Date().toISOString() };
   }
 }

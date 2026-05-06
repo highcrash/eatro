@@ -25,6 +25,15 @@ export interface POPdfInput {
   receiptDiscountPaisa?: number;
   receiptDiscountReason?: string | null;
   receiptExtraFees?: Array<{ label: string; amount: number }>;
+  /** When TRUE the unit-price + line-total + grand-total columns are
+   *  omitted from the printed PDF. Used by the WhatsApp-to-supplier
+   *  send: a draft PO going OUT to the supplier should hide
+   *  internally-negotiated unit prices (the supplier quotes their own
+   *  on delivery); the receive-confirmation copy is sent WITH prices
+   *  once goods arrive and the cashier has captured the agreed
+   *  numbers. Default false → full priced PDF (admin print path
+   *  unchanged). */
+  hidePrices?: boolean;
 }
 
 const PAGE_MARGIN = 40;
@@ -79,22 +88,40 @@ export async function buildPurchaseOrderPdf(po: POPdfInput): Promise<Buffer> {
 
     // ── Items table ──────────────────────────────────────────────
     const tableTop = doc.y + 6;
-    const cols = {
-      idx: { x: PAGE_MARGIN, w: 22 },
-      name: { x: PAGE_MARGIN + 22, w: 230 },
-      qty: { x: PAGE_MARGIN + 252, w: 70, align: 'right' as const },
-      unit: { x: PAGE_MARGIN + 322, w: 50, align: 'left' as const },
-      price: { x: PAGE_MARGIN + 372, w: 70, align: 'right' as const },
-      total: { x: PAGE_MARGIN + 442, w: 70, align: 'right' as const },
-    };
+    const hidePrices = !!po.hidePrices;
+    // When prices are hidden the QTY + UNIT columns get the extra
+    // breathing room — admin doesn't want an awkward blank gutter
+    // where Unit Price / Total used to sit. Total table width stays
+    // at 472 so the divider lines + footer alignment don't drift.
+    const cols = hidePrices
+      ? {
+          idx: { x: PAGE_MARGIN, w: 22 },
+          name: { x: PAGE_MARGIN + 22, w: 340 },
+          qty: { x: PAGE_MARGIN + 362, w: 60, align: 'right' as const },
+          unit: { x: PAGE_MARGIN + 422, w: 90, align: 'left' as const },
+          // Unused when hidePrices=true; kept on the type so down-
+          // stream code that references cols.price/total compiles.
+          price: { x: 0, w: 0, align: 'right' as const },
+          total: { x: 0, w: 0, align: 'right' as const },
+        }
+      : {
+          idx: { x: PAGE_MARGIN, w: 22 },
+          name: { x: PAGE_MARGIN + 22, w: 230 },
+          qty: { x: PAGE_MARGIN + 252, w: 70, align: 'right' as const },
+          unit: { x: PAGE_MARGIN + 322, w: 50, align: 'left' as const },
+          price: { x: PAGE_MARGIN + 372, w: 70, align: 'right' as const },
+          total: { x: PAGE_MARGIN + 442, w: 70, align: 'right' as const },
+        };
 
     doc.font('Helvetica-Bold').fontSize(9);
     doc.text('#', cols.idx.x, tableTop);
     doc.text('ITEM', cols.name.x, tableTop);
     doc.text('QTY', cols.qty.x, tableTop, { width: cols.qty.w, align: cols.qty.align });
     doc.text('UNIT', cols.unit.x, tableTop, { width: cols.unit.w });
-    doc.text('UNIT PRICE', cols.price.x, tableTop, { width: cols.price.w, align: cols.price.align });
-    doc.text('TOTAL', cols.total.x, tableTop, { width: cols.total.w, align: cols.total.align });
+    if (!hidePrices) {
+      doc.text('UNIT PRICE', cols.price.x, tableTop, { width: cols.price.w, align: cols.price.align });
+      doc.text('TOTAL', cols.total.x, tableTop, { width: cols.total.w, align: cols.total.align });
+    }
 
     doc.moveTo(PAGE_MARGIN, tableTop + 14).lineTo(PAGE_MARGIN + 472, tableTop + 14).strokeColor('#333').stroke();
 
@@ -115,8 +142,10 @@ export async function buildPurchaseOrderPdf(po: POPdfInput): Promise<Buffer> {
       const rowH = doc.heightOfString(item.name, { width: cols.name.w });
       doc.text(fmtQty(item.quantityOrdered), cols.qty.x, y, { width: cols.qty.w, align: cols.qty.align });
       doc.text(item.unit, cols.unit.x, y, { width: cols.unit.w });
-      doc.text(fmtMoney(item.unitCostPaisa), cols.price.x, y, { width: cols.price.w, align: cols.price.align });
-      doc.text(fmtMoney(lineTotal), cols.total.x, y, { width: cols.total.w, align: cols.total.align });
+      if (!hidePrices) {
+        doc.text(fmtMoney(item.unitCostPaisa), cols.price.x, y, { width: cols.price.w, align: cols.price.align });
+        doc.text(fmtMoney(lineTotal), cols.total.x, y, { width: cols.total.w, align: cols.total.align });
+      }
 
       y += Math.max(14, rowH + 4);
       doc.moveTo(PAGE_MARGIN, y - 2).lineTo(PAGE_MARGIN + 472, y - 2).strokeColor('#eee').stroke();
@@ -132,7 +161,7 @@ export async function buildPurchaseOrderPdf(po: POPdfInput): Promise<Buffer> {
     const hasAdjustments = discount > 0 || positiveFees.length > 0;
     const grandTotal = itemsSubtotal + positiveFees.reduce((s, f) => s + Number(f.amount), 0) - discount;
 
-    if (hasAdjustments) {
+    if (hasAdjustments && !hidePrices) {
       y += 4;
       doc.moveTo(PAGE_MARGIN + 200, y).lineTo(PAGE_MARGIN + 472, y).strokeColor('#999').stroke();
       y += 6;
@@ -161,13 +190,17 @@ export async function buildPurchaseOrderPdf(po: POPdfInput): Promise<Buffer> {
     }
 
     // ── Grand total ──────────────────────────────────────────────
-    y += 8;
-    doc.moveTo(PAGE_MARGIN + 320, y).lineTo(PAGE_MARGIN + 472, y).strokeColor('#333').stroke();
-    y += 6;
-    doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('GRAND TOTAL', PAGE_MARGIN + 320, y, { width: 122, align: 'right' });
-    doc.text(fmtMoney(grandTotal), cols.total.x, y, { width: cols.total.w, align: cols.total.align });
-    y += 24;
+    if (!hidePrices) {
+      y += 8;
+      doc.moveTo(PAGE_MARGIN + 320, y).lineTo(PAGE_MARGIN + 472, y).strokeColor('#333').stroke();
+      y += 6;
+      doc.font('Helvetica-Bold').fontSize(11);
+      doc.text('GRAND TOTAL', PAGE_MARGIN + 320, y, { width: 122, align: 'right' });
+      doc.text(fmtMoney(grandTotal), cols.total.x, y, { width: cols.total.w, align: cols.total.align });
+      y += 24;
+    } else {
+      y += 14;
+    }
 
     if (po.notes) {
       doc.font('Helvetica-Bold').fontSize(9).fillColor('#000').text('Notes:', PAGE_MARGIN, y);
