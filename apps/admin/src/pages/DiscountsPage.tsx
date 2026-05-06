@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, X, Search, ChevronRight } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Search, ChevronRight, ChevronDown } from 'lucide-react';
 import type { MenuItem, MenuCategory } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
@@ -53,6 +53,16 @@ function CategoryCheckbox({ state, onChange, label, count }: {
   );
 }
 
+/** A node in the selector tree. Two shapes:
+ *   - 'leaf': a sellable MenuItem (standalone, or a variant child).
+ *             Has its own selectable id.
+ *   - 'parent': a non-sellable variant shell. Selecting it toggles
+ *               all its children; the shell id is never persisted.
+ */
+type SelectorNode =
+  | { kind: 'leaf'; item: MenuItem }
+  | { kind: 'parent'; item: MenuItem; children: MenuItem[] };
+
 function ItemSelector({ menuItems, categories, selected, onChange }: {
   menuItems: MenuItem[];
   categories: MenuCategory[];
@@ -79,21 +89,50 @@ function ItemSelector({ menuItems, categories, selected, onChange }: {
     return cur?.id ?? catId;
   };
 
-  // groups: rootCategoryId → MenuItem[], plus a synthetic "uncategorised"
-  // bucket for items whose categoryId doesn't resolve.
+  // groups: rootCategoryId → SelectorNode[]. Variant children are
+  // attached under their parent shell rather than appearing as flat
+  // siblings, which avoids the "Pizza Margherita ($0)" + "Pizza
+  // Margherita Small ($200)" + "Pizza Margherita Large ($350)"
+  // duplication that was confusing admins, and lets the discount tick
+  // the entire family in one click.
   const groups = useMemo(() => {
-    const m = new Map<string, MenuItem[]>();
+    // Index variant children by their parent so we can attach them.
+    const childrenByParent = new Map<string, MenuItem[]>();
     for (const item of menuItems) {
+      if (item.variantParentId) {
+        const arr = childrenByParent.get(item.variantParentId) ?? [];
+        arr.push(item);
+        childrenByParent.set(item.variantParentId, arr);
+      }
+    }
+
+    const m = new Map<string, SelectorNode[]>();
+    for (const item of menuItems) {
+      // Skip variant children — they get rendered under their parent's
+      // node instead of as siblings.
+      if (item.variantParentId) continue;
       const root = rootIdFor(item.categoryId);
       const arr = m.get(root) ?? [];
-      arr.push(item);
+      if (item.isVariantParent) {
+        const kids = (childrenByParent.get(item.id) ?? []).sort(
+          (a, b) => Number(a.price) - Number(b.price) || a.name.localeCompare(b.name),
+        );
+        arr.push({ kind: 'parent', item, children: kids });
+      } else {
+        arr.push({ kind: 'leaf', item });
+      }
       m.set(root, arr);
     }
-    // Sort groups by category sortOrder + name; sort items alphabetically.
-    const sorted: Array<{ id: string; name: string; items: MenuItem[] }> = [];
-    for (const [id, items] of m.entries()) {
+    // Sort groups by category sortOrder + name; sort nodes alphabetically.
+    const nodeName = (n: SelectorNode) => n.item.name;
+    const sorted: Array<{ id: string; name: string; nodes: SelectorNode[] }> = [];
+    for (const [id, nodes] of m.entries()) {
       const cat = categoryById.get(id);
-      sorted.push({ id, name: cat?.name ?? 'Uncategorised', items: [...items].sort((a, b) => a.name.localeCompare(b.name)) });
+      sorted.push({
+        id,
+        name: cat?.name ?? 'Uncategorised',
+        nodes: [...nodes].sort((a, b) => nodeName(a).localeCompare(nodeName(b))),
+      });
     }
     return sorted.sort((a, b) => {
       const av = categoryById.get(a.id)?.sortOrder ?? 999;
@@ -103,33 +142,97 @@ function ItemSelector({ menuItems, categories, selected, onChange }: {
     });
   }, [menuItems, categoryById]);
 
-  // Apply search filter inside each group; drop empty groups so the
-  // tree collapses naturally as the user types.
+  // Apply search filter inside each group. A variant parent matches
+  // when ITS name OR any child's name matches; the matching children
+  // (or all children when only the parent name matched) are kept.
   const visibleGroups = useMemo(() => {
     if (!q) return groups;
     return groups
-      .map((g) => ({ ...g, items: g.items.filter((m) => m.name.toLowerCase().includes(q)) }))
-      .filter((g) => g.items.length > 0 || g.name.toLowerCase().includes(q));
+      .map((g) => {
+        const filtered: SelectorNode[] = [];
+        for (const node of g.nodes) {
+          if (node.kind === 'leaf') {
+            if (node.item.name.toLowerCase().includes(q)) filtered.push(node);
+            continue;
+          }
+          const parentMatch = node.item.name.toLowerCase().includes(q);
+          const matchedKids = parentMatch
+            ? node.children
+            : node.children.filter((c) => c.name.toLowerCase().includes(q));
+          if (parentMatch || matchedKids.length > 0) {
+            filtered.push({ kind: 'parent', item: node.item, children: matchedKids });
+          }
+        }
+        return { ...g, nodes: filtered };
+      })
+      .filter((g) => g.nodes.length > 0 || g.name.toLowerCase().includes(q));
   }, [groups, q]);
 
-  // Track which groups are user-collapsed. Default: all expanded.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggleCollapse = (id: string) => {
-    setCollapsed((c) => {
+  // Track which categories AND variant parents are user-collapsed.
+  // Default: all expanded for categories; variant parents COLLAPSED by
+  // default so the tree stays scannable in branches with many variants.
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+  const toggleCategoryCollapse = (id: string) => {
+    setCollapsedCategories((c) => {
       const n = new Set(c);
       if (n.has(id)) n.delete(id); else n.add(id);
       return n;
     });
   };
+  const toggleParentExpand = (id: string) => {
+    setExpandedParents((c) => {
+      const n = new Set(c);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+  // Auto-expand a variant parent that matched the search by name OR by
+  // child match — admin who searches "Large" should see the Large
+  // variants without manually clicking each parent open.
+  const searchExpanded = useMemo(() => {
+    if (!q) return new Set<string>();
+    const s = new Set<string>();
+    for (const g of visibleGroups) {
+      for (const n of g.nodes) {
+        if (n.kind === 'parent') s.add(n.item.id);
+      }
+    }
+    return s;
+  }, [q, visibleGroups]);
 
   const selSet = useMemo(() => new Set(selected), [selected]);
   const toggleItem = (id: string, on: boolean) => {
     onChange(on ? [...selected, id] : selected.filter((x) => x !== id));
   };
 
-  // Bulk toggle every visible (search-filtered) item under a group.
-  const toggleGroup = (groupItems: MenuItem[], next: 'all' | 'none') => {
-    const groupIds = groupItems.map((i) => i.id);
+  /** Toggle a variant parent: tick / untick all its (currently visible
+   *  given the search filter) children at once. The shell's own id is
+   *  never persisted — the discount engine targets sellable rows. */
+  const toggleParent = (children: MenuItem[], next: 'all' | 'none') => {
+    const ids = children.map((c) => c.id);
+    if (next === 'all') {
+      const merged = new Set(selected);
+      for (const id of ids) merged.add(id);
+      onChange(Array.from(merged));
+    } else {
+      const idSet = new Set(ids);
+      onChange(selected.filter((id) => !idSet.has(id)));
+    }
+  };
+
+  // Bulk toggle every visible leaf under a category, including each
+  // variant parent's children.
+  const flattenLeafIds = (nodes: SelectorNode[]): string[] => {
+    const out: string[] = [];
+    for (const n of nodes) {
+      if (n.kind === 'leaf') out.push(n.item.id);
+      else for (const c of n.children) out.push(c.id);
+    }
+    return out;
+  };
+  const toggleGroup = (nodes: SelectorNode[], next: 'all' | 'none') => {
+    const groupIds = flattenLeafIds(nodes);
     if (next === 'all') {
       const merged = new Set(selected);
       for (const id of groupIds) merged.add(id);
@@ -141,15 +244,15 @@ function ItemSelector({ menuItems, categories, selected, onChange }: {
   };
 
   // Top-level "Select all visible" — handy after a search narrows the list.
-  const totalVisible = visibleGroups.reduce((s, g) => s + g.items.length, 0);
+  const totalVisible = visibleGroups.reduce((s, g) => s + flattenLeafIds(g.nodes).length, 0);
   const visibleSelected = visibleGroups.reduce(
-    (s, g) => s + g.items.filter((i) => selSet.has(i.id)).length,
+    (s, g) => s + flattenLeafIds(g.nodes).filter((id) => selSet.has(id)).length,
     0,
   );
   const allState: 'none' | 'some' | 'all' =
     visibleSelected === 0 ? 'none' : visibleSelected === totalVisible ? 'all' : 'some';
   const toggleAllVisible = (next: 'all' | 'none') => {
-    const allIds = visibleGroups.flatMap((g) => g.items.map((i) => i.id));
+    const allIds = visibleGroups.flatMap((g) => flattenLeafIds(g.nodes));
     if (next === 'all') {
       const merged = new Set(selected);
       for (const id of allIds) merged.add(id);
@@ -160,12 +263,48 @@ function ItemSelector({ menuItems, categories, selected, onChange }: {
     }
   };
 
+  // First-match navigation. Build a flat ordered list of leaves +
+  // parents so Enter in the search box can target the topmost
+  // matching row. Parents come first in their slot so a search like
+  // "Pizza" hits the Pizza family with one keystroke.
+  const firstMatch = useMemo((): { kind: 'leaf' | 'parent'; id: string; ids: string[] } | null => {
+    if (!q) return null;
+    for (const g of visibleGroups) {
+      for (const n of g.nodes) {
+        if (n.kind === 'parent') {
+          return { kind: 'parent', id: n.item.id, ids: n.children.map((c) => c.id) };
+        }
+        return { kind: 'leaf', id: n.item.id, ids: [n.item.id] };
+      }
+    }
+    return null;
+  }, [q, visibleGroups]);
+
+  const handleSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || !firstMatch) return;
+    e.preventDefault();
+    const allOn = firstMatch.ids.every((id) => selSet.has(id));
+    if (allOn) {
+      const drop = new Set(firstMatch.ids);
+      onChange(selected.filter((id) => !drop.has(id)));
+    } else {
+      const merged = new Set(selected);
+      for (const id of firstMatch.ids) merged.add(id);
+      onChange(Array.from(merged));
+    }
+  };
+
   return (
     <div>
       <div className="relative mb-2">
         <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#555]" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search items..."
-          className="w-full bg-[#0D0D0D] border border-[#2A2A2A] pl-8 pr-3 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B] placeholder:text-[#555]" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={handleSearchKey}
+          placeholder="Search items… (press Enter to add the highlighted match)"
+          className="w-full bg-[#0D0D0D] border border-[#2A2A2A] pl-8 pr-3 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B] placeholder:text-[#555]"
+        />
       </div>
       <div className="max-h-[260px] overflow-auto border border-[#2A2A2A] bg-[#0D0D0D]">
         {totalVisible > 0 && (
@@ -177,10 +316,11 @@ function ItemSelector({ menuItems, categories, selected, onChange }: {
           />
         )}
         {visibleGroups.map((g) => {
-          const groupSelectedCount = g.items.filter((i) => selSet.has(i.id)).length;
+          const groupLeafIds = flattenLeafIds(g.nodes);
+          const groupSelectedCount = groupLeafIds.filter((id) => selSet.has(id)).length;
           const state: 'none' | 'some' | 'all' =
-            groupSelectedCount === 0 ? 'none' : groupSelectedCount === g.items.length ? 'all' : 'some';
-          const isCollapsed = collapsed.has(g.id);
+            groupSelectedCount === 0 ? 'none' : groupSelectedCount === groupLeafIds.length ? 'all' : 'some';
+          const isCollapsed = collapsedCategories.has(g.id);
           return (
             <div key={g.id} className="border-t border-[#1F1F1F] first:border-0">
               <div
@@ -188,24 +328,100 @@ function ItemSelector({ menuItems, categories, selected, onChange }: {
                 onClick={(e) => {
                   // Clicking the row body (not the checkbox) toggles collapse.
                   if ((e.target as HTMLElement).tagName !== 'INPUT') {
-                    toggleCollapse(g.id);
+                    toggleCategoryCollapse(g.id);
                   }
                 }}
               >
                 <CategoryCheckbox
                   state={state}
-                  onChange={(next) => toggleGroup(g.items, next)}
+                  onChange={(next) => toggleGroup(g.nodes, next)}
                   label={g.name}
-                  count={g.items.length}
+                  count={groupLeafIds.length}
                 />
               </div>
-              {!isCollapsed && g.items.map((m) => (
-                <label key={m.id} className="flex items-center gap-2 pl-9 pr-3 py-1.5 hover:bg-[#161616] cursor-pointer text-xs font-body text-[#999]">
-                  <input type="checkbox" checked={selSet.has(m.id)} onChange={(e) => toggleItem(m.id, e.target.checked)} />
-                  {m.name}
-                  <span className="text-[#555] ml-auto">{formatCurrency(Number(m.price))}</span>
-                </label>
-              ))}
+              {!isCollapsed && g.nodes.map((node) => {
+                if (node.kind === 'leaf') {
+                  const isFirstMatch = firstMatch?.kind === 'leaf' && firstMatch.id === node.item.id;
+                  return (
+                    <label
+                      key={node.item.id}
+                      className={`flex items-center gap-2 pl-9 pr-3 py-1.5 cursor-pointer text-xs font-body ${
+                        isFirstMatch ? 'bg-[#1F1F1F] text-white ring-1 ring-[#D62B2B]/40' : 'text-[#999] hover:bg-[#161616]'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selSet.has(node.item.id)}
+                        onChange={(e) => toggleItem(node.item.id, e.target.checked)}
+                      />
+                      {node.item.name}
+                      <span className="text-[#555] ml-auto">{formatCurrency(Number(node.item.price))}</span>
+                    </label>
+                  );
+                }
+                // Variant parent shell row + (optionally) its children.
+                const childIds = node.children.map((c) => c.id);
+                const childSelected = childIds.filter((id) => selSet.has(id)).length;
+                const parentState: 'none' | 'some' | 'all' =
+                  childSelected === 0 ? 'none' : childSelected === childIds.length ? 'all' : 'some';
+                const isExpanded = expandedParents.has(node.item.id) || searchExpanded.has(node.item.id);
+                const prices = node.children.map((c) => Number(c.price)).filter((n) => Number.isFinite(n) && n > 0);
+                const priceLabel = prices.length === 0
+                  ? `${node.children.length} variant${node.children.length === 1 ? '' : 's'}`
+                  : prices.length === 1 || Math.min(...prices) === Math.max(...prices)
+                    ? formatCurrency(prices[0])
+                    : `${formatCurrency(Math.min(...prices))} – ${formatCurrency(Math.max(...prices))}`;
+                const isFirstMatch = firstMatch?.kind === 'parent' && firstMatch.id === node.item.id;
+                return (
+                  <div key={node.item.id}>
+                    <div
+                      className={`flex items-center pl-7 pr-3 py-1.5 cursor-pointer text-xs font-body ${
+                        isFirstMatch ? 'bg-[#1F1F1F] text-white ring-1 ring-[#D62B2B]/40' : 'text-[#999] hover:bg-[#161616]'
+                      }`}
+                      onClick={(e) => {
+                        // Clicking anywhere except the arrow / checkbox
+                        // toggles ALL the variant children. Click the
+                        // arrow to expand without selecting.
+                        const tgt = e.target as HTMLElement;
+                        if (tgt.dataset.role === 'expand') {
+                          toggleParentExpand(node.item.id);
+                          return;
+                        }
+                        if (tgt.tagName === 'INPUT') return;
+                        toggleParent(node.children, parentState === 'all' ? 'none' : 'all');
+                      }}
+                    >
+                      <button
+                        type="button"
+                        data-role="expand"
+                        className="text-[#555] hover:text-[#999] mr-1"
+                        onClick={(e) => { e.stopPropagation(); toggleParentExpand(node.item.id); }}
+                        title={isExpanded ? 'Hide variants' : 'Show variants'}
+                      >
+                        {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      </button>
+                      <ParentCheckbox state={parentState} />
+                      <span className="ml-2">{node.item.name}</span>
+                      <span className="text-[#666] ml-2 text-[10px]">({node.children.length})</span>
+                      <span className="text-[#555] ml-auto">{priceLabel}</span>
+                    </div>
+                    {isExpanded && node.children.map((c) => (
+                      <label
+                        key={c.id}
+                        className="flex items-center gap-2 pl-14 pr-3 py-1.5 hover:bg-[#161616] cursor-pointer text-xs font-body text-[#999]"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selSet.has(c.id)}
+                          onChange={(e) => toggleItem(c.id, e.target.checked)}
+                        />
+                        {c.name}
+                        <span className="text-[#555] ml-auto">{formatCurrency(Number(c.price))}</span>
+                      </label>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
@@ -215,6 +431,29 @@ function ItemSelector({ menuItems, categories, selected, onChange }: {
       </div>
       {selected.length > 0 && <p className="text-[10px] text-[#666] mt-1">{selected.length} item{selected.length > 1 ? 's' : ''} selected</p>}
     </div>
+  );
+}
+
+/** Tri-state checkbox that's purely visual — toggling is handled by
+ *  the parent row's onClick (which decides whether to flip ALL kids on
+ *  or off based on current state). Kept as a plain checkbox so HTML
+ *  semantics + indeterminate behavior carry over. */
+function ParentCheckbox({ state }: { state: 'none' | 'some' | 'all' }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = state === 'some';
+  }, [state]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={state === 'all'}
+      readOnly
+      // Stop the row click handler from double-firing when the
+      // checkbox is the click target. The row's onClick still owns
+      // the "select all kids" semantics.
+      onClick={(e) => e.stopPropagation()}
+    />
   );
 }
 
