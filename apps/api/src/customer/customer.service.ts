@@ -31,6 +31,21 @@ export function normalizeBdPhone(raw: string | null | undefined): string | null 
   return cleaned;
 }
 
+/** Permissive phone normaliser used at every customer create/update
+ *  path. Prefers the BD canonical form (`01XXXXXXXXX`) when the input
+ *  is recognisably a BD mobile — that's how `01620307630` and
+ *  `+8801620307630` collapse to the SAME customer row. For non-BD
+ *  numbers (a foreign supplier contact, an unusual landline) we keep
+ *  the digits-only form so admin can still save it. Returns null only
+ *  on empty / non-numeric input. */
+export function normalizePhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const bd = normalizeBdPhone(raw);
+  if (bd) return bd;
+  const digits = String(raw).replace(/[^\d]/g, '');
+  return digits.length >= 8 ? digits : null;
+}
+
 @Injectable()
 export class CustomerService {
   // In-memory OTP store for customer auth
@@ -272,15 +287,20 @@ export class CustomerService {
   }
 
   async createFromPos(branchId: string, data: { phone: string; name?: string; email?: string }) {
-    if (!data.phone || data.phone.length < 8) throw new BadRequestException('Invalid phone number');
+    // Normalise FIRST so `01620307630` and `+8801620307630` resolve to
+    // the same canonical key. Without this, the same diner saving
+    // their number two different ways spawned two customer rows.
+    const phone = normalizePhone(data.phone);
+    if (!phone) throw new BadRequestException('Invalid phone number');
 
-    const existing = await this.prisma.customer.findUnique({
-      where: { branchId_phone: { branchId, phone: data.phone } },
-    });
+    // Use the suffix-aware lookup so a legacy row stored in a
+    // non-canonical form (`+8801620307630`) is found by the canonical
+    // key (`01620307630`) instead of being shadowed by a fresh insert.
+    const existing = await this.findCustomerByPhone(branchId, phone);
     if (existing) return existing;
 
     return this.prisma.customer.create({
-      data: { branchId, phone: data.phone, name: data.name || 'Walk-in', email: data.email },
+      data: { branchId, phone, name: data.name || 'Walk-in', email: data.email },
     });
   }
 
@@ -297,15 +317,15 @@ export class CustomerService {
     let updated = 0;
     let skipped = 0;
     for (const row of items) {
-      const phone = (row.phone ?? '').replace(/[^\d+]/g, '').trim();
-      if (!phone || phone.replace(/[^\d]/g, '').length < 8) {
+      const phone = normalizePhone(row.phone);
+      if (!phone) {
         results.push({ phone: row.phone ?? '(empty)', status: 'skipped', reason: 'Invalid phone' });
         skipped++;
         continue;
       }
       const name = (row.name ?? '').trim();
       const email = (row.email ?? '').trim() || undefined;
-      const existing = await this.prisma.customer.findUnique({ where: { branchId_phone: { branchId, phone } } });
+      const existing = await this.findCustomerByPhone(branchId, phone);
       if (existing) {
         const fields: { name?: string; email?: string } = {};
         if (name && (existing.name === 'Walk-in' || !existing.name)) fields.name = name;
@@ -347,14 +367,13 @@ export class CustomerService {
       data.name = name;
     }
     if (dto.phone !== undefined) {
-      const phone = String(dto.phone).replace(/[^\d+]/g, '').trim();
-      if (!phone || phone.replace(/[^\d]/g, '').length < 8) {
-        throw new BadRequestException('Invalid phone number');
-      }
+      const phone = normalizePhone(dto.phone);
+      if (!phone) throw new BadRequestException('Invalid phone number');
       if (phone !== existing.phone) {
-        const collision = await this.prisma.customer.findUnique({
-          where: { branchId_phone: { branchId, phone } },
-        });
+        // Suffix-aware lookup so saving `01620307630` finds an
+        // existing `+8801620307630` row in the same branch instead of
+        // raising a fake conflict against a different person.
+        const collision = await this.findCustomerByPhone(branchId, phone);
         if (collision && collision.id !== id) {
           throw new BadRequestException(`Another customer in this branch already uses ${phone}`);
         }
