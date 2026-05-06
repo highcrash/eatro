@@ -9,6 +9,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { OrderService } from './order.service';
+import { normalizePhone } from '../customer/customer.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QrGateService, extractClientIp } from '../qr-gate/qr-gate.service';
 
@@ -417,16 +418,26 @@ export class QrOrderController {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
 
-    const phone = (dto.phone ?? '').trim();
+    // Canonicalise the phone so `01620307630` and `+8801620307630`
+    // collapse to the same customer row instead of spawning duplicates.
+    const phone = normalizePhone(dto.phone);
     if (!phone) throw new BadRequestException('Phone number required');
     const name = (dto.name ?? '').trim() || 'Guest';
 
     const order = await this.prisma.order.findFirst({ where: { id, branchId, deletedAt: null } });
     if (!order) throw new NotFoundException('Order not found');
 
+    // Suffix-aware lookup so legacy rows stored in non-canonical form
+    // (e.g. `+8801620307630`) still match a fresh canonical input.
     let customer = await this.prisma.customer.findFirst({
       where: { branchId, phone, isActive: true },
     });
+    if (!customer) {
+      const tail = phone.slice(1); // drop leading 0 → 1XXXXXXXXX
+      customer = await this.prisma.customer.findFirst({
+        where: { branchId, isActive: true, phone: { endsWith: tail } },
+      });
+    }
     if (!customer) {
       customer = await this.prisma.customer.create({ data: { branchId, phone, name } });
     }
