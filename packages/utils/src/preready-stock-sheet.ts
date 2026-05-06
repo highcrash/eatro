@@ -15,6 +15,11 @@ declare const window: {
   open(url: string, target: string, features: string): {
     document: { write(s: string): void; close(): void };
   } | null;
+  desktop?: {
+    print?: {
+      reportA4?: (args: { html: string; landscape?: boolean }) => Promise<{ ok: true } | { ok: false; message: string }>;
+    };
+  };
 };
 
 export interface PreReadyStockSheetItem {
@@ -118,12 +123,28 @@ export function renderPreReadyStockSheetHtml(input: PreReadyStockSheetInput): st
 }
 
 /**
- * Open a popup, write the printable A4 sheet HTML, and let the
- * auto-print script fire. Returns false when the popup was blocked.
- * Caller decides what to surface to the user.
+ * Print the A4 stock sheet. Two paths:
+ *
+ *   1. Electron desktop — routes through window.desktop.print.reportA4()
+ *      which fires the configured Reports slot silently (the same
+ *      Windows printer admin set up for daily reports / receipt
+ *      backups). No popup, no print dialog. Fire-and-forget; any
+ *      hardware error surfaces via the desktop's own toast.
+ *
+ *   2. Browser — opens an 820×1100 popup, writes the sheet HTML, and
+ *      lets the auto-print <script> fire so the user's default
+ *      browser print dialog handles it.
+ *
+ * Returns false when the browser path could not open a popup
+ * (blocker triggered). The desktop path never returns false at the
+ * caller site — IPC errors are surfaced by the desktop's own UI.
  */
 export function printPreReadyStockSheet(input: PreReadyStockSheetInput): boolean {
   const html = renderPreReadyStockSheetHtml(input);
+  if (typeof window !== 'undefined' && window.desktop?.print?.reportA4) {
+    void window.desktop.print.reportA4({ html, landscape: false });
+    return true;
+  }
   // Slightly taller window than the kitchen ticket since A4 is
   // portrait — a 320×600 popup squashes the preview when the OS
   // print dialog opens.
