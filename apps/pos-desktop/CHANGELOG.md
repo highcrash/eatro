@@ -3,6 +3,33 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.12 — Recipe-attached Kitchen Tickets (2026-05-06)
+
+Silent ESC/POS kitchen-print path now draws a small "recipe:" block
+under each item line listing the ingredients (qty + unit) needed to
+plate the dish. Mirrors the new HTML + KDS popup-print rendering
+shipped in the same release of the API + web POS.
+
+- Recipe rows respect "− NO ONION"–style mods: anything the
+  customer asked to remove is filtered out before printing so the
+  chef doesn't see what's already been removed.
+- Per-serving qty is multiplied by line qty so the figure on paper
+  matches what stock actually deducts.
+- Two-level admin toggle controls visibility:
+  - Settings → Kitchen → "Print recipe on Kitchen Tickets"
+    (branch master, default ON).
+  - Menu item edit → "Hide recipe on Kitchen Ticket"
+    (per-item override for trivially obvious items like drinks).
+- Items with no recipe row print "(no recipe — sold as-is)" so
+  the chef knows it's intentional, not a missing-data bug.
+
+Bundled API rebundle also includes today's QR-gate timezone fix,
+WhatsApp PO 132000/132001 fallbacks, order-recalc preserving the
+applied coupon when items change, and customer phone-number
+normalisation. None of those need a desktop rebuild on their own,
+but they ship with this build so terminals get a single coherent
+update.
+
 ## 0.8.61 — Daily report outflow tiles + variant-parent negative-cost fix (2026-05-03)
 
 API + admin rebundle. No Electron-shell changes.
