@@ -94,7 +94,7 @@ export class PurchasingController {
   @Post(':id/receive')
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   receiveGoods(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: ReceiveGoodsDto) {
-    return this.purchasingService.receiveGoods(id, user.branchId, user.sub, dto);
+    return this.purchasingService.receiveGoods(id, user.branchId, user.sub, dto, user);
   }
 
   @Post(':id/return')
