@@ -18,6 +18,25 @@ interface RecipeIngredient {
   ingredient: { id: string; name: string };
 }
 
+/** Drop the parent-item name from the start of a variant's `name`
+ *  so tab labels read "(4 Pieces)" / "Large" instead of repeating
+ *  the title that's already above. Match is case-insensitive on the
+ *  prefix only. Falls back to the raw variant name when no shared
+ *  prefix (legacy data, custom labels). Common separators (—, –, -,
+ *  : , whitespace) trimmed off the front of the residual. */
+function stripParentPrefix(variantName: string, parentName: string): string {
+  const v = (variantName ?? '').trim();
+  const p = (parentName ?? '').trim();
+  if (!v) return '';
+  if (!p) return v;
+  if (v.toLowerCase() === p.toLowerCase()) return v; // fully identical — keep what admin chose
+  if (v.toLowerCase().startsWith(p.toLowerCase())) {
+    const tail = v.slice(p.length).replace(/^[\s—–\-:|]+/, '').trim();
+    if (tail) return tail;
+  }
+  return v;
+}
+
 export default function ItemPage() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
@@ -307,22 +326,31 @@ export default function ItemPage() {
 
         {/* Variant tabs — visible only on parent shells. Tapping a tab
             swaps image / description / price / addons to the chosen
-            variant. Defaults to the cheapest on first render. */}
+            variant. Defaults to the cheapest on first render.
+            Layout: wrap to multiple rows on narrow viewports instead
+            of horizontal-scroll. The pre-wrap version cut off the
+            second variant on iPhone-width screens because admins
+            often store the FULL parent name in each variant ("Naga
+            Chili Chicken Bites (4 Pieces)"), making each tab too wide
+            for a phone. We also strip the parent-name prefix from
+            the displayed variant label so the tab reads "(4 Pieces)"
+            instead of repeating the title visible just above. */}
         {isVariantParent && (
-          <div className="mt-4 flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+          <div className="mt-4 flex flex-wrap gap-2 pb-1">
             {variantList.map((v) => {
               const active = v.id === selectedVariantId;
+              const tabLabel = stripParentPrefix(v.name, item.name);
               return (
                 <button
                   key={v.id}
                   onClick={() => setSelectedVariantId(v.id)}
-                  className={`flex-shrink-0 px-3 py-2 text-xs font-body whitespace-nowrap transition-colors border ${
+                  className={`px-3 py-2 text-xs font-body transition-colors border ${
                     active
                       ? 'bg-[#C8FF00] text-[#0D0D0D] border-[#C8FF00]'
                       : 'bg-[#1A1A1A] text-[#999] border-[#2A2A2A] hover:text-white'
                   }`}
                 >
-                  <span className="font-medium">{v.name}</span>
+                  <span className="font-medium">{tabLabel}</span>
                   <span className={`ml-1.5 text-[10px] ${active ? 'text-[#0D0D0D]' : 'text-[#666]'}`}>
                     {formatCurrency(Number(v.price))}
                   </span>
