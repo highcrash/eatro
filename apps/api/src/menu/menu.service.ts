@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 
 import type { CreateMenuItemDto, UpdateMenuItemDto, CreateCustomMenuDto, UpsertAddonGroupDto } from '@restora/types';
+import { computeMarginBand } from '@restora/utils';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
 
@@ -774,11 +775,13 @@ export class MenuService {
     const negotiate = settings?.customMenuNegotiateMargin?.toNumber() ?? null;
     const maxMargin = settings?.customMenuMaxMargin?.toNumber() ?? null;
 
-    const floor = costMargin != null ? Math.round(cogs * (1 + costMargin / 100)) : cogs;
-    const absoluteMin = negotiate != null && negotiate > 0
-      ? Math.round(floor * (1 - negotiate / 100))
-      : floor;
-    const ceiling = maxMargin != null ? Math.round(cogs * (1 + maxMargin / 100)) : null;
+    // Gross-margin formula via the shared helper so the band the
+    // server enforces matches what the POS Custom Menu dialog
+    // displays — no surprise rejections on save.
+    const { floor, minPrice: absoluteMin, ceiling } = computeMarginBand(
+      cogs, costMargin, negotiate, maxMargin,
+    );
+    void floor; // floor only used as a debug breadcrumb; absoluteMin is the binding lower bound.
 
     if (cogs > 0 && sellingPrice < absoluteMin) {
       throw new BadRequestException(

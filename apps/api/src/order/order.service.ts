@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 
 import type { Prisma } from '@prisma/client';
 import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason, CorrectPaymentDto, AddonSelectionInput, OrderItemAddonSnapshot } from '@restora/types';
-import { generateOrderNumber, type MushakLineItem, type MushakBuyerBlock } from '@restora/utils';
+import { generateOrderNumber, computeMarginBand, type MushakLineItem, type MushakBuyerBlock } from '@restora/utils';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
@@ -390,8 +390,10 @@ export class OrderService {
         }
       }
       const cogs = Math.round(costPerStockUnit * qtyInStockUnit);
-      const floor = Math.round(cogs * (1 + costMargin / 100));
-      const ceiling = maxMargin != null ? Math.round(cogs * (1 + maxMargin / 100)) : null;
+      // Gross-margin formula via the shared helper so the surcharge
+      // band the cashier sees in the Customise dialog matches what
+      // the server enforces on order create.
+      const { floor, ceiling } = computeMarginBand(cogs, costMargin, null, maxMargin);
 
       if (cogs > 0 && a.surcharge < floor) {
         throw new BadRequestException(

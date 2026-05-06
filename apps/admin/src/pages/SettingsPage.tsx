@@ -673,8 +673,8 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
         <div className="px-5 py-4 border-b border-[#2A2A2A]">
           <p className="text-sm font-body text-white font-medium mb-1">Custom Menu Pricing</p>
           <p className="text-xs font-body text-[#999] leading-relaxed">
-            Controls the price floor / ceiling cashiers see when they create a one-off Custom Menu item in POS. All percentages are
-            applied to recipe COGS.
+            Controls the price floor / ceiling cashiers see when they create a one-off Custom Menu item in POS. Percentages are
+            <span className="text-white"> gross-margin on selling price</span> (industry standard) — i.e. selling = cost &divide; (1 &minus; margin/100). At 80% margin, cost is 20% of selling, so selling = 5&times; cost. Capped at 99 to keep the math finite.
           </p>
         </div>
         <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -691,17 +691,19 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
               )}
             </label>
             <input
-              type="number" step="0.01" min="0" value={dispCost}
+              type="number" step="0.01" min="0" max="99" value={dispCost}
               onChange={(e) => { setCostMargin(e.target.value); setTouched(true); }}
-              placeholder="e.g. 52"
+              placeholder="e.g. 60"
               className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]"
             />
-            <p className="text-[10px] text-[#555] mt-1 leading-relaxed">52 → ৳40 cost = ৳60.80 floor.</p>
+            <p className="text-[10px] text-[#555] mt-1 leading-relaxed">
+              60 → ৳40 cost = ৳100 floor (60% of selling is profit). 80 → ৳40 cost = ৳200 floor.
+            </p>
           </div>
           <div>
             <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Negotiate Margin %</label>
             <input
-              type="number" step="0.01" min="0" value={dispNeg}
+              type="number" step="0.01" min="0" max="99" value={dispNeg}
               onChange={(e) => { setNegotiate(e.target.value); setTouched(true); }}
               placeholder="optional"
               className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]"
@@ -711,12 +713,14 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
           <div>
             <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Max Margin %</label>
             <input
-              type="number" step="0.01" min="0" value={dispMax}
+              type="number" step="0.01" min="0" max="99" value={dispMax}
               onChange={(e) => { setMaxMargin(e.target.value); setTouched(true); }}
               placeholder="optional"
               className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]"
             />
-            <p className="text-[10px] text-[#555] mt-1 leading-relaxed">200 = max selling price = 3× cost. Empty = no cap.</p>
+            <p className="text-[10px] text-[#555] mt-1 leading-relaxed">
+              80 = max selling = 5&times; cost. 90 = 10&times; cost. Empty = no cap.
+            </p>
           </div>
         </div>
         <div className="px-5 py-3 border-t border-[#2A2A2A] flex justify-end">

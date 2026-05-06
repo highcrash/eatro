@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { X, Plus, Trash2, Search } from 'lucide-react';
 
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, computeMarginBand } from '@restora/utils';
 import { api } from '../lib/api';
 
 interface RecipeLine {
@@ -59,8 +59,9 @@ interface Props {
  *
  * 2. **Add** — pick any branch ingredient + qty + unit + surcharge
  *    in paisa. Surcharge is gated to the branch's customMenu band:
- *    floor = COGS × (1 + costMargin) (strict, no negotiation here),
- *    ceiling = COGS × (1 + maxMargin). Validates client-side then
+ *    floor = COGS / (1 − costMargin/100) — gross margin on selling
+ *    (no negotiation here), ceiling = COGS / (1 − maxMargin/100).
+ *    Validates client-side then
  *    re-validates server-side. Total surcharge gets added to the
  *    line's unit price; the cashier sees it on the cart and the
  *    receipt totals.
@@ -116,8 +117,10 @@ export default function CustomiseLineDialog({ menuItemId, menuItemName, initialR
     let unitCost = Number(ing.costPerUnit) || 0;
     if (unitCost === 0 && ing.hasVariants) unitCost = cheapestVariantCost.get(ing.id) ?? 0;
     const cogs = Math.round(unitCost * line.quantity);
-    const floor = Math.round(cogs * (1 + costMarginPct / 100));
-    const ceiling = maxMarginPct != null ? Math.round(cogs * (1 + maxMarginPct / 100)) : null;
+    // Gross-margin formula (selling = cost / (1 - margin/100)) so the
+    // surcharge band on cashier-added ingredients matches the Custom
+    // Menu floor/ceiling logic. Same helper used server-side.
+    const { floor, ceiling } = computeMarginBand(cogs, costMarginPct, null, maxMarginPct);
     return { cogs, floor, ceiling };
   };
 

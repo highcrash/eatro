@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { X, Plus, Trash2, Search, Copy, History, Pencil } from 'lucide-react';
 
 import type { CreateCustomMenuDto, MenuItem } from '@restora/types';
-import { formatCurrency } from '@restora/utils';
+import { formatCurrency, computeMarginBand } from '@restora/utils';
 import { api } from '../lib/api';
 import ApprovalOtpDialog from './ApprovalOtpDialog';
 
@@ -139,11 +139,16 @@ export default function CustomMenuDialog({ approval, onClose, onCreated }: Props
   const negotiate = branchSettings?.customMenuNegotiateMargin ?? null;
   const maxMargin = branchSettings?.customMenuMaxMargin ?? null;
 
-  const floorPrice = costMargin != null ? Math.round(cogs * (1 + Number(costMargin) / 100)) : cogs;
-  const minPrice = negotiate != null && Number(negotiate) > 0
-    ? Math.round(floorPrice * (1 - Number(negotiate) / 100))
-    : floorPrice;
-  const maxPrice = maxMargin != null ? Math.round(cogs * (1 + Number(maxMargin) / 100)) : null;
+  // Gross-margin formula: selling = cost / (1 - margin/100). Same
+  // helper used by the Customise dialog + the server's surcharge
+  // band validator so the numbers stay consistent across surfaces.
+  const { floor: floorPrice, minPrice, ceiling: maxPriceRaw } = computeMarginBand(
+    cogs,
+    costMargin != null ? Number(costMargin) : null,
+    negotiate != null ? Number(negotiate) : null,
+    maxMargin != null ? Number(maxMargin) : null,
+  );
+  const maxPrice = maxPriceRaw;
 
   // Pre-fill the price field with the floor when COGS first becomes known
   // and the user hasn't typed anything yet.
@@ -309,7 +314,7 @@ export default function CustomMenuDialog({ approval, onClose, onCreated }: Props
             </div>
             <div className="flex justify-between items-center">
               <span className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">
-                Floor {costMargin != null && <span className="text-theme-text-muted">(+{Number(costMargin)}%)</span>}
+                Floor {costMargin != null && <span className="text-theme-text-muted">({Number(costMargin)}% margin)</span>}
               </span>
               <span className="text-sm text-theme-text">{formatCurrency(floorPrice)}</span>
             </div>
@@ -321,7 +326,7 @@ export default function CustomMenuDialog({ approval, onClose, onCreated }: Props
             )}
             {maxPrice != null && (
               <div className="flex justify-between items-center">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Ceiling (+{Number(maxMargin)}%)</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Ceiling ({Number(maxMargin)}% margin)</span>
                 <span className="text-sm text-theme-text">{formatCurrency(maxPrice)}</span>
               </div>
             )}
