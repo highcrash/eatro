@@ -56,14 +56,43 @@ function computeTotals(branch: TaxableBranch, subtotal: number, discountAmount =
 export class OrderService {
   /**
    * Multi-device QR-share workflow: in-memory map of pending share
-   * requests keyed by `${orderId}::${requestingDeviceId}`. Value is
-   * the request's expiresAt epoch (60s window). Used to gate
-   * approve-share so only an actually-pending request can flip a
-   * device into `sharedDeviceIds` — replay protection without a DB
-   * trip on every approve. Bounded growth: every entry expires
-   * within 60s and is reaped on each request-share call.
+   * requests keyed by `${orderId}::${requestingDeviceId}`. Value
+   * carries the request's expiresAt epoch (60s window) plus the
+   * deviceLabel the requester sent — so the primary device's
+   * polling order-status endpoint can re-surface the prompt even
+   * when the original WS emit landed before the primary connected
+   * to the order room (browser refresh, network blip, late mount).
+   * Used to gate approve-share so only an actually-pending request
+   * can flip a device into `sharedDeviceIds` — replay protection
+   * without a DB trip on every approve. Bounded growth: every entry
+   * expires within 60s and is reaped on each request-share call.
    */
-  private pendingShareRequests = new Map<string, number>();
+  private pendingShareRequests = new Map<string, { expiresAt: number; deviceLabel: string | null }>();
+
+  /**
+   * Snapshot of all unexpired pending share requests for an order,
+   * suitable for inclusion in the QR app's polling order-status
+   * payload so the primary device can render the approve/deny modal
+   * even if the original WS emit was missed. Reaps expired entries
+   * as a side-effect (mirrors the behaviour of requestShare).
+   */
+  getPendingShareRequests(orderId: string): Array<{ deviceId: string; deviceLabel: string | null; expiresAt: number }> {
+    const now = Date.now();
+    const out: Array<{ deviceId: string; deviceLabel: string | null; expiresAt: number }> = [];
+    for (const [key, value] of this.pendingShareRequests) {
+      if (value.expiresAt <= now) {
+        this.pendingShareRequests.delete(key);
+        continue;
+      }
+      const sep = key.indexOf('::');
+      if (sep < 0) continue;
+      const ord = key.slice(0, sep);
+      const dev = key.slice(sep + 2);
+      if (ord !== orderId) continue;
+      out.push({ deviceId: dev, deviceLabel: value.deviceLabel, expiresAt: value.expiresAt });
+    }
+    return out;
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -1141,11 +1170,11 @@ export class OrderService {
     }
     // Reap expired entries on every request — keeps the map bounded.
     const now = Date.now();
-    for (const [k, exp] of this.pendingShareRequests) {
-      if (exp <= now) this.pendingShareRequests.delete(k);
+    for (const [k, v] of this.pendingShareRequests) {
+      if (v.expiresAt <= now) this.pendingShareRequests.delete(k);
     }
     const expiresAt = now + 60_000;
-    this.pendingShareRequests.set(`${orderId}::${deviceId}`, expiresAt);
+    this.pendingShareRequests.set(`${orderId}::${deviceId}`, { expiresAt, deviceLabel: deviceLabel ?? null });
 
     this.ws.emitToOrder(orderId, 'order:share-request', {
       orderId,
@@ -1169,9 +1198,9 @@ export class OrderService {
   async approveShare(orderId: string, branchId: string, deviceId: string, approve: boolean) {
     if (!deviceId) throw new BadRequestException('deviceId required');
     const key = `${orderId}::${deviceId}`;
-    const expiresAt = this.pendingShareRequests.get(key);
+    const pending = this.pendingShareRequests.get(key);
     this.pendingShareRequests.delete(key);
-    if (!expiresAt || expiresAt <= Date.now()) {
+    if (!pending || pending.expiresAt <= Date.now()) {
       // Either no pending request, or it timed out. Surface as 410 so
       // the primary device knows the popup it just answered was stale.
       throw new BadRequestException('Share request expired or never received. Ask the other device to request again.');

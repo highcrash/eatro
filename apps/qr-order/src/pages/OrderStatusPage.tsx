@@ -39,6 +39,11 @@ interface QrOrder {
   primaryDeviceId?: string | null;
   /** JSON-encoded string array of approved device UUIDs. */
   sharedDeviceIds?: string | null;
+  /** Pending share requests waiting for the primary device's
+   *  approve/deny. Returned by the polling status endpoint so the
+   *  modal still surfaces when the original WS emit raced ahead of
+   *  the primary's socket join. */
+  pendingShareRequests?: Array<{ deviceId: string; deviceLabel: string | null; expiresAt: number }>;
 }
 
 const ORDER_STEPS = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'SERVED'];
@@ -208,6 +213,31 @@ export default function OrderStatusPage() {
     // isPrimaryDevice toggles when the order loads, hence the dep —
     // when it flips true we want the share-request handler in scope.
   }, [orderId, isPrimaryDevice, myDeviceId, qc]);
+
+  // Poll-based fallback for missed WS share-request events. The
+  // 3-second order-status query carries a pendingShareRequests
+  // snapshot; if the primary device sees an entry it doesn't have
+  // open yet (modal not visible OR a different device than the one
+  // currently shown), surface the modal. This rescues the case where
+  // device B's request fired before device A's socket joined the
+  // order room (page refresh, brief offline, late mount) — the WS
+  // emit was lost but the server-side pendingShareRequests Map still
+  // has the entry until its 60s TTL expires.
+  useEffect(() => {
+    if (!isPrimaryDevice) return;
+    const pending = order?.pendingShareRequests ?? [];
+    if (pending.length === 0) return;
+    // Pick the first non-self entry (defensive — the primary device
+    // shouldn't show in this list anyway, but the server filter is
+    // separate from this client guard).
+    const next = pending.find((p) => p.deviceId !== myDeviceId);
+    if (!next) return;
+    // Don't clobber an already-open modal for the SAME device — the
+    // user may already be reading the prompt. Only update if the
+    // currently-shown request is a different device or null.
+    if (shareRequest && shareRequest.deviceId === next.deviceId) return;
+    setShareRequest({ deviceId: next.deviceId, deviceLabel: next.deviceLabel, expiresAt: next.expiresAt });
+  }, [order?.pendingShareRequests, isPrimaryDevice, myDeviceId, shareRequest]);
 
   // 60s timeout for THIS device's pending share request — flips the
   // read-only banner to "no answer; ask staff" when the primary
