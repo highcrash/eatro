@@ -212,10 +212,13 @@ export default function StockWatcherPage() {
           .sw-table th, .sw-table td { border: 1px solid #ccc !important; padding: 4px 8px !important; }
           @page { size: A4; margin: 12mm; }
         }
-        .sw-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        .sw-table th { text-align: left; padding: 6px 8px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
-        .sw-table td { padding: 6px 8px; border-top: 1px solid #2a2a2a; vertical-align: top; }
-        .sw-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+        .sw-table { width: 100%; border-collapse: collapse; font-size: 12px; color: #e6e6e6; }
+        .sw-table th { text-align: left; padding: 6px 8px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; background: #161616; }
+        .sw-table td { padding: 6px 8px; border-top: 1px solid #2a2a2a; vertical-align: top; color: inherit; }
+        .sw-table tbody tr:hover { background: #161616; }
+        .sw-table .num { text-align: right; font-variant-numeric: tabular-nums; color: #fff; }
+        .sw-table td.num.gain { color: #4CAF50; }
+        .sw-table td.num.loss { color: #FFA726; }
         .sw-tile { background: #161616; border: 1px solid #2a2a2a; padding: 16px 20px; }
         .sw-section-label { font-size: 11px; color: #888; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; margin: 16px 0 6px; }
         .sw-day { border: 1px solid #2a2a2a; background: #0d0d0d; padding: 16px 20px; margin-bottom: 12px; }
