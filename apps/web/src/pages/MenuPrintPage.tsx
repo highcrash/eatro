@@ -251,12 +251,25 @@ export default function MenuPrintPage() {
         }
 
         .mp-img-wrap {
-          /* Neutral light background regardless of theme so plated food
-             photos with transparent edges don't sit on solid black. */
+          /* Light theme keeps a white tile so plated-food photos with
+             transparent edges read cleanly against an off-white card.
+             Dark theme override below swaps to transparent so PNGs
+             with a transparent cut-out blend into the dark card
+             instead of showing a hard white square. */
           width: 80px; height: 80px;
           background: #FFFFFF;
           display: flex; align-items: center; justify-content: center;
           overflow: hidden;
+        }
+        .menu-print-root[data-theme="dark"] .mp-img-wrap {
+          background: transparent;
+        }
+        /* contain (not cover) on dark so the transparent area around
+           a plated-food cut-out doesn't get cropped — the photo
+           floats in the card. Light theme keeps cover for the tile
+           look. */
+        .menu-print-root[data-theme="dark"] .mp-img {
+          object-fit: contain;
         }
         .mp-img { width: 100%; height: 100%; object-fit: cover; }
         .mp-img-empty {
