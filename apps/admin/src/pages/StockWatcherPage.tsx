@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Printer } from 'lucide-react';
+import { Printer, Search, ChevronDown } from 'lucide-react';
 
 import { formatCurrency } from '@restora/utils';
 import { api } from '../lib/api';
@@ -166,33 +166,53 @@ export default function StockWatcherPage() {
     enabled: !!effectiveId,
   });
 
-  // Flatten parents + variants for the picker. The /ingredients
-  // endpoint returns parents only (variants nested under
-  // `variants[]`); admins routinely need to drill into a specific
-  // variant ("Spring Onion — Local 2KG Pack") so we surface them
-  // both. Parents that have variants are tagged "(family)" so the
-  // user knows picking the parent triggers a roll-up across all
-  // children. Variants are indented for visual hierarchy.
-  const sortedIngredients = useMemo(() => {
-    const parents = [...ingredients].sort((a, b) => a.name.localeCompare(b.name));
-    const flat: Array<Ingredient & { _depth: number; _label: string }> = [];
-    for (const p of parents) {
-      const isParent = !!p.hasVariants && Array.isArray(p.variants) && p.variants.length > 0;
-      flat.push({
-        ...p,
-        _depth: 0,
-        _label: isParent
-          ? `${p.name} — family (${p.variants!.length} variant${p.variants!.length === 1 ? '' : 's'})`
-          : p.name,
+  // Parents-only picker. The server-side `getStockWatcher` already
+  // rolls up variants under their parent (PURCHASE / SALE / WASTE
+  // movements all hit specific variant rows; the report aggregates
+  // them across the family), so the admin never needs to choose a
+  // variant explicitly — picking the parent gives the combined
+  // view. Sort alphabetically for stable typeahead matching.
+  const pickerOptions = useMemo(() => {
+    return [...ingredients]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((p) => {
+        const variantCount = Array.isArray(p.variants) ? p.variants.length : 0;
+        const label = p.hasVariants && variantCount > 0
+          ? `${p.name} (${variantCount} variant${variantCount === 1 ? '' : 's'})`
+          : p.name;
+        return { id: p.id, name: p.name, label, category: p.category };
       });
-      if (isParent) {
-        for (const v of [...p.variants!].sort((a, b) => a.name.localeCompare(b.name))) {
-          flat.push({ ...v, _depth: 1, _label: `   ↳ ${v.name}` });
-        }
-      }
-    }
-    return flat;
   }, [ingredients]);
+
+  // Combobox state — search-as-you-type. Closed by default; opens
+  // when the input is focused or the chevron is clicked. Click-
+  // outside closes via the document listener below. Filter is a
+  // case-insensitive substring match on the label so "spring"
+  // matches "Spring Onion (3 variants)" as well as "Karim's Spring
+  // Roll Wrapper".
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState('');
+  const pickerWrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (pickerWrapRef.current && !pickerWrapRef.current.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [pickerOpen]);
+
+  const filteredOptions = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    if (!q) return pickerOptions;
+    return pickerOptions.filter((o) => o.label.toLowerCase().includes(q));
+  }, [pickerOptions, pickerQuery]);
+
+  const selectedLabel =
+    pickerOptions.find((o) => o.id === effectiveId)?.label ?? '';
 
   return (
     <div className="space-y-6 stock-watcher-page">
@@ -232,20 +252,67 @@ export default function StockWatcherPage() {
           <p className="text-xs text-[#999] mt-1">Per-ingredient activity ledger over a date range.</p>
         </div>
         <div className="flex-1" />
-        <div>
+        <div className="relative" ref={pickerWrapRef}>
           <label className="block text-[10px] uppercase tracking-widest text-[#999] mb-1">Ingredient</label>
-          <select
-            value={effectiveId}
-            onChange={(e) => setIngredientId(e.target.value)}
-            className="bg-[#161616] border border-[#2a2a2a] text-white px-3 py-2 text-sm min-w-[220px]"
+          <button
+            type="button"
+            onClick={() => setPickerOpen((v) => !v)}
+            className="flex items-center gap-2 bg-[#161616] border border-[#2a2a2a] text-white px-3 py-2 text-sm min-w-[280px] hover:border-[#444]"
           >
-            {sortedIngredients.length === 0 && <option value="">Loading…</option>}
-            {sortedIngredients.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i._label}
-              </option>
-            ))}
-          </select>
+            <Search size={14} className="text-[#888]" />
+            <span className="flex-1 text-left truncate">{selectedLabel || 'Pick an ingredient…'}</span>
+            <ChevronDown size={14} className={`text-[#888] transition-transform ${pickerOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {pickerOpen && (
+            <div className="absolute z-20 mt-1 w-[360px] bg-[#0d0d0d] border border-[#2a2a2a] shadow-2xl">
+              <div className="border-b border-[#2a2a2a] p-2">
+                <input
+                  autoFocus
+                  type="text"
+                  value={pickerQuery}
+                  onChange={(e) => setPickerQuery(e.target.value)}
+                  placeholder="Type to search…"
+                  className="w-full bg-[#161616] border border-[#2a2a2a] text-white text-sm px-2 py-1.5 outline-none focus:border-[#666]"
+                  onKeyDown={(e) => {
+                    // Enter selects the first match — keeps the
+                    // keyboard-only flow snappy.
+                    if (e.key === 'Enter' && filteredOptions[0]) {
+                      e.preventDefault();
+                      setIngredientId(filteredOptions[0].id);
+                      setPickerOpen(false);
+                      setPickerQuery('');
+                    } else if (e.key === 'Escape') {
+                      setPickerOpen(false);
+                    }
+                  }}
+                />
+              </div>
+              <ul className="max-h-72 overflow-auto">
+                {filteredOptions.length === 0 && (
+                  <li className="px-3 py-2 text-xs text-[#888]">No matches.</li>
+                )}
+                {filteredOptions.map((o) => {
+                  const active = o.id === effectiveId;
+                  return (
+                    <li key={o.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIngredientId(o.id);
+                          setPickerOpen(false);
+                          setPickerQuery('');
+                        }}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-[#1f1f1f] ${active ? 'bg-[#1f1f1f] text-white' : 'text-[#ddd]'}`}
+                      >
+                        <div>{o.label}</div>
+                        {o.category && <div className="text-[10px] text-[#888]">{o.category}</div>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </div>
         <div>
           <label className="block text-[10px] uppercase tracking-widest text-[#999] mb-1">From</label>
