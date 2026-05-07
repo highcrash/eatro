@@ -27,6 +27,9 @@ interface Ingredient {
   name: string;
   unit: string;
   category: string;
+  hasVariants?: boolean;
+  parentId?: string | null;
+  variants?: Ingredient[];
 }
 
 interface PurchaseRow {
@@ -40,6 +43,7 @@ interface PurchaseRow {
   totalPaisa: number;
   isApprox: boolean;
   notes: string | null;
+  variantName: string | null;
 }
 
 interface SaleRow {
@@ -51,6 +55,7 @@ interface SaleRow {
   unitCostPaisa: number;
   totalPaisa: number;
   isApprox: boolean;
+  variantName: string | null;
 }
 
 interface WastageRow {
@@ -64,6 +69,7 @@ interface WastageRow {
   unitCostPaisa: number;
   totalPaisa: number;
   isApprox: boolean;
+  variantName: string | null;
 }
 
 interface OtherRow {
@@ -76,6 +82,7 @@ interface OtherRow {
   unitCostPaisa: number;
   totalPaisa: number;
   isApprox: boolean;
+  variantName: string | null;
 }
 
 interface StockWatcherDay {
@@ -87,7 +94,15 @@ interface StockWatcherDay {
 }
 
 interface StockWatcherResponse {
-  ingredient: { id: string; name: string; unit: string; currentStock: number; costPerUnit: number };
+  ingredient: {
+    id: string;
+    name: string;
+    unit: string;
+    currentStock: number;
+    costPerUnit: number;
+    hasVariants?: boolean;
+    variantCount?: number;
+  };
   range: { from: string; to: string };
   summary: {
     openingStockQty: number;
@@ -151,10 +166,33 @@ export default function StockWatcherPage() {
     enabled: !!effectiveId,
   });
 
-  const sortedIngredients = useMemo(
-    () => [...ingredients].sort((a, b) => a.name.localeCompare(b.name)),
-    [ingredients],
-  );
+  // Flatten parents + variants for the picker. The /ingredients
+  // endpoint returns parents only (variants nested under
+  // `variants[]`); admins routinely need to drill into a specific
+  // variant ("Spring Onion — Local 2KG Pack") so we surface them
+  // both. Parents that have variants are tagged "(family)" so the
+  // user knows picking the parent triggers a roll-up across all
+  // children. Variants are indented for visual hierarchy.
+  const sortedIngredients = useMemo(() => {
+    const parents = [...ingredients].sort((a, b) => a.name.localeCompare(b.name));
+    const flat: Array<Ingredient & { _depth: number; _label: string }> = [];
+    for (const p of parents) {
+      const isParent = !!p.hasVariants && Array.isArray(p.variants) && p.variants.length > 0;
+      flat.push({
+        ...p,
+        _depth: 0,
+        _label: isParent
+          ? `${p.name} — family (${p.variants!.length} variant${p.variants!.length === 1 ? '' : 's'})`
+          : p.name,
+      });
+      if (isParent) {
+        for (const v of [...p.variants!].sort((a, b) => a.name.localeCompare(b.name))) {
+          flat.push({ ...v, _depth: 1, _label: `   ↳ ${v.name}` });
+        }
+      }
+    }
+    return flat;
+  }, [ingredients]);
 
   return (
     <div className="space-y-6 stock-watcher-page">
@@ -201,7 +239,7 @@ export default function StockWatcherPage() {
             {sortedIngredients.length === 0 && <option value="">Loading…</option>}
             {sortedIngredients.map((i) => (
               <option key={i.id} value={i.id}>
-                {i.name} {i.category ? `(${i.category})` : ''}
+                {i._label}
               </option>
             ))}
           </select>
@@ -244,7 +282,14 @@ export default function StockWatcherPage() {
         <>
           {/* ── Header (printable) ─────────────────────────── */}
           <div>
-            <p className="font-display text-2xl text-white tracking-widest">{data.ingredient.name}</p>
+            <p className="font-display text-2xl text-white tracking-widest">
+              {data.ingredient.name}
+              {data.ingredient.hasVariants && data.ingredient.variantCount ? (
+                <span className="text-sm text-[#888] ml-3 tracking-wide">
+                  family · {data.ingredient.variantCount} variant{data.ingredient.variantCount === 1 ? '' : 's'} rolled up
+                </span>
+              ) : null}
+            </p>
             <p className="text-xs text-[#999] mt-1">
               {fmtDate(data.range.from.slice(0, 10))} → {fmtDate(data.range.to.slice(0, 10))}
             </p>
@@ -311,7 +356,10 @@ export default function StockWatcherPage() {
                       {day.purchases.map((r, i) => (
                         <tr key={i}>
                           <td>{fmtTime(r.time)}</td>
-                          <td>{r.type === 'PRODUCTION_RECEIVED' ? '— Production —' : r.supplierName ?? '—'}</td>
+                          <td>
+                            {r.type === 'PRODUCTION_RECEIVED' ? '— Production —' : r.supplierName ?? '—'}
+                            {r.variantName && <span className="block text-[10px] text-[#888]">{r.variantName}</span>}
+                          </td>
                           <td>{r.poNumber ?? '—'}</td>
                           <td className="num">+{fmtQty(r.quantity, r.unit)}</td>
                           <td className="num">{formatCurrency(r.unitCostPaisa)}/{r.unit}{r.isApprox && <span className="text-[#888] text-[10px]"> (approx.)</span>}</td>
@@ -342,7 +390,10 @@ export default function StockWatcherPage() {
                         <tr key={i}>
                           <td>{fmtTime(r.time)}</td>
                           <td>{r.orderNumber ?? '—'}</td>
-                          <td className="text-[#ccc]">{r.notes ?? '—'}</td>
+                          <td className="text-[#ccc]">
+                            {r.notes ?? '—'}
+                            {r.variantName && <span className="block text-[10px] text-[#888]">{r.variantName}</span>}
+                          </td>
                           <td className="num">−{fmtQty(r.quantity, data.ingredient.unit)}</td>
                           <td className="num">{formatCurrency(r.unitCostPaisa)}/{data.ingredient.unit}{r.isApprox && <span className="text-[#888] text-[10px]"> (approx.)</span>}</td>
                           <td className="num">{formatCurrency(r.totalPaisa)}</td>
@@ -373,7 +424,10 @@ export default function StockWatcherPage() {
                         <tr key={i}>
                           <td>{fmtTime(r.time)}</td>
                           <td>{r.kind === 'MANUAL' ? 'Manual' : 'Auto (Void)'}</td>
-                          <td className="text-[#ccc]">{r.reason ?? r.notes ?? '—'}</td>
+                          <td className="text-[#ccc]">
+                            {r.reason ?? r.notes ?? '—'}
+                            {r.variantName && <span className="block text-[10px] text-[#888]">{r.variantName}</span>}
+                          </td>
                           <td className="text-[#ccc]">{r.kind === 'VOID_AUTO' ? r.orderNumber ?? '—' : r.recordedByName ?? '—'}</td>
                           <td className="num">−{fmtQty(r.quantity, data.ingredient.unit)}</td>
                           <td className="num">{formatCurrency(r.unitCostPaisa)}/{data.ingredient.unit}{r.isApprox && <span className="text-[#888] text-[10px]"> (approx.)</span>}</td>
@@ -404,7 +458,10 @@ export default function StockWatcherPage() {
                         <tr key={i}>
                           <td>{fmtTime(r.time)}</td>
                           <td>{r.type}</td>
-                          <td className="text-[#ccc]">{r.notes ?? '—'}</td>
+                          <td className="text-[#ccc]">
+                            {r.notes ?? '—'}
+                            {r.variantName && <span className="block text-[10px] text-[#888]">{r.variantName}</span>}
+                          </td>
                           <td className="text-[#ccc]">{r.staffName ?? r.orderNumber ?? '—'}</td>
                           <td className="num">{r.signedQuantity >= 0 ? '+' : '−'}{fmtQty(Math.abs(r.signedQuantity), data.ingredient.unit)}</td>
                           <td className="num">{formatCurrency(r.totalPaisa)}{r.isApprox && <span className="text-[#888] text-[10px]"> (approx.)</span>}</td>

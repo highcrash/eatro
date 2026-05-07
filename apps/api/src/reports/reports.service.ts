@@ -1026,31 +1026,62 @@ export class ReportsService {
 
     const ingredient = await this.prisma.ingredient.findFirst({
       where: { id: ingredientId, branchId, deletedAt: null },
-      select: { id: true, name: true, unit: true, currentStock: true, costPerUnit: true },
+      select: { id: true, name: true, unit: true, currentStock: true, costPerUnit: true, hasVariants: true, parentId: true },
     });
     if (!ingredient) return null;
 
+    // Family roll-up: when admin picks a parent that hasVariants, the
+    // PARENT's own stock_movements are typically empty — every recipe
+    // SALE / WASTE / VOID_RETURN deducts from a specific variant via
+    // FIFO. Sum across the whole family so the picker doesn't return
+    // an empty report for a "Spring Onion" parent that has 3 brand
+    // variants underneath.
+    const familyIds = ingredient.hasVariants
+      ? [
+          ingredient.id,
+          ...(
+            await this.prisma.ingredient.findMany({
+              where: { parentId: ingredient.id, deletedAt: null },
+              select: { id: true },
+            })
+          ).map((v) => v.id),
+        ]
+      : [ingredient.id];
+
+    // Family currentStock + cost (used for opening/closing valuation
+    // when no `unitCostPaisa` is stamped on a row). Parent's own row
+    // already aggregates currentStock via syncParentStock; for the
+    // single-variant case we use the row directly.
+    const familyCurrentStock = ingredient.hasVariants
+      ? await this.prisma.ingredient
+          .aggregate({
+            where: { id: { in: familyIds }, deletedAt: null },
+            _sum: { currentStock: true },
+          })
+          .then((r) => Number(r._sum.currentStock ?? 0))
+      : ingredient.currentStock.toNumber();
+
     const currentCost = ingredient.costPerUnit.toNumber();
 
-    // Pull every movement for this ingredient in the range, plus the
-    // ones AFTER the range — we need the "after" sum to derive the
+    // Pull every movement for the FAMILY in the range, plus the ones
+    // AFTER the range — we need the "after" sum to derive the
     // closing-at-to snapshot from currentStock.
     const movementsInRange = await this.prisma.stockMovement.findMany({
       where: {
         branchId,
-        ingredientId,
+        ingredientId: { in: familyIds },
         createdAt: { gte: dateFrom, lte: dateTo },
       },
       orderBy: { createdAt: 'asc' },
     });
     const movementsAfter = await this.prisma.stockMovement.aggregate({
-      where: { branchId, ingredientId, createdAt: { gt: dateTo } },
+      where: { branchId, ingredientId: { in: familyIds }, createdAt: { gt: dateTo } },
       _sum: { quantity: true },
     });
 
     const sumAfter = Number(movementsAfter._sum.quantity ?? 0);
     const sumInRange = movementsInRange.reduce((s, m) => s + Number(m.quantity), 0);
-    const closingStockQty = ingredient.currentStock.toNumber() - sumAfter;
+    const closingStockQty = familyCurrentStock - sumAfter;
     const openingStockQty = closingStockQty - sumInRange;
     const closingStockValuePaisa = Math.round(closingStockQty * currentCost);
     const openingStockValuePaisa = Math.round(openingStockQty * currentCost);
@@ -1103,6 +1134,16 @@ export class ReportsService {
     const orderById = new Map(orders.map((o) => [o.id, o] as const));
     const staffById = new Map(staff.map((s) => [s.id, s] as const));
 
+    // Variant-name lookup so per-day rows can show "Spring Onion —
+    // ABC (1 KG Pack)" alongside the parent header. Only matters for
+    // family rollups; standalone ingredients fall through with a
+    // single-entry map.
+    const familyMembers = await this.prisma.ingredient.findMany({
+      where: { id: { in: familyIds } },
+      select: { id: true, name: true },
+    });
+    const ingNameById = new Map(familyMembers.map((i) => [i.id, i.name] as const));
+
     // Match WasteLog → StockMovement by (createdAt within ±5s, abs qty).
     const wasteByMovementId = new Map<string, (typeof wasteLogs)[number]>();
     for (const m of movementsInRange) {
@@ -1147,6 +1188,13 @@ export class ReportsService {
           const time = m.createdAt.toISOString();
           const orderRef = m.orderId ? orderById.get(m.orderId)?.orderNumber ?? null : null;
 
+          // Variant name for family rollups — shown next to the
+          // description so admins reading "Spring Onion" can see
+          // "Spring Onion — Local Vendor (2 KG Pack)" on each row.
+          // Falls back to the family parent's name for safety.
+          const variantName = ingNameById.get(m.ingredientId) ?? ingredient.name;
+          const isVariantRow = m.ingredientId !== ingredient.id;
+
           if (m.type === 'PURCHASE' || m.type === 'PRODUCTION_RECEIVED') {
             purchaseQty += qty;
             purchaseValue += totalPaisa;
@@ -1162,6 +1210,7 @@ export class ReportsService {
               totalPaisa,
               isApprox: cost.isApprox,
               notes: m.notes,
+              variantName: isVariantRow ? variantName : null,
             });
           } else if (m.type === 'SALE' || m.type === 'OPERATIONAL_USE') {
             const absQty = Math.abs(qty);
@@ -1176,6 +1225,7 @@ export class ReportsService {
               unitCostPaisa: cost.value,
               totalPaisa,
               isApprox: cost.isApprox,
+              variantName: isVariantRow ? variantName : null,
             });
           } else if (m.type === 'WASTE') {
             const absQty = Math.abs(qty);
@@ -1194,6 +1244,7 @@ export class ReportsService {
               unitCostPaisa: cost.value,
               totalPaisa,
               isApprox: cost.isApprox,
+              variantName: isVariantRow ? variantName : null,
             });
           } else {
             // ADJUSTMENT, VOID_RETURN — bucket as "other" so the user
@@ -1210,6 +1261,7 @@ export class ReportsService {
               unitCostPaisa: cost.value,
               totalPaisa,
               isApprox: cost.isApprox,
+              variantName: isVariantRow ? variantName : null,
             });
           }
         }
@@ -1222,8 +1274,14 @@ export class ReportsService {
         id: ingredient.id,
         name: ingredient.name,
         unit: ingredient.unit,
-        currentStock: ingredient.currentStock.toNumber(),
+        // For a family rollup this is the SUM of all variants' on-
+        // hand stock so the closing-stock tile and the page header
+        // match each other. For a single ingredient it's the row's
+        // own currentStock.
+        currentStock: familyCurrentStock,
         costPerUnit: currentCost,
+        hasVariants: ingredient.hasVariants,
+        variantCount: familyIds.length - 1,
       },
       range: { from: dateFrom.toISOString(), to: dateTo.toISOString() },
       summary: {
