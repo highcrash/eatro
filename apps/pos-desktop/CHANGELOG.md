@@ -3,6 +3,33 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.13 — Notification sound on the desktop (2026-05-07)
+
+The notification chime never played on installed terminals because:
+
+1. The MP3 (`/sounds/notification-echo.mp3`) lived in the WEB POS
+   `public/` tree but the desktop renderer is a separate Vite
+   build with its own root. Path resolved to a 404.
+2. Chromium's default `document-user-activation-required`
+   autoplay policy blocked `audio.play()` until the cashier had
+   interacted with the page. On a kiosk that just booted into the
+   lock screen, every notification fired before that gesture so
+   nothing played; the synth fallback's `AudioContext` was
+   suspended for the same reason.
+
+Both fixed:
+
+- Bundled `notification-echo.mp3` into
+  `apps/pos-desktop/src/renderer/public/sounds/` so the desktop
+  build serves the asset at the same `/sounds/notification-echo.mp3`
+  path the web POS uses.
+- Set `webPreferences.autoplayPolicy: 'no-user-gesture-required'`
+  on the main BrowserWindow. This is a kiosk app, not a browser
+  tab — the gesture protection doesn't apply.
+
+After updating, every new unseen notification on the desktop
+plays the SoundReality echo chime at floor-audible volume.
+
 ## 2.0.12 — Recipe-attached Kitchen Tickets (2026-05-06)
 
 Silent ESC/POS kitchen-print path now draws a small "recipe:" block
