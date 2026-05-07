@@ -274,6 +274,17 @@ export default function MenuPrintPage() {
           line-height: 1.1;
           margin: 0;
         }
+        /* Per-category serial — same display family as the name so
+           the row reads "1. ITEM NAME", with the number muted to
+           keep the eye on the dish. Sized slightly smaller so a
+           two-digit serial doesn't crowd long names on narrow
+           cards. */
+        .mp-serial {
+          color: #999;
+          font-size: 14px;
+          margin-right: 6px;
+          font-weight: normal;
+        }
         .mp-price {
           font-family: 'Bebas Neue', sans-serif;
           font-size: 16px; letter-spacing: 0.04em;
@@ -447,7 +458,13 @@ export default function MenuPrintPage() {
               <tr>
                 <td>
                   <div className="mp-grid">
-                    {items.map((item) => {
+                    {items.map((item, idx) => {
+                      // Per-category serial number — index in the
+                      // already-sorted (sortOrder asc) item list, +1
+                      // for human-friendly numbering. Resets to 1 in
+                      // each category. Admin pins items to the top
+                      // of a category by setting a low sortOrder.
+                      const serial = idx + 1;
                 const hasVariants = item.isVariantParent && item.variants && item.variants.length > 0;
                 const parentAddonGroups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
                 // Per-variant fallback: when admin attached addons to
@@ -485,7 +502,10 @@ export default function MenuPrintPage() {
                     </div>
                     <div className="mp-card-body">
                       <div className="mp-card-head">
-                        <h3 className="mp-name">{item.name}</h3>
+                        <h3 className="mp-name">
+                          <span className="mp-serial">{serial}.</span>
+                          {item.name}
+                        </h3>
                         {!hasVariants && <span className="mp-price">{headPrice}</span>}
                         {hasVariants && <span className="mp-price">{headPrice}</span>}
                       </div>

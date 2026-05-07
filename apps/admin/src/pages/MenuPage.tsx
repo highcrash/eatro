@@ -227,6 +227,7 @@ function ItemDialog({
     websiteVisible: initial?.websiteVisible ?? true,
     excludeFromTopSelling: (initial as any)?.excludeFromTopSelling ?? false,
     kotHideRecipe: (initial as any)?.kotHideRecipe ?? false,
+    sortOrder: String(initial?.sortOrder ?? 0),
     seoTitle: (initial as any)?.seoTitle ?? '',
     seoDescription: (initial as any)?.seoDescription ?? '',
     isVariantParent: initial?.isVariantParent ?? false,
@@ -302,6 +303,12 @@ function ItemDialog({
         websiteVisible: form.websiteVisible,
         excludeFromTopSelling: form.excludeFromTopSelling,
         kotHideRecipe: form.kotHideRecipe,
+        // Lower number = higher in the list. Drives the in-category
+        // ordering on the printable menu, the website grid, and the
+        // QR menu — anywhere the public menu endpoint sorts items.
+        sortOrder: Number.isFinite(parseInt(form.sortOrder, 10))
+          ? Math.max(0, parseInt(form.sortOrder, 10))
+          : 0,
         seoTitle: form.seoTitle || null,
         seoDescription: form.seoDescription || null,
       };
@@ -551,6 +558,23 @@ function ItemDialog({
                 </span>
               </span>
             </label>
+            <div className="border-t border-[#2A2A2A] pt-2 mt-2 space-y-1">
+              <label className="block text-[#666] text-[10px] font-body tracking-widest uppercase">
+                Sort Order (Menu-Print)
+              </label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={form.sortOrder}
+                onChange={(e) => set('sortOrder', e.target.value)}
+                placeholder="0"
+                className="w-32 bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-xs font-body focus:outline-none focus:border-[#D62B2B]"
+              />
+              <p className="text-[10px] text-[#666] font-body">
+                Lower number sorts higher inside the category on the printable menu (and the website / QR grid). Tie → alphabetical.
+              </p>
+            </div>
             <div className="border-t border-[#2A2A2A] pt-2 mt-2 space-y-2">
               <p className="text-[#666] text-[10px] font-body tracking-widest uppercase">SEO (optional)</p>
               <input value={form.seoTitle} onChange={(e) => set('seoTitle', e.target.value)} placeholder="Custom title tag for this item"
