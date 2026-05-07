@@ -4,6 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import type { Order } from '@restora/types';
 import { api } from '../lib/api';
 import { useNotificationsStore } from '../store/notifications.store';
+// Asset import — Vite resolves to a build-time URL (fingerprinted on
+// the web POS deploy, relative on the desktop electron-vite render
+// build). See the longer note next to NOTIFICATION_SRC below.
+import notificationSoundUrl from '../assets/sounds/notification-echo.mp3';
 
 export type NotifType = 'qr' | 'items' | 'bill';
 
@@ -118,21 +122,25 @@ export function useNotifications() {
 }
 
 // ─── Sound ──────────────────────────────────────────────────────────────────
-// Plays the bundled notification chime (apps/pos/public/sounds/
+// Plays the bundled notification chime (apps/pos/src/assets/sounds/
 // notification-echo.mp3) on every new unseen notification. The asset
-// is served from /sounds/notification-echo.mp3 by Vite's static
-// handler in dev and copied into the dist root in build, so the
-// same path works on the deployed web POS and the desktop shell
-// (which loads the deployed POS bundle in a BrowserWindow).
+// is imported as a module so Vite resolves the URL at build time —
+// the deployed web POS gets a fingerprinted absolute URL
+// (`/assets/notification-echo-HASH.mp3`) served by the API host,
+// and the desktop electron-vite renderer gets the SAME asset under
+// a relative URL that works under `file://` when Electron loads the
+// renderer dist via loadFile(). Earlier the path was hardcoded as
+// `/sounds/notification-echo.mp3` in `public/`, which 404'd on the
+// desktop because absolute paths under file:// resolve to the
+// filesystem ROOT, not the app's renderer dir.
 //
-// Fallback path — if the MP3 fails to load (file missing, browser
-// audio blocked before the cashier's first interaction, or an
-// older bundled build that hasn't picked up the asset yet), drop
+// Fallback path — if the MP3 fails to load (audio blocked before
+// the cashier's first interaction, decoding error, etc.) drop
 // back to the synthesized two-tone chime that used to be the only
 // sound. Keeps the cashier's "an order needs attention" cue alive
 // even when the file path is broken.
 
-const NOTIFICATION_SRC = '/sounds/notification-echo.mp3';
+const NOTIFICATION_SRC = notificationSoundUrl;
 
 // Single shared HTMLAudioElement so we don't pay the decode cost on
 // every notification. `currentTime = 0` rewinds when a new event

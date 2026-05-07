@@ -3,6 +3,26 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.14 — Notification chime actually loads on desktop (2026-05-07)
+
+The 2.0.13 fix copied the MP3 into `apps/pos-desktop/src/renderer/
+public/sounds/` and disabled Chromium's autoplay gating, but the
+chime still didn't play. Root cause: `Audio('/sounds/notification-
+echo.mp3')` resolves the absolute path against the page's URL —
+under `loadFile('../renderer/index.html')` that's the `file://`
+protocol, and `/sounds/...` falls back to the FILESYSTEM ROOT
+(`file://C:/sounds/...`), NOT the app's renderer dir. 404 on every
+play; the fallback synth chime path silenced the error so it
+looked like the audio just never fired.
+
+Permanent fix: import the asset as a module so Vite resolves the
+URL at build time. The web POS deploy gets a fingerprinted
+absolute URL; the electron-vite renderer gets a relative URL that
+works under `file://`. New asset location:
+`apps/pos/src/assets/sounds/notification-echo.mp3` (single source
+of truth — both web and desktop consume the same import). The
+two `public/` copies that 2.0.13 added are gone.
+
 ## 2.0.13 — Notification sound on the desktop (2026-05-07)
 
 The notification chime never played on installed terminals because:
