@@ -118,10 +118,64 @@ export function useNotifications() {
 }
 
 // ─── Sound ──────────────────────────────────────────────────────────────────
-// Synthesize a short two-tone chime via Web Audio so we don't need an audio file.
+// Plays the bundled notification chime (apps/pos/public/sounds/
+// notification-echo.mp3) on every new unseen notification. The asset
+// is served from /sounds/notification-echo.mp3 by Vite's static
+// handler in dev and copied into the dist root in build, so the
+// same path works on the deployed web POS and the desktop shell
+// (which loads the deployed POS bundle in a BrowserWindow).
+//
+// Fallback path — if the MP3 fails to load (file missing, browser
+// audio blocked before the cashier's first interaction, or an
+// older bundled build that hasn't picked up the asset yet), drop
+// back to the synthesized two-tone chime that used to be the only
+// sound. Keeps the cashier's "an order needs attention" cue alive
+// even when the file path is broken.
+
+const NOTIFICATION_SRC = '/sounds/notification-echo.mp3';
+
+// Single shared HTMLAudioElement so we don't pay the decode cost on
+// every notification. `currentTime = 0` rewinds when a new event
+// fires while a previous play is still in progress, so the cashier
+// hears each event distinctly instead of one being silently dropped.
+let notificationAudio: HTMLAudioElement | null = null;
+function getNotificationAudio(): HTMLAudioElement | null {
+  if (typeof window === 'undefined') return null;
+  if (!notificationAudio) {
+    try {
+      notificationAudio = new Audio(NOTIFICATION_SRC);
+      notificationAudio.preload = 'auto';
+      // Default volume — louder than the old synth chime which was
+      // capped at 0.18. The MP3 is mastered so this is a comfortable
+      // POS-floor volume; cashiers can lower the OS volume to taste.
+      notificationAudio.volume = 0.7;
+    } catch {
+      notificationAudio = null;
+    }
+  }
+  return notificationAudio;
+}
 
 let audioCtx: AudioContext | null = null;
 function playBeep() {
+  // Preferred path — bundled MP3 chime.
+  const a = getNotificationAudio();
+  if (a) {
+    try {
+      a.currentTime = 0;
+      const p = a.play();
+      if (p && typeof p.then === 'function') {
+        p.catch(() => playSynthChimeFallback());
+      }
+      return;
+    } catch {
+      // fallthrough to synth fallback
+    }
+  }
+  playSynthChimeFallback();
+}
+
+function playSynthChimeFallback() {
   try {
     const Ctor = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
     if (!Ctor) return;
