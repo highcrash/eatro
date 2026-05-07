@@ -1004,4 +1004,243 @@ export class ReportsService {
       },
     };
   }
+
+  /**
+   * Per-ingredient activity ledger ("Stock Watcher") — every stock
+   * movement on a single ingredient inside a date range, grouped by
+   * day, sub-grouped by movement bucket (purchase / sale / wastage /
+   * other), with PO + supplier context for purchases and order +
+   * menu-item context for sales / void-waste rows.
+   *
+   * Cost basis per row: `unitCostPaisa` stamped on the StockMovement
+   * at write time (post-2026-05-08 migration). Old rows without it
+   * fall back to current `Ingredient.costPerUnit` and are flagged
+   * `isApprox: true` so the UI can mark them.
+   */
+  async getStockWatcher(branchId: string, ingredientId: string, from?: string, to?: string) {
+    const now = new Date();
+    const dateFrom = from ? new Date(from) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    dateFrom.setHours(0, 0, 0, 0);
+    const dateTo = to ? new Date(to) : now;
+    dateTo.setHours(23, 59, 59, 999);
+
+    const ingredient = await this.prisma.ingredient.findFirst({
+      where: { id: ingredientId, branchId, deletedAt: null },
+      select: { id: true, name: true, unit: true, currentStock: true, costPerUnit: true },
+    });
+    if (!ingredient) return null;
+
+    const currentCost = ingredient.costPerUnit.toNumber();
+
+    // Pull every movement for this ingredient in the range, plus the
+    // ones AFTER the range — we need the "after" sum to derive the
+    // closing-at-to snapshot from currentStock.
+    const movementsInRange = await this.prisma.stockMovement.findMany({
+      where: {
+        branchId,
+        ingredientId,
+        createdAt: { gte: dateFrom, lte: dateTo },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    const movementsAfter = await this.prisma.stockMovement.aggregate({
+      where: { branchId, ingredientId, createdAt: { gt: dateTo } },
+      _sum: { quantity: true },
+    });
+
+    const sumAfter = Number(movementsAfter._sum.quantity ?? 0);
+    const sumInRange = movementsInRange.reduce((s, m) => s + Number(m.quantity), 0);
+    const closingStockQty = ingredient.currentStock.toNumber() - sumAfter;
+    const openingStockQty = closingStockQty - sumInRange;
+    const closingStockValuePaisa = Math.round(closingStockQty * currentCost);
+    const openingStockValuePaisa = Math.round(openingStockQty * currentCost);
+
+    // Resolve cost-per-row: prefer stamped unitCostPaisa, fall back
+    // to current ingredient cost (flagged isApprox).
+    const rowCost = (m: { unitCostPaisa: { toNumber(): number } | null }): { value: number; isApprox: boolean } => {
+      if (m.unitCostPaisa != null) return { value: m.unitCostPaisa.toNumber(), isApprox: false };
+      return { value: currentCost, isApprox: true };
+    };
+
+    // Lookups for context columns.
+    const poIds = Array.from(new Set(movementsInRange.map((m) => m.purchaseOrderId).filter((x): x is string => !!x)));
+    const orderIds = Array.from(new Set(movementsInRange.map((m) => m.orderId).filter((x): x is string => !!x)));
+    const staffIds = Array.from(new Set(movementsInRange.map((m) => m.staffId).filter((x): x is string => !!x)));
+
+    const [pos, orders, staff, wasteLogs] = await Promise.all([
+      poIds.length
+        ? this.prisma.purchaseOrder.findMany({
+            where: { id: { in: poIds } },
+            select: { id: true, supplier: { select: { name: true } } },
+          })
+        : Promise.resolve([] as Array<{ id: string; supplier: { name: string } | null }>),
+      orderIds.length
+        ? this.prisma.order.findMany({
+            where: { id: { in: orderIds } },
+            select: { id: true, orderNumber: true },
+          })
+        : Promise.resolve([] as Array<{ id: string; orderNumber: string }>),
+      staffIds.length
+        ? this.prisma.staff.findMany({
+            where: { id: { in: staffIds } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
+      // Manual waste log rows for this ingredient in range. We match
+      // each WASTE-type StockMovement to its WasteLog by approximate
+      // timestamp (same-transaction writes land within milliseconds).
+      this.prisma.wasteLog.findMany({
+        where: {
+          branchId,
+          ingredientId,
+          createdAt: { gte: dateFrom, lte: dateTo },
+        },
+        include: { recordedBy: { select: { name: true } } },
+      }),
+    ]);
+
+    const poById = new Map(pos.map((p) => [p.id, p] as const));
+    const orderById = new Map(orders.map((o) => [o.id, o] as const));
+    const staffById = new Map(staff.map((s) => [s.id, s] as const));
+
+    // Match WasteLog → StockMovement by (createdAt within ±5s, abs qty).
+    const wasteByMovementId = new Map<string, (typeof wasteLogs)[number]>();
+    for (const m of movementsInRange) {
+      if (m.type !== 'WASTE') continue;
+      const targetTime = m.createdAt.getTime();
+      const targetQty = Math.abs(Number(m.quantity));
+      const match = wasteLogs.find(
+        (w) =>
+          Math.abs(w.createdAt.getTime() - targetTime) < 5000 &&
+          Math.abs(Number(w.quantity) - targetQty) < 0.0001 &&
+          !Array.from(wasteByMovementId.values()).some((used) => used.id === w.id),
+      );
+      if (match) wasteByMovementId.set(m.id, match);
+    }
+
+    // Group by date (YYYY-MM-DD).
+    const byDate = new Map<string, typeof movementsInRange>();
+    for (const m of movementsInRange) {
+      const day = m.createdAt.toISOString().slice(0, 10);
+      const arr = byDate.get(day) ?? [];
+      arr.push(m);
+      byDate.set(day, arr);
+    }
+
+    let purchaseQty = 0, purchaseValue = 0;
+    let usageQty = 0, usageValue = 0;
+    let wastageQty = 0, wastageValue = 0;
+    let adjustmentQty = 0, adjustmentValue = 0;
+
+    const days = Array.from(byDate.entries())
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([date, rows]) => {
+        const purchases: any[] = [];
+        const sales: any[] = [];
+        const wastage: any[] = [];
+        const other: any[] = [];
+
+        for (const m of rows) {
+          const cost = rowCost(m);
+          const qty = Number(m.quantity);
+          const totalPaisa = Math.round(Math.abs(qty) * cost.value);
+          const time = m.createdAt.toISOString();
+          const orderRef = m.orderId ? orderById.get(m.orderId)?.orderNumber ?? null : null;
+
+          if (m.type === 'PURCHASE' || m.type === 'PRODUCTION_RECEIVED') {
+            purchaseQty += qty;
+            purchaseValue += totalPaisa;
+            const po = m.purchaseOrderId ? poById.get(m.purchaseOrderId) : null;
+            purchases.push({
+              time,
+              type: m.type,
+              supplierName: po?.supplier?.name ?? null,
+              poNumber: m.purchaseOrderId ? m.purchaseOrderId.slice(-8).toUpperCase() : null,
+              quantity: qty,
+              unit: ingredient.unit,
+              unitCostPaisa: cost.value,
+              totalPaisa,
+              isApprox: cost.isApprox,
+              notes: m.notes,
+            });
+          } else if (m.type === 'SALE' || m.type === 'OPERATIONAL_USE') {
+            const absQty = Math.abs(qty);
+            usageQty += absQty;
+            usageValue += totalPaisa;
+            sales.push({
+              time,
+              type: m.type,
+              orderNumber: orderRef,
+              notes: m.notes,
+              quantity: absQty,
+              unitCostPaisa: cost.value,
+              totalPaisa,
+              isApprox: cost.isApprox,
+            });
+          } else if (m.type === 'WASTE') {
+            const absQty = Math.abs(qty);
+            wastageQty += absQty;
+            wastageValue += totalPaisa;
+            const log = wasteByMovementId.get(m.id);
+            const isVoidAuto = (m.notes ?? '').toLowerCase().startsWith('void waste');
+            wastage.push({
+              time,
+              kind: isVoidAuto ? 'VOID_AUTO' : 'MANUAL',
+              reason: log?.reason ?? null,
+              recordedByName: log?.recordedBy?.name ?? (m.staffId ? staffById.get(m.staffId)?.name ?? null : null),
+              orderNumber: orderRef,
+              notes: m.notes,
+              quantity: absQty,
+              unitCostPaisa: cost.value,
+              totalPaisa,
+              isApprox: cost.isApprox,
+            });
+          } else {
+            // ADJUSTMENT, VOID_RETURN — bucket as "other" so the user
+            // sees them but they don't muddy the headline tiles.
+            adjustmentQty += qty;
+            adjustmentValue += qty >= 0 ? totalPaisa : -totalPaisa;
+            other.push({
+              time,
+              type: m.type,
+              signedQuantity: qty,
+              notes: m.notes,
+              orderNumber: orderRef,
+              staffName: m.staffId ? staffById.get(m.staffId)?.name ?? null : null,
+              unitCostPaisa: cost.value,
+              totalPaisa,
+              isApprox: cost.isApprox,
+            });
+          }
+        }
+
+        return { date, purchases, sales, wastage, other };
+      });
+
+    return {
+      ingredient: {
+        id: ingredient.id,
+        name: ingredient.name,
+        unit: ingredient.unit,
+        currentStock: ingredient.currentStock.toNumber(),
+        costPerUnit: currentCost,
+      },
+      range: { from: dateFrom.toISOString(), to: dateTo.toISOString() },
+      summary: {
+        openingStockQty,
+        openingStockValuePaisa,
+        purchaseQty,
+        purchaseValuePaisa: purchaseValue,
+        usageQty,
+        usageValuePaisa: usageValue,
+        wastageQty,
+        wastageValuePaisa: wastageValue,
+        adjustmentQty,
+        adjustmentValuePaisa: adjustmentValue,
+        closingStockQty,
+        closingStockValuePaisa,
+      },
+      days,
+    };
+  }
 }

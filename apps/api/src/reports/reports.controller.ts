@@ -140,4 +140,21 @@ export class ReportsController {
     const defaultTo = now.toISOString().split('T')[0];
     return this.reportsService.getSalesVsFoodCost(user.branchId, from ?? defaultFrom, to ?? defaultTo);
   }
+
+  /**
+   * Per-ingredient activity ledger ("Stock Watcher"). Owner / Manager
+   * only — surfaces purchase prices + supplier names which cashiers
+   * shouldn't see. Range defaults to last 30 days when from/to are
+   * omitted.
+   */
+  @Get('stock-watcher')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  getStockWatcher(
+    @CurrentUser() user: JwtPayload,
+    @Query('ingredientId') ingredientId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.reportsService.getStockWatcher(user.branchId, ingredientId, from, to);
+  }
 }

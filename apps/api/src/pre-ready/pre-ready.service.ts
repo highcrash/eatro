@@ -659,6 +659,11 @@ export class PreReadyService {
         for (let idx = 0; idx < recipe.items.length; idx++) {
           const recipeItem = recipe.items[idx];
           const deductQty = conversions[idx];
+          // costPerUnit pre-fetched above into ingredientCosts[]; reuse
+          // so the SALE movement carries the same per-stock-unit cost
+          // we used to compute totalProductionCost. Variant branch
+          // overrides with the variant's own cost below.
+          const recipeIngCost = ingredientCosts[idx]?.costPerUnit ?? 0;
 
           // Check if ingredient has variants
           const ingredient = await tx.ingredient.findUnique({ where: { id: recipeItem.ingredientId }, select: { hasVariants: true } });
@@ -674,14 +679,14 @@ export class PreReadyService {
               const available = Number(variant.currentStock);
               const deduct = Math.min(remaining, available);
               await tx.ingredient.update({ where: { id: variant.id }, data: { currentStock: { decrement: deduct } } });
-              await tx.stockMovement.create({ data: { branchId, ingredientId: variant.id, type: 'SALE', quantity: -deduct, notes: `Pre-ready production: ${po.preReadyItem.name} x${producedQty}` } });
+              await tx.stockMovement.create({ data: { branchId, ingredientId: variant.id, type: 'SALE', quantity: -deduct, notes: `Pre-ready production: ${po.preReadyItem.name} x${producedQty}`, unitCostPaisa: Number(variant.costPerUnit) } });
               remaining -= deduct;
             }
             if (remaining > 0) {
               const fallback = variants[0] ?? await tx.ingredient.findFirst({ where: { parentId: recipeItem.ingredientId, isActive: true, deletedAt: null }, orderBy: { createdAt: 'asc' } });
               if (fallback) {
                 await tx.ingredient.update({ where: { id: fallback.id }, data: { currentStock: { decrement: remaining } } });
-                await tx.stockMovement.create({ data: { branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, notes: `Pre-ready production: ${po.preReadyItem.name} x${producedQty} (insufficient)` } });
+                await tx.stockMovement.create({ data: { branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, notes: `Pre-ready production: ${po.preReadyItem.name} x${producedQty} (insufficient)`, unitCostPaisa: Number(fallback.costPerUnit) } });
               }
             }
             parentSyncIds.add(recipeItem.ingredientId);
@@ -697,6 +702,7 @@ export class PreReadyService {
                 type: 'SALE',
                 quantity: -deductQty,
                 notes: `Pre-ready production: ${po.preReadyItem.name} x${producedQty}`,
+                unitCostPaisa: recipeIngCost,
               },
             });
           }
@@ -794,6 +800,10 @@ export class PreReadyService {
           type: 'PRODUCTION_RECEIVED',
           quantity: producedQty,
           notes: `Production: ${po.preReadyItem.name} ×${producedQty} ${po.preReadyItem.unit}`,
+          // Per-produced-unit cost rolled up from the recipe input
+          // costs above. Ensures the Stock Watcher report shows the
+          // produced batch at its real input-cost basis.
+          unitCostPaisa: costPerProducedUnit,
         },
       });
 
@@ -873,7 +883,7 @@ export class PreReadyService {
             if (remaining <= 0) break;
             const deduct = Math.min(remaining, Number(v.currentStock));
             await tx.ingredient.update({ where: { id: v.id }, data: { currentStock: { decrement: deduct } } });
-            await tx.stockMovement.create({ data: { branchId, ingredientId: v.id, type: 'WASTE', quantity: -deduct, notes: wasteNotes } });
+            await tx.stockMovement.create({ data: { branchId, ingredientId: v.id, type: 'WASTE', quantity: -deduct, notes: wasteNotes, unitCostPaisa: Number(v.costPerUnit) } });
             await tx.wasteLog.create({ data: { branchId, ingredientId: v.id, quantity: deduct, reason: 'PREPARATION_ERROR', notes: wasteNotes, recordedById: dto.staffId } });
             remaining -= deduct;
           }
@@ -881,17 +891,18 @@ export class PreReadyService {
             const fallback = variants[0] ?? await tx.ingredient.findFirst({ where: { parentId: c.ingredientId, isActive: true, deletedAt: null }, orderBy: { createdAt: 'asc' } });
             if (fallback) {
               await tx.ingredient.update({ where: { id: fallback.id }, data: { currentStock: { decrement: remaining } } });
-              await tx.stockMovement.create({ data: { branchId, ingredientId: fallback.id, type: 'WASTE', quantity: -remaining, notes: wasteNotes } });
+              await tx.stockMovement.create({ data: { branchId, ingredientId: fallback.id, type: 'WASTE', quantity: -remaining, notes: wasteNotes, unitCostPaisa: Number(fallback.costPerUnit) } });
               await tx.wasteLog.create({ data: { branchId, ingredientId: fallback.id, quantity: remaining, reason: 'PREPARATION_ERROR', notes: wasteNotes, recordedById: dto.staffId } });
             }
           }
           wasteSyncIds.add(c.ingredientId);
         } else {
+          const standalone = await tx.ingredient.findUnique({ where: { id: c.ingredientId }, select: { costPerUnit: true } });
           await tx.ingredient.update({
             where: { id: c.ingredientId },
             data: { currentStock: { decrement: c.deductQty } },
           });
-          await tx.stockMovement.create({ data: { branchId, ingredientId: c.ingredientId, type: 'WASTE', quantity: -c.deductQty, notes: wasteNotes } });
+          await tx.stockMovement.create({ data: { branchId, ingredientId: c.ingredientId, type: 'WASTE', quantity: -c.deductQty, notes: wasteNotes, unitCostPaisa: standalone?.costPerUnit.toNumber() ?? 0 } });
           await tx.wasteLog.create({ data: { branchId, ingredientId: c.ingredientId, quantity: c.deductQty, reason: 'PREPARATION_ERROR', notes: wasteNotes, recordedById: dto.staffId } });
         }
       }

@@ -311,6 +311,11 @@ export class RecipeService {
       quantity: number;
       orderId: string;
       notes: string;
+      // Per-stock-unit cost AT THE TIME OF THE SALE — preserved on
+      // the movement so the Stock Watcher report can value this
+      // SALE row historically even after Ingredient.costPerUnit
+      // shifts on later receipts.
+      unitCostPaisa: number;
     }[] = [];
 
     const stockUpdates: { id: string; decrement: number }[] = [];
@@ -354,7 +359,7 @@ export class RecipeService {
             if (remaining <= 0) break;
             const available = Number(variant.currentStock);
             const deduct = Math.min(remaining, available);
-            movements.push({ branchId, ingredientId: variant.id, type: 'SALE', quantity: -deduct, orderId, notes: noteBase });
+            movements.push({ branchId, ingredientId: variant.id, type: 'SALE', quantity: -deduct, orderId, notes: noteBase, unitCostPaisa: Number(variant.costPerUnit) });
             stockUpdates.push({ id: variant.id, decrement: deduct });
             remaining -= deduct;
           }
@@ -365,14 +370,14 @@ export class RecipeService {
               orderBy: { createdAt: 'asc' },
             });
             if (fallback) {
-              movements.push({ branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, orderId, notes: `${noteBase} (insufficient stock)` });
+              movements.push({ branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, orderId, notes: `${noteBase} (insufficient stock)`, unitCostPaisa: Number(fallback.costPerUnit) });
               stockUpdates.push({ id: fallback.id, decrement: remaining });
             }
           }
           parentSyncIds.add(recipeItem.ingredientId);
         } else {
           // Standard ingredient (no variants) — existing logic
-          movements.push({ branchId, ingredientId: recipeItem.ingredientId, type: 'SALE', quantity: -totalQty, orderId, notes: noteBase });
+          movements.push({ branchId, ingredientId: recipeItem.ingredientId, type: 'SALE', quantity: -totalQty, orderId, notes: noteBase, unitCostPaisa: recipeItem.ingredient.costPerUnit.toNumber() });
           stockUpdates.push({ id: recipeItem.ingredientId, decrement: totalQty });
         }
       }
@@ -479,7 +484,7 @@ export class RecipeService {
     });
     const byId = new Map(ingredients.map((i) => [i.id, i] as const));
 
-    const movements: { branchId: string; ingredientId: string; type: 'SALE'; quantity: number; orderId: string; notes: string }[] = [];
+    const movements: { branchId: string; ingredientId: string; type: 'SALE'; quantity: number; orderId: string; notes: string; unitCostPaisa: number }[] = [];
     const stockUpdates: { id: string; decrement: number }[] = [];
     const parentSyncIds = new Set<string>();
 
@@ -505,7 +510,7 @@ export class RecipeService {
           if (remaining <= 0) break;
           const available = Number(v.currentStock);
           const deduct = Math.min(remaining, available);
-          movements.push({ branchId, ingredientId: v.id, type: 'SALE', quantity: -deduct, orderId, notes: 'Auto-deducted (added ingredient)' });
+          movements.push({ branchId, ingredientId: v.id, type: 'SALE', quantity: -deduct, orderId, notes: 'Auto-deducted (added ingredient)', unitCostPaisa: Number(v.costPerUnit) });
           stockUpdates.push({ id: v.id, decrement: deduct });
           remaining -= deduct;
         }
@@ -515,13 +520,13 @@ export class RecipeService {
             orderBy: { createdAt: 'asc' },
           });
           if (fallback) {
-            movements.push({ branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, orderId, notes: 'Auto-deducted (added ingredient, insufficient stock)' });
+            movements.push({ branchId, ingredientId: fallback.id, type: 'SALE', quantity: -remaining, orderId, notes: 'Auto-deducted (added ingredient, insufficient stock)', unitCostPaisa: Number(fallback.costPerUnit) });
             stockUpdates.push({ id: fallback.id, decrement: remaining });
           }
         }
         parentSyncIds.add(ing.id);
       } else {
-        movements.push({ branchId, ingredientId: ing.id, type: 'SALE', quantity: -totalQty, orderId, notes: 'Auto-deducted (added ingredient)' });
+        movements.push({ branchId, ingredientId: ing.id, type: 'SALE', quantity: -totalQty, orderId, notes: 'Auto-deducted (added ingredient)', unitCostPaisa: Number(ing.costPerUnit) });
         stockUpdates.push({ id: ing.id, decrement: totalQty });
       }
     }
@@ -560,6 +565,11 @@ export class RecipeService {
       quantity: number;
       orderId: string;
       notes: string;
+      // Cost mirrored from the original SALE movement so the void's
+      // value cancels the sale exactly. Falls back to current
+      // ingredient cost on the rare path where the original SALE
+      // can't be located (e.g. variant-fallback path with no sale row).
+      unitCostPaisa: number;
     }[] = [];
     const parentSyncIds = new Set<string>();
 
@@ -585,7 +595,7 @@ export class RecipeService {
             for (const mv of saleMovements) {
               const restoreQty = Math.abs(Number(mv.quantity));
               stockUpdates.push({ id: mv.ingredientId, increment: restoreQty });
-              movements.push({ branchId, ingredientId: mv.ingredientId, type: 'VOID_RETURN', quantity: restoreQty, orderId, notes: 'Stock returned on void' });
+              movements.push({ branchId, ingredientId: mv.ingredientId, type: 'VOID_RETURN', quantity: restoreQty, orderId, notes: 'Stock returned on void', unitCostPaisa: mv.unitCostPaisa ? Number(mv.unitCostPaisa) : 0 });
             }
           } else {
             // Fallback: restore to first variant
@@ -595,13 +605,13 @@ export class RecipeService {
             });
             if (firstVariant) {
               stockUpdates.push({ id: firstVariant.id, increment: totalQty });
-              movements.push({ branchId, ingredientId: firstVariant.id, type: 'VOID_RETURN', quantity: totalQty, orderId, notes: 'Stock returned on void' });
+              movements.push({ branchId, ingredientId: firstVariant.id, type: 'VOID_RETURN', quantity: totalQty, orderId, notes: 'Stock returned on void', unitCostPaisa: Number(firstVariant.costPerUnit) });
             }
           }
           parentSyncIds.add(recipeItem.ingredientId);
         } else {
           stockUpdates.push({ id: recipeItem.ingredientId, increment: totalQty });
-          movements.push({ branchId, ingredientId: recipeItem.ingredientId, type: 'VOID_RETURN', quantity: totalQty, orderId, notes: 'Stock returned on void' });
+          movements.push({ branchId, ingredientId: recipeItem.ingredientId, type: 'VOID_RETURN', quantity: totalQty, orderId, notes: 'Stock returned on void', unitCostPaisa: recipeItem.ingredient.costPerUnit.toNumber() });
         }
       }
     }
