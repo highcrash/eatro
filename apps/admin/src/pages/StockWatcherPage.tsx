@@ -228,16 +228,39 @@ export default function StockWatcherPage() {
       {/* ── Print styles ─────────────────────────────────────── */}
       <style>{`
         @media print {
-          /* Hide everything except the report content. The admin
-             layout's sidebar / topbar live outside this page so we
-             have to rely on a class hook to skip the form controls
-             and the page's print button itself. */
+          /* AdminLayout wraps every page in <div class="h-screen flex">
+             with a left <aside> sidebar and a <main flex-1 overflow-auto
+             p-8>. h-screen + overflow-auto means the browser sees only
+             one viewport-tall scroll region — print captures only that
+             slice and the rest is white. Defeat both: collapse the
+             height clamps, hide the sidebar, and let <main> flow
+             naturally. */
+          html, body {
+            height: auto !important;
+            overflow: visible !important;
+            background: #fff !important;
+            color: #000 !important;
+          }
+          body > div, body > div > div {
+            height: auto !important;
+            min-height: 0 !important;
+            display: block !important;
+            overflow: visible !important;
+          }
+          aside { display: none !important; }
+          main {
+            overflow: visible !important;
+            height: auto !important;
+            padding: 0 !important;
+            display: block !important;
+          }
+          /* Hide form controls + buttons + nav. Anything tagged
+             .no-print on this page disappears too. */
           .no-print { display: none !important; }
-          body, html { background: #fff !important; color: #000 !important; }
           .stock-watcher-page { padding: 0 !important; }
           .stock-watcher-page * { color: #000 !important; background: transparent !important; border-color: #999 !important; }
           .sw-tile { border: 1px solid #999; padding: 8px 12px !important; }
-          .sw-day { page-break-inside: avoid; }
+          .sw-day { page-break-inside: avoid; border: 1px solid #ccc !important; padding: 8px !important; margin-bottom: 8px !important; }
           .sw-table th, .sw-table td { border: 1px solid #ccc !important; padding: 4px 8px !important; }
           @page { size: A4; margin: 12mm; }
         }
