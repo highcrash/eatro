@@ -228,41 +228,47 @@ export default function StockWatcherPage() {
       {/* ── Print styles ─────────────────────────────────────── */}
       <style>{`
         @media print {
-          /* AdminLayout wraps every page in <div class="h-screen flex">
-             with a left <aside> sidebar and a <main flex-1 overflow-auto
-             p-8>. h-screen + overflow-auto means the browser sees only
-             one viewport-tall scroll region — print captures only that
-             slice and the rest is white. Defeat both: collapse the
-             height clamps, hide the sidebar, and let <main> flow
-             naturally. */
-          html, body {
-            height: auto !important;
-            overflow: visible !important;
+          /* Classic print isolation. Earlier we tried defeating the
+             AdminLayout's h-screen + overflow:auto chain via display
+             + overflow overrides — Chrome / Edge handled it but
+             Firefox + some Chromium builds still printed blank pages
+             because the scrollable <main> ate the content. Instead,
+             use visibility:hidden on EVERYTHING + visibility:visible
+             on just the report subtree, then float the report absolute
+             at top:0. Browsers print whatever's positioned within the
+             page bounds regardless of scroll container.
+
+             visibility:hidden (not display:none) preserves the
+             original layout space so the surrounding nav doesn't
+             reflow at the moment of printing — but nothing renders. */
+          @page { size: A4; margin: 12mm; }
+          html, body { background: #fff !important; }
+          body * { visibility: hidden !important; }
+          .stock-watcher-page, .stock-watcher-page * {
+            visibility: visible !important;
+          }
+          .stock-watcher-page {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            padding: 0 !important;
             background: #fff !important;
             color: #000 !important;
+            font-family: Arial, sans-serif !important;
           }
-          body > div, body > div > div {
-            height: auto !important;
-            min-height: 0 !important;
-            display: block !important;
-            overflow: visible !important;
+          /* Force every descendant to dark-on-light. The dark-theme
+             colours bleed through Tailwind classes + inline style
+             attributes; !important here wins against both. */
+          .stock-watcher-page * {
+            color: #000 !important;
+            background: transparent !important;
+            border-color: #999 !important;
           }
-          aside { display: none !important; }
-          main {
-            overflow: visible !important;
-            height: auto !important;
-            padding: 0 !important;
-            display: block !important;
-          }
-          /* Hide form controls + buttons + nav. Anything tagged
-             .no-print on this page disappears too. */
           .no-print { display: none !important; }
-          .stock-watcher-page { padding: 0 !important; }
-          .stock-watcher-page * { color: #000 !important; background: transparent !important; border-color: #999 !important; }
-          .sw-tile { border: 1px solid #999; padding: 8px 12px !important; }
+          .sw-tile { border: 1px solid #999 !important; padding: 8px 12px !important; }
           .sw-day { page-break-inside: avoid; border: 1px solid #ccc !important; padding: 8px !important; margin-bottom: 8px !important; }
           .sw-table th, .sw-table td { border: 1px solid #ccc !important; padding: 4px 8px !important; }
-          @page { size: A4; margin: 12mm; }
         }
         .sw-table { width: 100%; border-collapse: collapse; font-size: 12px; color: #e6e6e6; }
         .sw-table th { text-align: left; padding: 6px 8px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; background: #161616; }
