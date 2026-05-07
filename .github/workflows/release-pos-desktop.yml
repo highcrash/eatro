@@ -111,5 +111,13 @@ jobs:
             apps/pos-desktop/release/*.yml
             apps/pos-desktop/release/*.blockmap
           draft: false
-          prerelease: false
+          # Codecanyon branch ships 1.x tags; main ships 2.x. The
+          # codecanyon release MUST be marked prerelease so GitHub
+          # `/releases/latest` ignores it — without this, an installed
+          # main (stable) terminal hits /releases/latest, gets the
+          # codecanyon tag, and 404s on `stable.yml` since only
+          # `codecanyon.yml` is attached. Cross-channel auto-update
+          # protection in two places: this CI flag + the per-channel
+          # yml from electron-builder.
+          prerelease: ${{ startsWith(github.ref, 'refs/tags/pos-desktop-v1.') }}
           tag_name: ${{ github.ref_name }}
