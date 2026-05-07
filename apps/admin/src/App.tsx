@@ -15,6 +15,7 @@ import StaffPage from './pages/StaffPage';
 import OrdersPage from './pages/OrdersPage';
 import SuppliersPage from './pages/SuppliersPage';
 import InventoryPage from './pages/InventoryPage';
+import StockWatcherPage from './pages/StockWatcherPage';
 import RecipesPage from './pages/RecipesPage';
 import PurchasingPage from './pages/PurchasingPage';
 import ShoppingListPage from './pages/ShoppingListPage';
@@ -95,6 +96,7 @@ export default function AdminApp() {
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
+        <Route path="/stock-watcher" element={<StockWatcherPage />} />
         <Route path="/recipes" element={<RecipesPage />} />
         <Route path="/pre-ready" element={<PreReadyPage />} />
         <Route path="/purchasing" element={<PurchasingPage />} />

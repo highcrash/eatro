@@ -171,6 +171,8 @@ export class PurchasingService {
         orderId: null;
         staffId: string;
         notes: string;
+        unitCostPaisa: number;
+        purchaseOrderId: string;
       }[] = [];
 
       for (const receipt of dto.items) {
@@ -221,13 +223,19 @@ export class PurchasingService {
 
         const ingredientUpdate: Record<string, unknown> = { currentStock: { increment: stockQtyReceived } };
 
+        // Hoisted so the StockMovement push below can reference it
+        // unconditionally. Falls back to the existing ingredient cost
+        // when the cashier didn't enter a price for this receipt
+        // (e.g. a comp/sample drop) — keeps the movement value sane.
+        let costPerStockUnit = ingredient.costPerUnit.toNumber();
+
         if (effectivePrice !== undefined) {
           const branch = await tx.branch.findFirstOrThrow({ where: { id: branchId } });
           const method = (branch as any).stockPricingMethod ?? 'LAST_PURCHASE';
 
           // Calculate cost per STOCK unit from purchase unit price
           const conversionFactor = stockQtyReceived / receipt.quantityReceived; // e.g. 1000 for KG→G
-          const costPerStockUnit = Math.round(effectivePrice / conversionFactor);
+          costPerStockUnit = Math.round(effectivePrice / conversionFactor);
 
           if (method === 'WEIGHTED_AVERAGE') {
             const existingStock = ingredient.currentStock.toNumber();
@@ -266,6 +274,15 @@ export class PurchasingService {
           orderId: null,
           staffId,
           notes: dto.notes ?? `Received ${receipt.quantityReceived} ${hasPurchaseUnit ? ingredient.purchaseUnit : ingredient.unit} from PO ${po.id.slice(-8)}`,
+          // Per-stock-unit cost AT TIME OF RECEIPT — same figure used
+          // to compute costPerUnit on the Ingredient row, but
+          // preserved on the movement so the Stock Watcher report
+          // can value this PURCHASE row historically even after
+          // costPerUnit shifts on later receipts.
+          unitCostPaisa: costPerStockUnit,
+          // Direct FK to the PO so the report can join supplier +
+          // PO# without parsing notes.
+          purchaseOrderId: po.id,
         });
 
         // Check if this item is fully received
@@ -312,9 +329,14 @@ export class PurchasingService {
           }
 
           const ingredientUpdate: Record<string, unknown> = { currentStock: { increment: stockQtyReceived } };
+          // Compute the per-stock-unit cost for this extra so we can
+          // both update the Ingredient row AND stamp the StockMovement.
+          // Falls back to 0 when the cashier didn't enter a unit price.
+          let extraCostPerStockUnit = 0;
           if (extra.unitPrice && extra.unitPrice > 0) {
             const conversionFactor = stockQtyReceived / extra.quantityReceived;
-            ingredientUpdate.costPerUnit = Math.round(extra.unitPrice / conversionFactor);
+            extraCostPerStockUnit = Math.round(extra.unitPrice / conversionFactor);
+            ingredientUpdate.costPerUnit = extraCostPerStockUnit;
             if (hasPurchaseUnit) ingredientUpdate.costPerPurchaseUnit = extra.unitPrice;
           }
 
@@ -340,6 +362,8 @@ export class PurchasingService {
             orderId: null,
             staffId,
             notes: dto.notes ?? `Extra item received with PO ${po.id.slice(-8)}`,
+            unitCostPaisa: extraCostPerStockUnit,
+            purchaseOrderId: po.id,
           });
         }
       }
@@ -776,6 +800,10 @@ export class PurchasingService {
             type: 'ADJUSTMENT',
             quantity: -item.quantity.toNumber(),
             notes: `Return to supplier${ret.purchaseOrderId ? ` - PO ${ret.purchaseOrderId.slice(-8)}` : ''}`,
+            // Per-stock-unit price the items were returned AT — used by
+            // the Stock Watcher report to value the supplier-return row.
+            unitCostPaisa: item.unitPrice.toNumber(),
+            ...(ret.purchaseOrderId ? { purchaseOrderId: ret.purchaseOrderId } : {}),
           },
         });
       }

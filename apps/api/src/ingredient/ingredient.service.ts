@@ -908,6 +908,10 @@ export class IngredientService {
           quantity: movementQty,
           notes: dto.notes ?? null,
           staffId,
+          // Per-stock-unit cost at the time of the adjustment — same
+          // figure shown on the Stock Watcher report's Other section
+          // so adjustments + operational-use rows carry value too.
+          unitCostPaisa: ingredient.costPerUnit.toNumber(),
         },
       });
 
@@ -1016,6 +1020,7 @@ export class IngredientService {
             quantity: rounded,
             notes: 'Through CSV update',
             staffId,
+            unitCostPaisa: ingredient.costPerUnit.toNumber(),
           },
         });
         await tx.ingredient.update({

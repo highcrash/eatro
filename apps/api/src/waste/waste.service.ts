@@ -57,6 +57,11 @@ export class WasteService {
           quantity: -dto.quantity,
           staffId,
           notes: `Waste: ${dto.reason}${dto.notes ? ` — ${dto.notes}` : ''}`,
+          // Per-stock-unit cost AT TIME OF WASTE — preserved on the
+          // movement so the Stock Watcher report values waste rows
+          // historically. Read post-decrement is fine: costPerUnit
+          // is unaffected by the stock decrement, only currentStock.
+          unitCostPaisa: ingredient.costPerUnit.toNumber(),
         },
       });
 

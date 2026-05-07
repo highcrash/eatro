@@ -1804,14 +1804,26 @@ model StockMovement {
   correctedAt           DateTime?
   correctedFromQuantity Decimal?  @db.Decimal(14, 4)
   correctionReason      String?
-  createdAt    DateTime          @default(now())
+  /// Per-unit cost in paisa AT THE TIME OF THE MOVEMENT. Persisted so
+  /// the Stock Watcher report can show accurate historical valuations
+  /// even after Ingredient.costPerUnit shifts on subsequent receipts.
+  /// Nullable — old rows (pre-migration) fall back to current
+  /// ingredient cost with an "(approx.)" tag in the report UI.
+  unitCostPaisa         Decimal?          @db.Decimal(14, 4)
+  /// Direct FK to the PurchaseOrder for PURCHASE-type rows. Lets the
+  /// Stock Watcher report join supplier + PO# + receipt context
+  /// without parsing the legacy "PO XXXXXXXX" suffix in `notes`.
+  /// Null on every other movement type.
+  purchaseOrderId       String?
+  createdAt             DateTime          @default(now())
 
   // Relations
-  branch     Branch     @relation(fields: [branchId], references: [id])
-  ingredient Ingredient @relation(fields: [ingredientId], references: [id])
+  branch        Branch         @relation(fields: [branchId], references: [id])
+  ingredient    Ingredient     @relation(fields: [ingredientId], references: [id])
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
 
   @@index([branchId, createdAt])
-  @@index([ingredientId])
+  @@index([ingredientId, createdAt])
   @@map("stock_movements")
 }
 
@@ -1861,6 +1873,10 @@ model PurchaseOrder {
   items            PurchaseOrderItem[]
   supplierPayments SupplierPayment[]
   returns          PurchaseReturn[]
+  /// Back-relation for the per-PO list of stock movements
+  /// (PURCHASE-type rows on receive). Lets the Stock Watcher report
+  /// join supplier + PO context without parsing notes.
+  stockMovements   StockMovement[]
 
   @@index([branchId, status])
   @@map("purchase_orders")

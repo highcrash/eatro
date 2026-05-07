@@ -978,14 +978,15 @@ export class OrderService {
         if (recipe) {
           for (const ri of recipe.items) {
             const wasteQty = ri.quantity.toNumber() * item.quantity;
+            const ingCost = ri.ingredient.costPerUnit.toNumber();
             await this.prisma.wasteLog.create({
               data: { branchId, ingredientId: ri.ingredientId, quantity: wasteQty, reason: (dto.wasteReason ?? 'PREPARATION_ERROR') as any, notes: `Void waste: ${item.menuItemName} ×${item.quantity} — ${dto.reason}`, recordedById: dto.approverId },
             });
             await this.prisma.stockMovement.create({
-              data: { branchId, ingredientId: ri.ingredientId, type: 'WASTE', quantity: -wasteQty, notes: `Void waste: ${item.menuItemName} ×${item.quantity}`, staffId: dto.approverId },
+              data: { branchId, ingredientId: ri.ingredientId, type: 'WASTE', quantity: -wasteQty, notes: `Void waste: ${item.menuItemName} ×${item.quantity}`, staffId: dto.approverId, unitCostPaisa: ingCost, orderId },
             });
             await this.prisma.stockMovement.create({
-              data: { branchId, ingredientId: ri.ingredientId, type: 'VOID_RETURN', quantity: wasteQty, notes: `Void return: ${item.menuItemName} (logged as waste)`, staffId: dto.approverId },
+              data: { branchId, ingredientId: ri.ingredientId, type: 'VOID_RETURN', quantity: wasteQty, notes: `Void return: ${item.menuItemName} (logged as waste)`, staffId: dto.approverId, unitCostPaisa: ingCost, orderId },
             });
           }
         }
@@ -1014,6 +1015,7 @@ export class OrderService {
       if (recipe) {
         for (const ri of recipe.items) {
           const wasteQty = ri.quantity.toNumber() * item.quantity;
+          const ingCost = ri.ingredient.costPerUnit.toNumber();
           // Waste log for waste tracking
           await this.prisma.wasteLog.create({
             data: {
@@ -1034,6 +1036,8 @@ export class OrderService {
               quantity: -wasteQty,
               notes: `Void waste: ${item.menuItemName} ×${item.quantity} — ${dto.reason}`,
               staffId: dto.approverId,
+              unitCostPaisa: ingCost,
+              orderId,
             },
           });
           // Restore the SALE deduction then re-deduct as WASTE (net zero stock change, but movements are correct)
@@ -1048,6 +1052,8 @@ export class OrderService {
               quantity: wasteQty,
               notes: `Void return: ${item.menuItemName} ×${item.quantity} (logged as waste)`,
               staffId: dto.approverId,
+              unitCostPaisa: ingCost,
+              orderId,
             },
           });
         }
