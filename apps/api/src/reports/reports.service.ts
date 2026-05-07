@@ -1048,18 +1048,15 @@ export class ReportsService {
         ]
       : [ingredient.id];
 
-    // Family currentStock + cost (used for opening/closing valuation
-    // when no `unitCostPaisa` is stamped on a row). Parent's own row
-    // already aggregates currentStock via syncParentStock; for the
-    // single-variant case we use the row directly.
-    const familyCurrentStock = ingredient.hasVariants
-      ? await this.prisma.ingredient
-          .aggregate({
-            where: { id: { in: familyIds }, deletedAt: null },
-            _sum: { currentStock: true },
-          })
-          .then((r) => Number(r._sum.currentStock ?? 0))
-      : ingredient.currentStock.toNumber();
+    // Family currentStock — for parents that have variants, the
+    // parent's own `currentStock` column IS the running sum of its
+    // variants (kept in lockstep by `syncParentStock` after every
+    // variant write). Earlier this branch ALSO summed variant rows,
+    // which double-counted the family total because the parent's
+    // currentStock already aggregates them — closing-stock then
+    // displayed at exactly 2× the on-hand figure. Just read the
+    // parent's column directly.
+    const familyCurrentStock = ingredient.currentStock.toNumber();
 
     const currentCost = ingredient.costPerUnit.toNumber();
 
