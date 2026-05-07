@@ -31,6 +31,17 @@ function createWindow(): void {
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // Chromium's default `document-user-activation-required`
+      // autoplay policy blocks `audio.play()` until the user has
+      // interacted with the page. On a cashier terminal that just
+      // booted into the lock screen, the first incoming WebSocket
+      // notification fires BEFORE any click — the audio Promise
+      // rejects silently and the synth fallback's AudioContext is
+      // suspended for the same reason. Result: no notification
+      // sound until the cashier happens to click. Disable the
+      // gating entirely — this is a kiosk app, not a browser tab,
+      // so the auto-play protection doesn't apply.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
 
