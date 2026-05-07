@@ -441,7 +441,16 @@ export default function MenuPrintPage() {
           <div className="mp-empty">No menu items to display.</div>
         )}
 
-        {sections.map(({ category, items }) => (
+        {sections.map(({ category, items }, sectionIdx) => {
+          // Running serial that CONTINUES across categories. Section
+          // 0 starts at 1, Section 1 picks up after Section 0's last
+          // item, and so on. Compute the offset once per section
+          // from the lengths of the prior sections so the per-item
+          // serial below is just `serialOffset + idx + 1`.
+          const serialOffset = sections
+            .slice(0, sectionIdx)
+            .reduce((s, sec) => s + sec.items.length, 0);
+          return (
           // <table> + <thead> so the category title repeats at the
           // top of every printed page when this category spans more
           // than one page. The whole grid lives in a single <td> so
@@ -459,12 +468,14 @@ export default function MenuPrintPage() {
                 <td>
                   <div className="mp-grid">
                     {items.map((item, idx) => {
-                      // Per-category serial number — index in the
-                      // already-sorted (sortOrder asc) item list, +1
-                      // for human-friendly numbering. Resets to 1 in
-                      // each category. Admin pins items to the top
-                      // of a category by setting a low sortOrder.
-                      const serial = idx + 1;
+                      // Continuous serial — section offset (sum of
+                      // earlier categories' item counts) plus the
+                      // current per-category index, +1 for human-
+                      // friendly numbering. Items in Category B
+                      // pick up where Category A left off; admin
+                      // still controls in-category order via
+                      // MenuItem.sortOrder.
+                      const serial = serialOffset + idx + 1;
                 const hasVariants = item.isVariantParent && item.variants && item.variants.length > 0;
                 const parentAddonGroups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
                 // Per-variant fallback: when admin attached addons to
@@ -609,7 +620,8 @@ export default function MenuPrintPage() {
               </tr>
             </tbody>
           </table>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
