@@ -1166,8 +1166,18 @@ export class ReportsService {
     }
 
     let purchaseQty = 0, purchaseValue = 0;
-    let usageQty = 0, usageValue = 0;
+    // GROSS usage = sum of all SALE + OPERATIONAL_USE deductions.
+    // We track this separately from the headline "usage" figure
+    // because some of those rows were later voided and the stock
+    // was returned (VOID_RETURN). The NET usage that admins care
+    // about for variance review is gross usage minus returns —
+    // it answers "how much was actually consumed by customers".
+    let usageGrossQty = 0, usageGrossValue = 0;
+    let voidReturnQty = 0, voidReturnValue = 0;
     let wastageQty = 0, wastageValue = 0;
+    // ADJUSTMENT is a manual correction; VOID_RETURN is now bucketed
+    // separately above. Keep ADJUSTMENT-only here so the audit
+    // picture stays clean.
     let adjustmentQty = 0, adjustmentValue = 0;
 
     const days = Array.from(byDate.entries())
@@ -1211,8 +1221,8 @@ export class ReportsService {
             });
           } else if (m.type === 'SALE' || m.type === 'OPERATIONAL_USE') {
             const absQty = Math.abs(qty);
-            usageQty += absQty;
-            usageValue += totalPaisa;
+            usageGrossQty += absQty;
+            usageGrossValue += totalPaisa;
             sales.push({
               time,
               type: m.type,
@@ -1243,9 +1253,31 @@ export class ReportsService {
               isApprox: cost.isApprox,
               variantName: isVariantRow ? variantName : null,
             });
+          } else if (m.type === 'VOID_RETURN') {
+            // VOID_RETURN puts qty back on the shelf — qty is positive.
+            // Track separately so the headline Usage tile can subtract
+            // returns and show the net "actually consumed" figure.
+            // The row still appears in the per-day "Other" table for
+            // audit visibility.
+            voidReturnQty += qty;
+            voidReturnValue += totalPaisa;
+            other.push({
+              time,
+              type: m.type,
+              signedQuantity: qty,
+              notes: m.notes,
+              orderNumber: orderRef,
+              staffName: m.staffId ? staffById.get(m.staffId)?.name ?? null : null,
+              unitCostPaisa: cost.value,
+              totalPaisa,
+              isApprox: cost.isApprox,
+              variantName: isVariantRow ? variantName : null,
+            });
           } else {
-            // ADJUSTMENT, VOID_RETURN — bucket as "other" so the user
-            // sees them but they don't muddy the headline tiles.
+            // ADJUSTMENT — manual stock correction. Surfaced under the
+            // Other section so admins see the audit trail; doesn't
+            // affect the headline tiles since these are corrections,
+            // not consumption.
             adjustmentQty += qty;
             adjustmentValue += qty >= 0 ? totalPaisa : -totalPaisa;
             other.push({
@@ -1286,8 +1318,17 @@ export class ReportsService {
         openingStockValuePaisa,
         purchaseQty,
         purchaseValuePaisa: purchaseValue,
-        usageQty,
-        usageValuePaisa: usageValue,
+        // `usageQty` is the NET figure — gross consumption MINUS
+        // void returns (because VOID_RETURN put that qty back on
+        // the shelf, so it wasn't actually consumed). Gross + the
+        // void-return breakdown are also exposed so the UI can
+        // show "Net X (gross Y, returns Z)" when returns happened.
+        usageQty: usageGrossQty - voidReturnQty,
+        usageValuePaisa: usageGrossValue - voidReturnValue,
+        usageGrossQty,
+        usageGrossValuePaisa: usageGrossValue,
+        voidReturnQty,
+        voidReturnValuePaisa: voidReturnValue,
         wastageQty,
         wastageValuePaisa: wastageValue,
         adjustmentQty,

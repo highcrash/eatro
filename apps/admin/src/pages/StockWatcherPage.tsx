@@ -109,8 +109,17 @@ interface StockWatcherResponse {
     openingStockValuePaisa: number;
     purchaseQty: number;
     purchaseValuePaisa: number;
+    /** Net usage = gross sales/operational deductions minus void
+     *  returns. This is the "actually consumed" figure. */
     usageQty: number;
     usageValuePaisa: number;
+    /** Gross usage figure before subtracting void returns. */
+    usageGrossQty: number;
+    usageGrossValuePaisa: number;
+    /** Stock returned to shelf when an order was voided. Always
+     *  positive; subtracted from gross usage to compute net. */
+    voidReturnQty: number;
+    voidReturnValuePaisa: number;
     wastageQty: number;
     wastageValuePaisa: number;
     adjustmentQty: number;
@@ -374,10 +383,15 @@ export default function StockWatcherPage() {
               accent="#4CAF50"
             />
             <Tile
-              label="Total Usage"
+              label="Net Usage"
               qty={fmtQty(data.summary.usageQty, data.ingredient.unit)}
               value={data.summary.usageValuePaisa}
               accent="#FFA726"
+              footer={
+                data.summary.voidReturnQty > 0
+                  ? `Gross ${fmtQty(data.summary.usageGrossQty, data.ingredient.unit)} − Returns ${fmtQty(data.summary.voidReturnQty, data.ingredient.unit)}`
+                  : undefined
+              }
             />
             <Tile
               label="Total Wastage"
@@ -393,10 +407,20 @@ export default function StockWatcherPage() {
               footer={`Opening ${fmtQty(data.summary.openingStockQty, data.ingredient.unit)} (${formatCurrency(data.summary.openingStockValuePaisa)})`}
             />
           </div>
-          {data.summary.adjustmentQty !== 0 && (
+          {(data.summary.adjustmentQty !== 0 || data.summary.voidReturnQty > 0) && (
             <p className="text-[11px] text-[#888]">
-              Net adjustments / void returns: {fmtQty(data.summary.adjustmentQty, data.ingredient.unit)} (
-              {formatCurrency(data.summary.adjustmentValuePaisa)})
+              {data.summary.voidReturnQty > 0 && (
+                <>
+                  Void returns to shelf: +{fmtQty(data.summary.voidReturnQty, data.ingredient.unit)} ({formatCurrency(data.summary.voidReturnValuePaisa)})
+                </>
+              )}
+              {data.summary.voidReturnQty > 0 && data.summary.adjustmentQty !== 0 && <span> · </span>}
+              {data.summary.adjustmentQty !== 0 && (
+                <>
+                  Manual adjustments: {data.summary.adjustmentQty >= 0 ? '+' : ''}
+                  {fmtQty(data.summary.adjustmentQty, data.ingredient.unit)} ({formatCurrency(data.summary.adjustmentValuePaisa)})
+                </>
+              )}
             </p>
           )}
 
