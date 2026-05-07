@@ -398,16 +398,16 @@ export default function StockWatcherPage() {
           </div>
 
           {/* ── Summary tiles ─────────────────────────────── */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <Tile
               label="Total Purchases"
-              qty={fmtQty(data.summary.purchaseQty, data.ingredient.unit)}
+              qty={`+${fmtQty(data.summary.purchaseQty, data.ingredient.unit)}`}
               value={data.summary.purchaseValuePaisa}
               accent="#4CAF50"
             />
             <Tile
               label="Net Usage"
-              qty={fmtQty(data.summary.usageQty, data.ingredient.unit)}
+              qty={`−${fmtQty(data.summary.usageQty, data.ingredient.unit)}`}
               value={data.summary.usageValuePaisa}
               accent="#FFA726"
               footer={
@@ -418,9 +418,20 @@ export default function StockWatcherPage() {
             />
             <Tile
               label="Total Wastage"
-              qty={fmtQty(data.summary.wastageQty, data.ingredient.unit)}
+              qty={`−${fmtQty(data.summary.wastageQty, data.ingredient.unit)}`}
               value={data.summary.wastageValuePaisa}
               accent="#D62B2B"
+            />
+            <Tile
+              label="Adjustments"
+              qty={`${data.summary.adjustmentQty >= 0 ? '+' : '−'}${fmtQty(Math.abs(data.summary.adjustmentQty), data.ingredient.unit)}`}
+              value={data.summary.adjustmentValuePaisa}
+              accent="#9E9E9E"
+              footer={
+                data.summary.adjustmentQty === 0
+                  ? '(no manual corrections)'
+                  : `Manual stock corrections${data.summary.adjustmentQty < 0 ? ' (decrease)' : ' (increase)'}`
+              }
             />
             <Tile
               label="Closing Stock"
@@ -430,20 +441,41 @@ export default function StockWatcherPage() {
               footer={`Opening ${fmtQty(data.summary.openingStockQty, data.ingredient.unit)} (${formatCurrency(data.summary.openingStockValuePaisa)})`}
             />
           </div>
-          {(data.summary.adjustmentQty !== 0 || data.summary.voidReturnQty > 0) && (
+
+          {/* ── Reconciliation strip ───────────────────────
+              Quick visual check that the numbers tie up to
+              closing stock. Equation is:
+                Opening + Purchases − Usage − Wastage ± Adjustments = Closing
+              The ✓ appears when the math closes inside a tiny
+              floating-point tolerance — useful as a smoke test
+              that no movement type is double-counted (or missed).
+              Subtitle below carries the void-returns detail when
+              applicable so admins can audit the Net Usage figure. */}
+          {(() => {
+            const s = data.summary;
+            const expected = s.openingStockQty + s.purchaseQty - s.usageQty - s.wastageQty + s.adjustmentQty;
+            const balances = Math.abs(expected - s.closingStockQty) < 0.01;
+            const u = data.ingredient.unit;
+            return (
+              <div className="bg-[#161616] border border-[#2a2a2a] px-4 py-3 text-[11px] text-[#ccc] flex items-center gap-2 flex-wrap">
+                <span className="text-[#888] uppercase tracking-widest text-[10px]">Reconciliation:</span>
+                <span>Opening <b className="text-white">{fmtQty(s.openingStockQty, u)}</b></span>
+                <span className="text-[#4CAF50]">+ Purchases <b>{fmtQty(s.purchaseQty, u)}</b></span>
+                <span className="text-[#FFA726]">− Usage <b>{fmtQty(s.usageQty, u)}</b></span>
+                <span className="text-[#D62B2B]">− Wastage <b>{fmtQty(s.wastageQty, u)}</b></span>
+                <span className="text-[#9E9E9E]">{s.adjustmentQty >= 0 ? '+' : '−'} Adjustments <b>{fmtQty(Math.abs(s.adjustmentQty), u)}</b></span>
+                <span className="text-[#888]">=</span>
+                <span>Closing <b className="text-white">{fmtQty(s.closingStockQty, u)}</b></span>
+                <span className={balances ? 'text-[#4CAF50]' : 'text-[#D62B2B]'} title={balances ? 'Math balances' : `Discrepancy of ${fmtQty(s.closingStockQty - expected, u)}`}>
+                  {balances ? '✓' : '⚠'}
+                </span>
+              </div>
+            );
+          })()}
+
+          {data.summary.voidReturnQty > 0 && (
             <p className="text-[11px] text-[#888]">
-              {data.summary.voidReturnQty > 0 && (
-                <>
-                  Void returns to shelf: +{fmtQty(data.summary.voidReturnQty, data.ingredient.unit)} ({formatCurrency(data.summary.voidReturnValuePaisa)})
-                </>
-              )}
-              {data.summary.voidReturnQty > 0 && data.summary.adjustmentQty !== 0 && <span> · </span>}
-              {data.summary.adjustmentQty !== 0 && (
-                <>
-                  Manual adjustments: {data.summary.adjustmentQty >= 0 ? '+' : ''}
-                  {fmtQty(data.summary.adjustmentQty, data.ingredient.unit)} ({formatCurrency(data.summary.adjustmentValuePaisa)})
-                </>
-              )}
+              Note: Net Usage already nets out the {fmtQty(data.summary.voidReturnQty, data.ingredient.unit)} ({formatCurrency(data.summary.voidReturnValuePaisa)}) of stock returned to the shelf when orders were voided — see the per-day "Other" tables below for the audit trail.
             </p>
           )}
 
