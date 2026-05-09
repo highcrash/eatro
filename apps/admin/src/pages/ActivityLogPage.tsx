@@ -347,18 +347,31 @@ function HistoryRow({ row }: { row: ActivityLogRow }) {
             <thead>
               <tr className="text-[10px] tracking-widest uppercase text-[#555]">
                 <th className="text-left py-1 font-medium">Field</th>
-                <th className="text-left py-1 font-medium">Before</th>
-                <th className="text-left py-1 font-medium">After</th>
+                <th className="text-left py-1 font-medium" colSpan={2}>Change</th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((e) => (
-                <tr key={e.field} className="border-t border-[#1A1A1A]">
-                  <td className="py-1.5 text-[#DDD9D3] font-medium">{e.field}</td>
-                  <td className="py-1.5 text-[#D62B2B] line-through">{renderValue(e.before)}</td>
-                  <td className="py-1.5 text-[#4CAF50]">{renderValue(e.after)}</td>
-                </tr>
-              ))}
+              {entries.map((e) => {
+                const itemsDiff = tryRenderItemsDiff(e.before, e.after);
+                if (itemsDiff) {
+                  // Recipe-style items array — full-width per-
+                  // ingredient diff that's actually readable.
+                  return (
+                    <tr key={e.field} className="border-t border-[#1A1A1A]">
+                      <td className="py-1.5 text-[#DDD9D3] font-medium align-top">{e.field}</td>
+                      <td className="py-1.5" colSpan={2}>{itemsDiff}</td>
+                    </tr>
+                  );
+                }
+                // Fallback: scalar before/after side-by-side.
+                return (
+                  <tr key={e.field} className="border-t border-[#1A1A1A]">
+                    <td className="py-1.5 text-[#DDD9D3] font-medium">{e.field}</td>
+                    <td className="py-1.5 text-[#D62B2B] line-through pr-3">{renderValue(e.before)}</td>
+                    <td className="py-1.5 text-[#4CAF50]">{renderValue(e.after)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         ) : snapshot ? (
@@ -382,4 +395,82 @@ function renderValue(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+/** Recipe-item shape both `RecipeController.snapshotRecipe` and
+ *  `PreReadyController.snapshotPreReadyRecipe` produce. Detected
+ *  here so the activity log diff renders as readable per-ingredient
+ *  add / remove / change lines instead of a raw JSON blob with
+ *  cuids. */
+interface RecipeItemSnap {
+  ingredientId: string;
+  ingredientName: string;
+  quantity: number;
+  unit: string;
+}
+
+function isRecipeItemArray(v: unknown): v is RecipeItemSnap[] {
+  if (!Array.isArray(v)) return false;
+  if (v.length === 0) return true; // empty array still classifies — supports CREATE / DELETE
+  const first = v[0] as Record<string, unknown> | null;
+  return !!first && typeof first === 'object' && 'ingredientName' in first && 'quantity' in first;
+}
+
+function fmtRecipeQty(qty: number, unit: string): string {
+  // Trim trailing zeros so "150.0000" reads as "150".
+  const rounded = Math.round(qty * 10000) / 10000;
+  return `${rounded} ${unit}`;
+}
+
+/** Render a recipe-items diff as three colour-coded sections:
+ *  added (green +), removed (red −), changed (amber ↑/↓ with old →
+ *  new). Returns null when the inputs aren't recipe-item arrays so
+ *  the caller can fall back to the generic stringifier. */
+function tryRenderItemsDiff(before: unknown, after: unknown): JSX.Element | null {
+  if (!isRecipeItemArray(before) && !isRecipeItemArray(after)) return null;
+  const beforeArr = isRecipeItemArray(before) ? before : [];
+  const afterArr = isRecipeItemArray(after) ? after : [];
+  const byNameBefore = new Map(beforeArr.map((it) => [it.ingredientName.toLowerCase(), it] as const));
+  const byNameAfter = new Map(afterArr.map((it) => [it.ingredientName.toLowerCase(), it] as const));
+
+  const added: RecipeItemSnap[] = [];
+  const removed: RecipeItemSnap[] = [];
+  const changed: Array<{ name: string; from: RecipeItemSnap; to: RecipeItemSnap }> = [];
+  for (const [key, b] of byNameBefore) {
+    const a = byNameAfter.get(key);
+    if (!a) {
+      removed.push(b);
+    } else if (Math.abs(a.quantity - b.quantity) > 0.0001 || a.unit !== b.unit) {
+      changed.push({ name: a.ingredientName, from: b, to: a });
+    }
+  }
+  for (const [key, a] of byNameAfter) {
+    if (!byNameBefore.has(key)) added.push(a);
+  }
+
+  if (added.length === 0 && removed.length === 0 && changed.length === 0) {
+    return <span className="text-[#666] italic text-[11px]">No ingredient changes (notes / order only).</span>;
+  }
+
+  return (
+    <div className="space-y-0.5 text-[11px] font-body leading-snug">
+      {added.map((a) => (
+        <div key={`a-${a.ingredientId}`} className="text-[#4CAF50]">
+          + {a.ingredientName}: {fmtRecipeQty(a.quantity, a.unit)}
+        </div>
+      ))}
+      {changed.map((c) => (
+        <div key={`c-${c.from.ingredientId}`} className="text-[#FFA726]">
+          {c.name}: {fmtRecipeQty(c.from.quantity, c.from.unit)}
+          <span className="text-[#888] mx-1">→</span>
+          {fmtRecipeQty(c.to.quantity, c.to.unit)}
+        </div>
+      ))}
+      {removed.map((r) => (
+        <div key={`r-${r.ingredientId}`} className="text-[#D62B2B]">
+          − {r.ingredientName}: {fmtRecipeQty(r.quantity, r.unit)}
+        </div>
+      ))}
+    </div>
+  );
 }

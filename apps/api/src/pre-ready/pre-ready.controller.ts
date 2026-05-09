@@ -15,6 +15,38 @@ export class PreReadyController {
     private readonly activityLog: ActivityLogService,
   ) {}
 
+  /** Denormalise a PreReadyRecipe row into a small audit-friendly
+   *  snapshot — mirrors the shape `RecipeController.snapshotRecipe`
+   *  produces for menu recipes. The activity log diff renderer
+   *  detects arrays of `{ ingredientName, quantity, unit }` objects
+   *  and pretty-prints them as per-ingredient adds / removes / qty
+   *  changes; without this denormalisation the UI fell back to
+   *  `JSON.stringify` and showed raw cuids + `recipeId` keys. */
+  private snapshotPreReadyRecipe(recipe: {
+    notes?: string | null;
+    yieldQuantity?: { toNumber(): number } | number | null;
+    yieldUnit?: string | null;
+    items: Array<{
+      quantity: { toNumber(): number } | number;
+      unit: string;
+      ingredient: { id: string; name: string };
+    }>;
+  } | null): { notes: string | null; yieldQuantity: number | null; yieldUnit: string | null; items: Array<{ ingredientId: string; ingredientName: string; quantity: number; unit: string }> } | null {
+    if (!recipe) return null;
+    const yq = recipe.yieldQuantity;
+    return {
+      notes: recipe.notes ?? null,
+      yieldQuantity: yq == null ? null : (typeof yq === 'number' ? yq : yq.toNumber()),
+      yieldUnit: recipe.yieldUnit ?? null,
+      items: recipe.items.map((it) => ({
+        ingredientId: it.ingredient.id,
+        ingredientName: it.ingredient.name,
+        quantity: typeof it.quantity === 'number' ? it.quantity : it.quantity.toNumber(),
+        unit: it.unit,
+      })),
+    };
+  }
+
   // Items
   @Get('items')
   @Roles('OWNER', 'MANAGER', 'KITCHEN', 'CASHIER', 'ADVISOR')
@@ -124,14 +156,19 @@ export class PreReadyController {
     // Capture the prior recipe so the activity log carries a real
     // before/after diff (the headline use-case is "who added that
     // missing 200ml of garlic to the Curry Sauce recipe last night?").
+    // Both snapshots run through `snapshotPreReadyRecipe` to strip
+    // Prisma internal ids + freeze ingredient names, so the UI's
+    // diff renderer reads "Garlic 200 G → 250 G" instead of a raw
+    // JSON blob with `id`/`recipeId` cuids.
     const beforeItem = await this.preReadyService.findOneItem(id, user.branchId).catch(() => null);
-    const before = (beforeItem as any)?.recipe ?? null;
+    const before = this.snapshotPreReadyRecipe((beforeItem as any)?.recipe ?? null);
     const updated = await this.preReadyService.upsertRecipe(id, user.branchId, dto);
+    const after = this.snapshotPreReadyRecipe(updated as any);
     void this.activityLog.log({
       branchId: user.branchId, actor: user, category: 'PRE_READY', action: 'UPDATE',
       entityType: 'preReadyRecipe', entityId: id,
       entityName: (beforeItem as any)?.name ?? `pre-ready ${id}`,
-      before: before as any, after: updated as any,
+      before: before as any, after: after as any,
       summary: `Updated pre-ready recipe (${(dto as any)?.items?.length ?? 0} ingredient lines, yield ${(dto as any)?.yieldQuantity ?? '?'} ${(dto as any)?.yieldUnit ?? ''})`,
     });
     return updated;
