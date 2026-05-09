@@ -319,12 +319,16 @@ function HistoryRow({ row }: { row: ActivityLogRow }) {
   const diff = row.diff;
   let entries: Array<{ field: string; before: unknown; after: unknown }> = [];
   let snapshot: Record<string, unknown> | null = null;
+  let snapshotKind: 'created' | 'deleted' | null = null;
   if (diff && typeof diff === 'object') {
-    if ('__after' in diff || '__before' in diff) {
-      snapshot = ((diff as Record<string, unknown>).__after ?? (diff as Record<string, unknown>).__before) as Record<string, unknown>;
+    const d = diff as Record<string, unknown>;
+    if ('__after' in d || '__before' in d) {
+      snapshot = (d.__after ?? d.__before) as Record<string, unknown>;
+      snapshotKind = '__after' in d ? 'created' : 'deleted';
     } else {
       entries = Object.entries(diff as Record<string, { before: unknown; after: unknown }>)
-        .map(([field, v]) => ({ field, before: v.before, after: v.after }));
+        .map(([field, v]) => ({ field, before: v.before, after: v.after }))
+        .filter((e) => !isNoiseField(e.field));
     }
   }
 
@@ -346,36 +350,43 @@ function HistoryRow({ row }: { row: ActivityLogRow }) {
           <table className="w-full text-xs font-body">
             <thead>
               <tr className="text-[10px] tracking-widest uppercase text-[#555]">
-                <th className="text-left py-1 font-medium">Field</th>
+                <th className="text-left py-1 font-medium w-1/4">Field</th>
                 <th className="text-left py-1 font-medium" colSpan={2}>Change</th>
               </tr>
             </thead>
             <tbody>
               {entries.map((e) => {
-                const itemsDiff = tryRenderItemsDiff(e.before, e.after);
+                const itemsDiff = tryRenderNamedArrayDiff(e.before, e.after);
                 if (itemsDiff) {
-                  // Recipe-style items array — full-width per-
-                  // ingredient diff that's actually readable.
                   return (
                     <tr key={e.field} className="border-t border-[#1A1A1A]">
-                      <td className="py-1.5 text-[#DDD9D3] font-medium align-top">{e.field}</td>
+                      <td className="py-1.5 text-[#DDD9D3] font-medium align-top">{humanizeField(e.field)}</td>
                       <td className="py-1.5" colSpan={2}>{itemsDiff}</td>
                     </tr>
                   );
                 }
-                // Fallback: scalar before/after side-by-side.
+                if (isPlainObject(e.before) || isPlainObject(e.after)) {
+                  return (
+                    <tr key={e.field} className="border-t border-[#1A1A1A]">
+                      <td className="py-1.5 text-[#DDD9D3] font-medium align-top">{humanizeField(e.field)}</td>
+                      <td className="py-1.5" colSpan={2}>
+                        {renderObjectChange(e.before, e.after)}
+                      </td>
+                    </tr>
+                  );
+                }
                 return (
                   <tr key={e.field} className="border-t border-[#1A1A1A]">
-                    <td className="py-1.5 text-[#DDD9D3] font-medium">{e.field}</td>
-                    <td className="py-1.5 text-[#D62B2B] line-through pr-3">{renderValue(e.before)}</td>
-                    <td className="py-1.5 text-[#4CAF50]">{renderValue(e.after)}</td>
+                    <td className="py-1.5 text-[#DDD9D3] font-medium align-top">{humanizeField(e.field)}</td>
+                    <td className="py-1.5 text-[#D62B2B] line-through pr-3 align-top">{renderScalar(e.before, e.field)}</td>
+                    <td className="py-1.5 text-[#4CAF50] align-top">{renderScalar(e.after, e.field)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         ) : snapshot ? (
-          <pre className="text-[10px] text-[#999] overflow-auto whitespace-pre-wrap">{JSON.stringify(snapshot, null, 2)}</pre>
+          renderSnapshot(snapshot, snapshotKind)
         ) : (
           <p className="text-[10px] text-[#666] italic">No diff captured.</p>
         )}
@@ -384,93 +395,333 @@ function HistoryRow({ row }: { row: ActivityLogRow }) {
   );
 }
 
-function renderValue(v: unknown): string {
-  if (v == null) return '∅';
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'string') return v.length > 80 ? `${v.slice(0, 80)}…` : v;
-  try {
-    const s = JSON.stringify(v);
-    return s.length > 80 ? `${s.slice(0, 80)}…` : s;
-  } catch {
-    return String(v);
-  }
+// ── Field-name helpers ──────────────────────────────────────────────
+
+/** Drop fields that are pure noise in an audit context: row id,
+ *  branch scoping, who-recorded-this, timestamps the activity-log
+ *  itself already shows. */
+function isNoiseField(field: string): boolean {
+  const f = field.toLowerCase();
+  return (
+    f === 'id' ||
+    f === 'branchid' ||
+    f === 'createdat' ||
+    f === 'updatedat' ||
+    f === 'deletedat'
+  );
 }
 
-/** Recipe-item shape both `RecipeController.snapshotRecipe` and
- *  `PreReadyController.snapshotPreReadyRecipe` produce. Detected
- *  here so the activity log diff renders as readable per-ingredient
- *  add / remove / change lines instead of a raw JSON blob with
- *  cuids. */
-interface RecipeItemSnap {
-  ingredientId: string;
-  ingredientName: string;
-  quantity: number;
-  unit: string;
+/** "costPerUnit" -> "Cost Per Unit", "menuItemId" -> "Menu Item ID",
+ *  "tax_amount" -> "Tax Amount". Display only; the underlying field
+ *  name is preserved on the row data. */
+function humanizeField(field: string): string {
+  const spaced = field
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\bId\b/g, 'ID');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-function isRecipeItemArray(v: unknown): v is RecipeItemSnap[] {
-  if (!Array.isArray(v)) return false;
-  if (v.length === 0) return true; // empty array still classifies — supports CREATE / DELETE
-  const first = v[0] as Record<string, unknown> | null;
-  return !!first && typeof first === 'object' && 'ingredientName' in first && 'quantity' in first;
+// ── Value detection ──────────────────────────────────────────────────
+
+const CUID_RE = /^c[a-z0-9]{24,}$/;
+
+function isCuid(v: unknown): boolean {
+  return typeof v === 'string' && CUID_RE.test(v);
 }
 
-function fmtRecipeQty(qty: number, unit: string): string {
+function isISODateString(v: unknown): boolean {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v);
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Money fields are stamped as paisa (1/100 of a taka). The renderer
+ *  spots them by suffix so the audit log shows "৳12.50" instead of
+ *  "1250". */
+function isPaisaField(field: string): boolean {
+  return /paisa$/i.test(field);
+}
+
+/** Display-known-quantity fields end in Cents (legacy) or Amount
+ *  (already stored in major units). Both render with the currency
+ *  prefix for instant readability. */
+function isCurrencyField(field: string): boolean {
+  return /amount$|cents$/i.test(field);
+}
+
+function fmtPaisa(n: number): string {
+  return `৳${(n / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtAmount(n: number): string {
+  return `৳${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtNum(n: number): string {
   // Trim trailing zeros so "150.0000" reads as "150".
-  const rounded = Math.round(qty * 10000) / 10000;
-  return `${rounded} ${unit}`;
+  return String(Math.round(n * 10000) / 10000);
 }
 
-/** Render a recipe-items diff as three colour-coded sections:
- *  added (green +), removed (red −), changed (amber ↑/↓ with old →
- *  new). Returns null when the inputs aren't recipe-item arrays so
- *  the caller can fall back to the generic stringifier. */
-function tryRenderItemsDiff(before: unknown, after: unknown): JSX.Element | null {
-  if (!isRecipeItemArray(before) && !isRecipeItemArray(after)) return null;
-  const beforeArr = isRecipeItemArray(before) ? before : [];
-  const afterArr = isRecipeItemArray(after) ? after : [];
-  const byNameBefore = new Map(beforeArr.map((it) => [it.ingredientName.toLowerCase(), it] as const));
-  const byNameAfter = new Map(afterArr.map((it) => [it.ingredientName.toLowerCase(), it] as const));
+function fmtIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
 
-  const added: RecipeItemSnap[] = [];
-  const removed: RecipeItemSnap[] = [];
-  const changed: Array<{ name: string; from: RecipeItemSnap; to: RecipeItemSnap }> = [];
-  for (const [key, b] of byNameBefore) {
-    const a = byNameAfter.get(key);
+/** Best-effort short label for a nested ref: prefer name/title fields,
+ *  else first non-id string. Returns null when nothing usable. */
+function refLabel(obj: Record<string, unknown>): string | null {
+  for (const k of ['name', 'title', 'menuItemName', 'ingredientName', 'displayName', 'orderNumber']) {
+    const v = obj[k];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return null;
+}
+
+// ── Scalar / object renderers ───────────────────────────────────────
+
+function renderScalar(v: unknown, field?: string): string {
+  if (v == null) return '∅';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'number') {
+    if (field && isPaisaField(field)) return fmtPaisa(v);
+    if (field && isCurrencyField(field)) return fmtAmount(v);
+    return fmtNum(v);
+  }
+  if (typeof v === 'string') {
+    if (isCuid(v)) return '—';
+    if (isISODateString(v)) return fmtIso(v);
+    return v.length > 120 ? `${v.slice(0, 120)}…` : v;
+  }
+  if (Array.isArray(v)) return `${v.length} item${v.length === 1 ? '' : 's'}`;
+  if (isPlainObject(v)) {
+    const label = refLabel(v);
+    if (label) return label;
+    try { return JSON.stringify(v).slice(0, 120); } catch { return '[object]'; }
+  }
+  return String(v);
+}
+
+/** Render a nested-object change (or one-sided create/delete of the
+ *  nested ref). Falls back to per-field key/value lines when both
+ *  sides are objects. */
+function renderObjectChange(before: unknown, after: unknown): JSX.Element {
+  // One-sided: the whole nested ref appeared / disappeared.
+  if (!isPlainObject(before) || !isPlainObject(after)) {
+    return (
+      <div className="flex gap-2 text-[11px] leading-snug">
+        <span className="text-[#D62B2B] line-through">{renderScalar(before)}</span>
+        <span className="text-[#888]">→</span>
+        <span className="text-[#4CAF50]">{renderScalar(after)}</span>
+      </div>
+    );
+  }
+  // Both sides are objects: show a per-field mini-diff for the
+  // changed sub-fields only.
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const rows: JSX.Element[] = [];
+  for (const k of keys) {
+    if (isNoiseField(k)) continue;
+    const b = (before as Record<string, unknown>)[k];
+    const a = (after as Record<string, unknown>)[k];
+    if (jsonEqual(b, a)) continue;
+    rows.push(
+      <div key={k} className="flex gap-2 text-[11px] leading-snug">
+        <span className="text-[#888] w-32 shrink-0">{humanizeField(k)}</span>
+        <span className="text-[#D62B2B] line-through">{renderScalar(b, k)}</span>
+        <span className="text-[#888]">→</span>
+        <span className="text-[#4CAF50]">{renderScalar(a, k)}</span>
+      </div>
+    );
+  }
+  if (rows.length === 0) {
+    return <span className="text-[#666] italic text-[11px]">No visible change.</span>;
+  }
+  return <div className="space-y-0.5">{rows}</div>;
+}
+
+function jsonEqual(a: unknown, b: unknown): boolean {
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+}
+
+// ── Snapshot renderer (CREATE / DELETE) ─────────────────────────────
+
+/** Replace the JSON-blob fallback for CREATE/DELETE rows with a flat
+ *  field list rendered the same way as UPDATE rows — humanized field
+ *  names, money formatting, cuid hiding. Nested arrays of named
+ *  objects (eg recipe items) get the same colour-coded diff treatment
+ *  against an empty counterpart so the snapshot lists "+ X, + Y" for
+ *  create and "− X, − Y" for delete. */
+function renderSnapshot(snap: Record<string, unknown>, kind: 'created' | 'deleted' | null): JSX.Element {
+  const entries = Object.entries(snap).filter(([k]) => !isNoiseField(k));
+  if (entries.length === 0) {
+    return <p className="text-[10px] text-[#666] italic">Empty snapshot.</p>;
+  }
+  const tone = kind === 'deleted' ? 'text-[#D62B2B]' : 'text-[#4CAF50]';
+  return (
+    <table className="w-full text-xs font-body">
+      <tbody>
+        {entries.map(([k, v]) => {
+          // Recipe-items style array? Render as colour-coded list.
+          if (isNamedArray(v)) {
+            const empty: Record<string, unknown>[] = [];
+            const diff = kind === 'deleted'
+              ? tryRenderNamedArrayDiff(v, empty)
+              : tryRenderNamedArrayDiff(empty, v);
+            return (
+              <tr key={k} className="border-t border-[#1A1A1A]">
+                <td className="py-1.5 text-[#DDD9D3] font-medium align-top w-1/4">{humanizeField(k)}</td>
+                <td className="py-1.5">{diff}</td>
+              </tr>
+            );
+          }
+          // Nested object — show one-line ref label or a mini key-value list.
+          if (isPlainObject(v)) {
+            const label = refLabel(v);
+            return (
+              <tr key={k} className="border-t border-[#1A1A1A]">
+                <td className="py-1.5 text-[#DDD9D3] font-medium align-top w-1/4">{humanizeField(k)}</td>
+                <td className={`py-1.5 ${tone}`}>{label ?? renderInlineObject(v)}</td>
+              </tr>
+            );
+          }
+          return (
+            <tr key={k} className="border-t border-[#1A1A1A]">
+              <td className="py-1.5 text-[#DDD9D3] font-medium align-top w-1/4">{humanizeField(k)}</td>
+              <td className={`py-1.5 ${tone}`}>{renderScalar(v, k)}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function renderInlineObject(obj: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (isNoiseField(k) || isCuid(v)) continue;
+    parts.push(`${humanizeField(k)}: ${renderScalar(v, k)}`);
+    if (parts.length >= 4) { parts.push('…'); break; }
+  }
+  return parts.join(', ') || '∅';
+}
+
+// ── Named-array diff (generalized recipe renderer) ──────────────────
+
+/** Detect arrays whose items expose a stable display name. Covers
+ *  recipe items (`ingredientName`), PO lines + variants (`name` /
+ *  `menuItemName`), discount tiers, etc. — anything where matching
+ *  by display name gives a meaningful add/remove/change view. */
+function isNamedArray(v: unknown): v is Array<Record<string, unknown>> {
+  if (!Array.isArray(v)) return false;
+  if (v.length === 0) return true; // empty still classifies — supports CREATE/DELETE
+  const first = v[0];
+  if (!isPlainObject(first)) return false;
+  return typeof refLabel(first) === 'string';
+}
+
+/** Render an array-of-objects diff as colour-coded add/remove/change
+ *  lines, matching items by display name. Generalises the recipe-
+ *  items renderer to any "list of named things" — PO items, variants,
+ *  modifier groups, etc. */
+function tryRenderNamedArrayDiff(before: unknown, after: unknown): JSX.Element | null {
+  if (!isNamedArray(before) && !isNamedArray(after)) return null;
+  const beforeArr = isNamedArray(before) ? before : [];
+  const afterArr = isNamedArray(after) ? after : [];
+
+  const keyOf = (it: Record<string, unknown>) => (refLabel(it) ?? '').toLowerCase();
+  const byKeyBefore = new Map<string, Record<string, unknown>>();
+  for (const it of beforeArr) byKeyBefore.set(keyOf(it), it);
+  const byKeyAfter = new Map<string, Record<string, unknown>>();
+  for (const it of afterArr) byKeyAfter.set(keyOf(it), it);
+
+  const added: Record<string, unknown>[] = [];
+  const removed: Record<string, unknown>[] = [];
+  const changed: Array<{ name: string; from: Record<string, unknown>; to: Record<string, unknown> }> = [];
+
+  for (const [key, b] of byKeyBefore) {
+    const a = byKeyAfter.get(key);
     if (!a) {
       removed.push(b);
-    } else if (Math.abs(a.quantity - b.quantity) > 0.0001 || a.unit !== b.unit) {
-      changed.push({ name: a.ingredientName, from: b, to: a });
+    } else if (!jsonEqual(stripIds(a), stripIds(b))) {
+      changed.push({ name: refLabel(a) ?? key, from: b, to: a });
     }
   }
-  for (const [key, a] of byNameAfter) {
-    if (!byNameBefore.has(key)) added.push(a);
+  for (const [key, a] of byKeyAfter) {
+    if (!byKeyBefore.has(key)) added.push(a);
   }
 
   if (added.length === 0 && removed.length === 0 && changed.length === 0) {
-    return <span className="text-[#666] italic text-[11px]">No ingredient changes (notes / order only).</span>;
+    return <span className="text-[#666] italic text-[11px]">No visible changes (notes / order only).</span>;
   }
 
   return (
     <div className="space-y-0.5 text-[11px] font-body leading-snug">
-      {added.map((a) => (
-        <div key={`a-${a.ingredientId}`} className="text-[#4CAF50]">
-          + {a.ingredientName}: {fmtRecipeQty(a.quantity, a.unit)}
+      {added.map((a, i) => (
+        <div key={`a-${i}`} className="text-[#4CAF50]">
+          + {refLabel(a)}: {summarizeRowFields(a)}
         </div>
       ))}
-      {changed.map((c) => (
-        <div key={`c-${c.from.ingredientId}`} className="text-[#FFA726]">
-          {c.name}: {fmtRecipeQty(c.from.quantity, c.from.unit)}
+      {changed.map((c, i) => (
+        <div key={`c-${i}`} className="text-[#FFA726]">
+          {c.name}: <span className="text-[#888]">{summarizeRowFields(c.from)}</span>
           <span className="text-[#888] mx-1">→</span>
-          {fmtRecipeQty(c.to.quantity, c.to.unit)}
+          {summarizeRowFields(c.to)}
         </div>
       ))}
-      {removed.map((r) => (
-        <div key={`r-${r.ingredientId}`} className="text-[#D62B2B]">
-          − {r.ingredientName}: {fmtRecipeQty(r.quantity, r.unit)}
+      {removed.map((r, i) => (
+        <div key={`r-${i}`} className="text-[#D62B2B]">
+          − {refLabel(r)}: {summarizeRowFields(r)}
         </div>
       ))}
     </div>
   );
+}
+
+/** Drop id-shaped + noise fields so jsonEqual doesn't flag spurious
+ *  diffs caused by Prisma echoing back the same ids in a different
+ *  order. */
+function stripIds(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (isNoiseField(k)) continue;
+    if (k.toLowerCase().endsWith('id') && isCuid(v)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Inline summary of the meaningful fields on one named-array row.
+ *  Skips the name (already shown as the row label), cuids, and noise.
+ *  Keeps it short — the diff line should fit on one row. */
+function summarizeRowFields(row: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const nameKey = (() => {
+    for (const k of ['name', 'title', 'menuItemName', 'ingredientName', 'displayName', 'orderNumber']) {
+      if (k in row && typeof row[k] === 'string') return k;
+    }
+    return null;
+  })();
+  // Quantity + unit pair gets condensed into one piece — covers the
+  // most common "ingredient: 50 G" recipe-line shape.
+  if ('quantity' in row && typeof row.quantity === 'number') {
+    const unit = typeof row.unit === 'string' ? ` ${row.unit}` : '';
+    parts.push(`${fmtNum(row.quantity)}${unit}`);
+  }
+  for (const [k, v] of Object.entries(row)) {
+    if (k === nameKey || k === 'quantity' || k === 'unit') continue;
+    if (isNoiseField(k) || isCuid(v)) continue;
+    if (k.toLowerCase().endsWith('id')) continue;
+    if (v == null || v === '') continue;
+    parts.push(`${humanizeField(k)}: ${renderScalar(v, k)}`);
+    if (parts.length >= 4) { parts.push('…'); break; }
+  }
+  return parts.join(', ');
 }
