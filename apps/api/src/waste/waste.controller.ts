@@ -13,8 +13,13 @@ export class WasteController {
   constructor(private readonly wasteService: WasteService) {}
 
   @Get()
-  findAll(@CurrentUser() user: JwtPayload, @Query('ingredientId') ingredientId?: string) {
-    return this.wasteService.findAll(user.branchId, ingredientId);
+  findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query('ingredientId') ingredientId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.wasteService.findAll(user.branchId, { ingredientId, from, to });
   }
 
   @Post()

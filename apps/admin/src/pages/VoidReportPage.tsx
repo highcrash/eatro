@@ -17,6 +17,13 @@ interface VoidedItem {
   voidReason: string | null;
   voidedAt: string | null;
   voidedBy: { id: string; name: string } | null;
+  /** True when the void was logged with `logAsWaste`, i.e. food was
+   *  consumed/lost rather than returned to inventory. */
+  loggedAsWaste: boolean;
+  /** Sum of (qty × unit cost) across the WASTE StockMovements paired
+   *  with this void — the actual ingredient-cost loss to the kitchen.
+   *  0 when not logged as waste. */
+  wasteCostPaisa: number;
 }
 
 interface VoidedOrder {
@@ -41,6 +48,15 @@ interface VoidReport {
     itemsValuePaisa: number;
     ordersValuePaisa: number;
     totalValuePaisa: number;
+    /** Selling-price value of voided items that were RETURNED to
+     *  stock (food went back on the shelf, no kitchen loss). */
+    voidedReturnSellingValuePaisa: number;
+    /** Selling-price value of voided items that were WASTED
+     *  (food was consumed / lost, kitchen ate the cost). */
+    voidedWasteSellingValuePaisa: number;
+    /** Actual ingredient-cost loss on the wasted voids — what the
+     *  kitchen paid for food that went out the door. */
+    actualVoidWasteCostPaisa: number;
     byApprover: Array<{ name: string; itemCount: number; orderCount: number; valuePaisa: number }>;
   };
 }
@@ -116,11 +132,38 @@ export default function VoidReportPage() {
       {isLoading && <p className="text-[#999] font-body text-sm">Loading…</p>}
 
       {summary && (
-        <div className="grid grid-cols-3 gap-4">
-          <StatCard label="Voided Items" value={String(summary.itemCount)} sub={formatCurrency(summary.itemsValuePaisa)} />
-          <StatCard label="Voided Orders" value={String(summary.orderCount)} sub={formatCurrency(summary.ordersValuePaisa)} />
-          <StatCard label="Total Voided Value" value={formatCurrency(summary.totalValuePaisa)} sub={`${summary.itemCount + summary.orderCount} events`} accent />
-        </div>
+        <>
+          <div className="grid grid-cols-3 gap-4">
+            <StatCard label="Voided Items" value={String(summary.itemCount)} sub={formatCurrency(summary.itemsValuePaisa)} />
+            <StatCard label="Voided Orders" value={String(summary.orderCount)} sub={formatCurrency(summary.ordersValuePaisa)} />
+            <StatCard label="Total Voided Value" value={formatCurrency(summary.totalValuePaisa)} sub={`${summary.itemCount + summary.orderCount} events`} accent />
+          </div>
+
+          {/* Per-mode split: of the voided items, how much was
+              returned to stock (no kitchen loss) vs how much was
+              actually wasted (food + cost gone). The third tile
+              shows the ACTUAL ingredient-cost loss on the wasted
+              voids — usually much smaller than the selling-price
+              figure since food cost is a fraction of menu price. */}
+          <div className="grid grid-cols-3 gap-4">
+            <StatCard
+              label="Voided → Returned"
+              value={formatCurrency(summary.voidedReturnSellingValuePaisa)}
+              sub="Selling-price of items returned to stock"
+            />
+            <StatCard
+              label="Voided → Wasted"
+              value={formatCurrency(summary.voidedWasteSellingValuePaisa)}
+              sub="Selling-price of items wasted on void"
+            />
+            <StatCard
+              label="Actual Waste Cost"
+              value={formatCurrency(summary.actualVoidWasteCostPaisa)}
+              sub="Ingredient cost the kitchen actually lost"
+              accent
+            />
+          </div>
+        </>
       )}
 
       {summary && summary.byApprover.length > 0 && (
