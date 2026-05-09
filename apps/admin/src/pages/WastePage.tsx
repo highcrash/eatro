@@ -1,9 +1,37 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { formatVariantLabel } from '@restora/utils';
-import type { WasteLog, WasteReason, Ingredient, MenuItem } from '@restora/types';
+import { formatVariantLabel, formatCurrency } from '@restora/utils';
+import type { WasteReason, Ingredient, MenuItem } from '@restora/types';
 import VariantPickerModal from '../components/VariantPickerModal';
+
+interface WasteLogRow {
+  id: string;
+  ingredientId: string;
+  ingredient: { id: string; name: string; unit: string };
+  quantity: number;
+  unitCostPaisa: number;
+  valuePaisa: number;
+  isApprox: boolean;
+  reason: WasteReason;
+  notes: string | null;
+  recordedBy: { id: string; name: string } | null;
+  createdAt: string;
+}
+
+interface WasteResponse {
+  rows: WasteLogRow[];
+  summary: {
+    rowCount: number;
+    totalQty: number;
+    totalValuePaisa: number;
+    byIngredient: Array<{ ingredientId: string; ingredientName: string; unit: string; qty: number; valuePaisa: number }>;
+    byReason: Array<{ reason: string; rowCount: number; qty: number; valuePaisa: number }>;
+  };
+}
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const monthAgoIso = () => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 const WASTE_REASONS: { value: WasteReason; label: string }[] = [
   { value: 'SPOILAGE', label: 'Spoilage' },
@@ -33,10 +61,18 @@ export default function WastePage() {
   const [wasteIngSearch, setWasteIngSearch] = useState<string | undefined>(undefined);
   const [menuWasteForm, setMenuWasteForm] = useState({ menuItemId: '', quantity: '1', reason: 'PREPARATION_ERROR' as WasteReason, notes: '' });
 
-  const { data: wasteLogs = [], isLoading } = useQuery<WasteLog[]>({
-    queryKey: ['waste-logs'],
-    queryFn: () => api.get('/waste'),
+  // Date range — defaults to last 30 days. Server widens its row-cap
+  // (200 → 1000) when from/to are present so a range scan can return
+  // the full window without paging.
+  const [from, setFrom] = useState<string>(monthAgoIso());
+  const [to, setTo] = useState<string>(todayIso());
+
+  const { data, isLoading } = useQuery<WasteResponse>({
+    queryKey: ['waste-logs', from, to],
+    queryFn: () => api.get<WasteResponse>(`/waste?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
   });
+  const wasteRows = data?.rows ?? [];
+  const summary = data?.summary ?? { rowCount: 0, totalQty: 0, totalValuePaisa: 0, byIngredient: [], byReason: [] };
 
   const { data: ingredients = [] } = useQuery<Ingredient[]>({
     queryKey: ['ingredients'],
@@ -95,19 +131,11 @@ export default function WastePage() {
     return menuItems.filter((m) => m.name.toLowerCase().includes(q));
   }, [menuItems, menuSearch]);
 
-  // Summary: total waste by ingredient
-  const wasteSummary = wasteLogs.reduce<Record<string, { name: string; unit: string; totalQty: number }>>((acc, log) => {
-    const key = log.ingredientId;
-    if (!acc[key]) acc[key] = { name: log.ingredient?.name ?? key, unit: log.ingredient?.unit ?? '', totalQty: 0 };
-    acc[key].totalQty += Number(log.quantity);
-    return acc;
-  }, {});
-
   const filteredWasteLogs = useMemo(() => {
-    if (!searchFilter.trim()) return wasteLogs;
+    if (!searchFilter.trim()) return wasteRows;
     const q = searchFilter.toLowerCase();
-    return wasteLogs.filter((log) => (log.ingredient?.name ?? '').toLowerCase().includes(q));
-  }, [wasteLogs, searchFilter]);
+    return wasteRows.filter((log) => (log.ingredient?.name ?? '').toLowerCase().includes(q));
+  }, [wasteRows, searchFilter]);
 
   return (
     <div className="space-y-6">
@@ -123,26 +151,95 @@ export default function WastePage() {
         </div>
       </div>
 
-      {/* Search bar */}
-      <div>
-        <input
-          type="text"
-          value={searchFilter}
-          onChange={(e) => setSearchFilter(e.target.value)}
-          placeholder="Search by ingredient name..."
-          className="w-full max-w-sm bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors placeholder:text-[#666]"
-        />
+      {/* Filters: date range + ingredient search */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-[10px] uppercase tracking-widest text-[#999] mb-1">From</label>
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-widest text-[#999] mb-1">To</label>
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="block text-[10px] uppercase tracking-widest text-[#999] mb-1">Search</label>
+          <input
+            type="text"
+            value={searchFilter}
+            onChange={(e) => setSearchFilter(e.target.value)}
+            placeholder="Search by ingredient name…"
+            className="w-full max-w-sm bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors placeholder:text-[#666]"
+          />
+        </div>
       </div>
 
-      {/* Summary */}
-      {Object.keys(wasteSummary).length > 0 && (
+      {/* Headline tiles — qty + value totals over the chosen range. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="bg-[#161616] border border-[#2A2A2A] px-5 py-4">
+          <p className="text-[10px] uppercase tracking-widest text-[#888]">Total Waste Entries</p>
+          <p className="font-display text-2xl text-white mt-1">{summary.rowCount}</p>
+          <p className="text-[11px] text-[#888] mt-1">{from} → {to}</p>
+        </div>
+        <div className="bg-[#161616] border border-[#2A2A2A] px-5 py-4">
+          <p className="text-[10px] uppercase tracking-widest text-[#888]">Total Wasted Quantity</p>
+          <p className="font-display text-2xl text-[#D62B2B] mt-1">
+            {summary.byIngredient.length === 1
+              ? `${summary.totalQty.toFixed(3)} ${summary.byIngredient[0].unit}`
+              : `${summary.totalQty.toFixed(3)} (mixed units)`}
+          </p>
+          <p className="text-[11px] text-[#888] mt-1">{summary.byIngredient.length} distinct ingredient{summary.byIngredient.length === 1 ? '' : 's'}</p>
+        </div>
+        <div className="bg-[#161616] border border-[#2A2A2A] px-5 py-4">
+          <p className="text-[10px] uppercase tracking-widest text-[#888]">Total Wasted Value</p>
+          <p className="font-display text-2xl text-[#FFA726] mt-1">{formatCurrency(summary.totalValuePaisa)}</p>
+          <p className="text-[11px] text-[#888] mt-1">qty × cost-at-time-of-waste</p>
+        </div>
+      </div>
+
+      {/* By-ingredient breakdown — clicking an ingredient name pre-
+          fills the search box so admin can drill in. */}
+      {summary.byIngredient.length > 0 && (
         <div className="bg-[#161616] border border-[#2A2A2A] p-4">
-          <p className="text-[#999] font-body text-xs tracking-widest uppercase mb-3">Waste Summary (All Time)</p>
-          <div className="flex flex-wrap gap-4">
-            {Object.values(wasteSummary).sort((a, b) => b.totalQty - a.totalQty).map((s) => (
-              <div key={s.name} className="bg-[#0D0D0D] border border-[#2A2A2A] px-4 py-2">
-                <p className="text-white font-body text-sm">{s.name}</p>
-                <p className="text-[#D62B2B] font-display text-lg">{s.totalQty.toFixed(3)} {s.unit}</p>
+          <p className="text-[#999] font-body text-xs tracking-widest uppercase mb-3">Breakdown by Ingredient</p>
+          <div className="flex flex-wrap gap-2">
+            {summary.byIngredient.map((s) => (
+              <button
+                key={s.ingredientId}
+                onClick={() => setSearchFilter(s.ingredientName)}
+                className="bg-[#0D0D0D] border border-[#2A2A2A] hover:border-[#444] px-3 py-2 text-left transition-colors"
+              >
+                <p className="text-white font-body text-sm">{s.ingredientName}</p>
+                <p className="text-[#D62B2B] font-display text-base">{s.qty.toFixed(3)} {s.unit}</p>
+                <p className="text-[#FFA726] text-[11px]">{formatCurrency(s.valuePaisa)}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* By-reason breakdown so admin can spot patterns ("60% of the
+          waste this month was Spoilage — let's check the walk-in"). */}
+      {summary.byReason.length > 0 && (
+        <div className="bg-[#161616] border border-[#2A2A2A] p-4">
+          <p className="text-[#999] font-body text-xs tracking-widest uppercase mb-3">Breakdown by Reason</p>
+          <div className="flex flex-wrap gap-2">
+            {summary.byReason.map((s) => (
+              <div key={s.reason} className="bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2">
+                <p className={`font-body text-xs tracking-widest uppercase ${REASON_COLORS[s.reason as WasteReason] ?? 'text-[#999]'}`}>
+                  {s.reason.replace('_', ' ')}
+                </p>
+                <p className="text-white font-display text-base">{s.rowCount} entr{s.rowCount === 1 ? 'y' : 'ies'}</p>
+                <p className="text-[#FFA726] text-[11px]">{formatCurrency(s.valuePaisa)}</p>
               </div>
             ))}
           </div>
@@ -155,7 +252,7 @@ export default function WastePage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-[#2A2A2A]">
-                {['Date', 'Ingredient', 'Quantity', 'Reason', 'Notes', 'Logged By'].map((h) => (
+                {['Date', 'Ingredient', 'Quantity', 'Unit Cost', 'Value', 'Reason', 'Notes', 'Logged By'].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">{h}</th>
                 ))}
               </tr>
@@ -166,6 +263,11 @@ export default function WastePage() {
                   <td className="px-4 py-3 text-[#999] font-body text-xs">{new Date(log.createdAt).toLocaleString()}</td>
                   <td className="px-4 py-3 text-white font-body text-sm">{log.ingredient?.name ?? log.ingredientId}</td>
                   <td className="px-4 py-3 text-[#D62B2B] font-body text-sm">−{Number(log.quantity).toFixed(3)} {log.ingredient?.unit}</td>
+                  <td className="px-4 py-3 text-[#999] font-body text-xs">
+                    {formatCurrency(log.unitCostPaisa)}/{log.ingredient?.unit}
+                    {log.isApprox && <span className="text-[#888] text-[10px] ml-1">(approx.)</span>}
+                  </td>
+                  <td className="px-4 py-3 text-[#FFA726] font-body text-sm">{formatCurrency(log.valuePaisa)}</td>
                   <td className="px-4 py-3">
                     <span className={`font-body text-xs tracking-widest uppercase ${REASON_COLORS[log.reason]}`}>{log.reason.replace('_', ' ')}</span>
                   </td>
@@ -174,7 +276,7 @@ export default function WastePage() {
                 </tr>
               ))}
               {filteredWasteLogs.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-[#999] font-body text-sm">{searchFilter ? 'No matching waste logs.' : 'No waste logs yet.'}</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-[#999] font-body text-sm">{searchFilter ? 'No matching waste logs.' : 'No waste logs in this date range.'}</td></tr>
               )}
             </tbody>
           </table>

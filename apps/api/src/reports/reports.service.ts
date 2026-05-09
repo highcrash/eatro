@@ -936,9 +936,63 @@ export class ReportsService {
       : [];
     const approverById = new Map(approvers.map((s) => [s.id, s] as const));
 
+    // Detect "logged as waste" per voided item: when admin voids an
+    // item with `logAsWaste=true`, the order service writes a
+    // StockMovement of type WASTE with the same orderId. So pulling
+    // every WASTE movement for the orderIds in scope and matching
+    // by createdAt within ±10s of voidedAt classifies each row.
+    // Old voids (pre-cost-stamp migration) without unitCostPaisa
+    // still contribute their qty to the waste-cost roll-up via the
+    // current Ingredient.costPerUnit fallback.
+    const wasteMovementsForVoids = parentOrderIds.length
+      ? await this.prisma.stockMovement.findMany({
+          where: {
+            branchId,
+            orderId: { in: parentOrderIds },
+            type: 'WASTE',
+          },
+          select: { orderId: true, ingredientId: true, quantity: true, unitCostPaisa: true, createdAt: true },
+        })
+      : [];
+
+    // Resolve fallback costs for any waste movement missing
+    // unitCostPaisa (pre-migration rows).
+    const fallbackIngredientIds = wasteMovementsForVoids
+      .filter((m) => m.unitCostPaisa == null)
+      .map((m) => m.ingredientId);
+    const fallbackCostByIngId = new Map<string, number>();
+    if (fallbackIngredientIds.length) {
+      const ings = await this.prisma.ingredient.findMany({
+        where: { id: { in: fallbackIngredientIds } },
+        select: { id: true, costPerUnit: true },
+      });
+      for (const ing of ings) {
+        fallbackCostByIngId.set(ing.id, ing.costPerUnit.toNumber());
+      }
+    }
+
     const items = voidedItems.map((i) => {
       const parent = parentById.get(i.orderId);
       const approver = i.voidedById ? approverById.get(i.voidedById) ?? null : null;
+      // Pair this voided item with WASTE movements written in the
+      // same transaction (within ±10s of voidedAt). Sum the cost
+      // value of those movements — that's the actual ingredient-
+      // cost the kitchen lost on this void.
+      const targetTime = i.voidedAt?.getTime() ?? 0;
+      const matched = wasteMovementsForVoids.filter(
+        (m) =>
+          m.orderId === i.orderId &&
+          targetTime > 0 &&
+          Math.abs(m.createdAt.getTime() - targetTime) < 10_000,
+      );
+      const loggedAsWaste = matched.length > 0;
+      const wasteCostPaisa = matched.reduce((s, m) => {
+        const qty = Math.abs(Number(m.quantity));
+        const unitCost = m.unitCostPaisa != null
+          ? m.unitCostPaisa.toNumber()
+          : fallbackCostByIngId.get(m.ingredientId) ?? 0;
+        return s + Math.round(qty * unitCost);
+      }, 0);
       return {
         id: i.id,
         orderId: i.orderId,
@@ -953,6 +1007,8 @@ export class ReportsService {
         voidReason: i.voidReason,
         voidedAt: i.voidedAt,
         voidedBy: approver,
+        loggedAsWaste,
+        wasteCostPaisa,
       };
     });
 
@@ -972,6 +1028,20 @@ export class ReportsService {
 
     const itemsValue = items.reduce((s, i) => s + i.lineTotal, 0);
     const ordersValue = orders.reduce((s, o) => s + o.subtotal, 0);
+
+    // Split the voided-item value by mode so admins see "of the X
+    // taka of voided sales, Y taka was returned to stock and Z taka
+    // was actually wasted (lost food, lost cost)". Old voids without
+    // a paired WASTE movement default to "returned" — which is
+    // historically correct for most installs since waste-on-void
+    // was opt-in.
+    const voidedReturnSellingValuePaisa = items
+      .filter((i) => !i.loggedAsWaste)
+      .reduce((s, i) => s + i.lineTotal, 0);
+    const voidedWasteSellingValuePaisa = items
+      .filter((i) => i.loggedAsWaste)
+      .reduce((s, i) => s + i.lineTotal, 0);
+    const actualVoidWasteCostPaisa = items.reduce((s, i) => s + i.wasteCostPaisa, 0);
 
     const byApprover: Record<string, { name: string; itemCount: number; orderCount: number; valuePaisa: number }> = {};
     for (const i of items) {
@@ -1000,6 +1070,12 @@ export class ReportsService {
         itemsValuePaisa: itemsValue,
         ordersValuePaisa: ordersValue,
         totalValuePaisa: itemsValue + ordersValue,
+        // Selling-price split of voided items.
+        voidedReturnSellingValuePaisa,
+        voidedWasteSellingValuePaisa,
+        // Ingredient-cost loss on the wasted voids — what the
+        // kitchen actually paid for food that went out the door.
+        actualVoidWasteCostPaisa,
         byApprover: Object.values(byApprover).sort((a, b) => b.valuePaisa - a.valuePaisa),
       },
     };
