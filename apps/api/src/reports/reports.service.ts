@@ -936,58 +936,78 @@ export class ReportsService {
       : [];
     const approverById = new Map(approvers.map((s) => [s.id, s] as const));
 
-    // Detect "logged as waste" per voided item: when admin voids an
-    // item with `logAsWaste=true`, the order service writes a
-    // StockMovement of type WASTE with the same orderId. So pulling
-    // every WASTE movement for the orderIds in scope and matching
-    // by createdAt within ±5s of voidedAt classifies each row.
-    // Old voids (pre-cost-stamp migration) without unitCostPaisa
-    // still contribute their qty to the waste-cost roll-up via the
-    // current Ingredient.costPerUnit fallback. Filter by createdAt
-    // in [start, end] so the cost roll-up matches the date range
-    // exactly (movements are written within ms of voidedAt).
-    const wasteMovementsForVoids = parentOrderIds.length
+    // Detect & value "logged as waste" voids by reading the WasteLog
+    // table directly — same source the Waste Log page uses, so the
+    // numbers always match. Order-service void-as-waste writes a
+    // WasteLog with notes prefixed `Void waste:` per recipe ingredient
+    // in the same transaction as the OrderItem void. We pair each
+    // WasteLog with its WASTE StockMovement (matched on ingredientId
+    // ±5s + |qty|, identical heuristic to WasteService.findAll) so
+    // the cost is the per-unit cost stamped at write time. Falls
+    // back to current Ingredient.costPerUnit when the StockMovement
+    // is pre-migration / missing unitCostPaisa.
+    const voidWasteLogs = await this.prisma.wasteLog.findMany({
+      where: {
+        branchId,
+        createdAt: { gte: start, lte: end },
+        notes: { startsWith: 'Void waste:' },
+      },
+      include: {
+        ingredient: { select: { id: true, costPerUnit: true } },
+      },
+    });
+
+    const wasteIngIds = Array.from(new Set(voidWasteLogs.map((w) => w.ingredientId)));
+    const wasteMovementsForVoids = wasteIngIds.length
       ? await this.prisma.stockMovement.findMany({
           where: {
             branchId,
-            orderId: { in: parentOrderIds },
             type: 'WASTE',
-            createdAt: { gte: start, lte: end },
+            ingredientId: { in: wasteIngIds },
+            createdAt: {
+              gte: new Date(start.getTime() - 10_000),
+              lte: new Date(end.getTime() + 10_000),
+            },
           },
-          select: { id: true, orderId: true, ingredientId: true, quantity: true, unitCostPaisa: true, createdAt: true },
+          select: { id: true, ingredientId: true, quantity: true, unitCostPaisa: true, createdAt: true },
         })
       : [];
 
-    // Resolve fallback costs for any waste movement missing
-    // unitCostPaisa (pre-migration rows).
-    const fallbackIngredientIds = wasteMovementsForVoids
-      .filter((m) => m.unitCostPaisa == null)
-      .map((m) => m.ingredientId);
-    const fallbackCostByIngId = new Map<string, number>();
-    if (fallbackIngredientIds.length) {
-      const ings = await this.prisma.ingredient.findMany({
-        where: { id: { in: fallbackIngredientIds } },
-        select: { id: true, costPerUnit: true },
-      });
-      for (const ing of ings) {
-        fallbackCostByIngId.set(ing.id, ing.costPerUnit.toNumber());
+    const claimedMovement = new Set<string>();
+    const findVoidWasteCost = (log: typeof voidWasteLogs[number]): number => {
+      const targetTime = log.createdAt.getTime();
+      const targetQty = Math.abs(Number(log.quantity));
+      const m = wasteMovementsForVoids.find(
+        (mv) =>
+          !claimedMovement.has(mv.id) &&
+          mv.ingredientId === log.ingredientId &&
+          Math.abs(mv.createdAt.getTime() - targetTime) < 5000 &&
+          Math.abs(Math.abs(Number(mv.quantity)) - targetQty) < 0.0001,
+      );
+      if (m && m.unitCostPaisa != null) {
+        claimedMovement.add(m.id);
+        return m.unitCostPaisa.toNumber();
       }
-    }
+      return log.ingredient.costPerUnit.toNumber();
+    };
 
     const items = voidedItems.map((i) => {
       const parent = parentById.get(i.orderId);
       const approver = i.voidedById ? approverById.get(i.voidedById) ?? null : null;
-      // Pair this voided item with WASTE movements written in the
-      // same transaction (within ±5s of voidedAt). Used only as a
-      // boolean classifier — the ACTUAL waste cost roll-up is summed
-      // once across all WASTE movements below, not per-item, so a
-      // multi-item void does not double-count its cost.
+      // Per-item classification: was this voided line logged as
+      // waste? Match by menuItemName appearing in any "Void waste:"
+      // WasteLog notes within ±10s of voidedAt. The notes are
+      // stamped as `Void waste: ${menuItemName} ×${quantity} —
+      // ${reason}` at the order-service write site, so substring
+      // match on menuItemName is reliable. More robust than joining
+      // via StockMovement.orderId since older voids may not have
+      // had orderId stamped on the WASTE movement.
       const targetTime = i.voidedAt?.getTime() ?? 0;
-      const loggedAsWaste = wasteMovementsForVoids.some(
-        (m) =>
-          m.orderId === i.orderId &&
-          targetTime > 0 &&
-          Math.abs(m.createdAt.getTime() - targetTime) < 5_000,
+      const loggedAsWaste = targetTime > 0 && voidWasteLogs.some(
+        (log) =>
+          log.notes != null &&
+          log.notes.includes(i.menuItemName) &&
+          Math.abs(log.createdAt.getTime() - targetTime) < 10_000,
       );
       const wasteCostPaisa = 0;
       return {
@@ -1038,14 +1058,12 @@ export class ReportsService {
     const voidedWasteSellingValuePaisa = items
       .filter((i) => i.loggedAsWaste)
       .reduce((s, i) => s + i.lineTotal, 0);
-    // Sum every WASTE movement on the in-range void orders ONCE —
-    // same source-of-truth the Waste Log page reads, just filtered
-    // to void-driven WASTE rows. Avoids the per-item double count.
-    const actualVoidWasteCostPaisa = wasteMovementsForVoids.reduce((s, m) => {
-      const qty = Math.abs(Number(m.quantity));
-      const unitCost = m.unitCostPaisa != null
-        ? m.unitCostPaisa.toNumber()
-        : fallbackCostByIngId.get(m.ingredientId) ?? 0;
+    // Sum every "Void waste:" WasteLog row in the date range — same
+    // source-of-truth the Waste Log page reads, valued via the same
+    // paired-StockMovement lookup so the two reports always agree.
+    const actualVoidWasteCostPaisa = voidWasteLogs.reduce((s, log) => {
+      const qty = Number(log.quantity);
+      const unitCost = findVoidWasteCost(log);
       return s + Math.round(qty * unitCost);
     }, 0);
 
