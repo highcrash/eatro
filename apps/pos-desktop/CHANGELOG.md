@@ -3,6 +3,37 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.81 — Sync hardening: ID remap + token refresh (2026-05-11)
+
+Three offline-sync fixes from a forward-looking audit after the
+MushakInvoice/payment-replay incident.
+
+**Critical: orders no longer cross-wire on out-of-order drain.**
+`bindOldestUnmappedOrder()` used to bind the real id from a successful
+POST /orders to the *oldest unmapped synthetic*. If order A's POST hit
+a 5xx and order B's POST then succeeded, B's real id would bind to
+A's synthetic — and every subsequent item / payment / discount on A
+would silently flow to order B on the server.
+Fix: outbox rows now carry the synthetic id their api-proxy minted
+(new `client_hint` column, ensureColumn-migrated for existing
+installs). Drain maps the exact synthetic instead of guessing by age.
+Legacy rows without a hint still fall back to oldest-unmapped so
+in-flight queues from older builds keep draining.
+
+**High: queued mutations no longer 401 on token expiry.**
+The sync worker captured the access token at enqueue time and used
+it verbatim on drain. Access JWT TTL is 8h, so a terminal that went
+offline overnight would 401 every queued row in the morning and
+flip them all to "Sync Issues". The drain now does the same
+transparent refresh + retry the api-proxy already does on live calls.
+
+**Medium: malformed POST /orders responses fail fast.**
+A 2xx with no `id` in the body used to leave the synthetic
+unmapped, then every dependent row (items, payments) would spin on
+"waiting for parent order id" for the full 50-attempt budget before
+flipping to failed. Now the parent row hard-fails immediately with
+a clear error so ops can see the misbehaving server / proxy.
+
 ## 1.0.80 — Outbox wakes sleeping rows on reconnect (2026-05-11)
 
 After a string of transient failures the outbox's exponential backoff
