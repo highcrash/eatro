@@ -244,6 +244,30 @@ export function retry(id: string): void {
     .run(Date.now(), id);
 }
 
+/**
+ * Reset the backoff window on every pending row so the next drain
+ * tick fires them all immediately. Used when the network state
+ * fundamentally changes (offline → online flip, manual "drain now"
+ * button) — the previous backoff was earned during a different
+ * network/server condition that may no longer apply, so a fresh
+ * attempt is more useful than waiting out a 10-min sleep.
+ *
+ * Does NOT reset `attempts`: the retry budget is preserved so a
+ * genuinely broken row still escalates to 'failed' after
+ * MAX_TRANSIENT_ATTEMPTS instead of looping forever.
+ */
+export function wakeAllPending(): number {
+  const res = getLocalDb()
+    .prepare(
+      `UPDATE outbox
+         SET next_attempt_at_ms = ?
+       WHERE status = 'pending'
+         AND next_attempt_at_ms > ?`,
+    )
+    .run(Date.now(), Date.now());
+  return Number(res.changes ?? 0);
+}
+
 /** Reset every failed row back to pending. Returns the row count touched. */
 export function retryAllFailed(): number {
   const res = getLocalDb()
