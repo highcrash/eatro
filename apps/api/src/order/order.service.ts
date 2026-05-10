@@ -637,8 +637,15 @@ export class OrderService {
 
   async processPayment(id: string, branchId: string, dto: ProcessPaymentDto) {
     const order = await this.findOne(id, branchId);
-    if (order.status === 'PAID') throw new BadRequestException('Order already paid');
     if (order.status === 'VOID') throw new BadRequestException('Cannot pay a voided order');
+    // Idempotent: when the desktop's offline outbox replays a payment
+    // after the original request already committed (network dropped
+    // between server-write and client-ack), the order is already PAID.
+    // Return the existing paid state instead of erroring so the
+    // cashier doesn't see "Internal server error" on a successful
+    // sale. Without this, the duplicate replay falls through to the
+    // transaction below and fails on MushakInvoice's unique(orderId).
+    if (order.status === 'PAID') return order;
 
     const total = order.totalAmount.toNumber();
 
@@ -659,6 +666,22 @@ export class OrderService {
     const branchForMushak = await this.prisma.branch.findUniqueOrThrow({ where: { id: branchId } });
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Take a row-level lock on the order before reading state. Two
+      // concurrent payment requests (eg the offline outbox replaying
+      // while the original is still in flight) can otherwise both
+      // pass the PAID check above, both create OrderPayment rows,
+      // and the second one's MushakInvoice insert fails with the
+      // unique(orderId) constraint — surfacing as "Internal server
+      // error" to the cashier. The lock serialises them; the second
+      // tx wakes up and sees status=PAID, returning the existing
+      // paid order without writing duplicate payments.
+      await tx.$executeRaw`SELECT id FROM "orders" WHERE id = ${id} FOR UPDATE`;
+      const locked = await tx.order.findUniqueOrThrow({
+        where: { id },
+        include: { items: true, payments: true },
+      });
+      if (locked.status === 'PAID') return locked;
+
       // Create payment records
       if (dto.method === 'SPLIT' && dto.splits) {
         await tx.orderPayment.createMany({
