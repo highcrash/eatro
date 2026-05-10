@@ -35,6 +35,13 @@ export interface OutboxRow {
   lastError: string | null;
   status: OutboxStatus;
   nextAttemptAtMs: number;
+  /** Synthetic id this row owns — set when api-proxy already minted an
+   *  `off_<kind>_<hex>` id for the offline response. The drain binds
+   *  this exact synthetic to the server-returned real id, eliminating
+   *  the crosswire bug where two POST /orders draining out-of-order
+   *  would bind sibling B's real id to sibling A's synthetic. Null on
+   *  rows enqueued by older builds — drain falls back to oldest-unmapped. */
+  clientHint: string | null;
 }
 
 const MAX_TRANSIENT_ATTEMPTS = 50;
@@ -73,6 +80,9 @@ export interface EnqueueInput {
   authToken: string | null;
   idempotencyKey?: string; // optional — caller can supply their own if they
                            // generated one up-front for the original request.
+  /** Synthetic id this row owns (eg `off_order_<hex>`). Stored so the
+   *  drain can map it to the real id the server returns without guessing. */
+  clientHint?: string | null;
 }
 
 export function enqueue(input: EnqueueInput): OutboxRow {
@@ -93,11 +103,12 @@ export function enqueue(input: EnqueueInput): OutboxRow {
     lastError: null,
     status: 'pending',
     nextAttemptAtMs: now,
+    clientHint: input.clientHint ?? null,
   };
   getLocalDb()
     .prepare(
-      `INSERT INTO outbox (id, idempotency_key, method, path, body, auth_token, created_at_ms, attempts, last_error, status, next_attempt_at_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO outbox (id, idempotency_key, method, path, body, auth_token, created_at_ms, attempts, last_error, status, next_attempt_at_ms, client_hint)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.id,
@@ -111,6 +122,7 @@ export function enqueue(input: EnqueueInput): OutboxRow {
       row.lastError,
       row.status,
       row.nextAttemptAtMs,
+      row.clientHint,
     );
   return row;
 }
@@ -128,6 +140,7 @@ function mapRow(r: any): OutboxRow {
     lastError: r.last_error,
     status: r.status as OutboxStatus,
     nextAttemptAtMs: Number(r.next_attempt_at_ms ?? 0),
+    clientHint: r.client_hint ?? null,
   };
 }
 

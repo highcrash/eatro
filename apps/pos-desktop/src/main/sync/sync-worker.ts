@@ -1,5 +1,5 @@
 import { readConfig } from '../config/store';
-import { getAccessToken } from '../session/session';
+import { getAccessToken, getRefreshToken, updateAccessToken } from '../session/session';
 import { onlineDetector } from './online-detector';
 import {
   listPending,
@@ -98,42 +98,61 @@ async function tryDeliver(serverUrl: string, row: OutboxRow): Promise<'success' 
   }
 
   const url = `${serverUrl}/api/v1${path}`;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Idempotency-Key': row.idempotencyKey,
+  const buildHeaders = (token: string | null): Record<string, string> => {
+    const h: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': row.idempotencyKey,
+    };
+    if (token) h['Authorization'] = `Bearer ${token}`;
+    return h;
   };
-  const currentToken = getAccessToken();
-  const tokenToUse = currentToken ?? row.authToken;
-  if (tokenToUse) headers['Authorization'] = `Bearer ${tokenToUse}`;
 
   try {
-    const res = await fetch(url, {
+    const initialToken = getAccessToken() ?? row.authToken;
+    let res = await fetch(url, {
       method: row.method,
-      headers,
+      headers: buildHeaders(initialToken),
       body: row.body ?? undefined,
     });
+    // Transparent 401 refresh: the row's captured authToken can be stale
+    // (8h JWT TTL; an overnight offline → morning drain hits expiry on
+    // every queued row). One refresh attempt + one retry, mirroring the
+    // api-proxy live-call path. If refresh fails the row falls through
+    // to the 4xx branch and surfaces in Sync Issues for manual triage.
+    if (res.status === 401) {
+      const fresh = await tryRefreshSession(serverUrl);
+      if (fresh) {
+        res = await fetch(url, {
+          method: row.method,
+          headers: buildHeaders(fresh),
+          body: row.body ?? undefined,
+        });
+      }
+    }
     if (res.ok) {
-      // If this was a POST /orders and we had issued a synthetic id, learn
-      // the real id so subsequent rows targeting `/orders/<syn>/...` get
-      // rewritten before dispatch.
+      // POST /orders just succeeded — bind the synthetic this row owns
+      // (or the oldest unmapped one for legacy outbox rows that predate
+      // the client_hint column) to the real id the server returned.
       if (row.method === 'POST' && row.path === '/orders') {
+        let realId: string | undefined;
         try {
           const text = await res.text();
           const data = text ? JSON.parse(text) : null;
-          const realId = (data as { id?: string } | null)?.id;
-          // The synthetic id never travels in the request body — it lives in
-          // the idempotencyKey's sibling record. Instead of threading it
-          // through, we recover it from the remap table: any synthetic id
-          // still without a real id and created around this order's time.
-          // Simpler: the outbox row's idempotency key IS unique per synthetic
-          // order, and the synthetic builder registered the id when it minted
-          // it. We don't have a direct key → so we accept that the caller
-          // (handleOffline) should register the mapping via the request body
-          // if possible; fall back to scanning all unmapped synthetic orders
-          // and binding the oldest one.
-          if (realId) bindOldestUnmappedOrder(realId);
+          realId = (data as { id?: string } | null)?.id ?? undefined;
         } catch {
-          // response body parse failure shouldn't fail the drain
+          // body parse failure handled below as missing-id
+        }
+        if (!realId) {
+          // 2xx with no id is a server / proxy bug — better to surface
+          // it now than let every dependent row spin on
+          // pathHasSynthetic('off_order_*') for 50 attempts.
+          markFailed(row.id, 'POST /orders returned 2xx with no id in body');
+          return 'hard-fail';
+        }
+        if (row.clientHint) {
+          mapSyntheticToReal(row.clientHint, realId);
+        } else {
+          bindOldestUnmappedOrder(realId);
         }
       }
       markSuccess(row.id);
@@ -150,6 +169,38 @@ async function tryDeliver(serverUrl: string, row: OutboxRow): Promise<'success' 
     markAttemptLoss(row.id, (err as Error).message);
     return 'transient';
   }
+}
+
+/**
+ * Refresh the access token using the stored refresh token. Returns the new
+ * access token, or null if the refresh failed. Mirrors the inline refresh
+ * inside api-proxy — kept duplicated to avoid a circular import between
+ * two sync-layer modules.
+ */
+let refreshing: Promise<string | null> | null = null;
+async function tryRefreshSession(serverUrl: string): Promise<string | null> {
+  if (refreshing) return refreshing;
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  refreshing = (async () => {
+    try {
+      const res = await fetch(`${serverUrl}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { accessToken?: string };
+      if (!data?.accessToken) return null;
+      updateAccessToken(data.accessToken);
+      return data.accessToken;
+    } catch {
+      return null;
+    } finally {
+      setTimeout(() => { refreshing = null; }, 0);
+    }
+  })();
+  return refreshing;
 }
 
 /**

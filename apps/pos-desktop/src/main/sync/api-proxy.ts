@@ -244,6 +244,13 @@ function handleOffline(
   // Queue the original request. Subsequent items/payments targeting a
   // synthetic order id ride on that same synthetic id in the path; the drain
   // will rewrite them after the create call returns the real id.
+  // For POST /orders specifically, hand the synth id we just minted to the
+  // outbox so the drain can map it explicitly to the real id (instead of
+  // guessing oldest-unmapped, which crosswires when sibling orders drain
+  // out of order).
+  const synthOrderId = kind === 'create-order' && synth && typeof synth === 'object'
+    ? (synth as { id?: string }).id ?? null
+    : null;
   try {
     enqueue({
       method,
@@ -251,6 +258,7 @@ function handleOffline(
       body: input.body,
       authToken,
       idempotencyKey,
+      clientHint: synthOrderId,
     });
   } catch (err) {
     // OutboxFullError is the only recoverable case: surface it to the

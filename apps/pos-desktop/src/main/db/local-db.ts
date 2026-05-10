@@ -70,7 +70,13 @@ function migrate(db: BetterSqlite): void {
       -- Earliest absolute time (ms epoch) at which the next drain attempt may
       -- fire. Set to created_at_ms on enqueue and pushed forward by the
       -- exponential backoff after each transient failure.
-      next_attempt_at_ms INTEGER NOT NULL DEFAULT 0
+      next_attempt_at_ms INTEGER NOT NULL DEFAULT 0,
+      -- Synthetic id this row "owns" — set by enqueue when the api-proxy has
+      -- already minted an off_<kind>_<hex> id for the offline response. Lets
+      -- the drain bind the EXACT synthetic to the server-returned real id
+      -- instead of guessing by oldest-unmapped, which crosswires when one
+      -- POST /orders fails transiently while a sibling POST succeeds.
+      client_hint TEXT
     );
     CREATE INDEX IF NOT EXISTS outbox_status_idx ON outbox(status, created_at_ms);
     -- outbox_next_attempt_idx is created below, after ensureColumn guarantees
@@ -124,6 +130,11 @@ function migrate(db: BetterSqlite): void {
   // schema changes on an existing table, so an explicit ALTER is needed.
   ensureColumn(db, 'outbox', 'next_attempt_at_ms', 'next_attempt_at_ms INTEGER NOT NULL DEFAULT 0');
   db.exec(`CREATE INDEX IF NOT EXISTS outbox_next_attempt_idx ON outbox(status, next_attempt_at_ms)`);
+  // client_hint added 2026-05-11 to fix the synthetic-id crosswire bug.
+  // Existing rows get NULL → drain falls back to bindOldestUnmappedOrder
+  // (the legacy behaviour) so in-flight queues from older builds still
+  // drain. New rows always carry the hint.
+  ensureColumn(db, 'outbox', 'client_hint', 'client_hint TEXT');
 }
 
 /** For tests / recovery. */
