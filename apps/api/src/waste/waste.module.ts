@@ -8,5 +8,6 @@ import { IngredientModule } from '../ingredient/ingredient.module';
   imports: [WsGatewayModule, IngredientModule],
   controllers: [WasteController],
   providers: [WasteService],
+  exports: [WasteService],
 })
 export class WasteModule {}

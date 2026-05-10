@@ -36,6 +36,7 @@ import {
   ChevronRight,
   X,
   History,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -91,6 +92,7 @@ const NAV_GROUPS: Array<{
     items: [
       { to: '/inventory', icon: Package, label: 'Inventory', allowedRoles: OPERATIONAL_ROLES },
       { to: '/stock-watcher', icon: Package, label: 'Stock Watcher', allowedRoles: ['OWNER', 'MANAGER', 'ADVISOR'] },
+      { to: '/stock-reconciliation', icon: ClipboardCheck, label: 'Stock Reconciliation', allowedRoles: ['OWNER', 'MANAGER', 'ADVISOR'] },
       { to: '/suppliers', icon: Truck, label: 'Suppliers', allowedRoles: OPERATIONAL_ROLES },
       { to: '/purchasing', icon: ShoppingCart, label: 'Purchasing', allowedRoles: OPERATIONAL_ROLES },
       { to: '/shopping-list', icon: ListChecks, label: 'Shopping List', allowedRoles: OPERATIONAL_ROLES },
