@@ -25,6 +25,7 @@ import { ReportsModule } from './reports/reports.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { WasteModule } from './waste/waste.module';
+import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { ExpenseModule } from './expense/expense.module';
 import { AccountModule } from './account/account.module';
 import { PreReadyModule } from './pre-ready/pre-ready.module';
@@ -99,6 +100,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // Feature modules (Phase 7)
     WasteModule,
+    ReconciliationModule,
 
     // Expense Management
     ExpenseModule,
