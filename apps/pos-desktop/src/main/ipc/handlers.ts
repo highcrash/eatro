@@ -17,7 +17,7 @@ import { printA4Report } from '../printing/a4-report';
 import type { KitchenTicketInput } from '@restora/utils';
 import { onlineDetector } from '../sync/online-detector';
 import { apiFetch, type ApiFetchInput } from '../sync/api-proxy';
-import { counts, listFailed, retry, retryAllFailed, dismiss, clearAll } from '../sync/outbox';
+import { counts, listFailed, retry, retryAllFailed, dismiss, clearAll, wakeAllPending } from '../sync/outbox';
 import { forceDrain } from '../sync/sync-worker';
 import { BrowserWindow } from 'electron';
 import { refreshUploadProxyServer } from '../upload-proxy';
@@ -246,7 +246,12 @@ export function registerIpcHandlers(): void {
     return { ok: true };
   });
 
-  ipcMain.handle('sync:drain-now', async () => forceDrain());
+  ipcMain.handle('sync:drain-now', async () => {
+    // User clicked "Sync now" — also wake any sleeping pending rows
+    // so the drain isn't a no-op when everything is in backoff.
+    wakeAllPending();
+    return forceDrain();
+  });
 
   ipcMain.handle('sync:force-offline', () => {
     onlineDetector.forceOffline();

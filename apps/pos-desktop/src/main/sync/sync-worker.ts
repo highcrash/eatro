@@ -8,6 +8,7 @@ import {
   markSuccess,
   markFailed,
   markAttemptLoss,
+  wakeAllPending,
   type OutboxRow,
 } from './outbox';
 import { isSynthetic, mapSyntheticToReal, rewritePath, pathHasSynthetic } from './id-remap';
@@ -193,6 +194,12 @@ function scheduleNextTick(): void {
 export function startSyncWorker(): void {
   onlineDetector.on('change', (next, prev) => {
     if (prev !== 'online' && next === 'online') {
+      // Wake up every sleeping pending row so the next drain tick
+      // tries them all immediately. Without this a row whose backoff
+      // window grew to 10 min during the offline / server-error
+      // period would keep showing as "1 pending" for up to 10 min
+      // after reconnect even though the network is healthy again.
+      wakeAllPending();
       void forceDrain();
     }
   });
