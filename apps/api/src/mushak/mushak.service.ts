@@ -114,6 +114,14 @@ export class MushakService {
     if (!branch.bin || !branch.branchCode) {
       throw new BadRequestException('Branch BIN + branchCode must be set before NBR mode can issue Mushak invoices');
     }
+    // Idempotent: if a Mushak invoice for this order already exists,
+    // return it instead of attempting to create a duplicate. This
+    // makes the call safe to retry under any condition (offline
+    // outbox replay, double-click, concurrent payment race) without
+    // tripping the unique(orderId) constraint that would surface as
+    // an "Internal server error" to the cashier.
+    const existing = await tx.mushakInvoice.findUnique({ where: { orderId: order.id } });
+    if (existing) return existing;
     const fiscalYear = computeFiscalYear(order.paidAt ?? new Date());
     const seq = await this.nextSeq(tx, branch.id, fiscalYear, 'INVOICE');
     const serial = formatInvoiceSerial(fiscalYear, branch.branchCode, seq);
