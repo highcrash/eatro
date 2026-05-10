@@ -3,6 +3,23 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.15 — Outbox wakes sleeping rows on reconnect (2026-05-11)
+
+After a string of transient failures the outbox's exponential backoff
+window can grow up to 10 minutes between retries. So even after the
+network came back and the matching server-side bug was fixed, a
+queued row would keep showing as "1 pending" on screen for up to 10
+minutes — cashiers had no obvious way to force a fresh attempt and
+just stared at "SYNCING — 1 pending" stuck on the title bar.
+
+Fix: new `wakeAllPending()` helper resets `next_attempt_at_ms` on
+every still-pending row (preserves `attempts` so a genuinely broken
+row still escalates to 'failed' after the 50-attempt budget). Wired
+into the offline-→online detector so the moment the network comes
+back every sleeping row tries immediately, and into the
+`sync:drain-now` IPC so the manual "Sync now" button isn't a no-op
+when everything is in backoff.
+
 ## 2.0.14 — Notification chime actually loads on desktop (2026-05-07)
 
 The 2.0.13 fix copied the MP3 into `apps/pos-desktop/src/renderer/
