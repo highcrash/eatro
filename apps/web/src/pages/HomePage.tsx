@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 import MenuCarousel from '../components/MenuCarousel';
 import SEO from '../components/SEO';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -468,12 +468,12 @@ export default function HomePage() {
               <div className="absolute inset-0 bg-black/80" />
             </>
           )}
-          <div className="max-w-7xl mx-auto relative">
+          <div className="relative">
             <p className="font-serif italic text-accent text-center mb-2">What They Say</p>
             <h2 className="font-display text-5xl md:text-6xl tracking-wider text-center mb-12">
               REVIEWS
             </h2>
-            <div className="flex gap-6 overflow-x-auto no-scrollbar pb-4">
+            <ReviewsCarousel>
               {reviews.map((review) => {
                 // Average the 4 sub-scores into a single 0-5 rating
                 // for the star row. Round to the nearest whole star —
@@ -484,7 +484,7 @@ export default function HomePage() {
                 return (
                   <div
                     key={review.id}
-                    className="flex-shrink-0 w-80 glass p-6"
+                    className="flex-shrink-0 w-80 glass p-6 snap-start"
                   >
                     {/* Stars on the left, customer name on the right —
                         same row so the card's identity sits at the top
@@ -517,7 +517,7 @@ export default function HomePage() {
                   </div>
                 );
               })}
-            </div>
+            </ReviewsCarousel>
           </div>
         </section>
       )}
@@ -688,6 +688,88 @@ export default function HomePage() {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Reviews carousel — horizontally scrollable strip with prev / next
+ * arrow buttons that snap one card-width at a time. Replaces the bare
+ * overflow-x-auto strip which cropped the rightmost card on viewports
+ * where the section's max-width truncated the row.
+ *
+ * Layout:
+ *   - The outer wrapper is full-width (no max-w cap) so the scroll
+ *     container can extend edge-to-edge — the last card scrolls
+ *     fully into view instead of clipping at the section gutter.
+ *   - The scroll container uses CSS scroll-snap so arrow nav lands
+ *     on a clean card boundary even if the user has nudged it with
+ *     a trackpad swipe between clicks.
+ *   - Arrow buttons sit absolute inside the wrapper, vertically
+ *     centred on the cards. They disable themselves at the ends of
+ *     the strip so there's no dead click.
+ */
+function ReviewsCarousel({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateButtons = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    // 4px slack on the right comparison so sub-pixel rounding doesn't
+    // leave the "next" button enabled forever on the last card.
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    updateButtons();
+    const el = ref.current;
+    if (!el) return;
+    const onResize = () => updateButtons();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [updateButtons]);
+
+  const scrollByCard = (dir: -1 | 1) => {
+    const el = ref.current;
+    if (!el) return;
+    // Card width (w-80 = 320px) plus the gap-6 (24px) = one snap unit.
+    el.scrollBy({ left: dir * (320 + 24), behavior: 'smooth' });
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-label="Previous reviews"
+        onClick={() => scrollByCard(-1)}
+        disabled={!canScrollLeft}
+        className="hidden md:flex absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 items-center justify-center bg-card border border-border text-text hover:border-accent hover:text-accent transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:text-text"
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M12 4l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        aria-label="Next reviews"
+        onClick={() => scrollByCard(1)}
+        disabled={!canScrollRight}
+        className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 items-center justify-center bg-card border border-border text-text hover:border-accent hover:text-accent transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:text-text"
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M8 4l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <div
+        ref={ref}
+        onScroll={updateButtons}
+        className="flex gap-6 overflow-x-auto scroll-smooth snap-x snap-mandatory no-scrollbar pb-4 pl-6 pr-6 md:pl-16 md:pr-16"
+      >
+        {children}
+      </div>
     </div>
   );
 }
