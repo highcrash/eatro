@@ -787,6 +787,39 @@ function ReviewsCarousel({ children }: { children: React.ReactNode }) {
  * longer total track but still 25s = items move at the same pixels/sec.
  */
 function ReviewItemMarquee({ items }: { items: Array<{ id: string; name: string; imageUrl: string }> }) {
+  // Card content is ~272 px wide (w-80 minus p-6 left/right). Each
+  // thumbnail is 48 px + 8 px gap = 56 px per stride. So up to 4
+  // thumbnails fit cleanly without horizontal overflow. Below that
+  // threshold a sliding marquee just makes the lonely items drift
+  // around an empty card; render them static instead.
+  const needsScroll = items.length > 4;
+
+  if (!needsScroll) {
+    return (
+      <div className="flex gap-2 mb-1">
+        {items.map((item) => (
+          <Link
+            key={item.id}
+            to={`/menu/${item.id}`}
+            title={item.name}
+            className="group relative block w-12 h-12 flex-shrink-0 overflow-hidden border border-border hover:border-accent transition-colors"
+          >
+            <img
+              src={item.imageUrl}
+              alt={item.name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+            <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-0.5 text-[10px] uppercase tracking-wider whitespace-nowrap bg-accent text-white opacity-0 group-hover:opacity-100 transition-opacity">
+              {item.name}
+            </span>
+          </Link>
+        ))}
+      </div>
+    );
+  }
+
+  // 5+ items overflow the card — switch to the seamless marquee.
   // Two copies of the same list. key prefixes diverge so React doesn't
   // think the second copy is the first one moved.
   const doubled = [...items, ...items];
