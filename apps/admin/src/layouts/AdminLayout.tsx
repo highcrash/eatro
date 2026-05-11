@@ -128,7 +128,9 @@ const NAV_GROUPS: Array<{
       { to: '/attendance', icon: Clock, label: 'Attendance', allowedRoles: OPERATIONAL_ROLES },
       // Payroll pays staff — money, owner/manager only.
       { to: '/payroll', icon: Wallet, label: 'Payroll', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/salary-structures', icon: Wallet, label: 'Salary Structures', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/leave', icon: CalendarDays, label: 'Leave', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/leave-rules', icon: CalendarDays, label: 'Leave Rules', allowedRoles: ['OWNER', 'MANAGER'] },
     ],
   },
   {

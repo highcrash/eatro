@@ -28,6 +28,14 @@ export interface StaffMember extends AuditFields {
    *  Null = fall back to BranchSetting defaults. */
   lateGraceMinutes?: number | null;
   halfDayAfterMinutes?: number | null;
+  /** Optional salary structure assignment. When set, payroll
+   *  generation reads earnings + deductions + thresholds from the
+   *  structure instead of the legacy manual baseSalary path. */
+  salaryStructureId?: string | null;
+  /** Optional leave rule assignment. When set, the accrual scheduler
+   *  credits this staff's LeaveBalance per the rule, and leave
+   *  approval soft-warns when the request exceeds the balance. */
+  leaveRuleId?: string | null;
 }
 
 export interface CreateStaffDto {
@@ -44,6 +52,8 @@ export interface CreateStaffDto {
   shiftEnd?: string | null;
   lateGraceMinutes?: number | null;
   halfDayAfterMinutes?: number | null;
+  salaryStructureId?: string | null;
+  leaveRuleId?: string | null;
 }
 
 export interface UpdateStaffDto extends Partial<Omit<CreateStaffDto, 'password'>> {

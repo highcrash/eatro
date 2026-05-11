@@ -258,6 +258,9 @@ model Branch {
   menuItemAddonGroups MenuItemAddonGroup[]
   scheduledFbPosts    ScheduledFbPost[]
   activityLogs        ActivityLog[]
+  salaryStructures    SalaryStructure[]
+  leaveRules          LeaveRule[]
+  leaveBalances       LeaveBalance[]
 
   @@index([isActive])
   @@map("branches")
@@ -520,7 +523,20 @@ model Staff {
   // OWNER/MANAGER are treated as always-allowed at the gate regardless.
   canAccessPos        Boolean   @default(true)
   hireDate            DateTime  @default(now())
+  /// Legacy single-value salary. Kept for branches that haven't built
+  /// a SalaryStructure yet — payroll generation falls back to this
+  /// when salaryStructureId is null. New installs should assign a
+  /// structure instead so the breakdown is auditable and the
+  /// per-structure deduction thresholds apply.
   monthlySalary       Decimal?  @db.Decimal(14, 2)
+  /// Optional salary structure — components + per-structure
+  /// late/half-day thresholds. Null = use the legacy monthlySalary
+  /// path with hardcoded 3-lates / 2-half-days rules.
+  salaryStructureId   String?
+  /// Optional leave rule — per-leave-type accrual + annual grant
+  /// policy. Null = leave applications work as today (no balance
+  /// tracking, no soft-warn on approval).
+  leaveRuleId         String?
   /// Tipsoi `person_identifier` (e.g. "Ahmed-1234"). Optional — Owner
   /// / Advisor roles that don't clock in don't need a device account.
   /// Sync drops logs whose person_identifier doesn't map here.
@@ -568,6 +584,9 @@ model Staff {
   mushakNotesIssued         MushakNote[]         @relation("MushakNoteIssuer")
   customRole                CustomRole?          @relation(fields: [customRoleId], references: [id])
   activityLogs              ActivityLog[]
+  salaryStructure           SalaryStructure?     @relation(fields: [salaryStructureId], references: [id])
+  leaveRule                 LeaveRule?           @relation(fields: [leaveRuleId], references: [id])
+  leaveBalances             LeaveBalance[]
 
   @@index([branchId, isActive])
   @@index([email])
@@ -1989,6 +2008,12 @@ model Payroll {
   updatedAt    DateTime      @updatedAt
 
   paidAmount Decimal @default(0) @db.Decimal(14, 2) // total paid so far
+  /// Frozen JSON snapshot of the salary structure used at generation
+  /// time (components + per-structure deduction thresholds). Same
+  /// pattern as MushakInvoice.snapshot — freezes the math so a later
+  /// edit to the structure doesn't rewrite history. NULL when the
+  /// run was generated against the legacy manual baseSalary path.
+  structureSnapshot Json?
 
   // Relations
   branch     Branch           @relation(fields: [branchId], references: [id])
@@ -2555,4 +2580,122 @@ model ActivityLog {
   @@index([branchId, category, createdAt])
   @@index([entityType, entityId, createdAt])
   @@map("activity_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SALARY STRUCTURES — composable salary templates with per-structure
+// attendance-deduction thresholds. Admin builds named structures
+// (Basic Pay + Rent + Food + Tax + ...) and assigns them to staff;
+// payroll generation reads the components and the structure-level
+// late/half-day-per-absent thresholds instead of typing a single
+// number + relying on the legacy hardcoded 3/2 rule.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum SalaryComponentType {
+  EARNING
+  DEDUCTION
+}
+
+model SalaryStructure {
+  id                String    @id @default(cuid())
+  branchId          String
+  name              String
+  notes             String?
+  /// N lates that aggregate into one absent-day penalty. Default 3
+  /// preserves the legacy hardcoded rule. Configurable per structure
+  /// so a "Senior" structure can be more lenient than a "Junior" one.
+  latesPerAbsent    Int       @default(3)
+  /// N half-days that aggregate into one absent-day penalty. Default 2.
+  halfDaysPerAbsent Int       @default(2)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  branch     Branch            @relation(fields: [branchId], references: [id])
+  components SalaryComponent[]
+  staff      Staff[]
+
+  @@index([branchId])
+  @@map("salary_structures")
+}
+
+model SalaryComponent {
+  id          String              @id @default(cuid())
+  structureId String
+  name        String
+  type        SalaryComponentType
+  amount      Decimal             @db.Decimal(14, 2)
+  sortOrder   Int                 @default(0)
+
+  structure SalaryStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+
+  @@index([structureId])
+  @@map("salary_components")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEAVE RULES + BALANCES — accrual policy per leave type, applied
+// monthly + annually by the scheduled accrual job. The Leave approval
+// flow decrements LeaveBalance for the requested type; the model
+// allows negative balances so the soft-warn UX can flag over-quota
+// approvals without blocking them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model LeaveRule {
+  id        String    @id @default(cuid())
+  branchId  String
+  name      String
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  branch  Branch           @relation(fields: [branchId], references: [id])
+  entries LeaveRuleEntry[]
+  staff   Staff[]
+
+  @@index([branchId])
+  @@map("leave_rules")
+}
+
+model LeaveRuleEntry {
+  id              String    @id @default(cuid())
+  ruleId          String
+  leaveType       LeaveType
+  /// Monthly accrual — credited on the 1st of every month.
+  /// 0 = no monthly accrual.
+  accrualPerMonth Decimal   @default(0) @db.Decimal(6, 2)
+  /// Upfront annual grant — credited once on Jan 1 each year.
+  /// 0 = none. Both fields can be non-zero (e.g. 1/month carry-over
+  /// plus a Jan 1 top-up) but typically only one is used per type.
+  annualGrant     Int       @default(0)
+  /// Optional cap on the running balance. Null = unlimited.
+  balanceCap      Int?
+
+  rule LeaveRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, leaveType])
+  @@map("leave_rule_entries")
+}
+
+model LeaveBalance {
+  id                String    @id @default(cuid())
+  branchId          String
+  staffId           String
+  leaveType         LeaveType
+  balance           Decimal   @default(0) @db.Decimal(6, 2)
+  /// Last time the monthly cron credited this row. NULL = never
+  /// accrued yet; cron treats it as due now.
+  lastAccrualAt     DateTime?
+  /// Last calendar year the annual grant was applied. Stays within
+  /// the same year so a re-run inside the same year is a no-op.
+  lastAnnualGrantAt DateTime?
+  updatedAt         DateTime  @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id])
+  staff  Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, leaveType])
+  @@index([branchId])
+  @@map("leave_balances")
 }

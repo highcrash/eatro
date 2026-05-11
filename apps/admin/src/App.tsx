@@ -44,6 +44,8 @@ import WebsitePage from './pages/WebsitePage';
 import DiscountsPage from './pages/DiscountsPage';
 import CustomersPage from './pages/CustomersPage';
 import ReviewsPage from './pages/ReviewsPage';
+import SalaryStructuresPage from './pages/SalaryStructuresPage';
+import LeaveRulesPage from './pages/LeaveRulesPage';
 import DataCleanupPage from './pages/DataCleanupPage';
 import BackupPage from './pages/BackupPage';
 import SmsPage from './pages/SmsPage';
@@ -92,6 +94,8 @@ export default function AdminApp() {
         <Route path="/reviews" element={<ReviewsPage />} />
         <Route path="/attendance" element={<AttendancePage />} />
         <Route path="/payroll" element={<PayrollPage />} />
+        <Route path="/salary-structures" element={<SalaryStructuresPage />} />
+        <Route path="/leave-rules" element={<LeaveRulesPage />} />
         <Route path="/leave" element={<LeavePage />} />
         <Route path="/waste" element={<WastePage />} />
         <Route path="/expenses" element={<ExpensesPage />} />

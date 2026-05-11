@@ -38,6 +38,19 @@ export class PayrollService {
     const from = new Date(dto.periodStart);
     const to = new Date(dto.periodEnd);
 
+    // Look up the staff's salary structure so the deduction thresholds
+    // + component breakdown drive the calculation. NULL = legacy path:
+    // hardcoded 3-lates / 2-half-days + admin-typed baseSalary.
+    const staff = await this.prisma.staff.findFirst({
+      where: { id: dto.staffId, branchId },
+      include: {
+        salaryStructure: {
+          include: { components: { orderBy: { sortOrder: 'asc' } } },
+        },
+      },
+    });
+    if (!staff) throw new NotFoundException('Staff not found in this branch');
+
     const attendanceRecords = await this.prisma.attendance.findMany({
       where: { branchId, staffId: dto.staffId, date: { gte: from, lte: to } },
     });
@@ -52,22 +65,66 @@ export class PayrollService {
     ).length;
 
     const totalDays = Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    const perDaySalary = totalDays > 0 ? dto.baseSalary / totalDays : 0;
 
-    // Deduction logic:
-    // - LATE: every 3 late days = 1 day salary deducted (floor division)
-    // - HALF_DAY: each = 0.5 day salary deducted
-    // - ABSENT: each = 1 day salary deducted
-    // - PRESENT, PAID_LEAVE, SICK_LEAVE, FESTIVAL_LEAVE: no deduction
-    const latePenaltyDays = Math.floor(daysLate / 3);
-    const halfDayPenalty = daysHalfDay * 0.5;
+    // Threshold + base-salary source — structure-driven when available,
+    // legacy hardcoded values + admin-typed baseSalary otherwise.
+    const latesPerAbsent = staff.salaryStructure?.latesPerAbsent ?? 3;
+    const halfDaysPerAbsent = staff.salaryStructure?.halfDaysPerAbsent ?? 2;
+
+    let baseSalary = dto.baseSalary;
+    let structureDeductions = 0;
+    let structureSnapshot: unknown = null;
+    if (staff.salaryStructure) {
+      const earnings = staff.salaryStructure.components
+        .filter((c) => c.type === 'EARNING')
+        .reduce((s, c) => s + c.amount.toNumber(), 0);
+      structureDeductions = staff.salaryStructure.components
+        .filter((c) => c.type === 'DEDUCTION')
+        .reduce((s, c) => s + c.amount.toNumber(), 0);
+      // Use admin-typed baseSalary as override if it differs from
+      // structure earnings (e.g. one-off salary review for this run);
+      // otherwise pull from the structure.
+      if (dto.baseSalary == null || dto.baseSalary === 0) {
+        baseSalary = earnings;
+      }
+      structureSnapshot = {
+        id: staff.salaryStructure.id,
+        name: staff.salaryStructure.name,
+        latesPerAbsent,
+        halfDaysPerAbsent,
+        components: staff.salaryStructure.components.map((c) => ({
+          name: c.name,
+          type: c.type,
+          amount: c.amount.toNumber(),
+        })),
+        derivedEarnings: earnings,
+        derivedDeductions: structureDeductions,
+      };
+    }
+
+    const perDaySalary = totalDays > 0 ? baseSalary / totalDays : 0;
+
+    // Deduction math driven by the (possibly per-structure) thresholds:
+    //   latePenaltyDays  = floor(daysLate  / latesPerAbsent)
+    //   halfDayPenalty   = floor(daysHalfDay / halfDaysPerAbsent)
+    //   absentPenalty    = daysAbsent
+    const latePenaltyDays = Math.floor(daysLate / Math.max(1, latesPerAbsent));
+    const halfDayPenalty = Math.floor(daysHalfDay / Math.max(1, halfDaysPerAbsent));
     const absentPenalty = daysAbsent;
     const totalPenaltyDays = latePenaltyDays + halfDayPenalty + absentPenalty;
     const attendanceDeduction = Math.round(perDaySalary * totalPenaltyDays);
 
-    const deductions = (dto.deductions ?? 0) + attendanceDeduction;
+    const adhocDeductions = dto.deductions ?? 0;
     const bonuses = dto.bonuses ?? 0;
-    const netPayable = Math.max(0, dto.baseSalary - attendanceDeduction - (dto.deductions ?? 0) + bonuses);
+    // Total deductions stored on the row = structure-level + attendance
+    // + admin-typed ad-hoc. The structure-level slice is captured in
+    // the snapshot so the admin UI can render the breakdown later.
+    const totalDeductions = structureDeductions + attendanceDeduction + adhocDeductions;
+    const netPayable = Math.max(0, baseSalary - totalDeductions + bonuses);
+
+    const thresholdNote = staff.salaryStructure
+      ? ` (rule ${latesPerAbsent}L=1A, ${halfDaysPerAbsent}H=1A from "${staff.salaryStructure.name}")`
+      : ` (legacy 3L=1A, 2H=1A)`;
 
     return this.prisma.payroll.create({
       data: {
@@ -75,13 +132,14 @@ export class PayrollService {
         staffId: dto.staffId,
         periodStart: from,
         periodEnd: to,
-        baseSalary: dto.baseSalary,
-        deductions,
+        baseSalary,
+        deductions: totalDeductions,
         bonuses,
         netPayable,
+        structureSnapshot: structureSnapshot as any,
         notes: dto.notes
           ? dto.notes
-          : `${daysPresent}P ${daysLate}L ${daysHalfDay}H ${daysAbsent}A ${daysPaidLeave}Leave | Late penalty: ${latePenaltyDays}d, Half-day: ${halfDayPenalty}d, Absent: ${absentPenalty}d = ${totalPenaltyDays} days deducted`,
+          : `${daysPresent}P ${daysLate}L ${daysHalfDay}H ${daysAbsent}A ${daysPaidLeave}Leave | Late: ${latePenaltyDays}d, Half: ${halfDayPenalty}d, Absent: ${absentPenalty}d = ${totalPenaltyDays}d deducted${thresholdNote}`,
         daysPresent: daysPresent + daysLate + daysPaidLeave,
         daysAbsent,
       },

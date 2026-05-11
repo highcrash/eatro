@@ -21,6 +21,9 @@ export class StaffService {
         // shows them as "(branch default)" placeholders when null.
         tipsoiPersonId: true, shiftStart: true, shiftEnd: true,
         lateGraceMinutes: true, halfDayAfterMinutes: true,
+        // Salary structure + leave rule assignments — null when
+        // unassigned (legacy / no rule yet defined).
+        salaryStructureId: true, leaveRuleId: true,
       },
       orderBy: { name: 'asc' },
     });

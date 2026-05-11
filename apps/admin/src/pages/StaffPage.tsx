@@ -21,6 +21,11 @@ interface Staff {
   shiftEnd?: string | null;
   lateGraceMinutes?: number | null;
   halfDayAfterMinutes?: number | null;
+  // Salary + leave assignment. Null means "no structure / rule" —
+  // payroll falls back to monthlySalary + hardcoded thresholds, leave
+  // approval skips balance tracking.
+  salaryStructureId?: string | null;
+  leaveRuleId?: string | null;
 }
 
 interface CustomRoleLite {
@@ -28,6 +33,16 @@ interface CustomRoleLite {
   name: string;
   baseRole: string;
   description?: string | null;
+}
+
+interface SalaryStructureLite {
+  id: string;
+  name: string;
+}
+
+interface LeaveRuleLite {
+  id: string;
+  name: string;
 }
 
 const ROLES = ['OWNER', 'MANAGER', 'ADVISOR', 'CASHIER', 'KITCHEN', 'WAITER'] as const;
@@ -49,6 +64,9 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
     shiftEnd: initial?.shiftEnd ?? '',
     lateGraceMinutes: initial?.lateGraceMinutes != null ? String(initial.lateGraceMinutes) : '',
     halfDayAfterMinutes: initial?.halfDayAfterMinutes != null ? String(initial.halfDayAfterMinutes) : '',
+    // Salary structure + leave rule assignment.
+    salaryStructureId: initial?.salaryStructureId ?? '',
+    leaveRuleId: initial?.leaveRuleId ?? '',
   });
   // "Use custom shift" toggle — collapsed by default. Auto-expands when
   // ANY shift override field is already set on the existing staff row.
@@ -66,6 +84,15 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
     queryFn: () => api.get<CustomRoleLite[]>('/custom-roles'),
   });
   const filteredCustomRoles = customRoles.filter((c) => c.baseRole === form.role);
+
+  const { data: salaryStructures = [] } = useQuery<SalaryStructureLite[]>({
+    queryKey: ['salary-structures'],
+    queryFn: () => api.get<SalaryStructureLite[]>('/salary-structures'),
+  });
+  const { data: leaveRules = [] } = useQuery<LeaveRuleLite[]>({
+    queryKey: ['leave-rules'],
+    queryFn: () => api.get<LeaveRuleLite[]>('/leave-rules'),
+  });
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -95,6 +122,9 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
       }
       if (form.password) dto.password = form.password;
       dto.canAccessPos = form.canAccessPos;
+      // Salary structure + leave rule — empty string clears.
+      dto.salaryStructureId = form.salaryStructureId || null;
+      dto.leaveRuleId = form.leaveRuleId || null;
       if (initial) {
         dto.isActive = form.isActive;
         return api.patch(`/staff/${initial.id}`, dto);
@@ -167,6 +197,37 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
               placeholder={initial ? '••••••' : 'password123'}
               className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
           </div>
+          {/* ─── Salary + Leave assignment ─────────────────────────────── */}
+          <div className="border-t border-[#2A2A2A] pt-4 space-y-3">
+            <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Salary & Leave</p>
+            <div>
+              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">
+                Salary Structure <span className="text-[#555] normal-case tracking-normal">(optional)</span>
+              </label>
+              <select value={form.salaryStructureId} onChange={(e) => set('salaryStructureId', e.target.value)}
+                className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white">
+                <option value="">— None (use legacy monthlySalary) —</option>
+                {salaryStructures.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <p className="text-[10px] text-[#555] mt-1">
+                When assigned, payroll generation reads earnings + deductions from this structure and uses its attendance thresholds.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">
+                Leave Rule <span className="text-[#555] normal-case tracking-normal">(optional)</span>
+              </label>
+              <select value={form.leaveRuleId} onChange={(e) => set('leaveRuleId', e.target.value)}
+                className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white">
+                <option value="">— None (no balance tracking) —</option>
+                {leaveRules.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+              <p className="text-[10px] text-[#555] mt-1">
+                Monthly accrual + annual grant run automatically. Leave approval will soft-warn when the request exceeds balance.
+              </p>
+            </div>
+          </div>
+
           {/* ─── Attendance / Tipsoi ───────────────────────────────────── */}
           <div className="border-t border-[#2A2A2A] pt-4">
             <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999] mb-2">Attendance</p>
