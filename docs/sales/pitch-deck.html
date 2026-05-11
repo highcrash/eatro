@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Restora POS — Restaurant Operating System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --black: #0D0D0D;
+      --black-2: #161616;
+      --grey-line: #2a2a2a;
+      --grey-text: #999;
+      --grey-soft: #DDD9D3;
+      --white: #ffffff;
+      --red: #D62B2B;
+      --red-dim: rgba(214, 43, 43, 0.15);
+      --green: #4CAF50;
+      --amber: #FFA726;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; border-radius: 0; }
+    html { scroll-behavior: smooth; scroll-snap-type: y mandatory; }
+    body {
+      background: var(--black);
+      color: var(--white);
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 300;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    .deck { width: 100%; }
+    .slide {
+      min-height: 100vh;
+      width: 100%;
+      padding: 8vh 8vw;
+      scroll-snap-align: start;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      border-bottom: 1px solid var(--grey-line);
+      position: relative;
+    }
+    .slide-num {
+      position: absolute;
+      top: 24px;
+      right: 32px;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--grey-text);
+      letter-spacing: 0.1em;
+    }
+    .eyebrow {
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 500;
+      font-size: 11px;
+      letter-spacing: 0.4em;
+      text-transform: uppercase;
+      color: var(--red);
+      margin-bottom: 24px;
+    }
+    h1, h2, h3 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-weight: 400;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+    h1.hero { font-size: clamp(48px, 9vw, 132px); margin-bottom: 32px; }
+    h1.title { font-size: clamp(40px, 6vw, 88px); margin-bottom: 24px; }
+    h2 { font-size: clamp(36px, 5vw, 72px); margin-bottom: 24px; }
+    h3 { font-size: clamp(20px, 2.2vw, 28px); color: var(--white); margin-bottom: 12px; letter-spacing: 0.1em; }
+    .lede {
+      font-size: clamp(18px, 2vw, 24px);
+      font-weight: 300;
+      color: var(--grey-soft);
+      max-width: 880px;
+      margin-bottom: 32px;
+    }
+    p { color: var(--grey-soft); max-width: 880px; margin-bottom: 16px; }
+    p.small { font-size: 13px; color: var(--grey-text); }
+    .red { color: var(--red); }
+    .strong { color: var(--white); font-weight: 500; }
+    .grid {
+      display: grid;
+      gap: 24px;
+      margin-top: 32px;
+    }
+    .grid.two { grid-template-columns: repeat(2, 1fr); }
+    .grid.three { grid-template-columns: repeat(3, 1fr); }
+    .grid.four { grid-template-columns: repeat(4, 1fr); }
+    @media (max-width: 900px) {
+      .grid.two, .grid.three, .grid.four { grid-template-columns: 1fr; }
+    }
+    .tile {
+      background: var(--black-2);
+      border: 1px solid var(--grey-line);
+      padding: 24px;
+    }
+    .tile h3 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 22px;
+      letter-spacing: 0.1em;
+      color: var(--white);
+      margin-bottom: 12px;
+    }
+    .tile p { font-size: 14px; color: var(--grey-text); margin: 0; }
+    .tile .num {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 56px;
+      color: var(--red);
+      line-height: 1;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      background: var(--red-dim);
+      color: var(--red);
+      border: 1px solid var(--red);
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+    .checks {
+      list-style: none;
+      padding: 0;
+      margin-top: 20px;
+    }
+    .checks li {
+      padding: 10px 0;
+      border-top: 1px solid var(--grey-line);
+      display: flex;
+      gap: 16px;
+      align-items: baseline;
+      color: var(--grey-soft);
+      font-size: 15px;
+    }
+    .checks li:last-child { border-bottom: 1px solid var(--grey-line); }
+    .checks li::before {
+      content: '+';
+      color: var(--red);
+      font-family: 'DM Mono', monospace;
+      font-weight: 500;
+      font-size: 18px;
+    }
+    .compare {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 24px;
+      font-size: 13px;
+    }
+    .compare th, .compare td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--grey-line);
+    }
+    .compare th {
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 500;
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--grey-text);
+    }
+    .compare th.us { color: var(--red); }
+    .compare td.center { text-align: center; }
+    .compare .yes { color: var(--green); font-weight: 500; }
+    .compare .no  { color: var(--grey-text); opacity: 0.6; }
+    .compare .partial { color: var(--amber); font-size: 11px; }
+    .compare tr:hover td { background: var(--black-2); }
+    .footer {
+      position: fixed;
+      bottom: 16px;
+      left: 16px;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--grey-text);
+      pointer-events: none;
+    }
+    a { color: var(--red); text-decoration: none; border-bottom: 1px solid var(--red); }
+    a:hover { color: var(--white); border-color: var(--white); }
+    .stack > * + * { margin-top: 16px; }
+    .pain {
+      border-left: 3px solid var(--red);
+      padding-left: 20px;
+      margin-bottom: 24px;
+    }
+    .pain h3 {
+      font-family: 'DM Sans', sans-serif;
+      text-transform: none;
+      font-weight: 500;
+      letter-spacing: normal;
+      font-size: 18px;
+      color: var(--white);
+      margin-bottom: 6px;
+    }
+    .pain p { color: var(--grey-text); font-size: 14px; margin: 0; }
+    .signal {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      padding: 20px 0;
+      border-top: 1px solid var(--grey-line);
+    }
+    .signal:last-child { border-bottom: 1px solid var(--grey-line); }
+    .signal .num-big {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 48px;
+      color: var(--red);
+      line-height: 1;
+      width: 80px;
+      flex-shrink: 0;
+    }
+    .signal h3 {
+      font-family: 'DM Sans', sans-serif;
+      text-transform: none;
+      font-weight: 500;
+      letter-spacing: normal;
+      font-size: 20px;
+      color: var(--white);
+      margin-bottom: 8px;
+    }
+    .signal p { color: var(--grey-text); font-size: 14px; margin: 0; }
+    /* Print: stack everything as plain pages */
+    @media print {
+      html { scroll-snap-type: none; }
+      body { background: #fff; color: #000; }
+      .slide {
+        min-height: auto;
+        page-break-after: always;
+        border-bottom: none;
+        padding: 24mm 18mm;
+      }
+      .tile, h1, h2, h3, p, .lede, .checks li, .compare th, .compare td {
+        color: #000 !important;
+        background: #fff !important;
+      }
+      .red, .pill, .compare .yes, .signal .num-big, .slide-num,
+      .compare th.us { color: #D62B2B !important; }
+      .footer { display: none; }
+    }
+  </style>
+</head>
+<body>
+<div class="deck">
+
+  <!-- 1: Title -->
+  <section class="slide">
+    <div class="slide-num">01 / 18</div>
+    <span class="eyebrow">Restaurant Operating System · Bangladesh</span>
+    <h1 class="hero">RESTORA<br/><span class="red">POS</span></h1>
+    <p class="lede">The restaurant POS built for how Bangladesh actually
+      runs. Mushak-compliant out of the box. Works when the internet
+      doesn't. One licence, every module included, your server, your
+      data.</p>
+    <p class="small">Scroll down to walk through the full pitch · 18 slides · ~10 min read</p>
+  </section>
+
+  <!-- 2: The problem -->
+  <section class="slide">
+    <div class="slide-num">02 / 18</div>
+    <span class="eyebrow">The problem</span>
+    <h2>Five tools.<br/>Five logins.<br/>Zero compliance.</h2>
+    <div class="grid two">
+      <div class="stack">
+        <div class="pain">
+          <h3>The NBR Mushak audit</h3>
+          <p>Paper book + Excel mirror. Inspectors find the gap. You pay the fine.</p>
+        </div>
+        <div class="pain">
+          <h3>Internet drops at 8pm Friday</h3>
+          <p>Cloud-only POS says "connecting…". Cashier shrugs at the customer holding ৳4,500.</p>
+        </div>
+        <div class="pain">
+          <h3>SaaS in dollars, every month, forever</h3>
+          <p>$79–$299 / location / month × 5 years × N branches. You still own nothing.</p>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="pain">
+          <h3>Five separate tools</h3>
+          <p>POS + KDS + accounts + WhatsApp + Facebook. Each its own login, each its own data silo.</p>
+        </div>
+        <div class="pain">
+          <h3>Generic POS doesn't speak your kitchen</h3>
+          <p>No variants. No pre-ready batches. No recipe roll-up. No parent-child stock. No reconciliation.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3: Our take -->
+  <section class="slide">
+    <div class="slide-num">03 / 18</div>
+    <span class="eyebrow">Our take</span>
+    <h2>Operational precision<br/>over feature lists.</h2>
+    <p class="lede">Not a generic POS we localised. A POS designed from
+      day one around NBR-Mushak compliance, intermittent internet,
+      WhatsApp-as-supply-chain, and the deep ingredient hierarchy a
+      real Bangladesh kitchen needs.</p>
+    <div class="grid four">
+      <div class="tile"><span class="num">10</span><h3>Modules</h3><p>POS, KDS, Inventory, Procurement, Mushak, Multi-channel, Marketing, People, Finance, Audit.</p></div>
+      <div class="tile"><span class="num">1</span><h3>Licence</h3><p>One purchase. Every module. Every branch. Every terminal you pair.</p></div>
+      <div class="tile"><span class="num">∞</span><h3>Branches</h3><p>No per-branch fee. No per-terminal fee. No per-seat fee.</p></div>
+      <div class="tile"><span class="num">0</span><h3>Vendor lock-in</h3><p>Self-hosted on your VPS. Your database. Your backups. Take it with you.</p></div>
+    </div>
+  </section>
+
+  <!-- 4: Mushak -->
+  <section class="slide">
+    <div class="slide-num">04 / 18</div>
+    <span class="eyebrow">Bangladesh-first compliance</span>
+    <h2>Mushak 6.3 + 6.8.<br/>Atomic. Sealed. Audit-ready.</h2>
+    <div class="grid two">
+      <div>
+        <p>Every paid order auto-issues a Mushak-6.3 invoice with an
+          atomic, sequential, never-reused, never-skipped serial. Every
+          refund auto-issues a Mushak-6.8 credit / debit note tied to
+          the original. Sequence allocation is a single SQL
+          <code style="color:var(--red)">INSERT … ON CONFLICT DO UPDATE … RETURNING</code> —
+          concurrent terminals can't race for the same number, even on a
+          Friday-night rush.</p>
+        <p>Every issued invoice freezes a JSON snapshot at the moment of
+          issue. A reprint three months later is legally identical even
+          if your menu prices or VAT rate changed in the meantime.</p>
+      </div>
+      <div>
+        <ul class="checks">
+          <li>BIN validation at branch setup</li>
+          <li>Per-fiscal-year segregation</li>
+          <li>Per-branch sequence pools</li>
+          <li>Mushak Register report (NBR-ready printout)</li>
+          <li>Buyer + seller blocks auto-populated</li>
+          <li>VAT-rate snapshot on every line</li>
+          <li>Reprint stays legal forever</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5: Offline desktop -->
+  <section class="slide">
+    <div class="slide-num">05 / 18</div>
+    <span class="eyebrow">Offline-first desktop</span>
+    <h2>Works when the WiFi<br/>doesn't.</h2>
+    <div class="grid two">
+      <div>
+        <p>The Windows cashier app is a native Electron build with a
+          SQLite outbox underneath every mutation. When the internet
+          drops mid-rush, the cashier types the order, the kitchen
+          ticket prints to the thermal printer, the cash drawer kicks,
+          the receipt prints, and the Mushak invoice number is reserved
+          locally — all without the server.</p>
+        <p>When connectivity returns the outbox drains in FIFO order
+          with idempotent retry. Synthetic ids rebind to real server
+          ids. Already-paid orders return the exact same response from
+          the server's idempotency cache. No double-charge. No
+          double-Mushak.</p>
+      </div>
+      <div>
+        <ul class="checks">
+          <li>Local SQLite outbox per terminal</li>
+          <li>Synthetic order ids bound to real ids on drain</li>
+          <li>Idempotency-Key on every mutation</li>
+          <li>Silent ESC/POS thermal printing (no driver dialog)</li>
+          <li>Cash-drawer kick on cash payment</li>
+          <li>Token refresh + retry on drain</li>
+          <li>DPAPI-encrypted device credentials</li>
+          <li>Per-terminal pairing + remote revoke</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6: Recipe-depth inventory -->
+  <section class="slide">
+    <div class="slide-num">06 / 18</div>
+    <span class="eyebrow">Recipe-depth inventory</span>
+    <h2>Track every drop.</h2>
+    <div class="grid three">
+      <div class="tile">
+        <h3>Parent &amp; variants</h3>
+        <p>Pulao Rice Pack with 1kg / 5kg / 25kg variants. Stock decrements per variant. Parent stock auto-syncs.</p>
+      </div>
+      <div class="tile">
+        <h3>Recipes with cost roll-up</h3>
+        <p>Menu-item costs computed from real ingredient costs at receipt time. Not a number you typed once.</p>
+      </div>
+      <div class="tile">
+        <h3>Pre-ready batches</h3>
+        <p>Cook 20 portions, log production, FIFO out as orders come, log waste if a batch expires.</p>
+      </div>
+      <div class="tile">
+        <h3>Cost-stamped movements</h3>
+        <p>Every WASTE / SALE / PURCHASE row carries the per-unit cost at the moment of write. Reports never lie.</p>
+      </div>
+      <div class="tile">
+        <h3>Stock Watcher</h3>
+        <p>Per-ingredient activity ledger over a date range — purchases, sales, waste, adjustments, day by day.</p>
+      </div>
+      <div class="tile">
+        <h3>Stock Reconciliation</h3>
+        <p>Print the count sheet. Walk the storeroom. Type the actuals. Variance auto-logs as WASTE or ADJUSTMENT.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7: WhatsApp procurement -->
+  <section class="slide">
+    <div class="slide-num">07 / 18</div>
+    <span class="eyebrow">WhatsApp-native procurement</span>
+    <h2>Suppliers don't read email.<br/>They read WhatsApp.</h2>
+    <p class="lede">Create a Purchase Order in the admin panel. The PDF
+      generates server-side. The Meta Cloud API delivers it straight to
+      the supplier's WhatsApp. No SMS fallback. No "did you get my
+      email?" The supplier replies "received", you mark the PO
+      received, and the stock auto-increments with the per-unit cost
+      stamped on every future row.</p>
+    <div class="grid three">
+      <div class="tile"><h3>WhatsApp PO</h3><p>PDF auto-attached, sent via Meta Business API.</p></div>
+      <div class="tile"><h3>Supplier ledger</h3><p>Every PO + receipt + payment, also WhatsApp-able to the supplier in one click.</p></div>
+      <div class="tile"><h3>Shopping list</h3><p>Cross-supplier "below minimum stock" view, split by past pricing.</p></div>
+    </div>
+  </section>
+
+  <!-- 8: Auto-Facebook -->
+  <section class="slide">
+    <div class="slide-num">08 / 18</div>
+    <span class="eyebrow">Marketing automation</span>
+    <h2>Discounts publish themselves.</h2>
+    <div class="grid two">
+      <div>
+        <p>Every restaurant in Bangladesh lives on Facebook. Restora POS
+          is the only POS that knows that. Create a discount in the
+          admin panel — name, value, scope, expiry — and within a
+          minute a Facebook post fires to your configured page. Image,
+          copy, terms, all automatic.</p>
+        <p>Per-minute background worker handles delivery and retries.
+          Default off per branch; flip it on once and discounts publish
+          themselves forever.</p>
+      </div>
+      <div>
+        <ul class="checks">
+          <li>Per-minute scheduled worker</li>
+          <li>Auto-generated copy + image</li>
+          <li>Posts to your configured Facebook page</li>
+          <li>Optional SMS + WhatsApp delivery</li>
+          <li>Default off per branch</li>
+          <li>Tracks impressions on the discount</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9: Kitchen -->
+  <section class="slide">
+    <div class="slide-num">09 / 18</div>
+    <span class="eyebrow">Kitchen</span>
+    <h2>KDS + section-routed<br/>thermal tickets.</h2>
+    <p class="lede">Tag menu items with a Cooking Station. On every
+      order, the server fans out one ticket per station — to a
+      Web-based KDS for chefs who want a screen, to the section's
+      thermal printer for those who want paper. Each ticket carries
+      the recipe ingredients embedded in the JSON so the chef sees the
+      ingredient counts without a separate lookup.</p>
+    <div class="grid three">
+      <div class="tile"><h3>Per-section routing</h3><p>Grill / Fry / Bar / Dessert — each section sees only its items.</p></div>
+      <div class="tile"><h3>Recipe in ticket</h3><p>Chef sees "Beef Oyster Rice = 250g rice + 80g beef" without looking it up.</p></div>
+      <div class="tile"><h3>Real-time progress</h3><p>Chefs mark PREPARING and DONE. Cashier sees status live. WebSocket-driven.</p></div>
+    </div>
+  </section>
+
+  <!-- 10: Multi-channel -->
+  <section class="slide">
+    <div class="slide-num">10 / 18</div>
+    <span class="eyebrow">Multi-channel ordering</span>
+    <h2>POS + QR + Website.<br/>One database.</h2>
+    <div class="grid three">
+      <div class="tile"><h3>In-store POS</h3><p>Cashier-driven. Native Windows app + browser POS for tablets.</p></div>
+      <div class="tile"><h3>QR self-order</h3><p>Customer scans the QR on the table. Mobile web — no app install. IP-gated to branch WiFi.</p></div>
+      <div class="tile"><h3>Public website</h3><p>Built-in CMS. Live menu, reservations, reviews. Optional online ordering pipes back through.</p></div>
+    </div>
+    <p style="margin-top: 32px;">All three flow into the same Order
+      table, the same kitchen tickets, the same Mushak invoices, the
+      same reports. No third-party "online ordering platform" taking a
+      cut.</p>
+  </section>
+
+  <!-- 11: Multi-branch + roles -->
+  <section class="slide">
+    <div class="slide-num">11 / 18</div>
+    <span class="eyebrow">Multi-branch &amp; access control</span>
+    <h2>One chain.<br/>One dashboard.<br/>Real role control.</h2>
+    <div class="grid two">
+      <div>
+        <ul class="checks">
+          <li>Per-branch settings, staff, roles</li>
+          <li>Owner switches branches from the sidebar</li>
+          <li>Per-staff base role + custom role overlay</li>
+          <li>Cashier Permissions matrix (per-action gate)</li>
+          <li>"Head Chef Dhaka" ≠ "Head Chef Chittagong"</li>
+          <li>Every endpoint is @Roles()-guarded</li>
+          <li>Multi-terminal pairing per branch</li>
+          <li>Remote terminal revoke from admin</li>
+        </ul>
+      </div>
+      <div>
+        <p>Restora POS is the only POS in this comparison with an
+          admin-defined custom-role overlay system. You define
+          "Senior Cashier", "Junior Cashier", "Head Chef", "Storeroom
+          Manager" — each with its own admin-page visibility and POS
+          permissions — without writing a line of code.</p>
+        <p>Every change to roles, permissions, and staff is logged
+          with a per-field diff in the Activity Log.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12: People -->
+  <section class="slide">
+    <div class="slide-num">12 / 18</div>
+    <span class="eyebrow">People</span>
+    <h2>Attendance.<br/>Payroll.<br/>Leave.<br/>All bundled.</h2>
+    <div class="grid four">
+      <div class="tile"><h3>Tipsoi sync</h3><p>Hourly biometric attendance auto-pull. Manual override available.</p></div>
+      <div class="tile"><h3>Shift rules</h3><p>Per-branch + per-staff. Late, overtime, no-show all calculated.</p></div>
+      <div class="tile"><h3>Payroll</h3><p>Salary + deductions + bonuses. Posts to Accounts.</p></div>
+      <div class="tile"><h3>Leave</h3><p>Annual balance, leave types, approval workflow.</p></div>
+    </div>
+  </section>
+
+  <!-- 13: Audit -->
+  <section class="slide">
+    <div class="slide-num">13 / 18</div>
+    <span class="eyebrow">Audit &amp; trust</span>
+    <h2>Every change.<br/>Every void.<br/>Every actor.</h2>
+    <div class="grid two">
+      <div>
+        <p><span class="strong">Activity Log.</span> Every admin-config
+          change is captured with actor, timestamp, before / after diff.
+          Recipe edits show "Spring Onion: 20g → 50g + Garlic added".
+          Sensitive fields (passwords, tokens, PINs) are scrubbed
+          before persist. Auto-purges after 90 days.</p>
+        <p><span class="strong">Void Audit.</span> Every voided item
+          split into "returned to stock" (cashier mistake) vs
+          "logged as waste" (kitchen loss) — selling-price for both,
+          actual ingredient cost for the wasted bucket.</p>
+      </div>
+      <div>
+        <ul class="checks">
+          <li>Per-field before / after diffs</li>
+          <li>Sensitive-field scrubbing built in</li>
+          <li>Searchable by actor, category, date, entity</li>
+          <li>Void Audit splits Returned vs Wasted</li>
+          <li>Actual ingredient-cost loss on voids</li>
+          <li>Approver + reason on every void</li>
+          <li>90-day auto-purge</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14: Self-hosted + backups -->
+  <section class="slide">
+    <div class="slide-num">14 / 18</div>
+    <span class="eyebrow">Your data, your control</span>
+    <h2>Self-hosted.<br/>Your VPS.<br/>Your backups.</h2>
+    <div class="grid three">
+      <div class="tile">
+        <h3>Install Wizard</h3>
+        <p>Owner walks through server URL, branch setup, first cashier — 1–2 hours from zero to first order.</p>
+      </div>
+      <div class="tile">
+        <h3>Daily backups</h3>
+        <p>Automated nightly full-database dump. On-demand backup download from the admin panel any time.</p>
+      </div>
+      <div class="tile">
+        <h3>Take it with you</h3>
+        <p>Postgres dump + filesystem assets. Move VPS providers any time. We never see your data.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15: Comparison -->
+  <section class="slide">
+    <div class="slide-num">15 / 18</div>
+    <span class="eyebrow">How we compare</span>
+    <h2>The field.</h2>
+    <table class="compare">
+      <thead>
+        <tr>
+          <th>Capability</th>
+          <th class="us center">Restora</th>
+          <th class="center">Toast</th>
+          <th class="center">Square</th>
+          <th class="center">Loyverse</th>
+          <th class="center">Petpooja</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Mushak 6.3 / 6.8 (atomic serial)</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Offline order entry (full payment)</td><td class="center yes">✓</td><td class="center partial">part.</td><td class="center partial">part.</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Section-routed kitchen tickets</td><td class="center yes">✓</td><td class="center yes">✓</td><td class="center partial">part.</td><td class="center no">—</td><td class="center yes">✓</td></tr>
+        <tr><td>Recipe with parent / variant roll-up</td><td class="center yes">✓</td><td class="center partial">part.</td><td class="center no">—</td><td class="center partial">part.</td><td class="center yes">✓</td></tr>
+        <tr><td>Pre-ready batch production</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center partial">part.</td></tr>
+        <tr><td>Stock Reconciliation print sheet</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>WhatsApp PO PDF to supplier</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Auto-Facebook on discount</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Custom roles overlay</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Activity Log with field diffs</td><td class="center yes">✓</td><td class="center partial">part.</td><td class="center partial">part.</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Tipsoi biometric attendance</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Self-hosted on your server</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Pricing model</td><td class="center yes">One-time</td><td class="center no">SaaS</td><td class="center no">% / txn</td><td class="center no">SaaS</td><td class="center no">SaaS</td></tr>
+      </tbody>
+    </table>
+    <p class="small" style="margin-top: 24px;">Full table with footnotes: see <a href="./comparison.md">comparison.md</a></p>
+  </section>
+
+  <!-- 16: Cost story -->
+  <section class="slide">
+    <div class="slide-num">16 / 18</div>
+    <span class="eyebrow">The cost story</span>
+    <h2>One licence.<br/>Five-year payoff.</h2>
+    <div class="grid two">
+      <div>
+        <p>A typical mid-market POS subscription runs USD <span class="strong">79–299 per month, per location</span>.
+          Three terminals across two branches, twelve months a year,
+          five years: <span class="red strong">USD 5,000–18,000</span>
+          in subscription fees alone, before hardware, before payment
+          processing, before add-ons.</p>
+        <p>Restora POS is a one-time licence + your VPS hosting (a few
+          thousand taka / month). Five-year TCO is a fraction. Most
+          owners pay back the licence in <span class="strong">the first
+          quarter</span>.</p>
+      </div>
+      <div>
+        <ul class="checks">
+          <li>One-time licence — every module bundled</li>
+          <li>No per-branch fee</li>
+          <li>No per-terminal fee</li>
+          <li>No per-transaction fee</li>
+          <li>No "Loyalty add-on $19/mo"</li>
+          <li>No proprietary hardware lock-in</li>
+          <li>Any 80mm ESC/POS thermal printer works</li>
+          <li>Any Windows-compatible cash drawer works</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17: Implementation -->
+  <section class="slide">
+    <div class="slide-num">17 / 18</div>
+    <span class="eyebrow">Implementation</span>
+    <h2>Day 1 → Month 1.</h2>
+    <table class="compare">
+      <thead>
+        <tr><th>When</th><th>What</th><th>Time</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="strong">Day 0</span></td><td>Install on your VPS via the Install Wizard</td><td>1–2 h</td></tr>
+        <tr><td><span class="strong">Day 1</span></td><td>Pair the first terminal, load menu, configure printers</td><td>3 h</td></tr>
+        <tr><td><span class="strong">Day 2</span></td><td>Train cashiers on PIN login + order entry</td><td>2 h</td></tr>
+        <tr><td><span class="strong">Week 1</span></td><td>Go live — Mushak invoices auto-issuing on every payment</td><td>—</td></tr>
+        <tr><td><span class="strong">Week 2</span></td><td>Configure kitchen sections + recipes + supplier list</td><td>4–6 h</td></tr>
+        <tr><td><span class="strong">Month 1</span></td><td>Coupons + auto-Facebook + attendance + payroll + reports</td><td>6–8 h</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top: 24px;">Switching from another POS? We can help with menu and customer data import in the first week. After that, the system is yours to run.</p>
+  </section>
+
+  <!-- 18: CTA -->
+  <section class="slide">
+    <div class="slide-num">18 / 18</div>
+    <span class="eyebrow">Get started</span>
+    <h1 class="title">Tell us about<br/>your restaurant.</h1>
+    <p class="lede">Branch count. Terminal count. Whether you have a VPS
+      or want a recommendation. Whether you need a data migration. We'll
+      come back with a licence quote, a timeline, and a demo of the
+      modules most relevant to your operation.</p>
+    <div class="grid three">
+      <div class="tile"><h3>Demo</h3><p>15 minutes. Live walkthrough of the modules you care about.</p></div>
+      <div class="tile"><h3>Trial</h3><p>Self-hosted sandbox. Try it on your VPS or ours. No data lock-in.</p></div>
+      <div class="tile"><h3>Buy</h3><p>One-time licence. Quote on request based on branches + terminals.</p></div>
+    </div>
+    <p style="margin-top: 48px;" class="small">
+      Restora POS is the restaurant operating system you'd build for
+      yourself if you had a year of evenings free. We did. You don't have to.
+    </p>
+  </section>
+
+</div>
+<div class="footer">RESTORA POS · PITCH DECK · v1</div>
+</body>
+</html>
