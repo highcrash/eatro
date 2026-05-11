@@ -778,9 +778,11 @@ export class PublicService {
 
   async getReviews(branchId: string) {
     // Explicit select so orderId/customerId internal pointers don't leak
-    // to the public website. Customer name is whitelisted.
-    return this.prisma.review.findMany({
-      where: { branchId },
+    // to the public website. Customer name is whitelisted. isHidden is
+    // filtered to the branch's visible-on-website slice — admins toggle
+    // it from /reviews to suppress spam, abuse, or one-star outliers.
+    const reviews = await this.prisma.review.findMany({
+      where: { branchId, isHidden: false },
       select: {
         id: true,
         foodScore: true,
@@ -790,9 +792,48 @@ export class PublicService {
         notes: true,
         createdAt: true,
         customer: { select: { name: true } },
+        // Pull the line items so the website can render a thumbnail row
+        // of the dishes this customer ordered. We expose menuItemId so
+        // the website can link to /menu/<id>, menuItemName for the hover
+        // tooltip, and imageUrl for the thumbnail itself. Soft-deleted
+        // menu items are filtered out — clicking through to a deleted
+        // dish would 404.
+        order: {
+          select: {
+            items: {
+              where: { menuItem: { deletedAt: null } },
+              select: {
+                menuItemId: true,
+                menuItemName: true,
+                menuItem: { select: { imageUrl: true } },
+              },
+            },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: 20,
+    });
+
+    // Flatten + dedupe: one thumbnail per unique menu item, even if the
+    // customer ordered two of the same dish. Drop items with no image
+    // — a thumbnail row of broken-image icons looks worse than no row.
+    return reviews.map((r) => {
+      const seen = new Set<string>();
+      const orderedItems: Array<{ id: string; name: string; imageUrl: string }> = [];
+      for (const it of r.order.items) {
+        if (seen.has(it.menuItemId)) continue;
+        if (!it.menuItem?.imageUrl) continue;
+        seen.add(it.menuItemId);
+        orderedItems.push({
+          id: it.menuItemId,
+          name: it.menuItemName,
+          imageUrl: it.menuItem.imageUrl,
+        });
+      }
+      const { order: _order, ...rest } = r;
+      void _order;
+      return { ...rest, orderedItems };
     });
   }
 

@@ -35,6 +35,7 @@ import {
   X,
   History,
   ClipboardCheck,
+  Star,
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -121,6 +122,7 @@ const NAV_GROUPS: Array<{
     label: 'PEOPLE',
     items: [
       { to: '/customers', icon: Users, label: 'Customers', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/reviews', icon: Star, label: 'Reviews', allowedRoles: OPERATIONAL_ROLES },
       // Staff management edits passwords + roles — owner/manager only.
       { to: '/staff', icon: Users, label: 'Staff', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/attendance', icon: Clock, label: 'Attendance', allowedRoles: OPERATIONAL_ROLES },
