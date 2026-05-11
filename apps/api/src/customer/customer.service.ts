@@ -466,4 +466,29 @@ export class CustomerService {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  /**
+   * Admin moderation: flip a single review's `isHidden` flag. Hidden
+   * reviews disappear from the public website's /public/reviews feed
+   * but remain visible to the admin Reviews page so the same toggle
+   * can un-hide them later. We scope the update by branchId to
+   * prevent a malicious branch from moderating another branch's
+   * reviews via a forged id.
+   */
+  async setReviewVisibility(branchId: string, reviewId: string, isHidden: boolean) {
+    const result = await this.prisma.review.updateMany({
+      where: { id: reviewId, branchId },
+      data: { isHidden },
+    });
+    if (result.count === 0) {
+      throw new NotFoundException('Review not found in this branch');
+    }
+    return this.prisma.review.findUnique({
+      where: { id: reviewId },
+      include: {
+        customer: { select: { id: true, name: true, phone: true } },
+        order: { select: { id: true, orderNumber: true, totalAmount: true } },
+      },
+    });
+  }
 }

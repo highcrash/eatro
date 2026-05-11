@@ -152,6 +152,17 @@ export class CustomerController {
     return this.customerService.getReviews(user.branchId);
   }
 
+  // Admin moderation: hide / show a single review on the public website.
+  // The review stays in the admin Reviews list either way.
+  @Patch('reviews/:id/visibility')
+  setReviewVisibility(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: { isHidden: boolean },
+  ) {
+    return this.customerService.setReviewVisibility(user.branchId, id, !!dto.isHidden);
+  }
+
   @Post('assign-order')
   assignToOrder(
     @CurrentUser() user: JwtPayload,

@@ -46,6 +46,7 @@ import RolesPage from './pages/RolesPage';
 import WebsitePage from './pages/WebsitePage';
 import DiscountsPage from './pages/DiscountsPage';
 import CustomersPage from './pages/CustomersPage';
+import ReviewsPage from './pages/ReviewsPage';
 import DataCleanupPage from './pages/DataCleanupPage';
 import BackupPage from './pages/BackupPage';
 import SmsPage from './pages/SmsPage';
@@ -117,6 +118,7 @@ export default function AdminApp() {
         <Route path="/mushak/notes/:id" element={<MushakInvoiceView />} />
         <Route path="/discounts" element={<DiscountsPage />} />
         <Route path="/customers" element={<CustomersPage />} />
+        <Route path="/reviews" element={<ReviewsPage />} />
         <Route path="/attendance" element={<AttendancePage />} />
         <Route path="/payroll" element={<PayrollPage />} />
         <Route path="/leave" element={<LeavePage />} />

@@ -891,6 +891,12 @@ model Review {
   atmosphereScore Int // 1-5
   priceScore      Int // 1-5
   notes           String?
+  /// Admin-moderation flag. When true, the public website's
+  /// /public/reviews endpoint filters this row out, but it still
+  /// shows in the admin Reviews page so it can be un-hidden or
+  /// audited. Default false — new reviews are visible by default;
+  /// admins moderate retroactively.
+  isHidden        Boolean  @default(false)
   createdAt       DateTime @default(now())
 
   branch   Branch    @relation(fields: [branchId], references: [id])

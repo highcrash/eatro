@@ -52,6 +52,10 @@ interface Review {
   notes: string | null;
   createdAt: string;
   customer: { name: string } | null;
+  /** Distinct menu items this customer ordered on the rated visit.
+   *  Server filters items without an imageUrl + dedupes by menuItemId.
+   *  Each thumbnail links to /menu/:id and hovers the dish name. */
+  orderedItems: Array<{ id: string; name: string; imageUrl: string }>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -498,6 +502,33 @@ export default function HomePage() {
                       <p className="text-sm text-text/80 leading-relaxed mb-4 line-clamp-4">
                         &ldquo;{review.notes}&rdquo;
                       </p>
+                    )}
+                    {review.orderedItems && review.orderedItems.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {review.orderedItems.slice(0, 6).map((item) => (
+                          <Link
+                            key={item.id}
+                            to={`/menu/${item.id}`}
+                            title={item.name}
+                            className="group relative block w-12 h-12 overflow-hidden border border-border hover:border-accent transition-colors"
+                          >
+                            <img
+                              src={item.imageUrl}
+                              alt={item.name}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                            {/* Hover label — small badge above the thumbnail.
+                                Tooltip via title= is the always-available
+                                fallback; this overlay surfaces the dish
+                                name on mouse-capable devices without a
+                                user gesture. */}
+                            <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-0.5 text-[10px] uppercase tracking-wider whitespace-nowrap bg-accent text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                              {item.name}
+                            </span>
+                          </Link>
+                        ))}
+                      </div>
                     )}
                     <p className="text-xs font-semibold text-accent uppercase tracking-wider">
                       {name}
