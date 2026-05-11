@@ -1,9 +1,9 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Your Restaurant POS â€” Restaurant Operating System</title>
+  <title>Your Restaurant POS — Restaurant Operating System</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -252,13 +252,13 @@
   <!-- 1: Title -->
   <section class="slide">
     <div class="slide-num">01 / 18</div>
-    <span class="eyebrow">Restaurant Operating System Â· Bangladesh</span>
+    <span class="eyebrow">Restaurant Operating System · Bangladesh</span>
     <h1 class="hero">YOUR RESTAURANT<br/><span class="red">POS</span></h1>
     <p class="lede">The restaurant POS built for how Bangladesh actually
       runs. Mushak-compliant out of the box. Works when the internet
       doesn't. One licence, every module included, your server, your
       data.</p>
-    <p class="small">Scroll down to walk through the full pitch Â· 18 slides Â· ~10 min read</p>
+    <p class="small">Scroll down to walk through the full pitch · 18 slides · ~10 min read</p>
   </section>
 
   <!-- 2: The problem -->
@@ -274,11 +274,11 @@
         </div>
         <div class="pain">
           <h3>Internet drops at 8pm Friday</h3>
-          <p>Cloud-only POS says "connectingâ€¦". Cashier shrugs at the customer holding à§³4,500.</p>
+          <p>Cloud-only POS says "connecting…". Cashier shrugs at the customer holding ৳4,500.</p>
         </div>
         <div class="pain">
           <h3>SaaS in dollars, every month, forever</h3>
-          <p>$79â€“$299 / location / month Ã— 5 years Ã— N branches. You still own nothing.</p>
+          <p>$79–$299 / location / month × 5 years × N branches. You still own nothing.</p>
         </div>
       </div>
       <div class="stack">
@@ -304,9 +304,9 @@
       WhatsApp-as-supply-chain, and the deep ingredient hierarchy a
       real Bangladesh kitchen needs.</p>
     <div class="grid four">
-      <div class="tile"><span class="num">10</span><h3>Modules</h3><p>POS, KDS, Inventory, Procurement, Mushak, Multi-channel, Marketing, People, Finance, Audit.</p></div>
+      <div class="tile"><span class="num">11</span><h3>Modules</h3><p>POS, KDS, Inventory + Recipes, Custom Menu, Procurement, Mushak, Multi-channel, Marketing, People, Finance, Audit.</p></div>
       <div class="tile"><span class="num">1</span><h3>Licence</h3><p>One purchase. Every module. Every branch. Every terminal you pair.</p></div>
-      <div class="tile"><span class="num">âˆž</span><h3>Branches</h3><p>No per-branch fee. No per-terminal fee. No per-seat fee.</p></div>
+      <div class="tile"><span class="num">∞</span><h3>Branches</h3><p>No per-branch fee. No per-terminal fee. No per-seat fee.</p></div>
       <div class="tile"><span class="num">0</span><h3>Vendor lock-in</h3><p>Self-hosted on your VPS. Your database. Your backups. Take it with you.</p></div>
     </div>
   </section>
@@ -322,7 +322,7 @@
           atomic, sequential, never-reused, never-skipped serial. Every
           refund auto-issues a Mushak-6.8 credit / debit note tied to
           the original. Sequence allocation is a single SQL
-          <code style="color:var(--red)">INSERT â€¦ ON CONFLICT DO UPDATE â€¦ RETURNING</code> â€”
+          <code style="color:var(--red)">INSERT … ON CONFLICT DO UPDATE … RETURNING</code> —
           concurrent terminals can't race for the same number, even on a
           Friday-night rush.</p>
         <p>Every issued invoice freezes a JSON snapshot at the moment of
@@ -355,7 +355,7 @@
           drops mid-rush, the cashier types the order, the kitchen
           ticket prints to the thermal printer, the cash drawer kicks,
           the receipt prints, and the Mushak invoice number is reserved
-          locally â€” all without the server.</p>
+          locally — all without the server.</p>
         <p>When connectivity returns the outbox drains in FIFO order
           with idempotent retry. Synthetic ids rebind to real server
           ids. Already-paid orders return the exact same response from
@@ -388,8 +388,8 @@
         <p>Pulao Rice Pack with 1kg / 5kg / 25kg variants. Stock decrements per variant. Parent stock auto-syncs.</p>
       </div>
       <div class="tile">
-        <h3>Recipes with cost roll-up</h3>
-        <p>Menu-item costs computed from real ingredient costs at receipt time. Not a number you typed once.</p>
+        <h3>Recipes with live cost roll-up</h3>
+        <p>Per-portion cost computed live from current ingredient costs. Bulk import / export from Excel. Variant-aware FIFO at order time.</p>
       </div>
       <div class="tile">
         <h3>Pre-ready batches</h3>
@@ -401,7 +401,7 @@
       </div>
       <div class="tile">
         <h3>Stock Watcher</h3>
-        <p>Per-ingredient activity ledger over a date range â€” purchases, sales, waste, adjustments, day by day.</p>
+        <p>Per-ingredient activity ledger over a date range — purchases, sales, waste, adjustments, day by day.</p>
       </div>
       <div class="tile">
         <h3>Stock Reconciliation</h3>
@@ -437,7 +437,7 @@
       <div>
         <p>Every restaurant in Bangladesh lives on Facebook. Your Restaurant POS
           is the only POS that knows that. Create a discount in the
-          admin panel â€” name, value, scope, expiry â€” and within a
+          admin panel — name, value, scope, expiry — and within a
           minute a Facebook post fires to your configured page. Image,
           copy, terms, all automatic.</p>
         <p>Per-minute background worker handles delivery and retries.
@@ -463,13 +463,13 @@
     <span class="eyebrow">Kitchen</span>
     <h2>KDS + section-routed<br/>thermal tickets.</h2>
     <p class="lede">Tag menu items with a Cooking Station. On every
-      order, the server fans out one ticket per station â€” to a
+      order, the server fans out one ticket per station — to a
       Web-based KDS for chefs who want a screen, to the section's
       thermal printer for those who want paper. Each ticket carries
       the recipe ingredients embedded in the JSON so the chef sees the
       ingredient counts without a separate lookup.</p>
     <div class="grid three">
-      <div class="tile"><h3>Per-section routing</h3><p>Grill / Fry / Bar / Dessert â€” each section sees only its items.</p></div>
+      <div class="tile"><h3>Per-section routing</h3><p>Grill / Fry / Bar / Dessert — each section sees only its items.</p></div>
       <div class="tile"><h3>Recipe in ticket</h3><p>Chef sees "Beef Oyster Rice = 250g rice + 80g beef" without looking it up.</p></div>
       <div class="tile"><h3>Real-time progress</h3><p>Chefs mark PREPARING and DONE. Cashier sees status live. WebSocket-driven.</p></div>
     </div>
@@ -482,7 +482,7 @@
     <h2>POS + QR + Website.<br/>One database.</h2>
     <div class="grid three">
       <div class="tile"><h3>In-store POS</h3><p>Cashier-driven. Native Windows app + browser POS for tablets.</p></div>
-      <div class="tile"><h3>QR self-order</h3><p>Customer scans the QR on the table. Mobile web â€” no app install. IP-gated to branch WiFi.</p></div>
+      <div class="tile"><h3>QR self-order</h3><p>Customer scans the QR, removes recipe ingredients, adds any stock ingredient with margin-band-protected surcharge. IP-gated to branch WiFi.</p></div>
       <div class="tile"><h3>Public website</h3><p>Built-in CMS. Live menu, reservations, reviews. Optional online ordering pipes back through.</p></div>
     </div>
     <p style="margin-top: 32px;">All three flow into the same Order
@@ -503,7 +503,7 @@
           <li>Owner switches branches from the sidebar</li>
           <li>Per-staff base role + custom role overlay</li>
           <li>Cashier Permissions matrix (per-action gate)</li>
-          <li>"Head Chef Dhaka" â‰  "Head Chef Chittagong"</li>
+          <li>"Head Chef Dhaka" ≠ "Head Chef Chittagong"</li>
           <li>Every endpoint is @Roles()-guarded</li>
           <li>Multi-terminal pairing per branch</li>
           <li>Remote terminal revoke from admin</li>
@@ -513,8 +513,8 @@
         <p>Your Restaurant POS is the only POS in this comparison with an
           admin-defined custom-role overlay system. You define
           "Senior Cashier", "Junior Cashier", "Head Chef", "Storeroom
-          Manager" â€” each with its own admin-page visibility and POS
-          permissions â€” without writing a line of code.</p>
+          Manager" — each with its own admin-page visibility and POS
+          permissions — without writing a line of code.</p>
         <p>Every change to roles, permissions, and staff is logged
           with a per-field diff in the Activity Log.</p>
       </div>
@@ -543,12 +543,12 @@
       <div>
         <p><span class="strong">Activity Log.</span> Every admin-config
           change is captured with actor, timestamp, before / after diff.
-          Recipe edits show "Spring Onion: 20g â†’ 50g + Garlic added".
+          Recipe edits show "Spring Onion: 20g → 50g + Garlic added".
           Sensitive fields (passwords, tokens, PINs) are scrubbed
           before persist. Auto-purges after 90 days.</p>
         <p><span class="strong">Void Audit.</span> Every voided item
           split into "returned to stock" (cashier mistake) vs
-          "logged as waste" (kitchen loss) â€” selling-price for both,
+          "logged as waste" (kitchen loss) — selling-price for both,
           actual ingredient cost for the wasted bucket.</p>
       </div>
       <div>
@@ -573,7 +573,7 @@
     <div class="grid three">
       <div class="tile">
         <h3>Install Wizard</h3>
-        <p>Owner walks through server URL, branch setup, first cashier â€” 1â€“2 hours from zero to first order.</p>
+        <p>Owner walks through server URL, branch setup, first cashier — 1–2 hours from zero to first order.</p>
       </div>
       <div class="tile">
         <h3>Daily backups</h3>
@@ -603,18 +603,18 @@
         </tr>
       </thead>
       <tbody>
-        <tr><td>Mushak 6.3 / 6.8 (atomic serial)</td><td class="center yes">âœ“</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td></tr>
-        <tr><td>Offline order entry (full payment)</td><td class="center yes">âœ“</td><td class="center partial">part.</td><td class="center partial">part.</td><td class="center no">â€”</td><td class="center no">â€”</td></tr>
-        <tr><td>Section-routed kitchen tickets</td><td class="center yes">âœ“</td><td class="center yes">âœ“</td><td class="center partial">part.</td><td class="center no">â€”</td><td class="center yes">âœ“</td></tr>
-        <tr><td>Recipe with parent / variant roll-up</td><td class="center yes">âœ“</td><td class="center partial">part.</td><td class="center no">â€”</td><td class="center partial">part.</td><td class="center yes">âœ“</td></tr>
-        <tr><td>Pre-ready batch production</td><td class="center yes">âœ“</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center partial">part.</td></tr>
-        <tr><td>Stock Reconciliation print sheet</td><td class="center yes">âœ“</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td></tr>
-        <tr><td>WhatsApp PO PDF to supplier</td><td class="center yes">âœ“</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td></tr>
-        <tr><td>Auto-Facebook on discount</td><td class="center yes">âœ“</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td></tr>
-        <tr><td>Custom roles overlay</td><td class="center yes">âœ“</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td></tr>
-        <tr><td>Activity Log with field diffs</td><td class="center yes">âœ“</td><td class="center partial">part.</td><td class="center partial">part.</td><td class="center no">â€”</td><td class="center no">â€”</td></tr>
-        <tr><td>Tipsoi biometric attendance</td><td class="center yes">âœ“</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td></tr>
-        <tr><td>Self-hosted on your server</td><td class="center yes">âœ“</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td><td class="center no">â€”</td></tr>
+        <tr><td>Mushak 6.3 / 6.8 (atomic serial)</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Offline order entry (full payment)</td><td class="center yes">✓</td><td class="center partial">part.</td><td class="center partial">part.</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Section-routed kitchen tickets</td><td class="center yes">✓</td><td class="center yes">✓</td><td class="center partial">part.</td><td class="center no">—</td><td class="center yes">✓</td></tr>
+        <tr><td>Recipe with parent / variant roll-up</td><td class="center yes">✓</td><td class="center partial">part.</td><td class="center no">—</td><td class="center partial">part.</td><td class="center yes">✓</td></tr>
+        <tr><td>Pre-ready batch production</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center partial">part.</td></tr>
+        <tr><td>Stock Reconciliation print sheet</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>WhatsApp PO PDF to supplier</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Auto-Facebook on discount</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Custom roles overlay</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Activity Log with field diffs</td><td class="center yes">✓</td><td class="center partial">part.</td><td class="center partial">part.</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Tipsoi biometric attendance</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
+        <tr><td>Self-hosted on your server</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td><td class="center no">—</td></tr>
         <tr><td>Pricing model</td><td class="center yes">One-time</td><td class="center no">SaaS</td><td class="center no">% / txn</td><td class="center no">SaaS</td><td class="center no">SaaS</td></tr>
       </tbody>
     </table>
@@ -628,9 +628,9 @@
     <h2>One licence.<br/>Five-year payoff.</h2>
     <div class="grid two">
       <div>
-        <p>A typical mid-market POS subscription runs USD <span class="strong">79â€“299 per month, per location</span>.
+        <p>A typical mid-market POS subscription runs USD <span class="strong">79–299 per month, per location</span>.
           Three terminals across two branches, twelve months a year,
-          five years: <span class="red strong">USD 5,000â€“18,000</span>
+          five years: <span class="red strong">USD 5,000–18,000</span>
           in subscription fees alone, before hardware, before payment
           processing, before add-ons.</p>
         <p>Your Restaurant POS is a one-time licence + your VPS hosting (a few
@@ -640,7 +640,7 @@
       </div>
       <div>
         <ul class="checks">
-          <li>One-time licence â€” every module bundled</li>
+          <li>One-time licence — every module bundled</li>
           <li>No per-branch fee</li>
           <li>No per-terminal fee</li>
           <li>No per-transaction fee</li>
@@ -657,18 +657,18 @@
   <section class="slide">
     <div class="slide-num">17 / 18</div>
     <span class="eyebrow">Implementation</span>
-    <h2>Day 1 â†’ Month 1.</h2>
+    <h2>Day 1 → Month 1.</h2>
     <table class="compare">
       <thead>
         <tr><th>When</th><th>What</th><th>Time</th></tr>
       </thead>
       <tbody>
-        <tr><td><span class="strong">Day 0</span></td><td>Install on your VPS via the Install Wizard</td><td>1â€“2 h</td></tr>
+        <tr><td><span class="strong">Day 0</span></td><td>Install on your VPS via the Install Wizard</td><td>1–2 h</td></tr>
         <tr><td><span class="strong">Day 1</span></td><td>Pair the first terminal, load menu, configure printers</td><td>3 h</td></tr>
         <tr><td><span class="strong">Day 2</span></td><td>Train cashiers on PIN login + order entry</td><td>2 h</td></tr>
-        <tr><td><span class="strong">Week 1</span></td><td>Go live â€” Mushak invoices auto-issuing on every payment</td><td>â€”</td></tr>
-        <tr><td><span class="strong">Week 2</span></td><td>Configure kitchen sections + recipes + supplier list</td><td>4â€“6 h</td></tr>
-        <tr><td><span class="strong">Month 1</span></td><td>Coupons + auto-Facebook + attendance + payroll + reports</td><td>6â€“8 h</td></tr>
+        <tr><td><span class="strong">Week 1</span></td><td>Go live — Mushak invoices auto-issuing on every payment</td><td>—</td></tr>
+        <tr><td><span class="strong">Week 2</span></td><td>Configure kitchen sections + recipes + supplier list</td><td>4–6 h</td></tr>
+        <tr><td><span class="strong">Month 1</span></td><td>Coupons + auto-Facebook + attendance + payroll + reports</td><td>6–8 h</td></tr>
       </tbody>
     </table>
     <p style="margin-top: 24px;">Switching from another POS? We can help with menu and customer data import in the first week. After that, the system is yours to run.</p>
@@ -695,6 +695,6 @@
   </section>
 
 </div>
-<div class="footer">YOUR RESTAURANT POS Â· PITCH DECK Â· v1</div>
+<div class="footer">YOUR RESTAURANT POS · PITCH DECK · v1</div>
 </body>
 </html>
