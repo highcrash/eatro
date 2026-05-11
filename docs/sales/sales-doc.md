@@ -15,7 +15,7 @@ licence, every module included, your server, your data.
 1. [Why we built this](#1-why-we-built-this)
 2. [What's different about Restora POS — the seven signals](#2-whats-different-about-restora-pos--the-seven-signals)
 3. [The full stack — what's in the box](#3-the-full-stack--whats-in-the-box)
-4. [Feature deep-dive — ten modules](#4-feature-deep-dive--ten-modules)
+4. [Feature deep-dive — eleven modules](#4-feature-deep-dive--eleven-modules)
 5. [How we compare](#5-how-we-compare)
 6. [The cost story](#6-the-cost-story)
 7. [Who Restora POS is for (and who it isn't)](#7-who-restora-pos-is-for-and-who-it-isnt)
@@ -216,7 +216,7 @@ what you're replacing:
 
 ---
 
-## 4. Feature deep-dive — ten modules
+## 4. Feature deep-dive — eleven modules
 
 ### 4.1 Cashier (POS Desktop)
 
@@ -314,9 +314,100 @@ ingredients as a flat list, no variants, no recipe cost roll-up,
 no pre-ready, no waste valuation. You end up keeping inventory in a
 spreadsheet — and a spreadsheet doesn't decrement on every sale.
 
+#### Recipe Management — the part most POS skip
+
+A recipe in Restora POS is not just a textual list — it's the live
+blueprint the system uses to deduct stock on every sale, value waste
+on every void, compute cost-of-goods on every report, and gate
+margin-aware pricing on every customisation.
+
+- **Cost roll-up is live, not cached.** Every line carries the
+  ingredient's per-stock-unit cost. The total cost-per-serving is
+  computed on demand from current ingredient costs — when your tomato
+  supplier raises prices on Monday, every recipe that uses tomato
+  reflects it on Monday. No nightly job, no "Recalculate Costs"
+  button to remember.
+- **Variant-aware ingredient lines.** Add "Chicken" to a recipe and
+  Restora resolves to the right variant (Free Range vs Standard) at
+  the moment the order is placed — pulling FIFO from whichever
+  variant has stock. No stockouts because the recipe couldn't see the
+  alternative.
+- **Pre-ready components are first-class.** A recipe can reference a
+  pre-ready item (semi-cooked dough, marinated meat, base sauce)
+  exactly like a raw ingredient. The pre-ready batch FIFOs out as
+  orders consume it. One pre-ready item can power dozens of menu
+  items.
+- **Recipes per variant.** A parent menu item like "Espresso" with
+  variants "Single" / "Double" / "Triple" carries one recipe per
+  variant. A built-in **Copy From** dialog clones a recipe between
+  variants in one click — you don't re-type the base.
+- **Bulk import / export from Excel.** Two CSV modes: per-item (load
+  one menu item's recipe from a file) and bulk multi-item (one row
+  per ingredient line, grouped by menu item). The same file format
+  also exports — download every recipe, edit in Excel, re-upload to
+  replace. Fuzzy ingredient matching by name or item code so column
+  drift doesn't break the load.
+- **Kitchen tickets carry the recipe.** Chefs see exactly what to
+  pull from the line — "Beef Oyster Rice = 250 g rice + 80 g beef
+  + 30 g spring onion" — without a separate lookup.
+
+The kicker: every customer customisation that comes through the QR
+app or the cashier ("no onions", "extra cheese") is interpreted
+against the recipe at sale time. Removed lines skip the deduction;
+added lines are deducted from the ad-hoc ingredient. Your stock
+column tells the truth even when half the orders ask for
+modifications.
+
 ---
 
-### 4.4 Procurement — Suppliers, Purchasing, Shopping List, WhatsApp PO
+### 4.4 Custom Menu — let cashiers invent, then promote what sells
+
+**What it does.** Custom Menu is the parallel track for one-off
+dishes a cashier builds on the fly during service — a regular who
+wants "burger with smoked cheese instead of cheddar and add bacon",
+a chef's-special the kitchen invents for a private function, a
+seasonal special that hasn't been formalised on the printed menu yet.
+
+**How it works.** When a cashier picks **Custom Order** at the POS,
+they pick a base item (or start from blank), tick or untick recipe
+lines, add ad-hoc ingredients at a surcharge, set the selling price,
+and send the line to the kitchen. The system captures the whole
+composition — the recipe at that moment in time, the cost computed
+from the ingredients used, the price the cashier set, and the
+customer who got it. Every custom dish lives on the Custom Menu
+admin page with: times sold, lifetime revenue, computed COGS, gross
+margin %, last-sold date.
+
+When a custom dish proves itself ("we've sold 14 Smoked-Cheese
+Burgers in two weeks at a 62% margin"), the admin clicks **Promote to
+Menu** and it becomes a permanent menu item with that recipe and
+price baked in. No retype. No remeasure. No "let's add it to the
+menu next month".
+
+**Why it matters to you as the owner.** Menus aren't designed once
+and frozen — they evolve from what customers actually order and what
+chefs actually invent during service. Custom Menu captures that
+evolution automatically. You see what's selling that isn't on the
+menu yet; you see what margins those improvisations are running at;
+you promote the winners. Your menu becomes a living document instead
+of a quarterly redesign exercise.
+
+**Gross margin on selling, not markup on cost.** Restora POS uses
+the *gross margin on selling price* formula
+(`(Price - Cost) / Price × 100`) — the standard restaurant industry
+metric, not the markup-on-cost number that flatters cheap items.
+60% gross margin means 40% of selling price went to ingredient cost,
+which is exactly what you compare across menu items.
+
+**Where the cheap competition fails.** Toast / Square / Loyverse /
+Petpooja have menu management — you sit in admin, design items,
+publish. None of them capture cashier improvisation as a first-class
+data shape, none auto-compute the margin on it, and none let you
+promote a winning improvisation to the menu in one click.
+
+---
+
+### 4.5 Procurement — Suppliers, Purchasing, Shopping List, WhatsApp PO
 
 **What it does.** Manage suppliers, generate purchase orders, send
 them to suppliers, receive stock against them, track the supplier
@@ -347,7 +438,7 @@ purchasing and zero ledger.
 
 ---
 
-### 4.5 Bangladesh Compliance — Mushak 6.3 / 6.8
+### 4.6 Bangladesh Compliance — Mushak 6.3 / 6.8
 
 **What it does.** Issues NBR-compliant tax invoices on every paid
 order, NBR-compliant credit / debit notes on every refund. Maintains
@@ -378,7 +469,7 @@ the audit.
 
 ---
 
-### 4.6 Multi-channel ordering
+### 4.7 Multi-channel ordering
 
 **What it does.** Three ways customers reach you: in-store via a
 cashier (POS Desktop), self-serve via a QR code on every table (no
@@ -393,21 +484,44 @@ for dine-in-only restaurants. The public website pulls live menu,
 images, reviews from the same admin; if you enable online ordering,
 those orders flow into the same pipeline too.
 
+**The Customise dialog — remove ingredients, add ingredients, pay
+the right surcharge.** Every line in the QR cart opens a Customise
+dialog with two sections. The top section lists every ingredient in
+the dish's recipe as a checkbox — the customer can tick off
+"onions", "coriander", "chilli" and the kitchen ticket prints "NO
+ONIONS, NO CORIANDER" while the recipe-deduction engine skips those
+ingredients from the stock pull. The bottom section is "Add something"
+— the customer picks any ingredient your branch stocks
+("avocado", "extra cheese", "double bacon"), sets a quantity and
+unit, and pays a surcharge. The system enforces a per-branch
+margin band on every ad-hoc addition: the surcharge must sit inside
+the floor (your minimum acceptable margin) and the ceiling (your
+maximum) you configured in admin, so customers can't accidentally
+overpay and you can't accidentally undercharge for a costly add-on.
+The added ingredient is deducted from stock at sale, costed properly
+on the order, and surfaced separately in reports.
+
 **Why it matters to you as the owner.** Customer who's been waiting
 for the waiter for 10 minutes? They scan the QR and order themselves.
-The kitchen sees the ticket; the cashier sees the bill. You don't
-hire a separate "online ordering platform" — same database, same
-reports, same Mushak compliance.
+The kitchen sees the ticket with their exact modifications; the
+cashier sees the bill with the surcharges; your stock column tells
+the truth even when every third order has a "no onions, add cheese"
+modification. You don't hire a separate "online ordering platform" —
+same database, same reports, same Mushak compliance, same recipe
+engine deducting and valuing the same way regardless of channel.
 
 **Where the cheap competition fails.** QR ordering exists in Toast
 and Petpooja but their integration usually means paying a per-order
-take rate. Square has it but locked to the Square ecosystem. Loyverse
-doesn't really do it. None of them IP-gate to a branch — they assume
-you want delivery aggregator orders too.
+take rate, and modifiers are flat "add sauce" lists pre-configured
+by the admin — no customer can add an arbitrary ingredient. Square
+has it but locked to the Square ecosystem. Loyverse doesn't really
+do it. None of them IP-gate to a branch — they assume you want
+delivery aggregator orders too. And none enforce a margin band on
+ad-hoc customisations.
 
 ---
 
-### 4.7 Customers & Marketing — DB, Discounts, Coupons, Auto-Facebook, SMS
+### 4.8 Customers & Marketing — DB, Discounts, Coupons, Auto-Facebook, SMS
 
 **What it does.** Customer database with phone-number normalisation
 (so `01620307630` and `+8801620307630` are the same customer).
@@ -437,7 +551,7 @@ separate app.
 
 ---
 
-### 4.8 People — Staff, Custom Roles, Attendance, Payroll, Leave
+### 4.9 People — Staff, Custom Roles, Attendance, Payroll, Leave
 
 **What it does.** Staff management with role-based permissions, a
 Cashier Permissions matrix that fine-tunes what each role can do at
@@ -467,7 +581,7 @@ matrix on top is something most POS don't even attempt.
 
 ---
 
-### 4.9 Finance — Expenses, Liabilities, Accounts, Reports
+### 4.10 Finance — Accounts auto-management, Performance, Reports
 
 **What it does.** Track expenses (utilities, rent, food cost, staff
 cost, ad spend), liabilities (loans, rent owed, utility arrears),
@@ -475,10 +589,71 @@ accounts (cash in hand, bank balances, receivables). Generate the
 reports that tell you whether you're making money: daily, sales,
 items-sold, performance, supplies, void audit, Mushak register.
 
-**How it works.** Expenses post to an Account; receipts post to an
-Account; the Account ledger is a live running balance. Liabilities
-are scheduled obligations with due dates. Reports run against the
-underlying transactions — no overnight ETL, no stale dashboard.
+#### Accounts auto-management — the ledger writes itself
+
+Every account in Restora POS (Cash Register, Bank, bKash, Nagad,
+Receivables, Expense buckets) has a live running balance. The
+balance is not maintained by an accountant typing entries — it is
+maintained by the system, automatically, every time money moves.
+
+- **Every paid order auto-posts.** A bill paid in cash increases the
+  Cash Register account. A bill paid in bKash increases the bKash
+  account. A bill paid across two methods splits the posting
+  proportionally. Each posting writes an `AccountTransaction` row
+  of type SALE with the order number in the description, so the
+  ledger reads back like a journal an auditor can follow.
+- **Every expense auto-posts.** Record an electricity bill payment;
+  the Expenses account credits, the Cash (or bank) account debits.
+  Same for rent, supplier payments, staff payroll runs — payment
+  methods route to the right account, the ledger updates, the
+  running balance is correct.
+- **Wrong tender? One click to fix.** If a cashier picks Cash when
+  the customer actually paid bKash, the Correct Payment flow runs
+  a reversal: posts an `ADJUSTMENT` against the original account,
+  then a fresh SALE against the right one. Both entries stay in
+  the ledger so you can audit what happened.
+- **Inter-account transfers.** End-of-day cash deposit to the bank:
+  Transfer ৳50,000 from Register to Bank, the system writes a
+  matched OUT/IN pair, both balances update, the audit trail is
+  unbroken.
+- **The P&L report is a snapshot, not a manual exercise.** Pick a
+  date range and Restora POS computes revenue (broken down by
+  payment method), purchasing cost (sum of received POs), gross
+  profit, operating expenses (by category), payroll, and net
+  profit — alongside a closing balance snapshot of every account.
+  Daily. Monthly. Per branch. No ETL pipeline, no overnight job.
+
+The wow moment: every restaurant's accountant is currently
+double-entering numbers from the POS receipt printer into a Tally
+file. With Restora POS, the ledger is already the journal — the
+accountant becomes a reviewer, not a typist.
+
+#### Performance Report — which item, which category, which cost is moving
+
+The Performance Report is the analytical centrepiece for an owner
+deciding what to keep on the menu and where margin is leaking.
+
+- **By Menu Item.** Quantity sold, gross revenue, computed COGS
+  from the live recipe roll-up, gross profit in ৳, gross margin %.
+  Sorted by impact. Spot the dish you sell 200 of that's running
+  on a 12% margin — you're paying the kitchen to lose money on
+  every plate.
+- **By Category.** Same metrics rolled up to Mains / Sides /
+  Beverages / Desserts. A drinks category at 75% margin is a
+  different conversation than a curries category at 38% — the
+  report shows both at a glance.
+- **Inventory Price Volatility.** Per-ingredient: min cost, mean
+  cost, max cost, latest cost, number of receipts in the date
+  range, and a trend arrow if the latest cost has shifted more
+  than 5% from the mean. The single biggest signal for "we need
+  to renegotiate this supplier" — or "we need to raise the menu
+  price on items that use tomato".
+- **Print-friendly.** One-click print to A4 or save-as-PDF for
+  the monthly review meeting.
+
+Most POS show you revenue. Restora POS shows you the **margin
+geography of your menu** — and the cost volatility that's eating
+it from underneath.
 
 **Why it matters to you as the owner.** Most restaurants run blind:
 they know revenue (the POS prints it daily) but not profit. With
@@ -486,15 +661,20 @@ Restora POS you can answer "what's my actual food-cost percentage on
 Beef Oyster Rice?" because the recipe cost roll-up is live; "what's
 my labour-cost percentage this month?" because payroll is in the same
 system; "what did I spend on electricity this quarter?" because
-expenses are categorised.
+expenses are categorised; "is my Cash Register matching the deposit
+I made to the bank?" because both accounts are in the same ledger.
 
 **Where the cheap competition fails.** Toast and Petpooja have
 finance modules as paid add-ons. Square has rudimentary expenses.
-Loyverse barely has finance. None of them bundle liabilities.
+Loyverse barely has finance. None of them auto-post every sale and
+every expense to a live account ledger; none compute per-item COGS
++ margin from a live recipe roll-up; none show ingredient cost
+volatility. You end up with a spreadsheet and a Tally file and an
+accountant on a retainer. Restora POS replaces the spreadsheet.
 
 ---
 
-### 4.10 Audit & Trust — Activity Log, Void Audit, Permissions
+### 4.11 Audit & Trust — Activity Log, Void Audit, Permissions
 
 **What it does.** Every admin-config change is logged with actor,
 timestamp, before-and-after diff. Every voided item is in the Void
