@@ -9,7 +9,20 @@ interface StaffMember {
   id: string;
   name: string;
   role: string;
-  monthlySalary: number | null;
+}
+
+interface PayrollPrefill {
+  baseSalary: number;
+  source: 'structure' | 'legacy';
+  structure: {
+    id: string;
+    name: string;
+    latesPerAbsent: number;
+    halfDaysPerAbsent: number;
+    earnings: number;
+    deductions: number;
+    components: Array<{ name: string; type: 'EARNING' | 'DEDUCTION'; amount: number }>;
+  } | null;
 }
 
 const STATUS_COLORS: Record<PayrollStatus, string> = {
@@ -297,17 +310,39 @@ export default function PayrollPage() {
     },
   });
 
+  // Prefill (base salary + structure breakdown) for the staff currently
+  // selected in the Generate dialog. Fetched on staff-change so the
+  // form mirrors what the server will compute on submit.
+  const [prefill, setPrefill] = useState<PayrollPrefill | null>(null);
+  const [prefillLoading, setPrefillLoading] = useState(false);
+
   const openGen = () => {
     const now = new Date();
     const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
     setGenForm({ staffId: '', periodStart, periodEnd, baseSalary: 0, deductions: 0, bonuses: 0, notes: '' });
+    setPrefill(null);
     setShowGenDialog(true);
   };
 
-  const handleStaffChange = (staffId: string) => {
-    const s = staff.find((st) => st.id === staffId);
-    setGenForm((f) => ({ ...f, staffId, baseSalary: (s?.monthlySalary ?? 0) / 100 }));
+  const handleStaffChange = async (staffId: string) => {
+    setGenForm((f) => ({ ...f, staffId, baseSalary: 0 }));
+    setPrefill(null);
+    if (!staffId) return;
+    try {
+      setPrefillLoading(true);
+      const data = await api.get<PayrollPrefill>(`/payroll/prefill/${staffId}`);
+      setPrefill(data);
+      // Prefill ONLY base salary. Structure deductions are added by
+      // the server on top of dto.deductions (see payroll.service
+      // generate(): totalDeductions = structureDeductions +
+      // attendanceDeduction + adhocDeductions). Filling them in here
+      // would double-count. The Deductions field stays for ad-hoc
+      // additions on top of the structure rule.
+      setGenForm((f) => ({ ...f, baseSalary: data.baseSalary }));
+    } finally {
+      setPrefillLoading(false);
+    }
   };
 
   return (
@@ -437,7 +472,7 @@ export default function PayrollPage() {
               {(['baseSalary', 'deductions', 'bonuses'] as const).map((key) => (
                 <div key={key} className="flex flex-col gap-1">
                   <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">
-                    {key === 'baseSalary' ? 'Base Salary (৳) *' : key === 'deductions' ? 'Deductions (৳)' : 'Bonuses (৳)'}
+                    {key === 'baseSalary' ? 'Base Salary (৳) *' : key === 'deductions' ? 'Deductions (৳) — ad-hoc' : 'Bonuses (৳)'}
                   </label>
                   <input
                     type="number" min="0"
@@ -445,6 +480,29 @@ export default function PayrollPage() {
                     onChange={(e) => setGenForm((f) => ({ ...f, [key]: parseFloat(e.target.value) || 0 }))}
                     className="bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
                   />
+                  {key === 'baseSalary' && genForm.staffId && (
+                    <p className="text-[10px] font-body mt-0.5 text-[#666]">
+                      {prefillLoading && 'Loading…'}
+                      {!prefillLoading && prefill?.source === 'structure' && (
+                        <>
+                          From structure <span className="text-[#DDD9D3]">"{prefill.structure!.name}"</span>:
+                          earnings ৳{prefill.structure!.earnings.toLocaleString()}, structure deductions
+                          ৳{prefill.structure!.deductions.toLocaleString()} (auto-applied on submit).
+                        </>
+                      )}
+                      {!prefillLoading && prefill?.source === 'legacy' && prefill.baseSalary > 0 && (
+                        <>From legacy <span className="text-[#DDD9D3]">monthlySalary</span>. Assign a salary structure for breakdown + thresholds.</>
+                      )}
+                      {!prefillLoading && prefill?.source === 'legacy' && prefill.baseSalary === 0 && (
+                        <span className="text-[#FFA726]">No salary structure or legacy monthlySalary set for this staff. Type a value manually.</span>
+                      )}
+                    </p>
+                  )}
+                  {key === 'deductions' && prefill?.structure && prefill.structure.deductions > 0 && (
+                    <p className="text-[10px] font-body mt-0.5 text-[#666]">
+                      Structure already deducts ৳{prefill.structure.deductions.toLocaleString()}. This field adds extra one-off deductions on top.
+                    </p>
+                  )}
                 </div>
               ))}
               <div className="flex flex-col gap-1">

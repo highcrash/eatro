@@ -34,6 +34,69 @@ export class PayrollService {
     return payroll;
   }
 
+  /**
+   * Resolve the default base salary the admin should see when picking
+   * a staff member in the Generate-Payroll dialog. Mirrors the same
+   * source of truth that `generate()` uses on submit:
+   *   - if a SalaryStructure is assigned → sum of EARNING components
+   *     and structure-level deductions (returned for UI hints)
+   *   - else → legacy Staff.monthlySalary
+   *
+   * Amounts are returned in TAKA (Decimal → number) so the UI can
+   * render straight into the form input without paisa conversion.
+   * Server still receives the same taka figure on submit and converts
+   * once at the controller boundary.
+   */
+  async getPrefillForStaff(branchId: string, staffId: string) {
+    const staff = await this.prisma.staff.findFirst({
+      where: { id: staffId, branchId, deletedAt: null },
+      select: {
+        id: true, name: true, monthlySalary: true,
+        salaryStructure: {
+          select: {
+            id: true, name: true,
+            latesPerAbsent: true, halfDaysPerAbsent: true,
+            components: {
+              select: { name: true, type: true, amount: true, sortOrder: true },
+              orderBy: { sortOrder: 'asc' },
+            },
+          },
+        },
+      },
+    });
+    if (!staff) throw new NotFoundException('Staff not found in this branch');
+
+    if (staff.salaryStructure) {
+      const earnings = staff.salaryStructure.components
+        .filter((c) => c.type === 'EARNING')
+        .reduce((s, c) => s + c.amount.toNumber(), 0);
+      const deductions = staff.salaryStructure.components
+        .filter((c) => c.type === 'DEDUCTION')
+        .reduce((s, c) => s + c.amount.toNumber(), 0);
+      return {
+        baseSalary: earnings,
+        source: 'structure' as const,
+        structure: {
+          id: staff.salaryStructure.id,
+          name: staff.salaryStructure.name,
+          latesPerAbsent: staff.salaryStructure.latesPerAbsent,
+          halfDaysPerAbsent: staff.salaryStructure.halfDaysPerAbsent,
+          earnings,
+          deductions,
+          components: staff.salaryStructure.components.map((c) => ({
+            name: c.name, type: c.type, amount: c.amount.toNumber(),
+          })),
+        },
+      };
+    }
+
+    return {
+      baseSalary: staff.monthlySalary?.toNumber() ?? 0,
+      source: 'legacy' as const,
+      structure: null,
+    };
+  }
+
   async generate(branchId: string, dto: GeneratePayrollDto) {
     const from = new Date(dto.periodStart);
     const to = new Date(dto.periodEnd);
