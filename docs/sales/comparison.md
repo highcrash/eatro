@@ -26,7 +26,13 @@ runs on the software or around it.
 | Custom roles overlay (e.g. "Head Chef Dhaka" ≠ "Head Chef Ctg") | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Per-row activity audit log with field-level diffs | ✅ | Partial | Partial | ❌ | ❌ |
 | Tipsoi biometric attendance auto-sync | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Configurable salary structures (EARNING + DEDUCTION components, per-structure thresholds) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Configurable leave rules (per-type accrual + balance tracking) | ✅ | Add-on | Add-on | ❌ | Add-on |
 | Payroll + Leave management bundled | ✅ | Add-on | Add-on | ❌ | Add-on |
+| Loyalty programme bundled (points + rolling expiry + QR redemption) | ✅ | Add-on³ | Add-on⁴ | Tier-locked | Add-on |
+| Per-customer single-use coupon campaigns (filter → unique codes → reviewed batch send) | ✅ | ❌ | ❌ | ❌ | Partial |
+| First-visit welcome coupon auto-attached to payment SMS | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Customer balance card inside customer-facing QR app | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Liabilities & Accounts ledger bundled | ✅ | Add-on | ❌ | ❌ | Add-on |
 | Self-hosted on your own server | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Your data — never leaves your VPS | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -38,6 +44,10 @@ runs on the software or around it.
    and the cashier sees error states the customer sees too.
 ² Loyverse prints via the Loyverse Printer service which routes through
    the cloud — drops alongside the network.
+³ Toast Loyalty is a paid module — tiered subscription on top of the
+   per-location plan.
+⁴ Square Loyalty is a separate paid app billed per location after a
+   trial.
 
 ---
 
