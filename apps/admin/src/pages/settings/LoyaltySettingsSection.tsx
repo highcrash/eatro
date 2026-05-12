@@ -59,6 +59,36 @@ export default function LoyaltySettingsSection({ isOwner }: { isOwner: boolean }
     mut.mutate({ [k]: v });
   };
 
+  // The welcome-coupon value is admin-entered as TAKA when type is
+  // FLAT and as a raw percent when type is PERCENTAGE — but the
+  // server stores FLAT values in PAISA (mirrors Discount.value in
+  // schema.prisma). Convert at the form boundary so the input
+  // always shows taka and the request always sends paisa.
+  const couponValueForDisplay = form.firstVisitCouponType === 'FLAT'
+    ? form.firstVisitCouponValue / 100
+    : form.firstVisitCouponValue;
+  const setCouponValue = (taka: number) => {
+    const stored = form.firstVisitCouponType === 'FLAT'
+      ? Math.round(taka * 100)
+      : taka;
+    set('firstVisitCouponValue', stored);
+  };
+  // When the admin flips FLAT ↔ PERCENTAGE, re-encode the existing
+  // numeric value so it stays meaningful in the new unit.
+  const setCouponType = (next: 'PERCENTAGE' | 'FLAT') => {
+    const current = form.firstVisitCouponValue;
+    let migrated = current;
+    if (form.firstVisitCouponType === 'FLAT' && next === 'PERCENTAGE') {
+      // Was paisa; PERCENTAGE keeps the taka figure as a percent number
+      migrated = Math.round(current / 100);
+    } else if (form.firstVisitCouponType === 'PERCENTAGE' && next === 'FLAT') {
+      // Was raw percent; treat as taka and convert to paisa
+      migrated = Math.round(current * 100);
+    }
+    setForm((p) => ({ ...p, firstVisitCouponType: next, firstVisitCouponValue: migrated }));
+    mut.mutate({ firstVisitCouponType: next, firstVisitCouponValue: migrated });
+  };
+
   return (
     <div className="space-y-6">
       <section className="border border-[#2A2A2A] bg-[#161616]">
@@ -155,7 +185,7 @@ export default function LoyaltySettingsSection({ isOwner }: { isOwner: boolean }
               <Field label="Type">
                 <select
                   value={form.firstVisitCouponType}
-                  onChange={(e) => set('firstVisitCouponType', e.target.value as 'PERCENTAGE' | 'FLAT')}
+                  onChange={(e) => setCouponType(e.target.value as 'PERCENTAGE' | 'FLAT')}
                   disabled={!isOwner}
                   className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm"
                 >
@@ -167,8 +197,9 @@ export default function LoyaltySettingsSection({ isOwner }: { isOwner: boolean }
                 <input
                   type="number"
                   min={1}
-                  value={form.firstVisitCouponValue}
-                  onChange={(e) => set('firstVisitCouponValue', Number(e.target.value) || 1)}
+                  step={form.firstVisitCouponType === 'FLAT' ? '0.01' : '1'}
+                  value={couponValueForDisplay}
+                  onChange={(e) => setCouponValue(Number(e.target.value) || 1)}
                   disabled={!isOwner}
                   className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm"
                 />

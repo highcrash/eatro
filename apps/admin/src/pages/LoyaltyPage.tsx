@@ -116,7 +116,7 @@ export default function LoyaltyPage() {
                   <td className="px-4 py-3 text-[10px] text-[#888]">
                     {c.loyaltyExpiresAt ? new Date(c.loyaltyExpiresAt).toLocaleDateString() : '—'}
                   </td>
-                  <td className="px-4 py-3 text-right text-[#DDD9D3]">৳{Number(c.totalSpent).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right text-[#DDD9D3]">৳{(Number(c.totalSpent) / 100).toLocaleString()}</td>
                   <td className="px-4 py-3 text-center text-[#999]">{c.totalOrders}</td>
                   <td className="px-4 py-3 text-[10px] text-[#888]">
                     {c.lastVisit ? new Date(c.lastVisit).toLocaleDateString() : '—'}

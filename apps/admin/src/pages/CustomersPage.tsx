@@ -330,7 +330,7 @@ export default function CustomersPage() {
             </div>
 
             {/* Stats */}
-            <div className="px-6 py-4 grid grid-cols-4 gap-4">
+            <div className="px-6 py-4 grid grid-cols-5 gap-4">
               <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 text-center">
                 <p className="text-[10px] font-body text-[#666] tracking-widest uppercase">Orders</p>
                 <p className="font-display text-xl text-white">{detail.customer.totalOrders}</p>
@@ -338,6 +338,17 @@ export default function CustomersPage() {
               <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 text-center">
                 <p className="text-[10px] font-body text-[#666] tracking-widest uppercase">Spent</p>
                 <p className="font-display text-xl text-white">{formatCurrency(Number(detail.customer.totalSpent))}</p>
+              </div>
+              <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 text-center">
+                <p className="text-[10px] font-body text-[#666] tracking-widest uppercase">Loyalty Pts</p>
+                <p className="font-display text-xl text-[#4CAF50]">
+                  {detail.customer.loyaltyPoints != null ? detail.customer.loyaltyPoints.toLocaleString() : '—'}
+                </p>
+                {detail.customer.loyaltyExpiresAt && (
+                  <p className="text-[9px] font-body text-[#666] mt-0.5">
+                    exp {new Date(detail.customer.loyaltyExpiresAt).toLocaleDateString()}
+                  </p>
+                )}
               </div>
               <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 text-center">
                 <p className="text-[10px] font-body text-[#666] tracking-widest uppercase">Last Visit</p>

@@ -14,6 +14,9 @@ interface Customer {
   totalSpent: number;
   lastVisit: string | null;
   createdAt: string;
+  /** Loyalty programme balance — read-only on POS (redemption is QR-only). */
+  loyaltyPoints?: number;
+  loyaltyExpiresAt?: string | null;
 }
 
 export default function PosCustomersPage() {
@@ -118,8 +121,11 @@ export default function PosCustomersPage() {
                 <span className="font-theme-body font-medium text-sm text-theme-text">{c.name || 'Unnamed'}</span>
                 <span className="text-[10px] text-theme-text-muted">{c.totalOrders} orders</span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-theme-text-muted mt-0.5">
-                <Phone size={10} /> {c.phone}
+              <div className="flex items-center justify-between gap-2 text-xs text-theme-text-muted mt-0.5">
+                <span className="flex items-center gap-2"><Phone size={10} /> {c.phone}</span>
+                {(c.loyaltyPoints ?? 0) > 0 && (
+                  <span className="text-[10px] font-semibold text-theme-accent">{c.loyaltyPoints} pts</span>
+                )}
               </div>
             </button>
           ))}
@@ -159,9 +165,16 @@ export default function PosCustomersPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-4 gap-4 mb-6">
               <Stat label="Total Orders" value={String(selected.totalOrders)} />
               <Stat label="Total Spent" value={formatCurrency(Number(selected.totalSpent))} />
+              <Stat
+                label="Loyalty Points"
+                value={selected.loyaltyPoints != null ? selected.loyaltyPoints.toLocaleString() : '—'}
+                sub={selected.loyaltyExpiresAt
+                  ? `Expires ${new Date(selected.loyaltyExpiresAt).toLocaleDateString()}`
+                  : 'Redeem on QR'}
+              />
               <Stat label="Last Visit" value={selected.lastVisit ? formatDateTime(selected.lastVisit) : '—'} />
             </div>
 
@@ -233,11 +246,12 @@ export default function PosCustomersPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="bg-theme-surface border border-theme-border rounded-theme p-4">
       <p className="text-[10px] uppercase tracking-widest text-theme-text-muted font-theme-body">{label}</p>
       <p className="font-theme-display text-xl text-theme-text mt-1">{value}</p>
+      {sub && <p className="text-[10px] text-theme-text-muted font-theme-body mt-1">{sub}</p>}
     </div>
   );
 }

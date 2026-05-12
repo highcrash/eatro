@@ -1117,7 +1117,7 @@ function ActiveOrderView({
     },
   });
 
-  const { data: custResults = [] } = useQuery<{ id: string; name: string; phone: string; totalOrders: number }[]>({
+  const { data: custResults = [] } = useQuery<{ id: string; name: string; phone: string; totalOrders: number; loyaltyPoints?: number }[]>({
     queryKey: ['customer-search', custSearch],
     queryFn: () => api.get(`/customers/search?q=${encodeURIComponent(custSearch)}`),
     enabled: custSearch.length >= 2,
@@ -1329,7 +1329,12 @@ function ActiveOrderView({
                     <button key={c.id} onClick={() => assignCustomerMut.mutate(c.id)}
                       className="w-full text-left px-3 py-2 text-sm font-theme-body hover:bg-theme-surface-alt flex justify-between border-b border-theme-surface-alt last:border-0">
                       <span className="text-theme-text">{c.name}</span>
-                      <span className="text-theme-text-muted text-xs">{c.phone} ({c.totalOrders} orders)</span>
+                      <span className="text-theme-text-muted text-xs">
+                        {c.phone} ({c.totalOrders} orders)
+                        {(c.loyaltyPoints ?? 0) > 0 && (
+                          <span className="ml-1 text-theme-accent font-semibold">· {c.loyaltyPoints} pts</span>
+                        )}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -1742,7 +1747,12 @@ function ActiveOrderView({
                         className="w-full text-left px-3 py-2 text-sm hover:bg-theme-surface-alt flex justify-between border-b border-theme-surface-alt last:border-0"
                       >
                         <span className="text-theme-text">{c.name}</span>
-                        <span className="text-theme-text-muted text-xs">{c.phone} ({c.totalOrders} orders)</span>
+                        <span className="text-theme-text-muted text-xs">
+                          {c.phone} ({c.totalOrders} orders)
+                          {(c.loyaltyPoints ?? 0) > 0 && (
+                            <span className="ml-1 text-theme-accent font-semibold">· {c.loyaltyPoints} pts</span>
+                          )}
+                        </span>
                       </button>
                     ))}
                   </div>

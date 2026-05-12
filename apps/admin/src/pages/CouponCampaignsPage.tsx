@@ -118,7 +118,7 @@ export default function CouponCampaignsPage() {
                     <span className="text-[#FFA726]">{c.failedCount}</span>
                   </td>
                   <td className="px-4 py-3 text-[10px] text-[#999]">
-                    {c.couponType === 'PERCENTAGE' ? `${c.couponValue}%` : `৳${c.couponValue}`} · {c.validityDays}d
+                    {c.couponType === 'PERCENTAGE' ? `${c.couponValue}%` : `৳${(c.couponValue / 100).toLocaleString()}`} · {c.validityDays}d
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className={`text-[10px] uppercase tracking-widest border px-2 py-0.5 ${STATUS_BADGE[c.status]}`}>
@@ -265,7 +265,7 @@ function CreateCampaignDialog({ onClose, onCreated }: { onClose: () => void; onC
                   {recipients.slice(0, 50).map((c) => (
                     <div key={c.id} className="flex justify-between text-[#999]">
                       <span>{c.name} ({c.phone})</span>
-                      <span>৳{Number(c.totalSpent).toLocaleString()} · {c.totalOrders} orders</span>
+                      <span>৳{(Number(c.totalSpent) / 100).toLocaleString()} · {c.totalOrders} orders</span>
                     </div>
                   ))}
                   {recipients.length > 50 && <p className="text-[#666] italic mt-1">… and {recipients.length - 50} more</p>}
@@ -409,7 +409,7 @@ function ReviewDialog({ id, onClose }: { id: string; onClose: () => void }) {
           <div>
             <h2 className="text-lg font-bold text-white">{detail.name}</h2>
             <p className="text-[10px] text-[#888] mt-1">
-              {detail.recipientCount} recipients · {detail.couponType === 'PERCENTAGE' ? `${detail.couponValue}%` : `৳${detail.couponValue}`} · {detail.validityDays}d validity ·
+              {detail.recipientCount} recipients · {detail.couponType === 'PERCENTAGE' ? `${detail.couponValue}%` : `৳${(detail.couponValue / 100).toLocaleString()}`} · {detail.validityDays}d validity ·
               <span className={`ml-2 ${STATUS_BADGE[detail.status]} px-2 py-0.5`}>{detail.status}</span>
             </p>
           </div>
