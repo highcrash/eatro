@@ -15,7 +15,7 @@ licence, every module included, your server, your data.
 1. [Why we built this](#1-why-we-built-this)
 2. [What's different about Restora POS — the seven signals](#2-whats-different-about-restora-pos--the-seven-signals)
 3. [The full stack — what's in the box](#3-the-full-stack--whats-in-the-box)
-4. [Feature deep-dive — eleven modules](#4-feature-deep-dive--eleven-modules)
+4. [Feature deep-dive — twelve modules](#4-feature-deep-dive--twelve-modules)
 5. [How we compare](#5-how-we-compare)
 6. [The cost story](#6-the-cost-story)
 7. [Who Restora POS is for (and who it isn't)](#7-who-restora-pos-is-for-and-who-it-isnt)
@@ -174,13 +174,16 @@ Buy the licence once and you get:
 - Customer-facing QR self-order
 - Public restaurant website
 - Reservations
-- Customers, discounts, coupons
+- Customers, discounts, coupons, targeted coupon campaigns
+- Loyalty points programme — earn / redeem / rolling expiry / ledger / milestone SMS
+- First-visit welcome coupon, auto-attached to the payment SMS
 - Menu, recipes, ingredients, pre-ready, waste log, stock watcher,
   stock reconciliation
 - Suppliers, purchasing, shopping list, supplier ledger
 - Mushak invoices + register, BIN setup
 - Staff, custom roles, cashier permissions matrix
-- Attendance with Tipsoi biometric sync, payroll, leave management
+- Attendance with Tipsoi biometric sync, configurable salary structures,
+  payroll, configurable leave rules with annual / monthly accrual
 - Expenses, liabilities, accounts, daily / sales / items-sold /
   performance / supplies / void-audit / activity-log reports
 - Branding & theming, public website CMS
@@ -205,9 +208,11 @@ what you're replacing:
 | Tally / spreadsheet inventory | Ingredients + Recipes + Pre-Ready + Stock Watcher + Stock Reconciliation |
 | WhatsApp screenshots to suppliers | WhatsApp PO PDF auto-send + Supplier Ledger |
 | Manual Facebook posts | Auto-Facebook posts on discount creation |
+| Generic loyalty SaaS (per-member fees) | Loyalty points programme + per-customer single-use coupons + welcome coupon — bundled |
+| Manual SMS blasts in a CSV tool | Targeted coupon campaigns: filter by spend / visits / points, generate unique codes per recipient, two-step review-then-send |
 | Tablet at the door for online orders | Customer-facing QR self-order, IP-gated |
 | Static restaurant website | Built-in website CMS with menu, reviews, reservations |
-| Spreadsheet for staff hours | Attendance + Tipsoi biometric sync + Payroll + Leave |
+| Spreadsheet for staff hours | Attendance + Tipsoi biometric sync + Salary Structures + Payroll + Leave Rules |
 | Spreadsheet for expenses | Expenses + Liabilities + Accounts |
 | "Who deleted that?" | Activity Log with per-field before/after diffs |
 | Voids on paper | Void Audit report (Returned vs Wasted, value impact) |
@@ -216,7 +221,7 @@ what you're replacing:
 
 ---
 
-## 4. Feature deep-dive — eleven modules
+## 4. Feature deep-dive — twelve modules
 
 ### 4.1 Cashier (POS Desktop)
 
@@ -521,67 +526,214 @@ ad-hoc customisations.
 
 ---
 
-### 4.8 Customers & Marketing — DB, Discounts, Coupons, Auto-Facebook, SMS
+### 4.8 Customers & Marketing — DB, Discounts, Coupons, Targeted Campaigns, Welcome Coupons, Auto-Facebook, SMS
 
 **What it does.** Customer database with phone-number normalisation
-(so `01620307630` and `+8801620307630` are the same customer).
-Discounts (per-cashier, per-item, per-category), coupons (QR
-redeemable with use-limit + expiry), automatic Facebook posts on
-discount creation, SMS notifications.
+(so `01620307630` and `+8801620307630` are the same customer). Shared
+discount codes (per-cashier, per-item, per-category), shared coupon
+codes with use-limits, **targeted coupon campaigns** (one unique
+single-use code per filtered customer), **first-visit welcome coupons**
+auto-attached to the payment SMS of every brand-new customer,
+automatic Facebook posts on discount creation, transactional SMS via
+your configured gateway.
 
-**How it works.** Customer records are keyed by normalised phone.
-Discounts attach to either an order, a category, or specific menu
-items. Coupons are redeemable codes (also QR) with usage caps. When
-you create a discount, the Social module (per-minute cron) generates
-a Facebook post — discount name, value, menu item image, copy — and
-posts it to your configured page. SMS sends transactional messages
-through your configured provider (Twilio, local BD providers).
+**How it works.**
 
-**Why it matters to you as the owner.** "Mid-week 20% off Biryani" —
-in most POS you create the discount and then go open Facebook and
-write a post. In Restora POS you create the discount; the Facebook
-post auto-posts within a minute; the cashier sees the discount on
-their POS; the customer who already follows your page sees the post.
-Same workflow, half the steps.
+- *Customers + phone normalisation.* A customer is created the moment
+  a phone is attached to an order. Lifetime totals (`totalSpent`,
+  `totalOrders`, `lastVisit`) are maintained by the order service —
+  no manual upkeep.
+- *Discounts + shared coupons.* Discounts attach to an order, a
+  category, or specific menu items. Coupons are redeemable codes (POS
+  + QR) with usage caps + expiry.
+- *Targeted coupon campaigns (two-step).* Pick customers by minimum
+  spend, minimum visits, minimum loyalty points, or last-visit
+  recency. The server resolves the filter, generates one **unique
+  single-use code per recipient** (e.g. `AHM-A3F7E219`), creates a
+  DRAFT campaign, and shows you the recipient table with each code.
+  Verify, then click **Send all** — the SMS dispatches per recipient,
+  status flips to SENT, success/failure counts are tracked.
+- *First-visit welcome coupon.* Toggle on, set discount type +
+  value + validity in Settings → Marketing. Every brand-new
+  customer's first paid order auto-generates a unique coupon code
+  (single-use, customer-scoped) and the code goes straight into the
+  payment SMS — "Welcome! Here's your coupon: WEL-7B23F801, ৳50
+  off your next visit, valid till 12 Jun." The customer can't share
+  it; the next-customer's apply-coupon attempt rejects with
+  `COUPON_NOT_FOR_YOU`.
+- *Auto-Facebook posts.* When you create a discount, the Social
+  module (per-minute cron) generates a Facebook post — name, value,
+  menu image, copy — and posts to your configured page.
+- *Transactional SMS.* Payment receipts, OTPs, and campaign sends
+  all flow through one branch-configured gateway. Templates are
+  saved + reusable.
+
+**Why it matters to you as the owner.** "Mid-week 20% off Biryani"
+— in most POS you create the discount and then go open Facebook and
+write a post. In Restora POS the Facebook post auto-fires within a
+minute. "Push the top 50 spenders a ৳200-off coupon" — in most POS
+you export to a spreadsheet, mail-merge codes manually, paste them
+into a bulk SMS tool, and pray everyone gets the right one. In
+Restora POS: filter, click Generate, review the per-recipient table
+of unique codes, click Send. Each customer gets their own
+single-use code that no one else can redeem. "First-time customer
+walks in" — most POS treat them like every other customer; Restora
+POS ships them a welcome coupon attached to their payment SMS
+without you lifting a finger.
 
 **Where the cheap competition fails.** None of them auto-post to
-Facebook. Toast and Petpooja have loyalty / marketing modules as paid
-add-ons. Loyverse's loyalty is tier-locked. Square's marketing is a
-separate app.
+Facebook. Toast and Petpooja have loyalty / marketing modules as
+paid add-ons. Loyverse's loyalty is tier-locked. Square's marketing
+is a separate app. **Per-customer single-use codes generated from a
+segmentation filter and dispatched in a reviewed batch is something
+none of them ship out of the box.** The first-visit welcome coupon
+in particular is unique to Restora POS in this comparison.
 
 ---
 
-### 4.9 People — Staff, Custom Roles, Attendance, Payroll, Leave
+### 4.9 Loyalty — Points, QR Redemption, Rolling Expiry, Milestone SMS
+
+**What it does.** A bundled loyalty programme: customers earn points
+on every paid order, redeem them at the QR-order checkout to lower
+their bill, balances expire on a rolling validity window, an admin
+can adjust manually with a reason, and the daily expiry sweep keeps
+the ledger clean. No add-on fee, no per-member tier, no separate
+loyalty SaaS.
+
+**How it works.**
+
+- *Earn rate.* Admin sets `takaPerPoint` in Settings → Marketing
+  (default ৳100 spent = 1 point). Every paid order calls
+  `awardForOrder(orderId)`, computes `floor(totalTaka / takaPerPoint)`,
+  writes an EARNED row to the loyalty ledger, increments
+  `Customer.loyaltyPoints`. Idempotent — a retried payment never
+  double-credits.
+- *Redeem rate.* Admin sets `takaPerPointRedeem` (default 1 pt = ৳1
+  off). On the QR cart, an identified customer with a non-zero balance
+  sees a "Use Loyalty Points" panel capped at
+  `min(balance, floor(orderTotal / takaPerPointRedeem))`. Apply,
+  the bill drops, a REDEEMED row writes.
+- *Rolling expiry.* `loyaltyExpiresAt` is reset to `now +
+  validityDays` on every paid order. Active customers never lose
+  points. The daily 03:00 cron zeros any balance whose expiry has
+  passed and writes an EXPIRED row.
+- *Ledger.* Every transaction (EARNED, REDEEMED, EXPIRED,
+  ADJUSTMENT) is immutably stored with branch, customer, order
+  reference, signed point delta, and a description. The ledger can
+  rebuild any balance via `SUM(points)` if anyone ever suspects drift.
+- *Admin adjustments.* Admin can credit / debit any customer's
+  balance with a mandatory reason. Writes an ADJUSTMENT row +
+  Activity Log entry.
+- *Milestone SMS blast.* From the Loyalty page, filter customers
+  above a points threshold, pick a saved SMS template, click Send.
+  One-shot push for "your VIPs have hoarded enough points to come
+  back."
+- *POS visibility.* Cashiers see a customer's balance in the customer
+  picker dropdown ("· 240 pts") and on the Customers page detail
+  panel — read-only. Redemption is QR-only by design (the cashier's
+  job is to take orders, not haggle).
+- *QR My Account.* Every logged-in customer sees their own balance
+  card on My Account: balance + expiry date + "Resets each visit"
+  + a hint to redeem at checkout.
+- *Payment SMS enrichment.* When loyalty is enabled, the payment
+  SMS template gains `{{points_earned}}`, `{{points_balance}}`, and
+  `{{points_expires}}` placeholders. Default copy: "You earned 4 pt.
+  Total: 240."
+
+**Why it matters to you as the owner.** Loyalty is the single
+biggest driver of repeat-visit revenue in dine-in restaurants and
+the single most common feature locked behind a paid tier in every
+competing POS. Restora POS bundles it. Configurable rates, rolling
+expiry that rewards active customers, customer-facing balance card
+on the QR app, milestone SMS push, full ledger for audit, manual
+adjustment for the rare goodwill case. Set it up once, never think
+about it again.
+
+**Where the cheap competition fails.** Toast loyalty is an add-on
+($25–60/mo per location). Square Loyalty is a separate app
+($45/mo per location after a free trial). Petpooja loyalty is
+tier-locked. Loyverse Loyalty is paid above the free tier and
+caps reward redemption per visit. **None of them ship a rolling
+expiry pattern that resets on every visit** — most use fixed
+calendar windows that punish active customers. **None expose a
+points-balance card directly inside their customer-facing QR
+ordering app** — most require a separate loyalty app download
+that no Bangladeshi diner is going to install.
+
+---
+
+### 4.10 People — Staff, Custom Roles, Attendance, Salary Structures, Payroll, Leave Rules
 
 **What it does.** Staff management with role-based permissions, a
 Cashier Permissions matrix that fine-tunes what each role can do at
 the POS, custom roles that overlay the base roles, attendance with
-optional Tipsoi biometric sync, payroll calculation with deductions
-and bonuses, leave management with approval workflows.
+optional Tipsoi biometric sync, **configurable salary structures**
+with EARNING + DEDUCTION components and per-structure late /
+half-day thresholds, payroll calculation that honours those
+structures, **configurable leave rules** with monthly + annual
+accrual, leave management with approval workflows + balance
+tracking.
 
-**How it works.** Base roles (OWNER / MANAGER / ADVISOR / CASHIER /
-KITCHEN / WAITER) gate every endpoint at the controller level. The
-Cashier Permissions matrix lives on top — for example, even a CASHIER
-might need MANAGER approval to apply a discount above 10%. Custom
-Roles are admin-defined overlays: "Head Chef Dhaka" might see fewer
-admin pages than "Head Chef Chittagong". Attendance can be manual or
-auto-synced hourly from a Tipsoi biometric machine. Payroll calculates
-salary + deductions + bonuses and tracks it through Accounts.
+**How it works.**
 
-**Why it matters to you as the owner.** "Who can void an item?" "Who
-can apply a 50% discount?" "Who can issue a refund?" — every one of
-these is a knob you can turn per-branch, per-role, per-staff-member.
-And every change to those knobs is logged in the Activity Log so you
-can audit who changed what when.
+- *Base roles* (OWNER / MANAGER / ADVISOR / CASHIER / KITCHEN /
+  WAITER) gate every endpoint at the controller level. The Cashier
+  Permissions matrix sits on top — even a CASHIER might need MANAGER
+  approval to apply a discount above 10%.
+- *Custom Roles* are admin-defined overlays: "Head Chef Dhaka" might
+  see fewer admin pages than "Head Chef Chittagong".
+- *Attendance* can be manual or auto-synced hourly from a Tipsoi
+  biometric machine.
+- *Salary structures* are admin-defined templates: name, list of
+  EARNING components (Basic, House Rent, Medical, Conveyance,
+  Performance Bonus…), list of DEDUCTION components (Provident Fund,
+  Tax, Loan Repayment…), plus per-structure thresholds for the
+  attendance-deduction rule (e.g. "3 lates = 1 absent" can be
+  loosened to "5 lates = 1 absent" for a Senior structure). Assign
+  the structure to a staff member; payroll generation pulls the
+  breakdown from the structure, sums the EARNING side as base
+  salary, applies attendance deductions on the per-structure
+  threshold, applies structure deductions, and snapshots the entire
+  computation context onto the Payroll row so the breakdown is
+  audit-traceable years later.
+- *Payroll prefill.* When the admin opens Generate-Payroll and picks
+  a staff member, the form auto-fills the Base Salary from the
+  assigned structure (or the legacy `monthlySalary` field for staff
+  not yet on a structure) and shows a hint line ("From structure
+  'Senior': earnings ৳45,000, structure deductions ৳3,000
+  auto-applied"). No manual lookup, no double-counting.
+- *Configurable leave rules.* Define rules per leave type (Annual,
+  Sick, Festival, Casual, Maternity, etc.) with monthly accrual
+  (e.g. "0.83 days/month → 10 days/year") and annual grant policies.
+  Assign a rule to a staff member; the scheduler accrues balances
+  monthly + annually. Leave applications decrement the appropriate
+  balance on approval. Negative balances allowed — the soft-warn UX
+  flags over-quota approvals without blocking, so a manager can
+  approve a 2-day extra leave with eyes open.
+
+**Why it matters to you as the owner.** Bangladesh restaurant
+salaries aren't a single number — they're Basic + House Rent +
+Conveyance + Medical + maybe a Performance Bonus, minus Provident
+Fund or Loan Repayment. Most POS forces you to compress that into a
+single "monthly salary" field and re-explain the breakdown every
+month with a calculator. Restora POS lets you define the structure
+once and re-run it every month. And "who can void an item?" "who
+can apply a 50% discount?" — every one of these is a knob you can
+turn per-branch, per-role, per-staff-member, and every change is
+logged in the Activity Log.
 
 **Where the cheap competition fails.** Toast and Square have role
 systems but they're rigid (the roles you get are the roles you get).
 Custom roles + per-branch overrides + a separate Cashier Permissions
-matrix on top is something most POS don't even attempt.
+matrix on top is something most POS don't even attempt. **None of
+them ship configurable salary structures with per-structure
+attendance thresholds + payroll-prefill from the structure** — they
+all assume one number, one rule, no exceptions. Leave-rule accrual
+math is usually a paid HRMS add-on or just absent.
 
 ---
 
-### 4.10 Finance — Accounts auto-management, Performance, Reports
+### 4.11 Finance — Accounts auto-management, Performance, Reports
 
 **What it does.** Track expenses (utilities, rent, food cost, staff
 cost, ad spend), liabilities (loans, rent owed, utility arrears),
@@ -674,7 +826,7 @@ accountant on a retainer. Restora POS replaces the spreadsheet.
 
 ---
 
-### 4.11 Audit & Trust — Activity Log, Void Audit, Permissions
+### 4.12 Audit & Trust — Activity Log, Void Audit, Permissions
 
 **What it does.** Every admin-config change is logged with actor,
 timestamp, before-and-after diff. Every voided item is in the Void
@@ -799,7 +951,7 @@ orders within 48 hours of buying.
 | **Day 2** | Train cashiers on PIN login + order entry | 2 hours |
 | **Week 1** | Go live — Mushak invoices auto-issuing on every payment | — |
 | **Week 2** | Configure kitchen sections + recipes + supplier list | 4–6 hours |
-| **Month 1** | Coupons + auto-Facebook + attendance + payroll + reports | 6–8 hours |
+| **Month 1** | Coupons + auto-Facebook + loyalty programme + welcome coupon + targeted campaigns + attendance + salary structures + payroll + leave rules + reports | 6–8 hours |
 
 If you're switching from another POS, we can help with menu / customer
 data import in the first week. After that, the system is yours to run.
