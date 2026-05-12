@@ -877,6 +877,93 @@ summary:
 - Loyverse / Square are entry-level — fine for a coffee cart, not for
   a real restaurant.
 
+### 5.1 Bangladesh-market head-to-head — ChillyPOS and Restora POS SaaS
+
+If you're evaluating Restora POS for a BD restaurant, you've almost
+certainly also looked at two SaaS competitors:
+
+- **ChillyPOS** (chillypos.com) — BD-based, cloud-only, 1,000–2,000
+  BDT per branch per month. Markets AI Insight + customer sentiment
+  analysis + smart reservation + target SMS marketing.
+- **Restora POS SaaS** (restorapos.com) — same product name as ours
+  but a different company, cloud-only, monthly / yearly subscription.
+  Markets online/offline POS, KDS+CDS, reservation, online ordering
+  with website + mobile app integration, third-party delivery
+  integration, 21-day free trial.
+
+Both are real products. Here's the honest positioning.
+
+**Where we win decisively against both:**
+
+- **Mushak compliance.** Neither competitor publicly advertises
+  Mushak 6.3 atomic-serial issuance, Mushak 6.8 credit-note flow on
+  refund, or the NBR-ready Mushak Register report. For any BD
+  restaurant that takes audits seriously, this is the single most
+  important capability — and it's the one feature both competitors
+  silently skip.
+- **Offline-first that's actually documented.** ChillyPOS is
+  cloud-only — when WiFi drops, the register stops. Restora POS SaaS
+  claims offline but offers no public detail on Mushak-offline,
+  idempotency-keyed mutations, or thermal printing without server
+  contact. Our offline path is documented down to the SQLite outbox,
+  DPAPI-encrypted credentials, Idempotency-Key replay protection,
+  and synthetic-id remapping on drain. WiFi drop → your cashier
+  never sees a spinner.
+- **Operational depth.** Recipe roll-up with parent / variant
+  ingredients, pre-ready batch FIFO with expiry + waste link,
+  stock reconciliation with print-count-variance, WhatsApp PO PDF
+  via Meta Business API, auto-Facebook post on discount creation,
+  custom roles overlay + Cashier Permissions matrix, configurable
+  salary structures + leave rules, audit log with field-level
+  diffs. Each one is a feature some restaurants make a hiring
+  decision around. Both BD SaaS competitors miss the whole stack.
+- **Loyalty done right.** Rolling expiry that resets on every paid
+  order (so active diners don't get punished), per-customer
+  single-use coupon campaigns with reviewed batch send, first-visit
+  welcome coupon auto-attached to the payment SMS, customer balance
+  card *inside* the QR ordering app. ChillyPOS lists "Customer
+  Loyalty & Discount" but doesn't show any of these mechanics;
+  Restora POS SaaS doesn't appear to ship loyalty at all.
+- **You own everything.** Code on your VPS. Database under your
+  control. Backups in your hands. Stop paying one day, the software
+  keeps running. Try that with either SaaS.
+
+**Where they have something we should answer:**
+
+- *ChillyPOS markets "AI Insight" and customer sentiment analysis.*
+  We don't slap an "AI" label on anything. What we ship instead is
+  the **data layer** any AI would need to draw conclusions from —
+  Performance Report with margin per item, void audit broken down
+  by reason code, activity log with per-field before/after diffs,
+  ingredient price volatility tracking. If your operations team
+  has one hour a week, knowing "curries category margin dropped
+  from 38% to 32% this month" is more actionable than "AI
+  suggests adding a new dish." If you want to run actual ML on
+  top, the data is structured and exportable.
+- *Restora POS SaaS ships a native mobile waiter app for
+  table-side ordering.* We push web POS on a tablet browser —
+  works on Android + iPad, supports offline, no app-store install
+  cycle. For dine-in volume below ~150 covers per shift this is
+  equivalent. For 8+ waiters running phones simultaneously, a
+  dedicated mobile waiter app is on the roadmap.
+- *Restora POS SaaS advertises third-party delivery integration*
+  (Foodpanda / Pathao Food). We deliberately optimise for
+  direct-channel revenue (QR self-order, website ordering,
+  dine-in) because aggregators typically take 25–35% off the top.
+  Our API is documented; a Foodpanda webhook bridge is a
+  side-project rather than a missing core feature. If aggregator
+  channel is critical, plan for a custom connector.
+- *Both offer monthly subscription pricing; Restora POS SaaS
+  offers a 21-day free trial.* We're a one-time licence — pay once,
+  own forever. For evaluation we run scheduled 30-minute demos on
+  a sample database loaded with your menu. Less DIY, more
+  hand-holding, higher conversion. Different shape, same goal.
+
+**Honest gaps:** no native mobile waiter app yet; no native
+Foodpanda / Pathao connector; no 21-day self-serve trial. All three
+are deliberate trade-offs against shipping the depth listed above.
+If any one of them is a deal-breaker, talk to us about timeline.
+
 ---
 
 ## 6. The cost story
