@@ -846,15 +846,48 @@ export class OrderService {
       .join('/');
 
     // First-visit welcome coupon — fires only on a brand-new
-    // customer's FIRST paid order. The customer.totalOrders counter
-    // was just bumped to 1 right above this call, so check for == 1
-    // here. Generates a unique single-use Coupon with the
-    // BranchSetting-configured discount; the code goes into the
-    // payment SMS body via the {{coupon_code}} placeholder.
+    // customer's FIRST paid order. The earlier `=== 1` check against
+    // customer.totalOrders raced with the fire-and-forget counter
+    // update in processPayment: maybeSendPaymentSms re-reads the
+    // customer through prisma.order.findUnique({ include: { customer
+    // } }) and could see the pre-increment value (0) when the
+    // counter update hadn't committed yet → check failed → no coupon
+    // generated. We now ask the question that matters directly:
+    // "does this customer have any OTHER paid orders besides this
+    // one?" If zero, this IS the first paid order, race-immune.
+    // Generates a unique single-use Coupon with the BranchSetting-
+    // configured discount; the code goes into the payment SMS body
+    // via the {{coupon_code}} placeholder.
     let welcomeCouponCode: string | null = null;
     let welcomeCouponValueDisplay: string | null = null;
     let welcomeCouponExpiresDisplay: string | null = null;
-    if (settings.firstVisitCouponEnabled && order.customer && order.customer.totalOrders === 1) {
+    let isFirstPaidOrder = false;
+    if (settings.firstVisitCouponEnabled && order.customer && order.customerId) {
+      // Also skip if a first-visit coupon has already been issued for
+      // this customer — defends against the SMS path running twice
+      // (e.g. payment retry) so the diner doesn't end up with two
+      // welcome codes.
+      const [priorPaid, priorWelcome] = await Promise.all([
+        this.prisma.order.count({
+          where: {
+            branchId,
+            customerId: order.customerId,
+            status: 'PAID',
+            id: { not: order.id },
+            deletedAt: null,
+          },
+        }),
+        this.prisma.coupon.count({
+          where: {
+            branchId,
+            customerId: order.customerId,
+            campaignTag: 'first-visit',
+          },
+        }),
+      ]);
+      isFirstPaidOrder = priorPaid === 0 && priorWelcome === 0;
+    }
+    if (isFirstPaidOrder) {
       try {
         const expiresAt = new Date(Date.now() + settings.firstVisitCouponValidityDays * 24 * 60 * 60 * 1000);
         // BranchSetting.firstVisitCouponValue holds the admin-entered
