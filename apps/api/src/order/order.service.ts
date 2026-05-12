@@ -12,6 +12,8 @@ import { BranchSettingsService } from '../branch-settings/branch-settings.servic
 import { LicenseService } from '../license/license.service';
 import { SmsService } from '../sms/sms.service';
 import { MushakService } from '../mushak/mushak.service';
+import { LoyaltyService } from '../loyalty/loyalty.service';
+import { MarketingService } from '../marketing/marketing.service';
 
 /**
  * Service charge + VAT calculator used by every place that recomputes an
@@ -106,6 +108,8 @@ export class OrderService {
     private readonly license: LicenseService,
     private readonly sms: SmsService,
     private readonly mushak: MushakService,
+    private readonly loyalty: LoyaltyService,
+    private readonly marketing: MarketingService,
   ) {}
 
   /**
@@ -768,19 +772,36 @@ export class OrderService {
       }).catch(() => {});
     }
 
+    // Loyalty award — credits points based on the branch's
+    // loyaltyTakaPerPoint rate. Idempotent; safe on retry. Runs
+    // BEFORE the SMS so the renderer sees the post-credit balance.
+    // Fire-and-forget; a loyalty failure must never fail the payment.
+    let loyaltyResult: { pointsEarned: number; newBalance: number; newExpiresAt: Date | null } | null = null;
+    try {
+      loyaltyResult = await this.loyalty.awardForOrder(order.id);
+    } catch (err) {
+      console.warn(`[order] loyalty award failed for ${order.id}: ${(err as Error).message}`);
+    }
+
     // Payment-thank-you SMS. Fires only when the branch has it toggled on,
     // the order was attached to a customer with a phone, and the gateway
     // is configured. Fire-and-forget so a transient SMS failure never
     // blocks the checkout flow — the log row records the failure for
-    // admin triage.
-    void this.maybeSendPaymentSms(branchId, order.id).catch((err) => {
+    // admin triage. Loyalty result + first-visit coupon are computed
+    // inside the SMS path so they only generate a coupon when the SMS
+    // is actually about to dispatch.
+    void this.maybeSendPaymentSms(branchId, order.id, loyaltyResult).catch((err) => {
       console.warn(`[order] payment SMS failed for ${order.id}: ${(err as Error).message}`);
     });
 
     return updated;
   }
 
-  private async maybeSendPaymentSms(branchId: string, orderId: string): Promise<void> {
+  private async maybeSendPaymentSms(
+    branchId: string,
+    orderId: string,
+    loyaltyResult: { pointsEarned: number; newBalance: number; newExpiresAt: Date | null } | null,
+  ): Promise<void> {
     const settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
     if (!settings?.smsPaymentNotifyEnabled) return;
     const order = await this.prisma.order.findUnique({
@@ -804,19 +825,76 @@ export class OrderService {
       .map((p) => (p.method ?? 'cash').toLowerCase())
       .filter((v, i, a) => a.indexOf(v) === i)
       .join('/');
-    const defaultTemplate =
+
+    // First-visit welcome coupon — fires only on a brand-new
+    // customer's FIRST paid order. The customer.totalOrders counter
+    // was just bumped to 1 right above this call, so check for == 1
+    // here. Generates a unique single-use Coupon with the
+    // BranchSetting-configured discount; the code goes into the
+    // payment SMS body via the {{coupon_code}} placeholder.
+    let welcomeCouponCode: string | null = null;
+    let welcomeCouponValueDisplay: string | null = null;
+    let welcomeCouponExpiresDisplay: string | null = null;
+    if (settings.firstVisitCouponEnabled && order.customer && order.customer.totalOrders === 1) {
+      try {
+        const expiresAt = new Date(Date.now() + settings.firstVisitCouponValidityDays * 24 * 60 * 60 * 1000);
+        const coupon = await this.prisma.$transaction(async (tx) => {
+          return this.marketing.createUniqueCouponForCustomer(tx, {
+            branchId,
+            customerId: order.customerId!,
+            campaignTag: 'first-visit',
+            name: 'Welcome — first-visit coupon',
+            type: settings.firstVisitCouponType,
+            value: settings.firstVisitCouponValue.toNumber(),
+            expiresAt,
+            customerNameForCode: order.customer!.name,
+          });
+        });
+        welcomeCouponCode = coupon.code;
+        welcomeCouponValueDisplay = settings.firstVisitCouponType === 'PERCENTAGE'
+          ? `${settings.firstVisitCouponValue.toNumber()}%`
+          : `৳${settings.firstVisitCouponValue.toNumber()}`;
+        welcomeCouponExpiresDisplay = expiresAt.toLocaleDateString('en-GB', {
+          day: '2-digit', month: 'short', year: 'numeric',
+        });
+      } catch (err) {
+        console.warn(`[order] first-visit coupon generation failed for order ${order.id}: ${(err as Error).message}`);
+      }
+    }
+
+    // Default template includes the loyalty + welcome lines if the
+    // admin hasn't customised one. When the admin saved a custom
+    // template and didn't add the new placeholders, those values
+    // simply don't render — backwards compatible.
+    let defaultTemplate =
       'Thanks for Dining with {{brand}}. Your payment {{amount}} Taka has been received with {{method}}.';
+    if (loyaltyResult && loyaltyResult.pointsEarned > 0) {
+      defaultTemplate += ' You earned {{points_earned}} pt. Total: {{points_balance}}.';
+    }
+    if (welcomeCouponCode) {
+      defaultTemplate += ' Welcome coupon: {{coupon_code}} ({{coupon_value}} off, valid till {{coupon_expires}}).';
+    }
     const template = settings.smsPaymentTemplate && settings.smsPaymentTemplate.trim()
       ? settings.smsPaymentTemplate
       : defaultTemplate;
 
-    const body = template
-      .replace(/\{\{\s*brand\s*\}\}/gi, order.branch?.name ?? '')
-      .replace(/\{\{\s*name\s*\}\}/gi, order.customer?.name && order.customer.name.trim() && order.customer.name.trim().toLowerCase() !== 'walk-in'
-        ? order.customer.name.trim()
-        : 'Dear Customer')
-      .replace(/\{\{\s*amount\s*\}\}/gi, amount)
-      .replace(/\{\{\s*method\s*\}\}/gi, method || 'payment');
+    const pointsExpiresDisplay = loyaltyResult?.newExpiresAt
+      ? loyaltyResult.newExpiresAt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      : null;
+
+    const body = this.sms.renderTemplate(template, {
+      name: order.customer?.name ?? 'Dear Customer',
+      phone,
+      amount,
+      method: method || 'payment',
+      brand: order.branch?.name,
+      pointsEarned: loyaltyResult?.pointsEarned ?? 0,
+      pointsBalance: loyaltyResult?.newBalance ?? 0,
+      pointsExpires: pointsExpiresDisplay,
+      couponCode: welcomeCouponCode,
+      couponValue: welcomeCouponValueDisplay,
+      couponExpires: welcomeCouponExpiresDisplay,
+    });
 
     await this.sms.sendAndLog(branchId, phone, body, {
       kind: 'PAYMENT',
@@ -892,6 +970,17 @@ export class OrderService {
     return updated;
   }
 
+  /**
+   * QR-only loyalty redemption — delegates to LoyaltyService and
+   * emits the standard order-updated WS event so the QR cart, the
+   * cashier POS, and KDS see the new total in real time.
+   */
+  async applyLoyalty(orderId: string, branchId: string, customerId: string, points: number) {
+    const result = await this.loyalty.redeemForOrder(branchId, orderId, customerId, points);
+    this.ws.emitToBranch(branchId, 'order:updated', result.order);
+    return result;
+  }
+
   async applyCoupon(orderId: string, branchId: string, code: string) {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') throw new BadRequestException('Cannot modify this order');
@@ -912,6 +1001,13 @@ export class OrderService {
     if (!coupon) throw new BadRequestException('Invalid coupon code');
     if (coupon.expiresAt && coupon.expiresAt < new Date()) throw new BadRequestException('Coupon has expired');
     if (coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) throw new BadRequestException('Coupon usage limit reached');
+    // Per-customer scoped coupon — generated by a campaign or the
+    // first-visit welcome flow. Must be redeemed by the customer it
+    // was issued to. Rejecting here lets a sharing customer get a
+    // clean error and the issued customer to still use it.
+    if (coupon.customerId && coupon.customerId !== order.customerId) {
+      throw new BadRequestException('COUPON_NOT_FOR_YOU: this coupon was issued to a different customer');
+    }
 
     const activeItems = order.items.filter((i) => !i.voidedAt);
     const items = activeItems.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() }));

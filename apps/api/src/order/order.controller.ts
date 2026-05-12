@@ -360,9 +360,28 @@ export class QrOrderController {
   async getOrderStatus(@Param('id') id: string) {
     const order = await this.prisma.order.findFirst({
       where: { id, deletedAt: null },
-      include: { items: true },
+      include: {
+        items: true,
+        // Pull the customer's loyalty balance so the QR app can render
+        // the "Use Loyalty Points" widget without an extra round-trip.
+        // Loyalty config (enabled flag + redeem rate) comes from the
+        // branch settings hydrated below.
+        customer: { select: { loyaltyPoints: true } },
+        branch: {
+          select: {
+            settings: {
+              select: {
+                loyaltyEnabled: true,
+                loyaltyTakaPerPointRedeem: true,
+              },
+            },
+          },
+        },
+      },
     });
     if (!order) throw new NotFoundException('Order not found');
+    const loyaltyEnabled = order.branch?.settings?.loyaltyEnabled ?? false;
+    const loyaltyRedeemRate = order.branch?.settings?.loyaltyTakaPerPointRedeem ?? 1;
     return {
       id: order.id,
       orderNumber: order.orderNumber,
@@ -381,6 +400,11 @@ export class QrOrderController {
       // "Apply Coupon" directly or a phone-identify modal first.
       customerId: order.customerId,
       customerName: order.customerName,
+      // Loyalty info — 0 / null when no customer attached or programme
+      // disabled. The QR app uses these to render the redemption widget.
+      customerLoyaltyPoints: order.customer?.loyaltyPoints ?? 0,
+      loyaltyEnabled,
+      loyaltyTakaPerPointRedeem: loyaltyRedeemRate,
       // Multi-device QR-share: expose the order's device-anchor + the
       // approved shared list so the QR app can compute "am I a
       // participant?" client-side and either render the editable view
@@ -603,6 +627,26 @@ export class QrOrderController {
     await this.ensureGateOpen(branchId, req);
     await this.requireOrderParticipant(id, branchId, deviceId, dto.customerId);
     return this.orderService.applyCoupon(id, branchId, dto.code);
+  }
+
+  /**
+   * QR-only loyalty redemption — customer applies N points to reduce
+   * their bill. Branch must have loyaltyEnabled = true. The customer
+   * must be identified on the order; LoyaltyService validates balance
+   * + per-order cap before debiting.
+   */
+  @Post('qr/:id/apply-loyalty')
+  async applyLoyalty(
+    @Param('id') id: string,
+    @Headers('x-branch-id') branchId: string,
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Body() dto: { points: number; customerId: string },
+    @Req() req: Request,
+  ) {
+    if (!branchId) throw new BadRequestException('Branch ID required');
+    await this.ensureGateOpen(branchId, req);
+    await this.requireOrderParticipant(id, branchId, deviceId, dto.customerId);
+    return this.orderService.applyLoyalty(id, branchId, dto.customerId, dto.points);
   }
 
   @Patch('qr/:id/items/:itemId/notes')

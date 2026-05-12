@@ -32,6 +32,9 @@ interface QrOrder {
   couponCode?: string | null;
   customerId?: string | null;
   customerName?: string | null;
+  customerLoyaltyPoints?: number;
+  loyaltyEnabled?: boolean;
+  loyaltyTakaPerPointRedeem?: number;
   billRequested?: boolean;
   items: OrderItem[];
   /** Multi-device share anchors. Null on legacy / POS-created orders
@@ -93,6 +96,9 @@ export default function OrderStatusPage() {
   const [noteBusy, setNoteBusy] = useState(false);
   const [billBusy, setBillBusy] = useState(false);
   const [couponCode, setCouponCode] = useState('');
+  const [loyaltyPoints, setLoyaltyPoints] = useState('');
+  const [loyaltyBusy, setLoyaltyBusy] = useState(false);
+  const [loyaltyError, setLoyaltyError] = useState<string | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponBusy, setCouponBusy] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
@@ -360,6 +366,37 @@ export default function OrderStatusPage() {
       setCouponError((e as Error).message);
     } finally {
       setCouponBusy(false);
+    }
+  };
+
+  const applyLoyalty = async () => {
+    const pts = Number(loyaltyPoints);
+    if (!Number.isFinite(pts) || pts <= 0) {
+      setLoyaltyError('Enter a positive number of points');
+      return;
+    }
+    if (!order.customerId) {
+      setShowLogin(true);
+      return;
+    }
+    setLoyaltyBusy(true);
+    setLoyaltyError(null);
+    try {
+      const res = await qrFetch(`/orders/qr/${orderId}/apply-loyalty`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
+        body: JSON.stringify({ points: Math.floor(pts), customerId: order.customerId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Failed to redeem points' })) as { message?: string };
+        throw new Error(err.message || 'Failed to redeem points');
+      }
+      setLoyaltyPoints('');
+      void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
+    } catch (e) {
+      setLoyaltyError((e as Error).message);
+    } finally {
+      setLoyaltyBusy(false);
     }
   };
 
@@ -767,6 +804,49 @@ export default function OrderStatusPage() {
               </div>
             )}
             {couponError && <p className="text-xs text-[#D62B2B] font-body">{couponError}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Loyalty redemption — only when programme is enabled, customer
+          identified, and the customer has a non-zero balance. */}
+      {!isFinished &&
+        order.loyaltyEnabled &&
+        order.customerId &&
+        (order.customerLoyaltyPoints ?? 0) > 0 && (
+        <div className="px-5 mb-24">
+          <div className="border border-[#2A2A2A] bg-[#1A1A1A] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="font-body font-medium text-sm text-white">Use Loyalty Points</p>
+              <span className="text-[10px] text-[#C8FF00] font-body tracking-widest uppercase">
+                Balance {order.customerLoyaltyPoints ?? 0} pt
+              </span>
+            </div>
+            <p className="text-xs text-[#888] font-body">
+              {order.loyaltyTakaPerPointRedeem ?? 1} Taka off per point. Capped at the order total.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={Math.min(
+                  order.customerLoyaltyPoints ?? 0,
+                  Math.floor(Number(order.totalAmount ?? 0) / (order.loyaltyTakaPerPointRedeem ?? 1)),
+                )}
+                value={loyaltyPoints}
+                onChange={(e) => setLoyaltyPoints(e.target.value)}
+                placeholder="POINTS"
+                className="flex-1 bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2.5 text-sm font-mono font-semibold tracking-widest text-white outline-none focus:border-[#C8FF00]"
+              />
+              <button
+                onClick={() => void applyLoyalty()}
+                disabled={!loyaltyPoints.trim() || loyaltyBusy}
+                className="bg-[#C8FF00] text-[#0D0D0D] px-4 py-2.5 font-body font-medium text-sm disabled:opacity-40"
+              >
+                {loyaltyBusy ? '…' : 'Redeem'}
+              </button>
+            </div>
+            {loyaltyError && <p className="text-xs text-[#D62B2B] font-body">{loyaltyError}</p>}
           </div>
         </div>
       )}

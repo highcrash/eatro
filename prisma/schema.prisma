@@ -265,6 +265,8 @@ model Branch {
   salaryStructures    SalaryStructure[]
   leaveRules          LeaveRule[]
   leaveBalances       LeaveBalance[]
+  loyaltyTransactions LoyaltyTransaction[]
+  couponCampaigns     CouponCampaign[]
 
   @@index([isActive])
   @@map("branches")
@@ -281,6 +283,27 @@ model BranchSetting {
   notifyVoidOtp                   Boolean @default(true) // Send OTP to manager for void approval
   smsPaymentNotifyEnabled         Boolean @default(false) // Auto-send thank-you SMS to customer on order payment
   smsPaymentTemplate              String? // Payment SMS body; supports {{name}} + {{amount}} + {{method}} placeholders
+  // ── Marketing & Loyalty ────────────────────────────────────────
+  /// Master toggle for the loyalty programme. When false, no
+  /// points earn/redeem, no SMS enrichment, no welcome coupon.
+  loyaltyEnabled                  Boolean      @default(false)
+  /// Taka of spend that earns one loyalty point (e.g. 100 = 1
+  /// point per ৳100). Floor division on each paid order.
+  loyaltyTakaPerPoint             Int          @default(100)
+  /// Taka value of one point when redeemed on a QR order (e.g. 1
+  /// = ৳1 off per point).
+  loyaltyTakaPerPointRedeem       Int          @default(1)
+  /// Days a balance can sit idle before the daily expiry sweep
+  /// zeros it. Reset on every paid order (rolling expiry). 0 =
+  /// disable expiry entirely.
+  loyaltyValidityDays             Int          @default(180)
+  /// When true, the first paid order of every brand-new customer
+  /// auto-generates a unique single-use Coupon and the payment SMS
+  /// embeds its code + expiry.
+  firstVisitCouponEnabled         Boolean      @default(false)
+  firstVisitCouponType            DiscountType @default(PERCENTAGE)
+  firstVisitCouponValue           Decimal      @default(10) @db.Decimal(14, 2)
+  firstVisitCouponValidityDays    Int          @default(30)
   // Theming
   posTheme                        String  @default("sunrise") // built-in slug or custom slug
   websiteTheme                    String  @default("sunrise")
@@ -591,6 +614,7 @@ model Staff {
   salaryStructure           SalaryStructure?     @relation(fields: [salaryStructureId], references: [id])
   leaveRule                 LeaveRule?           @relation(fields: [leaveRuleId], references: [id])
   leaveBalances             LeaveBalance[]
+  couponCampaignsCreated    CouponCampaign[]     @relation("CouponCampaignCreator")
 
   @@index([branchId, isActive])
   @@index([email])
@@ -887,6 +911,14 @@ model Customer {
   lastVisit   DateTime?
   agreedTerms Boolean   @default(true)
   isActive    Boolean   @default(true)
+  /// Running loyalty-points balance. Maintained by LoyaltyService —
+  /// incremented on paid orders, decremented on QR redemption,
+  /// zero'd by the daily expiry sweep when loyaltyExpiresAt passes.
+  loyaltyPoints    Int       @default(0)
+  /// Rolling-expiry timestamp. Reset to (now + BranchSetting
+  /// .loyaltyValidityDays) on every paid order so active customers
+  /// never lose points. Null = balance has never been > 0.
+  loyaltyExpiresAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -894,6 +926,8 @@ model Customer {
   orders       Order[]
   reviews      Review[]
   reservations Reservation[]
+  coupons      Coupon[]
+  loyaltyTransactions LoyaltyTransaction[]
 
   @@unique([branchId, phone])
   @@index([branchId, phone])
@@ -1038,6 +1072,7 @@ model Order {
   payments OrderPayment[]
   mushakInvoice MushakInvoice?
   mushakNotes   MushakNote[]
+  loyaltyTransactions LoyaltyTransaction[]
 
   @@index([branchId, status])
   @@index([branchId, createdAt])
@@ -1136,13 +1171,26 @@ model Coupon {
   usedCount   Int           @default(0)
   expiresAt   DateTime?
   isActive    Boolean       @default(true)
+  /// When set, the code is valid ONLY when redeemed by this exact
+  /// customer (matched on the order's customerId). Null = legacy
+  /// shared-code behaviour, unchanged. Generated campaign coupons +
+  /// the first-visit welcome coupon always set this + maxUses=1.
+  customerId  String?
+  /// Campaign label so generated codes can be grouped + audited.
+  /// Set to the CouponCampaign.id for batch-generated codes, or
+  /// "first-visit" for auto-generated welcome coupons. Null on
+  /// admin-typed shared codes.
+  campaignTag String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  branch Branch @relation(fields: [branchId], references: [id])
+  branch   Branch    @relation(fields: [branchId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
 
   @@unique([branchId, code])
   @@index([branchId, isActive])
+  @@index([customerId])
+  @@index([campaignTag])
   @@map("coupons")
 }
 
@@ -2871,4 +2919,80 @@ model LeaveBalance {
   @@unique([staffId, leaveType])
   @@index([branchId])
   @@map("leave_balances")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARKETING + LOYALTY — per-customer coupon campaigns, points ledger, expiry
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LoyaltyTransactionType {
+  EARNED       // points awarded from a paid order
+  REDEEMED     // points applied on a QR order to reduce the bill
+  EXPIRED      // daily cron swept stale balance to zero
+  ADJUSTMENT   // admin manual nudge (positive or negative) with reason
+}
+
+model LoyaltyTransaction {
+  id          String                 @id @default(cuid())
+  branchId    String
+  customerId  String
+  /// Source order — null for ADJUSTMENT / EXPIRED rows.
+  orderId     String?
+  /// Signed integer. Positive = earned, negative = redeemed / expired
+  /// / debit adjustment. Sums into the running balance held on
+  /// Customer.loyaltyPoints (kept materialised for cheap reads).
+  points      Int
+  type        LoyaltyTransactionType
+  description String?
+  createdAt   DateTime               @default(now())
+
+  branch   Branch   @relation(fields: [branchId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order    Order?   @relation(fields: [orderId], references: [id])
+
+  @@index([customerId, createdAt])
+  @@index([branchId, createdAt])
+  @@map("loyalty_transactions")
+}
+
+enum CouponCampaignStatus {
+  DRAFT     // codes generated, SMS not yet sent
+  SENDING   // bulk dispatch in flight (transient)
+  SENT      // SMS dispatched to all recipients
+}
+
+model CouponCampaign {
+  id              String               @id @default(cuid())
+  branchId        String
+  name            String
+  status          CouponCampaignStatus @default(DRAFT)
+  /// Free-text snapshot of the segmentation filter at generation
+  /// time so the admin can audit which rules were applied later.
+  filterSummary   String?
+  /// Frozen coupon parameters for this batch — snapshotted so
+  /// later BranchSetting / template edits don't retro-rewrite past
+  /// campaigns.
+  couponType      DiscountType
+  couponValue     Decimal              @db.Decimal(14, 2)
+  validityDays    Int
+  /// SMS template body resolved at generation time. Per-recipient
+  /// rendering substitutes {{name}}, {{coupon_code}}, {{coupon_value}},
+  /// {{coupon_expires}}, {{brand}}.
+  smsTemplate     String
+  recipientCount  Int                  @default(0)
+  sentCount       Int                  @default(0)
+  failedCount     Int                  @default(0)
+  createdById     String?
+  createdAt       DateTime             @default(now())
+  sentAt          DateTime?
+
+  branch    Branch  @relation(fields: [branchId], references: [id])
+  createdBy Staff?  @relation("CouponCampaignCreator", fields: [createdById], references: [id])
+  // Coupons issued by this campaign are findable via
+  // Coupon.campaignTag == CouponCampaign.id (no FK so a campaign
+  // soft-delete doesn't cascade-kill issued coupons that customers
+  // still hold).
+
+  @@index([branchId, createdAt])
+  @@map("coupon_campaigns")
 }

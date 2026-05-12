@@ -9,6 +9,7 @@ import ThemingSection from './settings/ThemingSection';
 import TipsoiSettingsSection from './settings/TipsoiSettingsSection';
 import WhatsAppSettingsSection from './settings/WhatsAppSettingsSection';
 import SocialSettingsSection from './settings/SocialSettingsSection';
+import LoyaltySettingsSection from './settings/LoyaltySettingsSection';
 import { useStockUnits } from '../lib/units';
 
 interface UnitConversion {
@@ -356,7 +357,12 @@ export default function SettingsPage() {
       )}
 
       {tab === 'attendance' && <TipsoiSettingsSection isOwner={isOwner} />}
-      {tab === 'marketing' && <SocialSettingsSection isOwner={isOwner} />}
+      {tab === 'marketing' && (
+        <>
+          <LoyaltySettingsSection isOwner={isOwner} />
+          <SocialSettingsSection isOwner={isOwner} />
+        </>
+      )}
 
       {tab === 'units' && (
         <>

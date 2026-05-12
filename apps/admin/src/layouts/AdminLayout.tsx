@@ -38,6 +38,8 @@ import {
   History,
   ClipboardCheck,
   Star,
+  Send,
+  Gift,
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -112,12 +114,19 @@ const NAV_GROUPS: Array<{
       { to: '/reports/voids', icon: BarChart2, label: 'Void Audit', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/activity-log', icon: History, label: 'Activity Log', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/reports/mushak', icon: Receipt, label: 'Mushak Register', allowedRoles: OPERATIONAL_ROLES },
-      { to: '/discounts', icon: BarChart2, label: 'Discounts & Coupons', allowedRoles: OPERATIONAL_ROLES },
       { to: '/expenses', icon: Receipt, label: 'Expenses', allowedRoles: OPERATIONAL_ROLES },
       // Liabilities = utilities, rent, loans owed. Owner/Manager only.
       { to: '/liabilities', icon: Receipt, label: 'Liabilities', allowedRoles: ['OWNER', 'MANAGER'] },
       // Accounts = money + ledger. Owner/Manager only.
       { to: '/accounts', icon: Landmark, label: 'Accounts', allowedRoles: ['OWNER', 'MANAGER'] },
+    ],
+  },
+  {
+    label: 'MARKETING',
+    items: [
+      { to: '/discounts', icon: BarChart2, label: 'Discounts & Coupons', allowedRoles: OPERATIONAL_ROLES },
+      { to: '/marketing/campaigns', icon: Send, label: 'Coupon Campaigns', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/marketing/loyalty', icon: Gift, label: 'Loyalty', allowedRoles: ['OWNER', 'MANAGER'] },
     ],
   },
   {

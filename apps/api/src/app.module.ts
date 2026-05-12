@@ -29,6 +29,8 @@ import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { SalaryStructureModule } from './salary-structure/salary-structure.module';
 import { LeaveRuleModule } from './leave-rule/leave-rule.module';
 import { LeaveBalanceModule } from './leave-balance/leave-balance.module';
+import { MarketingModule } from './marketing/marketing.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
 import { ExpenseModule } from './expense/expense.module';
 import { AccountModule } from './account/account.module';
 import { PreReadyModule } from './pre-ready/pre-ready.module';
@@ -120,6 +122,8 @@ import { ScheduleModule } from '@nestjs/schedule';
     SalaryStructureModule,
     LeaveBalanceModule,
     LeaveRuleModule,
+    LoyaltyModule,
+    MarketingModule,
 
     // Feature modules (Phase 7)
     WasteModule,
