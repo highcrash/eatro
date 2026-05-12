@@ -3,6 +3,25 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.17 — Loyalty points surfaced in POS customer screens (2026-05-12)
+
+Renderer-only rebuild to ship the loyalty visibility added to
+`apps/pos`. The desktop bundles `apps/pos/src/**` directly, so the
+shipped installer was stale until this bump.
+
+- Customer picker dropdown on the order screen (both the inline
+  header search and the customer-required discount/coupon gate)
+  now shows "· N pts" on rows with a non-zero balance.
+- POS Customers page: list rows show a "N pts" chip; detail panel
+  gains a Loyalty Points stat tile with expiry / "Redeem on QR"
+  sub-line.
+
+Read-only on the desktop terminal — redemption stays QR-only per
+the loyalty programme spec. Cashiers can quote the balance to a
+diner who asks but cannot apply points themselves.
+
+No native / IPC / printing changes in this release.
+
 ## 2.0.16 — Sync hardening: ID remap + token refresh (2026-05-11)
 
 Three offline-sync fixes from a forward-looking audit after the
