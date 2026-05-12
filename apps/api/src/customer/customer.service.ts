@@ -204,6 +204,10 @@ export class CustomerService {
         select: {
           id: true, name: true, phone: true, email: true,
           totalSpent: true, totalOrders: true, lastVisit: true,
+          // Loyalty surface for the QR My Account page. The customer
+          // sees their running balance + expiry; redemption itself
+          // happens at the cart via /orders/qr/:id/apply-loyalty.
+          loyaltyPoints: true, loyaltyExpiresAt: true,
         },
       }),
       this.prisma.order.findMany({

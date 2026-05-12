@@ -50,6 +50,8 @@ interface OrderHistoryResponse {
     totalSpent: number;
     totalOrders: number;
     lastVisit: string | null;
+    loyaltyPoints: number;
+    loyaltyExpiresAt: string | null;
   } | null;
   orders: OrderHistoryRow[];
 }
@@ -257,6 +259,44 @@ export default function AccountPage() {
               <p className="text-[9px] text-[#666] font-body tracking-widest uppercase mb-1">Last visit</p>
               <p className="font-body text-xs text-white pt-1">{formatRelative(stats.lastVisit)}</p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Loyalty balance card ─────────────────────────────────────
+          Only shown when the customer has earned points (so a brand
+          new account doesn't see an empty zero-balance card). The
+          expiry sub-line resets every paid order on the server, so
+          active visitors always see a future date. Redemption itself
+          happens on the order screen via apply-loyalty — the copy
+          here is informational + a prompt to use them next visit. */}
+      {stats && stats.loyaltyPoints > 0 && (
+        <div className="px-5 mt-3">
+          <div className="bg-gradient-to-br from-[#1F2A00] to-[#1A1A1A] border border-[#C8FF00]/40 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[9px] text-[#C8FF00] font-body tracking-widest uppercase mb-1">Loyalty balance</p>
+                <p className="font-display text-3xl text-[#C8FF00] tracking-wide">
+                  {stats.loyaltyPoints.toLocaleString()} <span className="text-base text-[#888]">pt</span>
+                </p>
+              </div>
+              <div className="text-right">
+                {stats.loyaltyExpiresAt ? (
+                  <>
+                    <p className="text-[9px] text-[#666] font-body tracking-widest uppercase">Expires</p>
+                    <p className="text-xs font-body text-white mt-1">
+                      {new Date(stats.loyaltyExpiresAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
+                    <p className="text-[10px] font-body text-[#888] mt-0.5">Resets each visit</p>
+                  </>
+                ) : (
+                  <p className="text-[10px] font-body text-[#888]">No expiry</p>
+                )}
+              </div>
+            </div>
+            <p className="text-[11px] font-body text-[#aaa] mt-3 leading-relaxed">
+              Redeem points at checkout to lower your bill. Your balance grows automatically with every paid order.
+            </p>
           </div>
         </div>
       )}

@@ -17,6 +17,13 @@ export class PayrollController {
     return this.payrollService.findAll(user.branchId);
   }
 
+  // Prefill route MUST come before `:id` so /payroll/prefill/:staffId
+  // doesn't get parsed as findOne('prefill').
+  @Get('prefill/:staffId')
+  prefill(@Param('staffId') staffId: string, @CurrentUser() user: JwtPayload) {
+    return this.payrollService.getPrefillForStaff(user.branchId, staffId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.payrollService.findOne(id, user.branchId);
