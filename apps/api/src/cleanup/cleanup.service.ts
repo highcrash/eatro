@@ -11,6 +11,8 @@ export type CleanupScope =
   | 'expenses'
   | 'discounts'
   | 'coupons'
+  | 'coupon-campaigns'
+  | 'loyalty'
   | 'stock-zero'
   | 'stock-movements'
   | 'inventory-all'
@@ -118,6 +120,30 @@ export class CleanupService {
 
       case 'coupons': {
         deleted.coupons = (await p.coupon.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'coupon-campaigns': {
+        // Wipe campaign metadata + every coupon issued by a campaign.
+        // Manually-typed shared coupons (no campaignTag) survive.
+        deleted.campaignCoupons = (await p.coupon.deleteMany({
+          where: { branchId, campaignTag: { not: null } },
+        })).count;
+        deleted.couponCampaigns = (await p.couponCampaign.deleteMany({ where })).count;
+        break;
+      }
+
+      case 'loyalty': {
+        // Wipe the loyalty ledger AND zero every customer balance in
+        // this branch. The expiry sweep zeros balances individually
+        // when the rolling clock runs out; this is the
+        // blow-it-all-away version for "we're rebooting the loyalty
+        // programme" admin moments.
+        deleted.loyaltyTransactions = (await p.loyaltyTransaction.deleteMany({ where })).count;
+        await p.customer.updateMany({
+          where: { branchId, loyaltyPoints: { gt: 0 } },
+          data: { loyaltyPoints: 0, loyaltyExpiresAt: null },
+        });
         break;
       }
 
@@ -257,6 +283,15 @@ export class CleanupService {
       }
 
       case 'customers': {
+        // Per-customer coupons go SetNull on FK delete by default,
+        // which would leave them as orphaned "shared" codes any
+        // customer could redeem — wrong. Drop them explicitly first
+        // so the post-cleanup state has zero rogue coupons.
+        deleted.customerCoupons = (await p.coupon.deleteMany({
+          where: { branchId, customerId: { not: null } },
+        })).count;
+        // LoyaltyTransaction has onDelete: Cascade on the customerId
+        // FK, so customer.deleteMany takes the ledger with it.
         deleted.customers = (await p.customer.deleteMany({ where })).count;
         break;
       }
@@ -327,6 +362,17 @@ export class CleanupService {
         // Activity log audit trail — wiped as part of reset-all so a
         // post-reset install starts with a clean audit slate.
         deleted.activityLogs = (await p.activityLog.deleteMany({ where })).count;
+        // Marketing + loyalty — campaign metadata, generated coupons,
+        // points ledger, customer balances. Manual coupons (no
+        // campaignTag) get nuked by the explicit coupon.deleteMany
+        // below. Reset zeroes balances on customers we keep.
+        deleted.loyaltyTransactions = (await p.loyaltyTransaction.deleteMany({ where })).count;
+        await p.customer.updateMany({
+          where: { branchId, loyaltyPoints: { gt: 0 } },
+          data: { loyaltyPoints: 0, loyaltyExpiresAt: null },
+        });
+        deleted.coupons = (await p.coupon.deleteMany({ where })).count;
+        deleted.couponCampaigns = (await p.couponCampaign.deleteMany({ where })).count;
         await p.ingredient.updateMany({ where, data: { currentStock: 0 } });
         break;
       }

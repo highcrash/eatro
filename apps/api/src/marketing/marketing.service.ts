@@ -49,7 +49,9 @@ export class MarketingService {
       phone: { not: '' },
     };
     if (filter.minSpent != null && filter.minSpent > 0) {
-      where.totalSpent = { gte: filter.minSpent };
+      // filter.minSpent is admin-entered TAKA; Customer.totalSpent is
+      // stored in PAISA project-wide (see packages/utils/src/currency.ts).
+      where.totalSpent = { gte: Math.round(filter.minSpent * 100) };
     }
     if (filter.minVisits != null && filter.minVisits > 0) {
       where.totalOrders = { gte: filter.minVisits };
@@ -98,6 +100,15 @@ export class MarketingService {
 
     const expiresAt = new Date(Date.now() + dto.validityDays * DAY_MS);
 
+    // Coupon.value convention: PAISA when type === FLAT, raw percent
+    // when type === PERCENTAGE (mirrors Discount.value — see
+    // prisma/schema.prisma). Admin types taka in the form, so convert
+    // here once and pass the canonical paisa value down to the coupon
+    // factory + the campaign snapshot.
+    const storedCouponValue = dto.couponType === 'FLAT'
+      ? Math.round(dto.couponValue * 100)
+      : dto.couponValue;
+
     return this.prisma.$transaction(async (tx) => {
       const campaign = await tx.couponCampaign.create({
         data: {
@@ -106,7 +117,7 @@ export class MarketingService {
           status: 'DRAFT',
           filterSummary: this.summariseFilter(dto),
           couponType: dto.couponType,
-          couponValue: dto.couponValue,
+          couponValue: storedCouponValue,
           validityDays: dto.validityDays,
           smsTemplate: dto.smsTemplate,
           recipientCount: recipients.length,
@@ -125,7 +136,7 @@ export class MarketingService {
           campaignTag: campaign.id,
           name: campaign.name,
           type: dto.couponType,
-          value: dto.couponValue,
+          value: storedCouponValue,
           expiresAt,
           customerNameForCode: customer.name,
         });
@@ -193,9 +204,12 @@ export class MarketingService {
       const expiresAtFormatted = coupon.expiresAt
         ? coupon.expiresAt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
         : 'no expiry';
+      // Coupon.value is paisa for FLAT, raw percent for PERCENTAGE.
+      // Convert paisa → taka for the SMS body so customers don't see
+      // "৳5000 off" when the admin entered ৳50.
       const valueFormatted = coupon.type === 'PERCENTAGE'
         ? `${coupon.value.toNumber()}%`
-        : `৳${coupon.value.toNumber()}`;
+        : `৳${(coupon.value.toNumber() / 100).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
       const body = this.sms.renderTemplate(campaign.smsTemplate, {
         name: coupon.customer?.name,
         phone,

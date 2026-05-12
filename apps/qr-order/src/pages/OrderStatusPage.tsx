@@ -831,7 +831,9 @@ export default function OrderStatusPage() {
                 min={1}
                 max={Math.min(
                   order.customerLoyaltyPoints ?? 0,
-                  Math.floor(Number(order.totalAmount ?? 0) / (order.loyaltyTakaPerPointRedeem ?? 1)),
+                  // order.totalAmount is paisa; convert to taka before
+                  // dividing by the redeem rate (which is taka/point).
+                  Math.floor((Number(order.totalAmount ?? 0) / 100) / (order.loyaltyTakaPerPointRedeem ?? 1)),
                 )}
                 value={loyaltyPoints}
                 onChange={(e) => setLoyaltyPoints(e.target.value)}

@@ -11,6 +11,8 @@ type Scope =
   | 'expenses'
   | 'discounts'
   | 'coupons'
+  | 'coupon-campaigns'
+  | 'loyalty'
   | 'stock-zero'
   | 'stock-movements'
   | 'inventory-all'
@@ -83,7 +85,14 @@ const SECTIONS: Section[] = [
     title: 'Discounts & Coupons',
     actions: [
       { scope: 'discounts', label: 'Delete all discounts', desc: 'Removes all discount rules and menu item discounts.' },
-      { scope: 'coupons', label: 'Delete all coupons', desc: 'Removes all coupon codes.' },
+      { scope: 'coupons', label: 'Delete all coupons', desc: 'Removes all coupon codes (shared + per-customer + campaign-issued).' },
+    ],
+  },
+  {
+    title: 'Marketing & Loyalty',
+    actions: [
+      { scope: 'coupon-campaigns', label: 'Delete all coupon campaigns', desc: 'Removes campaigns and the per-customer coupons they generated. Shared coupon codes are kept.' },
+      { scope: 'loyalty', label: 'Reset loyalty points', desc: 'Wipes the loyalty transaction ledger and zeros every customer balance. Loyalty programme settings are kept.' },
     ],
   },
   {

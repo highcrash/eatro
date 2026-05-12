@@ -838,6 +838,14 @@ export class OrderService {
     if (settings.firstVisitCouponEnabled && order.customer && order.customer.totalOrders === 1) {
       try {
         const expiresAt = new Date(Date.now() + settings.firstVisitCouponValidityDays * 24 * 60 * 60 * 1000);
+        // BranchSetting.firstVisitCouponValue holds the admin-entered
+        // TAKA figure (UI labels it "Value (৳)"). Coupon.value follows
+        // the FLAT=paisa / PERCENTAGE=raw-percent convention from
+        // Discount.value, so convert here at the boundary.
+        const valueTaka = settings.firstVisitCouponValue.toNumber();
+        const storedCouponValue = settings.firstVisitCouponType === 'FLAT'
+          ? Math.round(valueTaka * 100)
+          : valueTaka;
         const coupon = await this.prisma.$transaction(async (tx) => {
           return this.marketing.createUniqueCouponForCustomer(tx, {
             branchId,
@@ -845,15 +853,15 @@ export class OrderService {
             campaignTag: 'first-visit',
             name: 'Welcome — first-visit coupon',
             type: settings.firstVisitCouponType,
-            value: settings.firstVisitCouponValue.toNumber(),
+            value: storedCouponValue,
             expiresAt,
             customerNameForCode: order.customer!.name,
           });
         });
         welcomeCouponCode = coupon.code;
         welcomeCouponValueDisplay = settings.firstVisitCouponType === 'PERCENTAGE'
-          ? `${settings.firstVisitCouponValue.toNumber()}%`
-          : `৳${settings.firstVisitCouponValue.toNumber()}`;
+          ? `${valueTaka}%`
+          : `৳${valueTaka.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
         welcomeCouponExpiresDisplay = expiresAt.toLocaleDateString('en-GB', {
           day: '2-digit', month: 'short', year: 'numeric',
         });

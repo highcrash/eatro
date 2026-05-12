@@ -26,7 +26,11 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   // Tier 2 — branch-owned singletons and people
   // CustomRole must be inserted before Staff so the FK (staff.customRoleId
   // → custom_roles.id) resolves on restore when staff rows reference it.
+  // Same rationale for SalaryStructure + LeaveRule — Staff has nullable
+  // FKs into both, so they must exist before staff rows insert.
   { accessor: 'customRole', table: 'custom_roles' },
+  { accessor: 'salaryStructure', table: 'salary_structures' },
+  { accessor: 'leaveRule', table: 'leave_rules' },
   { accessor: 'staff', table: 'staff' },
   { accessor: 'branchSetting', table: 'branch_settings' },
   { accessor: 'websiteContent', table: 'website_content' },
@@ -79,8 +83,14 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'creditorAdjustment', table: 'creditor_adjustments' },
   { accessor: 'wasteLog', table: 'waste_logs' },
 
-  // Tier 7 — discounts & reservation
+  // Tier 7 — discounts, coupons, campaigns & reservation
   { accessor: 'discount', table: 'discounts' },
+  // Coupon campaigns hold the parameters of a generated batch + the
+  // SMS template used at send time. Coupons reference them via the
+  // soft `campaignTag` string (no FK), so order between the two
+  // tables doesn't matter for FK resolution — but campaigns first
+  // for clarity.
+  { accessor: 'couponCampaign', table: 'coupon_campaigns' },
   { accessor: 'coupon', table: 'coupons' },
   { accessor: 'menuItemDiscount', table: 'menu_item_discounts' },
   // Auto-Facebook-post queue. References menuItemDiscount via FK with
@@ -96,12 +106,22 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'orderItem', table: 'order_items' },
   { accessor: 'orderPayment', table: 'order_payments' },
   { accessor: 'review', table: 'reviews' },
+  // Loyalty points ledger — references customer + branch + (optionally)
+  // order. Restored after orders so the orderId FK on EARNED /
+  // REDEEMED rows resolves cleanly.
+  { accessor: 'loyaltyTransaction', table: 'loyalty_transactions' },
 
-  // Tier 9 — HR (depend on staff)
+  // Tier 9 — HR (depend on staff + salaryStructure / leaveRule from Tier 2)
   { accessor: 'workPeriod', table: 'work_periods' },
   { accessor: 'attendance', table: 'attendance' },
+  // Salary components reference salary_structures (already in Tier 2);
+  // no FK to staff but logically grouped here with the rest of HR.
+  { accessor: 'salaryComponent', table: 'salary_components' },
   { accessor: 'payroll', table: 'payrolls' },
   { accessor: 'payrollPayment', table: 'payroll_payments' },
+  // Leave rule entries + per-staff balances. Rule itself sits in Tier 2.
+  { accessor: 'leaveRuleEntry', table: 'leave_rule_entries' },
+  { accessor: 'leaveBalance', table: 'leave_balances' },
   { accessor: 'leaveApplication', table: 'leave_applications' },
 
   // Tier 10 — accounting (depend on accounts + staff)
