@@ -197,6 +197,12 @@ export class LoyaltyService {
     const newTotalPaisa = Math.max(0, order.totalAmount.toNumber() - discountPaisa);
 
     return this.prisma.$transaction(async (tx) => {
+      // Persist the per-redemption taka discount on the ledger row so
+      // the order's recompute paths (addItemsToOrder, voidItem, etc.)
+      // can sum REDEEMED rows back into the discount when items change.
+      // Without this the loyalty discount was overwritten the next
+      // time the order's items mutated — customer lost points + lost
+      // the discount they bought with them.
       await tx.loyaltyTransaction.create({
         data: {
           branchId,
@@ -204,6 +210,7 @@ export class LoyaltyService {
           orderId: order.id,
           points: -points,
           type: 'REDEEMED',
+          discountAmount: discountPaisa,
           description: `Redeemed ${points} pt = ৳${discountTaka} off order`,
         },
       });
@@ -225,6 +232,20 @@ export class LoyaltyService {
         discountAmount: discountTaka,
       };
     });
+  }
+
+  /**
+   * Sum of REDEEMED loyalty-transaction discountAmount for a given
+   * order. Used by the order's recompute paths so adding / voiding
+   * items doesn't lose the loyalty discount portion.
+   * Returns paisa.
+   */
+  async getOrderLoyaltyDiscountPaisa(orderId: string): Promise<number> {
+    const agg = await this.prisma.loyaltyTransaction.aggregate({
+      where: { orderId, type: 'REDEEMED' },
+      _sum: { discountAmount: true },
+    });
+    return agg._sum.discountAmount?.toNumber() ?? 0;
   }
 
   /**

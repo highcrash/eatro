@@ -2944,6 +2944,13 @@ model LoyaltyTransaction {
   points      Int
   type        LoyaltyTransactionType
   description String?
+  /// Paisa amount this row applies as a bill discount. Populated only
+  /// on REDEEMED rows (snapshot of `points * takaPerPointRedeem * 100`
+  /// at redemption time, so the discount is rate-change-proof). The
+  /// order's effective loyalty discount is `SUM(discountAmount)` over
+  /// REDEEMED rows for that orderId — that's what recompute paths use
+  /// when items change on the order so the discount survives.
+  discountAmount Decimal @default(0) @db.Decimal(14, 2)
   createdAt   DateTime               @default(now())
 
   branch   Branch   @relation(fields: [branchId], references: [id])
