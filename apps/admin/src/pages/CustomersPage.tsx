@@ -23,6 +23,9 @@ function downloadCustomerCsvTemplate() {
 interface Customer {
   id: string; phone: string; name: string; email: string | null;
   totalOrders: number; totalSpent: number; lastVisit: string | null; createdAt: string;
+  /** Loyalty programme balance — null when the branch has loyalty disabled. */
+  loyaltyPoints?: number;
+  loyaltyExpiresAt?: string | null;
 }
 
 interface CustomerDetail {
@@ -258,6 +261,7 @@ export default function CustomersPage() {
               <th className="px-5 py-3 font-medium">Email</th>
               <th className="px-5 py-3 font-medium text-right"><SortBtn field="totalOrders" label="Orders" /></th>
               <th className="px-5 py-3 font-medium text-right"><SortBtn field="totalSpent" label="Total Spent" /></th>
+              <th className="px-5 py-3 font-medium text-right">Points</th>
               <th className="px-5 py-3 font-medium"><SortBtn field="lastVisit" label="Last Visit" /></th>
               <th className="px-5 py-3 font-medium">Joined</th>
               <th className="px-5 py-3 font-medium text-right">Actions</th>
@@ -265,7 +269,7 @@ export default function CustomersPage() {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} className="px-5 py-8 text-center text-[#999]">No customers found</td></tr>
+              <tr><td colSpan={10} className="px-5 py-8 text-center text-[#999]">No customers found</td></tr>
             ) : filtered.map((c) => (
               <tr key={c.id} className={`border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F] ${selectedId === c.id ? 'bg-[#1F1F1F]' : ''}`}>
                 <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
@@ -285,6 +289,7 @@ export default function CustomersPage() {
                 <td className="px-5 py-3 text-[#999]">{c.email || '—'}</td>
                 <td className="px-5 py-3 text-right text-white">{c.totalOrders}</td>
                 <td className="px-5 py-3 text-right text-white">{formatCurrency(Number(c.totalSpent))}</td>
+                <td className="px-5 py-3 text-right text-[#4CAF50]">{c.loyaltyPoints != null && c.loyaltyPoints > 0 ? c.loyaltyPoints.toLocaleString() : '—'}</td>
                 <td className="px-5 py-3 text-[#999] text-xs">{c.lastVisit ? formatDateTime(c.lastVisit) : '—'}</td>
                 <td className="px-5 py-3 text-[#999] text-xs">{new Date(c.createdAt).toLocaleDateString()}</td>
                 <td className="px-5 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>

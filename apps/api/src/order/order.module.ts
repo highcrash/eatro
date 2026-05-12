@@ -8,9 +8,14 @@ import { BranchSettingsModule } from '../branch-settings/branch-settings.module'
 import { QrGateModule } from '../qr-gate/qr-gate.module';
 import { SmsModule } from '../sms/sms.module';
 import { MushakModule } from '../mushak/mushak.module';
+import { LoyaltyModule } from '../loyalty/loyalty.module';
+import { MarketingModule } from '../marketing/marketing.module';
 
 @Module({
-  imports: [WsGatewayModule, RecipeModule, AccountModule, BranchSettingsModule, QrGateModule, SmsModule, MushakModule],
+  imports: [
+    WsGatewayModule, RecipeModule, AccountModule, BranchSettingsModule,
+    QrGateModule, SmsModule, MushakModule, LoyaltyModule, MarketingModule,
+  ],
   controllers: [OrderController, QrOrderController],
   providers: [OrderService],
   exports: [OrderService],

@@ -153,14 +153,36 @@ export class SmsService {
    *  record has no name or the raw name is the "Walk-in" placeholder. */
   renderTemplate(
     body: string,
-    ctx: { name?: string | null; phone?: string | null; amount?: number | string | null; method?: string | null },
+    ctx: {
+      name?: string | null;
+      phone?: string | null;
+      amount?: number | string | null;
+      method?: string | null;
+      brand?: string | null;
+      // Marketing / loyalty variables — substituted when the caller
+      // provides them. Templates that don't use a placeholder are
+      // unaffected.
+      couponCode?: string | null;
+      couponValue?: string | number | null;
+      couponExpires?: string | null;
+      pointsEarned?: number | null;
+      pointsBalance?: number | null;
+      pointsExpires?: string | null;
+    },
   ): string {
     const niceName = (ctx.name && ctx.name.trim() && ctx.name.trim().toLowerCase() !== 'walk-in') ? ctx.name.trim() : 'Dear Customer';
     return body
       .replace(/\{\{\s*name\s*\}\}/gi, niceName)
       .replace(/\{\{\s*phone\s*\}\}/gi, ctx.phone ?? '')
       .replace(/\{\{\s*amount\s*\}\}/gi, ctx.amount != null ? String(ctx.amount) : '')
-      .replace(/\{\{\s*method\s*\}\}/gi, ctx.method ?? '');
+      .replace(/\{\{\s*method\s*\}\}/gi, ctx.method ?? '')
+      .replace(/\{\{\s*brand\s*\}\}/gi, ctx.brand ?? '')
+      .replace(/\{\{\s*coupon_code\s*\}\}/gi, ctx.couponCode ?? '')
+      .replace(/\{\{\s*coupon_value\s*\}\}/gi, ctx.couponValue != null ? String(ctx.couponValue) : '')
+      .replace(/\{\{\s*coupon_expires\s*\}\}/gi, ctx.couponExpires ?? '')
+      .replace(/\{\{\s*points_earned\s*\}\}/gi, ctx.pointsEarned != null ? String(ctx.pointsEarned) : '0')
+      .replace(/\{\{\s*points_balance\s*\}\}/gi, ctx.pointsBalance != null ? String(ctx.pointsBalance) : '0')
+      .replace(/\{\{\s*points_expires\s*\}\}/gi, ctx.pointsExpires ?? '');
   }
 
   /** Query the gateway's balance endpoint. Returns null if SMS isn't
