@@ -109,8 +109,8 @@ export class OrderService {
   ) {}
 
   /**
-   * Re-evaluate a previously-applied discount or coupon against the
-   * current item set. Used by every flow that mutates items on an
+   * Re-evaluate the order's total discount amount against the current
+   * item set. Used by every flow that mutates items on an
    * already-discounted order — addItems, voidItem, rejectItem,
    * rejectItems, cancelItemByCustomer. Without this, the order's
    * stored `discountAmount` stayed frozen at the value computed when
@@ -119,34 +119,53 @@ export class OrderService {
    * order silently inflated the bill (subtotal+VAT, no discount line
    * subtracted) and removing food undercharged.
    *
-   * Percentage coupons SCALE with the new applicable subtotal; flat
-   * coupons stay at their face value but get capped at the new
-   * applicable subtotal so a remove-everything path doesn't go
-   * negative. SPECIFIC_ITEMS / ALL_EXCEPT scopes correctly track
-   * which items still match.
+   * Total discount = coupon/discount slice + loyalty-redemption slice.
+   * The coupon/discount slice rescales (percentage) or is capped at
+   * applicable subtotal (flat). The loyalty slice is summed from
+   * LoyaltyTransaction REDEEMED rows for this order — those carry
+   * the per-redemption discountAmount snapshotted at redemption time
+   * so the discount is rate-change-proof. Without this addition, the
+   * loyalty discount portion was overwritten on the next item mutation
+   * — customer lost their points AND lost the discount they bought.
+   *
+   * The total is finally capped at the order subtotal so an aggressive
+   * item-removal can't push totalAmount negative.
    */
   private async recomputeDiscountAmount(
     branchId: string,
     items: { menuItemId: string; totalPrice: number }[],
     discountId: string | null,
     couponId: string | null,
+    orderId?: string,
   ): Promise<number> {
-    if (!discountId && !couponId) return 0;
-    const config = discountId
-      ? await this.prisma.discount.findFirst({ where: { id: discountId, branchId } })
-      : await this.prisma.coupon.findFirst({ where: { id: couponId!, branchId } });
-    if (!config) return 0; // discount/coupon was deleted — fall back to 0
-    const targets: string[] = config.targetItems ? JSON.parse(config.targetItems) : [];
-    let applicable = 0;
-    for (const it of items) {
-      if (config.scope === 'ALL_ITEMS') applicable += it.totalPrice;
-      else if (config.scope === 'SPECIFIC_ITEMS' && targets.includes(it.menuItemId)) applicable += it.totalPrice;
-      else if (config.scope === 'ALL_EXCEPT' && !targets.includes(it.menuItemId)) applicable += it.totalPrice;
+    let couponDiscount = 0;
+    let applicableForCoupon = 0;
+    if (discountId || couponId) {
+      const config = discountId
+        ? await this.prisma.discount.findFirst({ where: { id: discountId, branchId } })
+        : await this.prisma.coupon.findFirst({ where: { id: couponId!, branchId } });
+      if (config) {
+        const targets: string[] = config.targetItems ? JSON.parse(config.targetItems) : [];
+        for (const it of items) {
+          if (config.scope === 'ALL_ITEMS') applicableForCoupon += it.totalPrice;
+          else if (config.scope === 'SPECIFIC_ITEMS' && targets.includes(it.menuItemId)) applicableForCoupon += it.totalPrice;
+          else if (config.scope === 'ALL_EXCEPT' && !targets.includes(it.menuItemId)) applicableForCoupon += it.totalPrice;
+        }
+        couponDiscount = config.type === 'FLAT'
+          ? Math.min(config.value.toNumber(), applicableForCoupon)
+          : Math.round(applicableForCoupon * (config.value.toNumber() / 100));
+      }
     }
-    if (config.type === 'FLAT') {
-      return Math.min(config.value.toNumber(), applicable);
-    }
-    return Math.round(applicable * (config.value.toNumber() / 100));
+
+    const loyaltyDiscount = orderId
+      ? await this.loyalty.getOrderLoyaltyDiscountPaisa(orderId)
+      : 0;
+
+    const subtotal = items.reduce((s, it) => s + it.totalPrice, 0);
+    // Cap combined discount at the order subtotal so removing every
+    // item still leaves totalAmount ≥ 0. Coupon and loyalty stack
+    // additively up to this cap.
+    return Math.min(couponDiscount + loyaltyDiscount, subtotal);
   }
 
   findAll(branchId: string, tableId?: string, status?: string, from?: string, to?: string) {
@@ -931,11 +950,16 @@ export class OrderService {
       else if (discount.scope === 'ALL_EXCEPT' && !targets.includes(item.menuItemId)) applicableTotal += item.totalPrice;
     }
 
-    const discountAmount = discount.type === 'FLAT'
+    const couponSlice = discount.type === 'FLAT'
       ? Math.min(discount.value.toNumber(), applicableTotal)
       : Math.round(applicableTotal * (discount.value.toNumber() / 100));
 
     const subtotal = activeItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
+    // Preserve any prior loyalty redemption on this order — without
+    // this the discountAmount field would be overwritten and the
+    // customer would lose the discount they already paid points for.
+    const loyaltySlice = await this.loyalty.getOrderLoyaltyDiscountPaisa(orderId);
+    const discountAmount = Math.min(couponSlice + loyaltySlice, subtotal);
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
@@ -960,12 +984,16 @@ export class OrderService {
 
     const activeItems = order.items.filter((i) => !i.voidedAt);
     const subtotal = activeItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
+    // Removing a coupon/discount must NOT also drop the loyalty
+    // discount portion — the customer already paid points for it.
+    const loyaltySlice = await this.loyalty.getOrderLoyaltyDiscountPaisa(orderId);
+    const discountAmount = Math.min(loyaltySlice, subtotal);
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
-    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, 0);
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { discountAmount: 0, discountId: null, discountName: null, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
+      data: { discountAmount, discountId: null, discountName: null, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -1023,11 +1051,15 @@ export class OrderService {
       else if (coupon.scope === 'ALL_EXCEPT' && !targets.includes(item.menuItemId)) applicableTotal += item.totalPrice;
     }
 
-    const discountAmount = coupon.type === 'FLAT'
+    const couponSlice = coupon.type === 'FLAT'
       ? Math.min(coupon.value.toNumber(), applicableTotal)
       : Math.round(applicableTotal * (coupon.value.toNumber() / 100));
 
     const subtotal = activeItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
+    // Stack a prior loyalty redemption on top of the new coupon. Total
+    // capped at subtotal so totalAmount can't go negative.
+    const loyaltySlice = await this.loyalty.getOrderLoyaltyDiscountPaisa(orderId);
+    const discountAmount = Math.min(couponSlice + loyaltySlice, subtotal);
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
     const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
@@ -1068,6 +1100,7 @@ export class OrderService {
       remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: Number(i.totalPrice) })),
       order.discountId ?? null,
       order.couponId ?? null,
+      orderId,
     );
     const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
@@ -1496,6 +1529,7 @@ export class OrderService {
       allItems.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
       order.discountId ?? null,
       order.couponId ?? null,
+      id,
     );
     const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
@@ -1590,6 +1624,7 @@ export class OrderService {
       remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
       order.discountId ?? null,
       order.couponId ?? null,
+      id,
     );
     const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
@@ -1660,6 +1695,7 @@ export class OrderService {
       remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
       order.discountId ?? null,
       order.couponId ?? null,
+      orderId,
     );
     const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
@@ -1700,6 +1736,7 @@ export class OrderService {
       remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: Number(i.totalPrice) })),
       order.discountId ?? null,
       order.couponId ?? null,
+      orderId,
     );
     const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
 
