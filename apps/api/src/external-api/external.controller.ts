@@ -19,6 +19,43 @@ import { ScopesGuard } from './guards/scopes.guard';
 import { ExternalService } from './external.service';
 import type { ApiClient } from './types/api-client.type';
 
+/// Body for POST /business/sms/send. Declared above the controller so
+/// emitDecoratorMetadata can resolve it at module-load time — when
+/// declared below the controller, `tsc`-built output crashes with a
+/// TDZ "Cannot access 'SendSmsDto' before initialization" at startup.
+/// (Dev-mode SWC was forgiving and we missed this locally.)
+class SendSmsDto {
+  @ApiProperty({
+    description:
+      'Destination phone number. Branch SMS service will normalise to its supported format (BD MSISDN, etc.).',
+    example: '+8801710330040',
+  })
+  @IsString()
+  @MinLength(6)
+  @MaxLength(20)
+  phone!: string;
+
+  @ApiProperty({
+    description:
+      'SMS body. Branch may prefix a brand tag — total wire length is constrained by the provider (typically 160 chars Latin, 70 chars unicode per segment).',
+    example: 'Hi Tahsin — we miss you at EATRO. 15% off this week. Show this SMS at the counter.',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(1000)
+  body!: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      "Free-form grouping tag persisted on the SmsLog row. Use the same tag across a batch so you can aggregate later (e.g. 'mai-2026-reactivation').",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  campaignTag?: string;
+}
+
 /// Public external surface. Versioned at /api/v1/external and
 /// authenticated with API keys (NOT the staff JWT). Every route is
 /// scope-gated; never trust client-supplied branchId — it comes from
@@ -275,36 +312,4 @@ export class ExternalController {
       },
     };
   }
-}
-
-class SendSmsDto {
-  @ApiProperty({
-    description:
-      'Destination phone number. Branch SMS service will normalise to its supported format (BD MSISDN, etc.).',
-    example: '+8801710330040',
-  })
-  @IsString()
-  @MinLength(6)
-  @MaxLength(20)
-  phone!: string;
-
-  @ApiProperty({
-    description:
-      'SMS body. Branch may prefix a brand tag — total wire length is constrained by the provider (typically 160 chars Latin, 70 chars unicode per segment).',
-    example: 'Hi Tahsin — we miss you at EATRO. 15% off this week. Show this SMS at the counter.',
-  })
-  @IsString()
-  @MinLength(1)
-  @MaxLength(1000)
-  body!: string;
-
-  @ApiProperty({
-    required: false,
-    description:
-      "Free-form grouping tag persisted on the SmsLog row. Use the same tag across a batch so you can aggregate later (e.g. 'mai-2026-reactivation').",
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  campaignTag?: string;
 }
