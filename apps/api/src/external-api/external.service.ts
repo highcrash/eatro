@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 
+import type { JwtPayload } from '@restora/types';
+
 import { ExpenseService } from '../expense/expense.service';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MarketingService } from '../marketing/marketing.service';
@@ -33,6 +35,44 @@ export class ExternalService {
     return this.sms.sendAndLog(branchId, phone, body, {
       kind: 'CAMPAIGN',
       campaignId: campaignTag ?? null,
+    });
+  }
+
+  /// Preview a segment — returns the recipient count without sending.
+  /// Cheap enough to call on every keystroke if a UI wants live counts.
+  async previewSegment(
+    branchId: string,
+    segment: {
+      minSpent?: number;
+      minVisits?: number;
+      maxLastVisitDays?: number;
+      minLoyaltyPoints?: number;
+    },
+  ): Promise<{ recipientCount: number }> {
+    const recipients = await this.marketing.segmentCustomers(branchId, segment);
+    return { recipientCount: recipients.length };
+  }
+
+  /// Send an SMS to every customer matching the segment, attributed to the
+  /// synthetic `actor` (the OWNER who issued the API key). Wraps
+  /// MarketingService.loyaltyBlast — same audit trail, same SmsLog rows,
+  /// same template placeholders ({{name}}, {{brand}}, {{pointsBalance}}).
+  async sendSmsBlast(
+    branchId: string,
+    actor: JwtPayload,
+    input: {
+      segment: {
+        minSpent?: number;
+        minVisits?: number;
+        maxLastVisitDays?: number;
+        minLoyaltyPoints?: number;
+      };
+      smsTemplate: string;
+    },
+  ): Promise<{ recipientCount: number; sent: number; failed: number }> {
+    return this.marketing.loyaltyBlast(branchId, actor, {
+      ...input.segment,
+      smsTemplate: input.smsTemplate,
     });
   }
 

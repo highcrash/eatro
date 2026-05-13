@@ -12,8 +12,10 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
+import { ActorSynthesisService } from './actor-synthesis';
 import { CurrentApiClient } from './decorators/current-api-client.decorator';
 import { Scopes } from './decorators/scopes.decorator';
+import { SmsBlastDto } from './dto/sms-blast.dto';
 import { ApiKeyGuard } from './guards/api-key.guard';
 import { ScopesGuard } from './guards/scopes.guard';
 import { ExternalService } from './external.service';
@@ -65,7 +67,10 @@ class SendSmsDto {
 @Controller({ path: 'external', version: '1' })
 @UseGuards(ApiKeyGuard, ScopesGuard)
 export class ExternalController {
-  constructor(private readonly external: ExternalService) {}
+  constructor(
+    private readonly external: ExternalService,
+    private readonly actorSynth: ActorSynthesisService,
+  ) {}
 
   @Get('business/profile')
   @Scopes('business:read')
@@ -272,12 +277,36 @@ export class ExternalController {
     return this.envelope(client.branchId, data);
   }
 
+  @Post('business/sms/blast')
+  @Scopes('marketing:write')
+  @ApiOperation({
+    summary: 'Send a templated SMS to every customer matching a segment',
+    description:
+      "Resolves the segment filter into a recipient list and sends the rendered template body to each one via the branch's SMS provider. Pass dryRun: true to preview the recipient count without sending. Templates support {{name}}, {{phone}}, {{brand}}, {{pointsBalance}}. Audit-logged with the staff member who issued the API key as the actor.",
+  })
+  async sendSmsBlast(@CurrentApiClient() client: ApiClient, @Body() dto: SmsBlastDto) {
+    if (dto.dryRun) {
+      const preview = await this.external.previewSegment(client.branchId, dto.segment);
+      return this.envelope(client.branchId, { dryRun: true, ...preview });
+    }
+    const actor = await this.actorSynth.fromApiKey(client.keyId, client.branchId);
+    const result = await this.external.sendSmsBlast(client.branchId, actor, {
+      segment: dto.segment,
+      smsTemplate: dto.smsTemplate,
+    });
+    return this.envelope(client.branchId, {
+      dryRun: false,
+      campaignTag: dto.campaignTag ?? null,
+      ...result,
+    });
+  }
+
   @Post('business/sms/send')
   @Scopes('marketing:write')
   @ApiOperation({
     summary: 'Send a single SMS to one phone number',
     description:
-      'Sends one SMS via the branch\'s configured SMS provider. Logs to sms_logs with kind=CAMPAIGN and the supplied campaignTag (if any). Use this for test sends and one-off targeted messages; bulk segment blasts will land at a separate endpoint.',
+      'Sends one SMS via the branch\'s configured SMS provider. Logs to sms_logs with kind=CAMPAIGN and the supplied campaignTag (if any). Use this for test sends and one-off targeted messages; bulk segment blasts go to POST /business/sms/blast.',
   })
   async sendSms(@CurrentApiClient() client: ApiClient, @Body() dto: SendSmsDto) {
     const phone = dto.phone.trim();

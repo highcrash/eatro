@@ -6,6 +6,7 @@ import { MarketingModule } from '../marketing/marketing.module';
 import { MenuModule } from '../menu/menu.module';
 import { ReportsModule } from '../reports/reports.module';
 import { SmsModule } from '../sms/sms.module';
+import { ActorSynthesisService } from './actor-synthesis';
 import { ApiKeysController } from './api-keys.controller';
 import { ApiKeysService } from './api-keys.service';
 import { ExternalController } from './external.controller';
@@ -16,7 +17,7 @@ import { ScopesGuard } from './guards/scopes.guard';
 @Module({
   imports: [ReportsModule, MenuModule, MarketingModule, LoyaltyModule, ExpenseModule, SmsModule],
   controllers: [ApiKeysController, ExternalController],
-  providers: [ApiKeysService, ExternalService, ApiKeyGuard, ScopesGuard],
+  providers: [ApiKeysService, ExternalService, ApiKeyGuard, ScopesGuard, ActorSynthesisService],
   exports: [ApiKeysService],
 })
 export class ExternalApiModule {}

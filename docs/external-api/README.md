@@ -121,6 +121,7 @@ Authoritative list lives in Swagger at `/api/docs/external` once the separate do
 | `GET /business/finance/expenses`         | `finance:read`    | shipped    |
 | `GET /business/reviews`                  | `reviews:read`    | shipped    |
 | `POST /business/sms/send`                | `marketing:write` | shipped    |
+| `POST /business/sms/blast`               | `marketing:write` | shipped    |
 | `POST /business/marketing/campaigns`     | `marketing:write` | deferred   |
 | `GET /business/finance/pnl`              | `finance:read`    | deferred   |
 
