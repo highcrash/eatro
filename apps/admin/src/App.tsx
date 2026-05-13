@@ -52,6 +52,7 @@ import DataCleanupPage from './pages/DataCleanupPage';
 import BackupPage from './pages/BackupPage';
 import SmsPage from './pages/SmsPage';
 import DevicesPage from './pages/DevicesPage';
+import IntegrationsPage from './pages/IntegrationsPage';
 import ReservationsPage from './pages/ReservationsPage';
 
 export default function AdminApp() {
@@ -116,6 +117,7 @@ export default function AdminApp() {
         <Route path="/backups" element={<BackupPage />} />
         <Route path="/sms" element={<SmsPage />} />
         <Route path="/devices" element={<DevicesPage />} />
+        <Route path="/integrations" element={<IntegrationsPage />} />
       </Route>
     </Routes>
   );

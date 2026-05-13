@@ -29,6 +29,7 @@ import {
   Globe,
   Database,
   Monitor,
+  KeyRound,
   MessageSquare,
   Search,
   ChevronRight,
@@ -158,6 +159,7 @@ const NAV_GROUPS: Array<{
       { to: '/backups', icon: Database, label: 'Backups', allowedRoles: ['OWNER'] },
       { to: '/sms', icon: MessageSquare, label: 'SMS', allowedRoles: ['OWNER', 'MANAGER', 'ADVISOR'] },
       { to: '/devices', icon: Monitor, label: 'Terminals', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/integrations', icon: KeyRound, label: 'Integrations', allowedRoles: ['OWNER'] },
     ],
   },
 ];

@@ -155,42 +155,42 @@ enum DiscountScope {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Branch {
-  id                   String    @id @default(cuid())
-  name                 String
-  address              String
-  phone                String
-  email                String?
-  currency             String    @default("BDT")
-  timezone             String    @default("Asia/Dhaka")
-  taxRate              Decimal   @default(0) @db.Decimal(5, 2) // percentage e.g. 15.00
-  vatEnabled           Boolean   @default(true) // master toggle — when false, taxRate is ignored on new orders
-  serviceChargeEnabled Boolean   @default(false) // adds a service charge line above VAT
-  serviceChargeRate    Decimal   @default(0) @db.Decimal(5, 2) // percentage e.g. 10.00
-  stockPricingMethod   String    @default("LAST_PURCHASE") // LAST_PURCHASE or WEIGHTED_AVERAGE
+  id                    String    @id @default(cuid())
+  name                  String
+  address               String
+  phone                 String
+  email                 String?
+  currency              String    @default("BDT")
+  timezone              String    @default("Asia/Dhaka")
+  taxRate               Decimal   @default(0) @db.Decimal(5, 2) // percentage e.g. 15.00
+  vatEnabled            Boolean   @default(true) // master toggle — when false, taxRate is ignored on new orders
+  serviceChargeEnabled  Boolean   @default(false) // adds a service charge line above VAT
+  serviceChargeRate     Decimal   @default(0) @db.Decimal(5, 2) // percentage e.g. 10.00
+  stockPricingMethod    String    @default("LAST_PURCHASE") // LAST_PURCHASE or WEIGHTED_AVERAGE
   // ── Branding ──
-  logoUrl              String? // main brand logo (used in admin, web, and as POS fallback)
-  posLogoUrl           String? // optional override for POS sidebar
-  websiteTagline       String? // hero tagline for the public website
-  billHeaderText       String? // optional header text rendered above items on bill/receipt
-  billFooterText       String? // free text shown at bottom of bills/receipts (multi-line)
-  bin                  String? // Bangladesh Business Identification Number, shown under phone
-  mushakVersion        String? // e.g. "Mushak-6.3" — printed below BIN on paper bills
+  logoUrl               String? // main brand logo (used in admin, web, and as POS fallback)
+  posLogoUrl            String? // optional override for POS sidebar
+  websiteTagline        String? // hero tagline for the public website
+  billHeaderText        String? // optional header text rendered above items on bill/receipt
+  billFooterText        String? // free text shown at bottom of bills/receipts (multi-line)
+  bin                   String? // Bangladesh Business Identification Number, shown under phone
+  mushakVersion         String? // e.g. "Mushak-6.3" — printed below BIN on paper bills
   // ── NBR / Mushak compliance ──
-  nbrEnabled           Boolean   @default(false)
-  branchCode           String? // e.g. "DHK"; required when nbrEnabled=true
-  sellerLegalName      String? // legal business name; falls back to `name`
-  sellerTradingName    String? // trading / brand name; falls back to `name`
-  wifiPass             String? // guest Wi-Fi password, optionally printed on the bill
-  wifiSsid             String? // guest Wi-Fi network name (SSID) — shown on QR gate page
-  qrGateEnabled        Boolean   @default(false) // when true, QR ordering requires the client IP to match qrAllowedIps
-  qrAllowedIps         String? // comma-separated IPs and CIDR blocks (e.g. "192.168.1.0/24,203.0.113.42")
-  qrGateMessage        String? // optional instructions shown under Wi-Fi details on the gate page
+  nbrEnabled            Boolean   @default(false)
+  branchCode            String? // e.g. "DHK"; required when nbrEnabled=true
+  sellerLegalName       String? // legal business name; falls back to `name`
+  sellerTradingName     String? // trading / brand name; falls back to `name`
+  wifiPass              String? // guest Wi-Fi password, optionally printed on the bill
+  wifiSsid              String? // guest Wi-Fi network name (SSID) — shown on QR gate page
+  qrGateEnabled         Boolean   @default(false) // when true, QR ordering requires the client IP to match qrAllowedIps
+  qrAllowedIps          String? // comma-separated IPs and CIDR blocks (e.g. "192.168.1.0/24,203.0.113.42")
+  qrGateMessage         String? // optional instructions shown under Wi-Fi details on the gate page
   /// Master kill switch for the QR ordering surface. When false, every
   /// QR scan and every QR mutation lands on a "we are not accepting QR
   /// orders right now, please ask staff" page — independent of the
   /// Wi-Fi allowlist. Default true (ordering on) so existing branches
   /// see no behaviour change until admin explicitly disables.
-  qrOrderingEnabled       Boolean @default(true)
+  qrOrderingEnabled     Boolean   @default(true)
   /// Optional service window for QR ordering, expressed as HH:mm
   /// strings in the branch's local timezone. When BOTH are set AND
   /// the current local time falls outside the window, the QR app
@@ -200,15 +200,15 @@ model Branch {
   /// Stored as plain HH:mm strings (no Date objects) so daylight-
   /// saving / cross-day windows (e.g. "22:00" → "02:00") stay
   /// trivial to reason about.
-  qrOrderingWindowStart   String? // "HH:mm" 24h, branch local
-  qrOrderingWindowEnd     String? // "HH:mm" 24h, branch local
-  billLogoWidthPct     Int       @default(80) // how wide the logo prints on the receipt (% of 80mm paper)
-  facebookUrl          String?
-  instagramUrl         String?
-  isActive             Boolean   @default(true)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  deletedAt            DateTime?
+  qrOrderingWindowStart String? // "HH:mm" 24h, branch local
+  qrOrderingWindowEnd   String? // "HH:mm" 24h, branch local
+  billLogoWidthPct      Int       @default(80) // how wide the logo prints on the receipt (% of 80mm paper)
+  facebookUrl           String?
+  instagramUrl          String?
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
 
   // Relations
   staff               Staff[]
@@ -263,21 +263,22 @@ model Branch {
   leaveBalances       LeaveBalance[]
   loyaltyTransactions LoyaltyTransaction[]
   couponCampaigns     CouponCampaign[]
+  externalApiKeys     ExternalApiKey[]
 
   @@index([isActive])
   @@map("branches")
 }
 
 model BranchSetting {
-  id                              String   @id @default(cuid())
-  branchId                        String   @unique
+  id                              String       @id @default(cuid())
+  branchId                        String       @unique
   // SMS Gateway
-  smsEnabled                      Boolean  @default(false)
+  smsEnabled                      Boolean      @default(false)
   smsApiKey                       String?
-  smsApiUrl                       String   @default("https://api.sms.net.bd/sendsms")
+  smsApiUrl                       String       @default("https://api.sms.net.bd/sendsms")
   // Notification toggles
-  notifyVoidOtp                   Boolean  @default(true) // Send OTP to manager for void approval
-  smsPaymentNotifyEnabled         Boolean  @default(false) // Auto-send thank-you SMS to customer on order payment
+  notifyVoidOtp                   Boolean      @default(true) // Send OTP to manager for void approval
+  smsPaymentNotifyEnabled         Boolean      @default(false) // Auto-send thank-you SMS to customer on order payment
   smsPaymentTemplate              String? // Payment SMS body; supports {{name}} + {{amount}} + {{method}} placeholders
   // ── Marketing & Loyalty ────────────────────────────────────────
   /// Master toggle for the loyalty programme. When false, no
@@ -301,24 +302,24 @@ model BranchSetting {
   firstVisitCouponValue           Decimal      @default(10) @db.Decimal(14, 2)
   firstVisitCouponValidityDays    Int          @default(30)
   // Theming
-  posTheme                        String   @default("sunrise") // built-in slug or custom slug
-  websiteTheme                    String   @default("sunrise")
+  posTheme                        String       @default("sunrise") // built-in slug or custom slug
+  websiteTheme                    String       @default("sunrise")
   customThemes                    String? // JSON array of custom theme objects (slug, name, scope, tokens)
   // Cashier permissions (Phase 6)
   cashierPermissions              String? // JSON: per-action enabled+approval mode
   // Kitchen
-  useKds                          Boolean  @default(true) // When false, kitchen tickets auto-print from POS (no KDS screen)
+  useKds                          Boolean      @default(true) // When false, kitchen tickets auto-print from POS (no KDS screen)
   // ── Reservation Settings ──
-  openingTime                     String   @default("09:00")
-  closingTime                     String   @default("23:00")
-  reservationSlotMinutes          Int      @default(90)
-  reservationBlockMinutes         Int      @default(60)
-  reservationMaxBookingsPerSlot   Int      @default(12)
-  reservationMaxPersonsPerSlot    Int      @default(40)
-  reservationAutoReserveMinutes   Int      @default(30)
-  reservationLateThresholdMinutes Int      @default(30)
-  reservationSmsEnabled           Boolean  @default(true)
-  reservationReminderMinutes      Int      @default(60)
+  openingTime                     String       @default("09:00")
+  closingTime                     String       @default("23:00")
+  reservationSlotMinutes          Int          @default(90)
+  reservationBlockMinutes         Int          @default(60)
+  reservationMaxBookingsPerSlot   Int          @default(12)
+  reservationMaxPersonsPerSlot    Int          @default(40)
+  reservationAutoReserveMinutes   Int          @default(30)
+  reservationLateThresholdMinutes Int          @default(30)
+  reservationSmsEnabled           Boolean      @default(true)
+  reservationReminderMinutes      Int          @default(60)
   reservationSmsConfirmTemplate   String?
   reservationSmsRejectTemplate    String?
   reservationSmsReminderTemplate  String?
@@ -326,26 +327,26 @@ model BranchSetting {
   /// % markup over recipe COGS for POS Customised Menu items.
   /// 52 means selling price floor = cost × 1.52.
   /// Null = no enforced floor (legacy behaviour).
-  customMenuCostMargin            Decimal? @db.Decimal(5, 2)
+  customMenuCostMargin            Decimal?     @db.Decimal(5, 2)
   /// Optional downward room from the calculated floor (10 = cashier may
   /// negotiate up to 10% below). Null / 0 = price is locked at the floor.
-  customMenuNegotiateMargin       Decimal? @db.Decimal(5, 2)
+  customMenuNegotiateMargin       Decimal?     @db.Decimal(5, 2)
   /// Optional upward ceiling expressed as % markup over cost (200 = max
   /// 200% over cost). Null = no cap.
-  customMenuMaxMargin             Decimal? @db.Decimal(5, 2)
+  customMenuMaxMargin             Decimal?     @db.Decimal(5, 2)
   /// Allow QR-app customers to remove ingredients themselves ("no
   /// garlic"). When false (default), the QR app shows only the
   /// "Special note" field — cashier reads the note and applies the
   /// removal manually via the existing POS Customise dialog at order
   /// acceptance time.
-  qrAllowSelfRemoveIngredients    Boolean  @default(false)
+  qrAllowSelfRemoveIngredients    Boolean      @default(false)
   /// Table-status timer thresholds in minutes. Order placed → kitchen
   /// Start (default 30); Start → kitchen Done (40); Served → cleared
   /// (35). Each phase clock starts fresh from the previous phase's
   /// transition timestamp. Null = use defaults.
-  tableTimerOrderToStartMin       Int?     @default(30)
-  tableTimerStartToDoneMin        Int?     @default(40)
-  tableTimerServedToClearMin      Int?     @default(35)
+  tableTimerOrderToStartMin       Int?         @default(30)
+  tableTimerStartToDoneMin        Int?         @default(40)
+  tableTimerServedToClearMin      Int?         @default(35)
 
   /// Lookback window (days) for the auto-min-stock recompute. When 0
   /// (default) the feature is OFF — minimum stock stays whatever
@@ -406,12 +407,12 @@ model BranchSetting {
   /// are populated. Token plaintext mirrors smsApiKey/tipsoiApiToken
   /// — masked in non-OWNER reads, stripped from activity-log diffs
   /// via SENSITIVE_FIELDS.
-  whatsappEnabled        Boolean @default(false)
-  whatsappPhoneNumberId  String?
-  whatsappWabaId         String?
-  whatsappAccessToken    String?
-  whatsappPoTemplate     String  @default("purchase_order_v1")
-  whatsappPoTemplateLang String  @default("en_US")
+  whatsappEnabled          Boolean @default(false)
+  whatsappPhoneNumberId    String?
+  whatsappWabaId           String?
+  whatsappAccessToken      String?
+  whatsappPoTemplate       String  @default("purchase_order_v1")
+  whatsappPoTemplateLang   String  @default("en_US")
   /// Comma-separated ordered list of body-param tokens the approved
   /// template expects. Each token maps to a piece of the PO context;
   /// the service builds the bodyParams array in this exact order.
@@ -421,7 +422,7 @@ model BranchSetting {
   /// admins whose approved template has a different placeholder count
   /// (Meta returns #132000 when they don't match) can edit this here
   /// without touching code.
-  whatsappPoTemplateParams String @default("supplierName,poNumber,date")
+  whatsappPoTemplateParams String  @default("supplierName,poNumber,date")
 
   /// When TRUE the kitchen ticket prints each item's recipe (ingredients
   /// + qty + unit) below the item name in a small font. Lets the cook
@@ -611,6 +612,7 @@ model Staff {
   leaveRule                 LeaveRule?           @relation(fields: [leaveRuleId], references: [id])
   leaveBalances             LeaveBalance[]
   couponCampaignsCreated    CouponCampaign[]     @relation("CouponCampaignCreator")
+  externalApiKeysCreated    ExternalApiKey[]     @relation("ExternalApiKeyCreator")
 
   @@index([branchId, isActive])
   @@index([email])
@@ -737,13 +739,13 @@ model MenuItem {
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
 
-  isCombo          Boolean @default(false)
-  cookingStationId String?
+  isCombo               Boolean @default(false)
+  cookingStationId      String?
   // Website detail fields
-  pieces           String? // e.g. "4-6" — null = don't show
-  prepTime         String? // e.g. "15 min"
-  spiceLevel       String? // e.g. "Mild", "Medium", "Hot"
-  websiteVisible   Boolean @default(true) // hide from website without affecting POS
+  pieces                String? // e.g. "4-6" — null = don't show
+  prepTime              String? // e.g. "15 min"
+  spiceLevel            String? // e.g. "Mild", "Medium", "Hot"
+  websiteVisible        Boolean @default(true) // hide from website without affecting POS
   /// When true, this item is excluded from the "Top Selling" surface
   /// on QR + website. Item still appears in its category and on the
   /// New Items strip — only the popularity-by-paid-quantity slider
@@ -757,30 +759,30 @@ model MenuItem {
   /// even if the branch toggle is on. Useful for trivially obvious
   /// items (drinks, sides) so the chef isn't drowning in noise.
   /// Default false → follow the branch setting.
-  kotHideRecipe Boolean @default(false)
+  kotHideRecipe         Boolean @default(false)
   /// True for items created via POS Customised Menu. UI uses this to
   /// hide them from the admin Menu page filter and to bypass website /
   /// QR feeds (websiteVisible=false handles the latter; this is the
   /// explicit provenance flag).
-  isCustom         Boolean @default(false)
+  isCustom              Boolean @default(false)
   /// Nullable parent FK. When set, this row is a sellable variant
   /// (e.g. "Hargao Prawn") and `variantParent` is the picker shell
   /// (e.g. "Hargao"). When null, item is either a standalone sellable
   /// item (legacy behaviour) or itself a parent shell when
   /// `isVariantParent=true`. Variants are limited to ONE level deep —
   /// admin / API enforce.
-  variantParentId  String?
+  variantParentId       String?
   /// True when this item is a non-sellable picker shell that exists
   /// only to group its variants. POS picker shows it as a card; click
   /// opens the variant chooser. Server rejects orderItem.create against
   /// a parent shell. Legacy MenuItems all have isVariantParent=false.
-  isVariantParent  Boolean @default(false)
+  isVariantParent       Boolean @default(false)
   /// True when this row is an addon (Extra Patty, Cheese Sauce,
   /// Garlic Nun, etc). Filtered out of the main POS grid + the
   /// website / QR feed; selectable only via an addon group on a
   /// parent menu item. Reuses the existing price + recipe shape so
   /// reports / costing engines work without modification.
-  isAddon          Boolean @default(false)
+  isAddon               Boolean @default(false)
 
   // Relations
   branch           Branch                @relation(fields: [branchId], references: [id])
@@ -897,16 +899,16 @@ model LinkedItem {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Customer {
-  id          String    @id @default(cuid())
-  branchId    String
-  phone       String
-  name        String    @default("Walk-in")
-  email       String?
-  totalOrders Int       @default(0)
-  totalSpent  Decimal   @default(0) @db.Decimal(14, 2)
-  lastVisit   DateTime?
-  agreedTerms Boolean   @default(true)
-  isActive    Boolean   @default(true)
+  id               String    @id @default(cuid())
+  branchId         String
+  phone            String
+  name             String    @default("Walk-in")
+  email            String?
+  totalOrders      Int       @default(0)
+  totalSpent       Decimal   @default(0) @db.Decimal(14, 2)
+  lastVisit        DateTime?
+  agreedTerms      Boolean   @default(true)
+  isActive         Boolean   @default(true)
   /// Running loyalty-points balance. Maintained by LoyaltyService —
   /// incremented on paid orders, decremented on QR redemption,
   /// zero'd by the daily expiry sweep when loyaltyExpiresAt passes.
@@ -915,14 +917,14 @@ model Customer {
   /// .loyaltyValidityDays) on every paid order so active customers
   /// never lose points. Null = balance has never been > 0.
   loyaltyExpiresAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  branch       Branch        @relation(fields: [branchId], references: [id])
-  orders       Order[]
-  reviews      Review[]
-  reservations Reservation[]
-  coupons      Coupon[]
+  branch              Branch               @relation(fields: [branchId], references: [id])
+  orders              Order[]
+  reviews             Review[]
+  reservations        Reservation[]
+  coupons             Coupon[]
   loyaltyTransactions LoyaltyTransaction[]
 
   @@unique([branchId, phone])
@@ -1057,17 +1059,17 @@ model Order {
   deletedAt           DateTime?
 
   // Relations
-  branch        Branch         @relation(fields: [branchId], references: [id])
-  cashier       Staff          @relation("OrderCashier", fields: [cashierId], references: [id])
-  table         DiningTable?   @relation(fields: [tableId], references: [id])
-  customer      Customer?      @relation(fields: [customerId], references: [id])
-  review        Review?
-  waiter        Staff?         @relation("OrderWaiter", fields: [waiterId], references: [id])
-  voidedBy      Staff?         @relation("OrderVoidedBy", fields: [voidedById], references: [id])
-  items         OrderItem[]
-  payments      OrderPayment[]
-  mushakInvoice MushakInvoice?
-  mushakNotes   MushakNote[]
+  branch              Branch               @relation(fields: [branchId], references: [id])
+  cashier             Staff                @relation("OrderCashier", fields: [cashierId], references: [id])
+  table               DiningTable?         @relation(fields: [tableId], references: [id])
+  customer            Customer?            @relation(fields: [customerId], references: [id])
+  review              Review?
+  waiter              Staff?               @relation("OrderWaiter", fields: [waiterId], references: [id])
+  voidedBy            Staff?               @relation("OrderVoidedBy", fields: [voidedById], references: [id])
+  items               OrderItem[]
+  payments            OrderPayment[]
+  mushakInvoice       MushakInvoice?
+  mushakNotes         MushakNote[]
   loyaltyTransactions LoyaltyTransaction[]
 
   @@index([branchId, status])
@@ -2055,7 +2057,7 @@ model Payroll {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  paidAmount Decimal @default(0) @db.Decimal(14, 2) // total paid so far
+  paidAmount        Decimal @default(0) @db.Decimal(14, 2) // total paid so far
   /// Frozen JSON snapshot of the salary structure used at generation
   /// time (components + per-structure deduction thresholds). Same
   /// pattern as MushakInvoice.snapshot — freezes the math so a later
@@ -2753,32 +2755,32 @@ model LeaveBalance {
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum LoyaltyTransactionType {
-  EARNED       // points awarded from a paid order
-  REDEEMED     // points applied on a QR order to reduce the bill
-  EXPIRED      // daily cron swept stale balance to zero
-  ADJUSTMENT   // admin manual nudge (positive or negative) with reason
+  EARNED // points awarded from a paid order
+  REDEEMED // points applied on a QR order to reduce the bill
+  EXPIRED // daily cron swept stale balance to zero
+  ADJUSTMENT // admin manual nudge (positive or negative) with reason
 }
 
 model LoyaltyTransaction {
-  id          String                 @id @default(cuid())
-  branchId    String
-  customerId  String
+  id             String                 @id @default(cuid())
+  branchId       String
+  customerId     String
   /// Source order — null for ADJUSTMENT / EXPIRED rows.
-  orderId     String?
+  orderId        String?
   /// Signed integer. Positive = earned, negative = redeemed / expired
   /// / debit adjustment. Sums into the running balance held on
   /// Customer.loyaltyPoints (kept materialised for cheap reads).
-  points      Int
-  type        LoyaltyTransactionType
-  description String?
+  points         Int
+  type           LoyaltyTransactionType
+  description    String?
   /// Paisa amount this row applies as a bill discount. Populated only
   /// on REDEEMED rows (snapshot of `points * takaPerPointRedeem * 100`
   /// at redemption time, so the discount is rate-change-proof). The
   /// order's effective loyalty discount is `SUM(discountAmount)` over
   /// REDEEMED rows for that orderId — that's what recompute paths use
   /// when items change on the order so the discount survives.
-  discountAmount Decimal @default(0) @db.Decimal(14, 2)
-  createdAt   DateTime               @default(now())
+  discountAmount Decimal                @default(0) @db.Decimal(14, 2)
+  createdAt      DateTime               @default(now())
 
   branch   Branch   @relation(fields: [branchId], references: [id])
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -2790,38 +2792,38 @@ model LoyaltyTransaction {
 }
 
 enum CouponCampaignStatus {
-  DRAFT     // codes generated, SMS not yet sent
-  SENDING   // bulk dispatch in flight (transient)
-  SENT      // SMS dispatched to all recipients
+  DRAFT // codes generated, SMS not yet sent
+  SENDING // bulk dispatch in flight (transient)
+  SENT // SMS dispatched to all recipients
 }
 
 model CouponCampaign {
-  id              String               @id @default(cuid())
-  branchId        String
-  name            String
-  status          CouponCampaignStatus @default(DRAFT)
+  id             String               @id @default(cuid())
+  branchId       String
+  name           String
+  status         CouponCampaignStatus @default(DRAFT)
   /// Free-text snapshot of the segmentation filter at generation
   /// time so the admin can audit which rules were applied later.
-  filterSummary   String?
+  filterSummary  String?
   /// Frozen coupon parameters for this batch — snapshotted so
   /// later BranchSetting / template edits don't retro-rewrite past
   /// campaigns.
-  couponType      DiscountType
-  couponValue     Decimal              @db.Decimal(14, 2)
-  validityDays    Int
+  couponType     DiscountType
+  couponValue    Decimal              @db.Decimal(14, 2)
+  validityDays   Int
   /// SMS template body resolved at generation time. Per-recipient
   /// rendering substitutes {{name}}, {{coupon_code}}, {{coupon_value}},
   /// {{coupon_expires}}, {{brand}}.
-  smsTemplate     String
-  recipientCount  Int                  @default(0)
-  sentCount       Int                  @default(0)
-  failedCount     Int                  @default(0)
-  createdById     String?
-  createdAt       DateTime             @default(now())
-  sentAt          DateTime?
+  smsTemplate    String
+  recipientCount Int                  @default(0)
+  sentCount      Int                  @default(0)
+  failedCount    Int                  @default(0)
+  createdById    String?
+  createdAt      DateTime             @default(now())
+  sentAt         DateTime?
 
-  branch    Branch  @relation(fields: [branchId], references: [id])
-  createdBy Staff?  @relation("CouponCampaignCreator", fields: [createdById], references: [id])
+  branch    Branch @relation(fields: [branchId], references: [id])
+  createdBy Staff? @relation("CouponCampaignCreator", fields: [createdById], references: [id])
   // Coupons issued by this campaign are findable via
   // Coupon.campaignTag == CouponCampaign.id (no FK so a campaign
   // soft-delete doesn't cascade-kill issued coupons that customers
@@ -2829,4 +2831,45 @@ model CouponCampaign {
 
   @@index([branchId, createdAt])
   @@map("coupon_campaigns")
+}
+
+// -----------------------------------------------------------------------------
+// EXTERNAL API KEYS - programmatic access from third-party / sister systems
+// -----------------------------------------------------------------------------
+// Issued by OWNER from Admin -> Integrations. Authenticates external callers
+// (e.g. the Marketing AI platform) against /api/v1/external/* routes. Secret
+// is shown ONCE at creation; only the bcrypt hash is persisted. Branch scope
+// is bound to the key itself - callers never pass branchId on the wire.
+
+model ExternalApiKey {
+  id          String    @id @default(cuid())
+  branchId    String
+  /// Human label shown in Admin (e.g. "Marketing AI - Production").
+  name        String
+  /// Stripe-style id segment for display + lookup. Format: rk_<8 hex chars>.
+  /// Safe to log and surface in UI. Indexed for fast guard-path lookups.
+  prefix      String    @unique
+  /// bcrypt(secret). Secret is generated as 32 random url-safe bytes at
+  /// creation time and never persisted in plaintext.
+  keyHash     String
+  /// Permission scopes, e.g. ['reports:read', 'customers:read',
+  /// 'marketing:write']. Each route declares the scope it requires; the
+  /// ScopesGuard enforces. Stored as a Postgres text[] so we can add new
+  /// scopes without migrations.
+  scopes      String[]
+  createdById String
+  lastUsedAt  DateTime?
+  /// Set when an OWNER revokes the key. Guard rejects keys with non-null
+  /// revokedAt unconditionally. Never null-out; revocation is permanent.
+  revokedAt   DateTime?
+  /// Optional - when set and in the past, guard rejects with 401.
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  branch    Branch @relation(fields: [branchId], references: [id])
+  createdBy Staff  @relation("ExternalApiKeyCreator", fields: [createdById], references: [id])
+
+  @@index([branchId, revokedAt])
+  @@map("external_api_keys")
 }

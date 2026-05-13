@@ -43,6 +43,11 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'supplier', table: 'suppliers' },
   { accessor: 'creditor', table: 'creditors' },
   { accessor: 'device', table: 'devices' },
+  // External API keys for /v1/external/*. Survive backup/restore so
+  // integrations (e.g. AI Marketing Agent) keep working after a
+  // restore. Bcrypt'd secret column is included — the plaintext was
+  // already lost at creation time, so restoring the hash is safe.
+  { accessor: 'externalApiKey', table: 'external_api_keys' },
 
   // Tier 3 — payment config (depends on branch + account)
   { accessor: 'paymentMethodConfig', table: 'payment_method_configs' },

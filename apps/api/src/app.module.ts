@@ -57,6 +57,7 @@ import { BackupModule } from './backup/backup.module';
 import { BranchSettingsModule } from './branch-settings/branch-settings.module';
 import { DeviceModule } from './device-registration/device.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
+import { ExternalApiModule } from './external-api/external-api.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -178,6 +179,11 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // Idempotent mutation responses — desktop outbox retries land here.
     IdempotencyModule,
+
+    // External API surface (/api/v1/external/*) for AI Marketing Agent
+    // and other programmatic consumers. API-key auth, scope-gated,
+    // branch-scoped via the key (never via header).
+    ExternalApiModule,
 
     // Reservation System
     ScheduleModule.forRoot(),

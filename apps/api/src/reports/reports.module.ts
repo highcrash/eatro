@@ -7,5 +7,6 @@ import { UnitConversionModule } from '../unit-conversion/unit-conversion.module'
   imports: [UnitConversionModule],
   controllers: [ReportsController],
   providers: [ReportsService],
+  exports: [ReportsService],
 })
 export class ReportsModule {}

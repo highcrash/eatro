@@ -7,6 +7,7 @@ import { join } from 'path';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { ExternalApiModule } from './external-api/external-api.module';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -65,11 +66,33 @@ async function bootstrap(): Promise<void> {
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('api/docs', app, document);
+
+    // Separate doc scoped to the External API — the contract for AI /
+    // marketing / data consumers. Hides the staff-internal surface.
+    const externalConfig = new DocumentBuilder()
+      .setTitle('Restora External API — v1')
+      .setDescription(
+        'Programmatic, scope-gated, branch-scoped read access for AI Marketing Agent and other external consumers. ' +
+          'Authenticate with `Authorization: Bearer rk_<prefix>_<secret>`. Keys are minted from Restora Admin → Integrations (OWNER only).',
+      )
+      .setVersion('1.0')
+      .addBearerAuth({
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'rk_<prefix>_<secret>',
+        description: 'External API key. Format: rk_<8-hex-prefix>_<base64url-secret>',
+      })
+      .build();
+    const externalDoc = SwaggerModule.createDocument(app, externalConfig, {
+      include: [ExternalApiModule],
+    });
+    SwaggerModule.setup('api/docs/external', app, externalDoc);
   }
 
   await app.listen(port);
   console.warn(`🚀 Restora API running on http://localhost:${port}/api`);
   console.warn(`📚 Swagger docs: http://localhost:${port}/api/docs`);
+  console.warn(`📡 External API docs: http://localhost:${port}/api/docs/external`);
 }
 
 void bootstrap();
