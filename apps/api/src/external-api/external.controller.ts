@@ -1,5 +1,16 @@
-import { Controller, DefaultValuePipe, Get, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  DefaultValuePipe,
+  Get,
+  ParseIntPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiProperty, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 import { CurrentApiClient } from './decorators/current-api-client.decorator';
 import { Scopes } from './decorators/scopes.decorator';
@@ -224,6 +235,34 @@ export class ExternalController {
     return this.envelope(client.branchId, data);
   }
 
+  @Post('business/sms/send')
+  @Scopes('marketing:write')
+  @ApiOperation({
+    summary: 'Send a single SMS to one phone number',
+    description:
+      'Sends one SMS via the branch\'s configured SMS provider. Logs to sms_logs with kind=CAMPAIGN and the supplied campaignTag (if any). Use this for test sends and one-off targeted messages; bulk segment blasts will land at a separate endpoint.',
+  })
+  async sendSms(@CurrentApiClient() client: ApiClient, @Body() dto: SendSmsDto) {
+    const phone = dto.phone.trim();
+    const body = dto.body.trim();
+    if (phone.length === 0 || body.length === 0) {
+      throw new BadRequestException('phone and body are required');
+    }
+    const result = await this.external.sendSms(
+      client.branchId,
+      phone,
+      body,
+      dto.campaignTag?.trim() || null,
+    );
+    return this.envelope(client.branchId, {
+      ok: result.ok,
+      smsLogId: result.log.id,
+      providerRequestId: result.log.requestId,
+      status: result.log.status,
+      error: result.log.errorText,
+    });
+  }
+
   private async envelope<T>(branchId: string, data: T) {
     const meta = await this.external.getBranchMetaContext(branchId);
     return {
@@ -236,4 +275,36 @@ export class ExternalController {
       },
     };
   }
+}
+
+class SendSmsDto {
+  @ApiProperty({
+    description:
+      'Destination phone number. Branch SMS service will normalise to its supported format (BD MSISDN, etc.).',
+    example: '+8801710330040',
+  })
+  @IsString()
+  @MinLength(6)
+  @MaxLength(20)
+  phone!: string;
+
+  @ApiProperty({
+    description:
+      'SMS body. Branch may prefix a brand tag — total wire length is constrained by the provider (typically 160 chars Latin, 70 chars unicode per segment).',
+    example: 'Hi Tahsin — we miss you at EATRO. 15% off this week. Show this SMS at the counter.',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(1000)
+  body!: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      "Free-form grouping tag persisted on the SmsLog row. Use the same tag across a batch so you can aggregate later (e.g. 'mai-2026-reactivation').",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  campaignTag?: string;
 }

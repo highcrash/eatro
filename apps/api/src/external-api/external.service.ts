@@ -6,6 +6,7 @@ import { MarketingService } from '../marketing/marketing.service';
 import { MenuService } from '../menu/menu.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportsService } from '../reports/reports.service';
+import { SmsService } from '../sms/sms.service';
 
 /// Facade over existing Restora services for the external API surface.
 /// Never reimplements aggregation logic — only shapes the response into
@@ -20,7 +21,20 @@ export class ExternalService {
     private readonly marketing: MarketingService,
     private readonly loyalty: LoyaltyService,
     private readonly expenses: ExpenseService,
+    private readonly sms: SmsService,
   ) {}
+
+  /// Send a single SMS via the branch's existing SMS pipeline. Logs to
+  /// `sms_logs` with a `campaignTag` so external consumers can correlate
+  /// sends. The SMS provider is configured per-branch in BranchSetting
+  /// (api.sms.net.bd) — this just hands the message off and returns the
+  /// resulting log row.
+  sendSms(branchId: string, phone: string, body: string, campaignTag: string | null) {
+    return this.sms.sendAndLog(branchId, phone, body, {
+      kind: 'CAMPAIGN',
+      campaignId: campaignTag ?? null,
+    });
+  }
 
   getMenu(branchId: string) {
     return this.menu.findAll(branchId);
