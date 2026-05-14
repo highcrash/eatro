@@ -15,6 +15,8 @@ interface Coupon {
   oncePerCustomer?: boolean;
   /** Stored in PAISA on the server; admin form edits in TAKA. */
   minOrderAmount?: number | null;
+  /** Required when type === FREE_ITEM — the menu item to auto-add at ৳0. */
+  freeMenuItemId?: string | null;
 }
 interface MenuItemDiscount {
   id: string; menuItemId: string; type: string; value: number; startDate: string; endDate: string;
@@ -531,17 +533,34 @@ function CouponDialog({ initial, menuItems, categories, onClose, onSave }: { ini
       ? (Number(initial.minOrderAmount) / 100).toString()
       : '',
   );
+  const [freeMenuItemId, setFreeMenuItemId] = useState(initial?.freeMenuItemId ?? '');
+  // Variant parents have no own price/recipe — apply would reject
+  // them server-side, so don't even let the admin pick one here.
+  const freebieCandidates = useMemo(
+    () => menuItems.filter((m) => !(m as { isVariantParent?: boolean }).isVariantParent),
+    [menuItems],
+  );
+  const isFreeItem = type === 'FREE_ITEM';
 
   const handleSave = () => {
-    const v = type === 'FLAT' ? Math.round(parseFloat(value) * 100) : parseFloat(value);
+    // FREE_ITEM has no "value" to save — the benefit lives on the
+    // freeMenuItem. PERCENTAGE / FLAT keep the existing value math.
+    let v = 0;
+    if (type === 'FLAT') v = Math.round(parseFloat(value) * 100);
+    else if (type === 'PERCENTAGE') v = parseFloat(value);
     const minTaka = minOrderAmount.trim() ? parseFloat(minOrderAmount) : null;
     onSave({
-      code, name, type, value: v, scope,
-      targetItems: scope !== 'ALL_ITEMS' ? targets : undefined,
+      code, name, type, value: v,
+      // Scope/targets are bill-shave concepts — meaningless for
+      // FREE_ITEM. Send ALL_ITEMS so the server doesn't trip on
+      // stale state from a type-flip.
+      scope: isFreeItem ? 'ALL_ITEMS' : scope,
+      targetItems: !isFreeItem && scope !== 'ALL_ITEMS' ? targets : undefined,
       maxUses: parseInt(maxUses) || 0,
       expiresAt: expiresAt || null,
       oncePerCustomer,
       minOrderAmount: minTaka != null && Number.isFinite(minTaka) && minTaka > 0 ? minTaka : null,
+      freeMenuItemId: isFreeItem ? (freeMenuItemId || null) : null,
     });
   };
 
@@ -562,14 +581,35 @@ function CouponDialog({ initial, menuItems, categories, onClose, onSave }: { ini
             <select value={type} onChange={(e) => setType(e.target.value)} className="w-full border border-[#2A2A2A] px-3 py-2 text-sm font-body bg-[#0D0D0D] text-white outline-none">
               <option value="PERCENTAGE">Percentage</option>
               <option value="FLAT">Flat (Tk)</option>
+              <option value="FREE_ITEM">Free This Menu</option>
             </select>
           </div>
-          <div className="flex-1">
-            <label className="text-xs font-body text-[#999] tracking-widest uppercase block mb-1">Value</label>
-            <input type="number" step="0.01" min="0" value={value} onChange={(e) => setValue(e.target.value)}
-              className="w-full border border-[#2A2A2A] px-3 py-2 text-sm font-body bg-[#0D0D0D] text-white outline-none focus:border-[#D62B2B]" />
-          </div>
+          {!isFreeItem && (
+            <div className="flex-1">
+              <label className="text-xs font-body text-[#999] tracking-widest uppercase block mb-1">Value</label>
+              <input type="number" step="0.01" min="0" value={value} onChange={(e) => setValue(e.target.value)}
+                className="w-full border border-[#2A2A2A] px-3 py-2 text-sm font-body bg-[#0D0D0D] text-white outline-none focus:border-[#D62B2B]" />
+            </div>
+          )}
         </div>
+        {isFreeItem && (
+          <div>
+            <label className="text-xs font-body text-[#999] tracking-widest uppercase block mb-1">Free Menu Item *</label>
+            <select
+              value={freeMenuItemId}
+              onChange={(e) => setFreeMenuItemId(e.target.value)}
+              className="w-full border border-[#2A2A2A] px-3 py-2 text-sm font-body bg-[#0D0D0D] text-white outline-none"
+            >
+              <option value="">— Select an item —</option>
+              {freebieCandidates.map((m) => (
+                <option key={m.id} value={m.id}>{m.name} — {formatCurrency(Number(m.price))}</option>
+              ))}
+            </select>
+            <p className="text-[10px] font-body text-[#666] mt-1">
+              When this coupon is applied (POS or QR), this item auto-adds to the order at ৳0 and a kitchen ticket fires for it. Variant parents are hidden — pick a specific variant.
+            </p>
+          </div>
+        )}
         <div className="flex gap-3">
           <div className="flex-1">
             <label className="text-xs font-body text-[#999] tracking-widest uppercase block mb-1">Max Uses (0=unlimited)</label>
@@ -582,15 +622,19 @@ function CouponDialog({ initial, menuItems, categories, onClose, onSave }: { ini
               className="w-full border border-[#2A2A2A] px-3 py-2 text-sm font-body bg-[#0D0D0D] text-white outline-none focus:border-[#D62B2B]" />
           </div>
         </div>
-        <div>
-          <label className="text-xs font-body text-[#999] tracking-widest uppercase block mb-1">Applies To</label>
-          <select value={scope} onChange={(e) => setScope(e.target.value)} className="w-full border border-[#2A2A2A] px-3 py-2 text-sm font-body bg-[#0D0D0D] text-white outline-none">
-            <option value="ALL_ITEMS">All Items</option>
-            <option value="SPECIFIC_ITEMS">Specific Items Only</option>
-            <option value="ALL_EXCEPT">All Items Except</option>
-          </select>
-        </div>
-        {scope !== 'ALL_ITEMS' && <ItemSelector menuItems={menuItems} categories={categories} selected={targets} onChange={setTargets} />}
+        {!isFreeItem && (
+          <>
+            <div>
+              <label className="text-xs font-body text-[#999] tracking-widest uppercase block mb-1">Applies To</label>
+              <select value={scope} onChange={(e) => setScope(e.target.value)} className="w-full border border-[#2A2A2A] px-3 py-2 text-sm font-body bg-[#0D0D0D] text-white outline-none">
+                <option value="ALL_ITEMS">All Items</option>
+                <option value="SPECIFIC_ITEMS">Specific Items Only</option>
+                <option value="ALL_EXCEPT">All Items Except</option>
+              </select>
+            </div>
+            {scope !== 'ALL_ITEMS' && <ItemSelector menuItems={menuItems} categories={categories} selected={targets} onChange={setTargets} />}
+          </>
+        )}
 
         {/* Per-customer + min-order-amount validation rules. Both
             optional — leave blank for shared / no-minimum behavior. */}
@@ -627,7 +671,11 @@ function CouponDialog({ initial, menuItems, categories, onClose, onSave }: { ini
 
         <div className="flex gap-3 pt-2">
           <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
-          <button onClick={handleSave} disabled={!code || !name || !value} className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40">Save</button>
+          <button
+            onClick={handleSave}
+            disabled={!code || !name || (isFreeItem ? !freeMenuItemId : !value)}
+            className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40"
+          >Save</button>
         </div>
       </div>
     </div>
@@ -845,7 +893,13 @@ export default function DiscountsPage() {
                 <tr key={c.id} className="border-b border-[#2A2A2A] last:border-0">
                   <td className="px-5 py-3 text-white font-mono tracking-widest">{c.code}</td>
                   <td className="px-5 py-3 text-[#999]">{c.name}</td>
-                  <td className="px-5 py-3 text-white">{c.type === 'FLAT' ? formatCurrency(Number(c.value)) : `${c.value}%`}</td>
+                  <td className="px-5 py-3 text-white">
+                    {c.type === 'FLAT' && formatCurrency(Number(c.value))}
+                    {c.type === 'PERCENTAGE' && `${c.value}%`}
+                    {c.type === 'FREE_ITEM' && (
+                      <span className="text-[#C8FF00] text-xs font-bold uppercase tracking-wider">Free Item</span>
+                    )}
+                  </td>
                   <td className="px-5 py-3 text-[#999]">{c.usedCount}{c.maxUses > 0 ? `/${c.maxUses}` : '/∞'}</td>
                   <td className="px-5 py-3 text-[#999] text-xs">{c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : '—'}</td>
                   <td className="px-5 py-3"><span className={`text-xs font-medium ${c.isActive ? 'text-green-600' : 'text-[#666]'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>

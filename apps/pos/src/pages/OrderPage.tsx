@@ -1108,12 +1108,33 @@ function ActiveOrderView({
   });
 
   const applyCouponMut = useMutation({
-    mutationFn: (code: string) => api.post<Order>(`/orders/${order.id}/apply-coupon`, { code }),
-    onSuccess: (updated) => {
+    mutationFn: (code: string) => {
+      // Snapshot the existing item IDs so onSuccess can detect any
+      // line(s) the FREE_ITEM coupon auto-added server-side and fire
+      // a kitchen ticket for them. Other coupon types add no items —
+      // the diff stays empty and no KT prints.
+      const priorItemIds = new Set(order.items.map((i) => i.id));
+      return api.post<Order>(`/orders/${order.id}/apply-coupon`, { code }).then((updated) => ({ updated, priorItemIds }));
+    },
+    onSuccess: ({ updated, priorItemIds }) => {
       setOrder(updated);
       setShowCouponInput(false);
       setPosCouponCode('');
       void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+
+      // FREE_ITEM coupon path: server inserted a ৳0 OrderItem tagged
+      // with fromCouponId. Detect any newcomer that wasn't in the
+      // pre-mutation snapshot and fire a kitchen ticket for just
+      // those lines via the existing desktop-ESC/POS-aware printer.
+      // maybePrintKitchenTicket already short-circuits when KDS is on.
+      const newFreeItems = updated.items.filter(
+        (i) => !priorItemIds.has(i.id) && i.fromCouponId,
+      );
+      if (newFreeItems.length > 0) {
+        // Synthetic order with ONLY the freebie lines so the chef
+        // doesn't get a duplicate ticket for items already cooked.
+        void maybePrintKitchenTicket({ ...updated, items: newFreeItems });
+      }
     },
   });
 

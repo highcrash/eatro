@@ -3,6 +3,28 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.83 — FREE_ITEM coupons auto-print kitchen tickets (2026-05-14)
+
+Renderer-only rebuild to ship the FREE_ITEM coupon support added on
+the API + admin sides. Two integration points needed POS code changes,
+so terminals must update to print kitchen tickets when a free item is
+auto-added by a coupon.
+
+- `applyCoupon` mutation snapshots the order's item IDs before
+  hitting the server, then on success diffs against the returned
+  order to find any newcomers tagged with `fromCouponId`. If found,
+  fires the standard `maybePrintKitchenTicket` path against a
+  synthetic order containing only the new freebie lines — chef gets
+  a clean KT for the free item without re-printing already-cooked
+  items. Routes through the desktop ESC/POS path
+  (`window.desktop.print.kitchen`) when available; browser popup
+  fallback otherwise. Skipped when KDS is enabled (KDS handles it).
+- New `OrderItem.fromCouponId` field surfaced via `@restora/types`
+  so the renderer can read it without a cast.
+
+No native / IPC / printing infrastructure changes — purely a renderer
+update + types bump.
+
 ## 1.0.82 — Loyalty points surfaced in POS customer screens (2026-05-12)
 
 Renderer-only rebuild to ship the loyalty visibility added to

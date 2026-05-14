@@ -1015,13 +1015,29 @@ export class OrderService {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') throw new BadRequestException('Cannot modify this order');
 
+    const removedCouponId = order.couponId;
     // Decrement coupon usage if removing a coupon
-    if (order.couponId) {
-      await this.prisma.coupon.update({ where: { id: order.couponId }, data: { usedCount: { decrement: 1 } } });
+    if (removedCouponId) {
+      await this.prisma.coupon.update({ where: { id: removedCouponId }, data: { usedCount: { decrement: 1 } } });
     }
 
-    const activeItems = order.items.filter((i) => !i.voidedAt);
-    const subtotal = activeItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
+    // FREE_ITEM cleanup: void any OrderItems this coupon auto-added.
+    // Voided rather than deleted so the audit trail survives — if the
+    // kitchen already started cooking, the cashier sees what happened
+    // and the void appears on the void-audit report. Skipped if the
+    // freebie was already voided manually (idempotent).
+    if (removedCouponId) {
+      await this.prisma.orderItem.updateMany({
+        where: { orderId, fromCouponId: removedCouponId, voidedAt: null },
+        data: { voidedAt: new Date(), voidReason: 'Coupon removed' },
+      });
+    }
+
+    // Re-read items after the void above.
+    const activeItems = removedCouponId
+      ? await this.prisma.orderItem.findMany({ where: { orderId, voidedAt: null } })
+      : order.items.filter((i) => !i.voidedAt);
+    const subtotal = activeItems.reduce((s, i) => s + Number(i.totalPrice), 0);
     // Removing a coupon/discount must NOT also drop the loyalty
     // discount portion — the customer already paid points for it.
     const loyaltySlice = await this.loyalty.getOrderLoyaltyDiscountPaisa(orderId);
@@ -1031,11 +1047,11 @@ export class OrderService {
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { discountAmount, discountId: null, discountName: null, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
+      data: { subtotal, discountAmount, discountId: null, discountName: null, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
-    this.ws.emitToBranch(branchId, 'order:updated', updated);
+    this.ws.emitOrderUpdate(orderId, branchId, 'order:updated', updated);
     return updated;
   }
 
@@ -1121,11 +1137,68 @@ export class OrderService {
       else if (coupon.scope === 'ALL_EXCEPT' && !targets.includes(item.menuItemId)) applicableTotal += item.totalPrice;
     }
 
+    // FREE_ITEM coupons don't shave the bill — they auto-add a
+    // designated menu item at ৳0. Insert the line BEFORE recomputing
+    // totals so the (zero-price) item is in the subtotal sum and the
+    // KT path picks it up. usedCount still increments so maxUses /
+    // oncePerCustomer caps work the same as any other type. The new
+    // OrderItem.fromCouponId tag lets removeDiscount void exactly the
+    // freebies the coupon added when the diner detaches it.
+    let freebieAdded: { menuItemId: string; menuItemName: string } | null = null;
+    if (coupon.type === 'FREE_ITEM') {
+      if (!coupon.freeMenuItemId) {
+        throw new BadRequestException('This FREE_ITEM coupon has no menu item configured — ask the admin to fix it');
+      }
+      const freeItem = await this.prisma.menuItem.findFirst({
+        where: { id: coupon.freeMenuItemId, branchId, deletedAt: null },
+      });
+      if (!freeItem) {
+        throw new BadRequestException('The free menu item linked to this coupon was removed');
+      }
+      if (!freeItem.isAvailable) {
+        throw new BadRequestException(`The free item "${freeItem.name}" is currently unavailable`);
+      }
+      if ((freeItem as { isVariantParent?: boolean }).isVariantParent) {
+        throw new BadRequestException('Coupon free item points at a variant parent — admin must pick a specific variant');
+      }
+      await this.prisma.orderItem.create({
+        data: {
+          orderId,
+          menuItemId: freeItem.id,
+          menuItemName: freeItem.name,
+          quantity: 1,
+          unitPrice: 0,
+          totalPrice: 0,
+          notes: `Free with coupon ${coupon.code}`,
+          kitchenStatus: 'NEW',
+          fromCouponId: coupon.id,
+        },
+      });
+      freebieAdded = { menuItemId: freeItem.id, menuItemName: freeItem.name };
+      // Recipe deduction so the kitchen actually has the ingredients.
+      // Fire-and-forget like every other addItems path so a recipe
+      // failure (no recipe defined, ingredient out of stock) doesn't
+      // block the apply itself — surfaces as a stock variance the
+      // owner sees on the next reconciliation.
+      void this.recipeService.deductStockForOrder(branchId, orderId, [
+        { menuItemId: freeItem.id, quantity: 1 },
+      ]);
+    }
+
+    // Re-fetch after the freebie insert so the recompute sees it.
+    const itemsForRecompute = freebieAdded
+      ? await this.prisma.orderItem.findMany({ where: { orderId, voidedAt: null } })
+      : activeItems;
+    const subtotal = itemsForRecompute.reduce((s, i) => s + Number(i.totalPrice), 0);
+
+    // FREE_ITEM contributes 0 to the bill-shave slice — its benefit
+    // lives on the inserted ৳0 line, not on a discount column.
     const couponSlice = coupon.type === 'FLAT'
       ? Math.min(coupon.value.toNumber(), applicableTotal)
-      : Math.round(applicableTotal * (coupon.value.toNumber() / 100));
+      : coupon.type === 'PERCENTAGE'
+        ? Math.round(applicableTotal * (coupon.value.toNumber() / 100))
+        : 0;
 
-    const subtotal = activeItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     // Stack a prior loyalty redemption on top of the new coupon. Total
     // capped at subtotal so totalAmount can't go negative.
     const loyaltySlice = await this.loyalty.getOrderLoyaltyDiscountPaisa(orderId);
@@ -1137,11 +1210,15 @@ export class OrderService {
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { discountAmount, couponId: coupon.id, couponCode: coupon.code, discountName: coupon.name, discountId: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
+      data: { subtotal, discountAmount, couponId: coupon.id, couponCode: coupon.code, discountName: coupon.name, discountId: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
-    this.ws.emitToBranch(branchId, 'order:updated', updated);
+    // Single emit picks up the new freebie line + the discount /
+    // total update for both POS + KDS + QR + sibling devices on a
+    // shared order. emitOrderUpdate fans to branch room AND per-order
+    // room so QR diners on a shared bill see the line appear.
+    this.ws.emitOrderUpdate(orderId, branchId, 'order:updated', updated);
     return updated;
   }
 
