@@ -16,6 +16,9 @@ export class DiscountService {
   }
 
   createDiscount(branchId: string, dto: { name: string; type: string; value: number; scope?: string; targetItems?: string[] }) {
+    if (dto.type === 'FREE_ITEM') {
+      throw new BadRequestException('FREE_ITEM is a coupon-only benefit. Create a coupon instead.');
+    }
     return this.prisma.discount.create({
       data: {
         branchId,
@@ -29,6 +32,9 @@ export class DiscountService {
   }
 
   async updateDiscount(id: string, branchId: string, dto: { name?: string; type?: string; value?: number; scope?: string; targetItems?: string[]; isActive?: boolean }) {
+    if (dto.type === 'FREE_ITEM') {
+      throw new BadRequestException('FREE_ITEM is a coupon-only benefit. Create a coupon instead.');
+    }
     const d = await this.prisma.discount.findFirst({ where: { id, branchId } });
     if (!d) throw new NotFoundException();
     return this.prisma.discount.update({
@@ -77,14 +83,41 @@ export class DiscountService {
     return this.prisma.coupon.findMany({ where: { branchId }, orderBy: { createdAt: 'desc' } });
   }
 
-  createCoupon(branchId: string, dto: { code: string; name: string; type: string; value: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string; oncePerCustomer?: boolean; minOrderAmount?: number | null }) {
+  /**
+   * FREE_ITEM coupons require a valid freeMenuItemId pointing at a
+   * branch-owned, non-deleted, non-variant-parent menu item. Throws
+   * a clear error if the admin forgets the picker, points it at a
+   * variant parent (we can't know which variant the diner wanted),
+   * or picks a deleted item. value is irrelevant for FREE_ITEM —
+   * stored as 0 for hygiene.
+   */
+  private async validateFreeItem(branchId: string, freeMenuItemId: string | null | undefined): Promise<string> {
+    if (!freeMenuItemId) {
+      throw new BadRequestException('FREE_ITEM coupon requires a menu item to give away');
+    }
+    const item = await this.prisma.menuItem.findFirst({
+      where: { id: freeMenuItemId, branchId, deletedAt: null },
+      select: { id: true, isVariantParent: true } as never,
+    }) as { id: string; isVariantParent: boolean } | null;
+    if (!item) throw new BadRequestException('Free menu item not found in this branch');
+    if (item.isVariantParent) {
+      throw new BadRequestException('Pick a specific variant — variant parents have no own price or recipe');
+    }
+    return item.id;
+  }
+
+  async createCoupon(branchId: string, dto: { code: string; name: string; type: string; value: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string; oncePerCustomer?: boolean; minOrderAmount?: number | null; freeMenuItemId?: string | null }) {
+    const isFreeItem = dto.type === 'FREE_ITEM';
+    const freeMenuItemId = isFreeItem ? await this.validateFreeItem(branchId, dto.freeMenuItemId) : null;
     return this.prisma.coupon.create({
       data: {
         branchId,
         code: dto.code.toUpperCase(),
         name: dto.name,
         type: dto.type as any,
-        value: dto.value,
+        // FREE_ITEM stores value 0 — the benefit lives on the
+        // freeMenuItem, not the value field.
+        value: isFreeItem ? 0 : dto.value,
         scope: (dto.scope as any) ?? 'ALL_ITEMS',
         targetItems: dto.targetItems ? JSON.stringify(dto.targetItems) : null,
         maxUses: dto.maxUses ?? 0,
@@ -95,20 +128,35 @@ export class DiscountService {
         minOrderAmount: dto.minOrderAmount != null && dto.minOrderAmount > 0
           ? Math.round(dto.minOrderAmount * 100)
           : null,
+        freeMenuItemId,
       },
     });
   }
 
-  async updateCoupon(id: string, branchId: string, dto: { code?: string; name?: string; type?: string; value?: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string | null; isActive?: boolean; oncePerCustomer?: boolean; minOrderAmount?: number | null }) {
+  async updateCoupon(id: string, branchId: string, dto: { code?: string; name?: string; type?: string; value?: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string | null; isActive?: boolean; oncePerCustomer?: boolean; minOrderAmount?: number | null; freeMenuItemId?: string | null }) {
     const c = await this.prisma.coupon.findFirst({ where: { id, branchId } });
     if (!c) throw new NotFoundException();
+    // Resolve the effective post-update type so we can decide whether
+    // freeMenuItemId is required + valid.
+    const effectiveType = dto.type ?? c.type;
+    let freeMenuItemPatch: { freeMenuItemId: string | null } | null = null;
+    if (effectiveType === 'FREE_ITEM') {
+      const incoming = dto.freeMenuItemId !== undefined ? dto.freeMenuItemId : c.freeMenuItemId;
+      const validated = await this.validateFreeItem(branchId, incoming);
+      freeMenuItemPatch = { freeMenuItemId: validated };
+    } else if (dto.type !== undefined) {
+      // Switching AWAY from FREE_ITEM clears the freebie pointer.
+      freeMenuItemPatch = { freeMenuItemId: null };
+    } else if (dto.freeMenuItemId !== undefined) {
+      freeMenuItemPatch = { freeMenuItemId: dto.freeMenuItemId };
+    }
     return this.prisma.coupon.update({
       where: { id },
       data: {
         ...(dto.code !== undefined ? { code: dto.code.toUpperCase() } : {}),
         ...(dto.name !== undefined ? { name: dto.name } : {}),
         ...(dto.type !== undefined ? { type: dto.type as any } : {}),
-        ...(dto.value !== undefined ? { value: dto.value } : {}),
+        ...(dto.value !== undefined ? { value: effectiveType === 'FREE_ITEM' ? 0 : dto.value } : {}),
         ...(dto.scope !== undefined ? { scope: dto.scope as any } : {}),
         ...(dto.targetItems !== undefined ? { targetItems: JSON.stringify(dto.targetItems) } : {}),
         ...(dto.maxUses !== undefined ? { maxUses: dto.maxUses } : {}),
@@ -120,6 +168,7 @@ export class DiscountService {
             ? Math.round(dto.minOrderAmount * 100)
             : null,
         } : {}),
+        ...(freeMenuItemPatch ?? {}),
       },
     });
   }

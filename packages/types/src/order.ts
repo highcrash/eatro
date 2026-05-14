@@ -71,6 +71,12 @@ export interface OrderItem {
   modifications?: OrderItemModifications | null;
   /** Per-line addon selections captured at order time. */
   addons?: OrderItemAddonSnapshot[] | null;
+  /** Set when this OrderItem was auto-inserted by a FREE_ITEM coupon
+   *  at apply time (price 0). Lets the POS detect newcomer freebies
+   *  on coupon-apply and fire a kitchen ticket; lets removeDiscount
+   *  void exactly the freebies a coupon added. Null on regular
+   *  cashier-/customer-added items. */
+  fromCouponId?: string | null;
 }
 
 export interface OrderPayment {

@@ -142,6 +142,11 @@ enum MenuItemType {
 enum DiscountType {
   FLAT
   PERCENTAGE
+  /// Coupon-only: instead of taking ৳ off the bill, the coupon
+  /// auto-adds a designated menu item to the order at ৳0. Admin
+  /// picks the item via Coupon.freeMenuItemId. Discount model
+  /// rejects this type — only Coupon supports it.
+  FREE_ITEM
 }
 
 enum DiscountScope {
@@ -804,6 +809,10 @@ model MenuItem {
   /// addon option. Inverse for MenuItemAddonOption.addon. Only
   /// populated when isAddon=true.
   addonOptionLinks MenuItemAddonOption[] @relation("MenuItemAddonChild")
+  /// Coupons configured to give this item away free (FREE_ITEM type).
+  /// Inverse for Coupon.freeMenuItem. Mostly informational; lets the
+  /// admin spot which coupons would break if this item is deleted.
+  freeItemCoupons  Coupon[]              @relation("CouponFreeItem")
 
   @@index([branchId, categoryId, isAvailable])
   @@index([branchId, sortOrder])
@@ -1107,15 +1116,22 @@ model OrderItem {
   /// Cart key includes an addons hash so different selections become
   /// separate OrderItem rows.
   addons        Json?
+  /// Set when this OrderItem was auto-inserted by a FREE_ITEM coupon
+  /// at apply time (price 0). Lets removeDiscount void exactly the
+  /// lines the coupon added when the customer/cashier detaches it.
+  /// Null on regular cashier-/customer-added items.
+  fromCouponId  String?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
   // Relations
-  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  menuItem MenuItem @relation(fields: [menuItemId], references: [id])
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
+  fromCoupon Coupon?  @relation("OrderItemFromCoupon", fields: [fromCouponId], references: [id])
 
   @@index([orderId])
   @@index([menuItemId])
+  @@index([fromCouponId])
   @@map("order_items")
 }
 
@@ -1183,6 +1199,13 @@ model Coupon {
   /// run "৳50 off when you spend at least ৳500" promos without the
   /// coupon shrinking the threshold itself.
   minOrderAmount Decimal?  @db.Decimal(14, 2)
+  /// Required when type === FREE_ITEM: the menu item that auto-adds
+  /// to the order at ৳0 when this coupon is applied. Null for FLAT
+  /// and PERCENTAGE coupons. Variant-parent items rejected at apply
+  /// time (the cashier picks a variant via the regular POS chooser
+  /// — there's no automatic way to know which variant the diner
+  /// wanted, and parents have no own price/recipe).
+  freeMenuItemId  String?
   /// When set, the code is valid ONLY when redeemed by this exact
   /// customer (matched on the order's customerId). Null = legacy
   /// shared-code behaviour, unchanged. Generated campaign coupons +
@@ -1196,13 +1219,19 @@ model Coupon {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  branch   Branch    @relation(fields: [branchId], references: [id])
-  customer Customer? @relation(fields: [customerId], references: [id])
+  branch        Branch     @relation(fields: [branchId], references: [id])
+  customer      Customer?  @relation(fields: [customerId], references: [id])
+  freeMenuItem  MenuItem?  @relation("CouponFreeItem", fields: [freeMenuItemId], references: [id])
+  /// OrderItems auto-inserted by this coupon (FREE_ITEM redemption
+  /// trail). Used by removeDiscount to void the freebies when the
+  /// coupon is detached from an order.
+  autoAddedItems OrderItem[] @relation("OrderItemFromCoupon")
 
   @@unique([branchId, code])
   @@index([branchId, isActive])
   @@index([customerId])
   @@index([campaignTag])
+  @@index([freeMenuItemId])
   @@map("coupons")
 }
 
