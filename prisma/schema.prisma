@@ -1169,6 +1169,20 @@ model Coupon {
   usedCount   Int           @default(0)
   expiresAt   DateTime?
   isActive    Boolean       @default(true)
+  /// When true, the same customer can only redeem this code once
+  /// across all of their orders. Independent of `maxUses` (which is
+  /// the global cap). Existing customer-scoped coupons (campaign +
+  /// first-visit) effectively had this behavior via `maxUses=1`;
+  /// this flag makes it work for shared codes too — admin can
+  /// publish "FIRST10" to everyone and still cap each customer to
+  /// one redemption. Default false = legacy behavior.
+  oncePerCustomer Boolean   @default(false)
+  /// Minimum order subtotal in PAISA required for the coupon to
+  /// apply. Null = no minimum. The check runs against the order's
+  /// active-items subtotal (pre-discount, pre-tax) so an admin can
+  /// run "৳50 off when you spend at least ৳500" promos without the
+  /// coupon shrinking the threshold itself.
+  minOrderAmount Decimal?  @db.Decimal(14, 2)
   /// When set, the code is valid ONLY when redeemed by this exact
   /// customer (matched on the order's customerId). Null = legacy
   /// shared-code behaviour, unchanged. Generated campaign coupons +

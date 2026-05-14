@@ -12,6 +12,9 @@ interface Discount {
 interface Coupon {
   id: string; code: string; name: string; type: string; value: number; scope: string; targetItems: string | null;
   maxUses: number; usedCount: number; expiresAt: string | null; isActive: boolean;
+  oncePerCustomer?: boolean;
+  /** Stored in PAISA on the server; admin form edits in TAKA. */
+  minOrderAmount?: number | null;
 }
 interface MenuItemDiscount {
   id: string; menuItemId: string; type: string; value: number; startDate: string; endDate: string;
@@ -521,10 +524,25 @@ function CouponDialog({ initial, menuItems, categories, onClose, onSave }: { ini
   const [targets, setTargets] = useState<string[]>(initial?.targetItems ? JSON.parse(initial.targetItems) : []);
   const [maxUses, setMaxUses] = useState(initial?.maxUses?.toString() ?? '0');
   const [expiresAt, setExpiresAt] = useState(initial?.expiresAt?.slice(0, 10) ?? '');
+  const [oncePerCustomer, setOncePerCustomer] = useState(initial?.oncePerCustomer ?? false);
+  // minOrderAmount is paisa on the wire, taka in the input.
+  const [minOrderAmount, setMinOrderAmount] = useState(
+    initial?.minOrderAmount != null && initial.minOrderAmount > 0
+      ? (Number(initial.minOrderAmount) / 100).toString()
+      : '',
+  );
 
   const handleSave = () => {
     const v = type === 'FLAT' ? Math.round(parseFloat(value) * 100) : parseFloat(value);
-    onSave({ code, name, type, value: v, scope, targetItems: scope !== 'ALL_ITEMS' ? targets : undefined, maxUses: parseInt(maxUses) || 0, expiresAt: expiresAt || null });
+    const minTaka = minOrderAmount.trim() ? parseFloat(minOrderAmount) : null;
+    onSave({
+      code, name, type, value: v, scope,
+      targetItems: scope !== 'ALL_ITEMS' ? targets : undefined,
+      maxUses: parseInt(maxUses) || 0,
+      expiresAt: expiresAt || null,
+      oncePerCustomer,
+      minOrderAmount: minTaka != null && Number.isFinite(minTaka) && minTaka > 0 ? minTaka : null,
+    });
   };
 
   return (
@@ -573,6 +591,40 @@ function CouponDialog({ initial, menuItems, categories, onClose, onSave }: { ini
           </select>
         </div>
         {scope !== 'ALL_ITEMS' && <ItemSelector menuItems={menuItems} categories={categories} selected={targets} onChange={setTargets} />}
+
+        {/* Per-customer + min-order-amount validation rules. Both
+            optional — leave blank for shared / no-minimum behavior. */}
+        <div className="border-t border-[#2A2A2A] pt-3 space-y-3">
+          <p className="text-[10px] font-body text-[#666] tracking-widest uppercase">Validation Rules (optional)</p>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={oncePerCustomer}
+              onChange={(e) => setOncePerCustomer(e.target.checked)}
+              className="mt-1 accent-[#D62B2B]"
+            />
+            <div>
+              <span className="text-sm font-body text-white">One redemption per customer</span>
+              <p className="text-[10px] font-body text-[#666] mt-0.5">
+                Even if Max Uses allows multiple redemptions overall, the same customer can only use this code once across all their orders.
+              </p>
+            </div>
+          </label>
+          <div>
+            <label className="text-xs font-body text-[#999] tracking-widest uppercase block mb-1">Minimum Order Amount (৳)</label>
+            <input
+              type="number" min="0" step="0.01"
+              value={minOrderAmount}
+              onChange={(e) => setMinOrderAmount(e.target.value)}
+              placeholder="Leave blank for no minimum"
+              className="w-full border border-[#2A2A2A] px-3 py-2 text-sm font-body bg-[#0D0D0D] text-white outline-none focus:border-[#D62B2B]"
+            />
+            <p className="text-[10px] font-body text-[#666] mt-1">
+              Coupon only applies when the order's pre-discount subtotal is at least this amount.
+            </p>
+          </div>
+        </div>
+
         <div className="flex gap-3 pt-2">
           <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
           <button onClick={handleSave} disabled={!code || !name || !value} className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40">Save</button>

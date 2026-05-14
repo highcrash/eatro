@@ -1076,6 +1076,38 @@ export class OrderService {
     const activeItems = order.items.filter((i) => !i.voidedAt);
     const items = activeItems.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() }));
 
+    // Validation: minimum order amount. Compared against the order's
+    // pre-discount subtotal so the threshold doesn't shrink under
+    // its own coupon. minOrderAmount is paisa.
+    const orderSubtotalPaisa = items.reduce((s, i) => s + i.totalPrice, 0);
+    if (coupon.minOrderAmount != null && coupon.minOrderAmount.toNumber() > 0
+        && orderSubtotalPaisa < coupon.minOrderAmount.toNumber()) {
+      const minTaka = (coupon.minOrderAmount.toNumber() / 100)
+        .toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+      throw new BadRequestException(
+        `COUPON_MIN_NOT_MET: this coupon requires a minimum order of ৳${minTaka}`,
+      );
+    }
+
+    // Validation: once-per-customer. Counts ANY prior order (PAID or
+    // still open) attached to this customer that already used the
+    // same coupon. The current order is excluded by `id: { not }`
+    // so re-applying after `removeDiscount` doesn't trip the rule.
+    if (coupon.oncePerCustomer) {
+      const priorUse = await this.prisma.order.count({
+        where: {
+          branchId,
+          customerId: order.customerId,
+          couponId: coupon.id,
+          id: { not: order.id },
+          deletedAt: null,
+        },
+      });
+      if (priorUse > 0) {
+        throw new BadRequestException('COUPON_ALREADY_USED: this customer has already redeemed this coupon');
+      }
+    }
+
     const targets: string[] = coupon.targetItems ? JSON.parse(coupon.targetItems) : [];
     let applicableTotal = 0;
     for (const item of items) {

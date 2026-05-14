@@ -77,7 +77,7 @@ export class DiscountService {
     return this.prisma.coupon.findMany({ where: { branchId }, orderBy: { createdAt: 'desc' } });
   }
 
-  createCoupon(branchId: string, dto: { code: string; name: string; type: string; value: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string }) {
+  createCoupon(branchId: string, dto: { code: string; name: string; type: string; value: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string; oncePerCustomer?: boolean; minOrderAmount?: number | null }) {
     return this.prisma.coupon.create({
       data: {
         branchId,
@@ -89,11 +89,17 @@ export class DiscountService {
         targetItems: dto.targetItems ? JSON.stringify(dto.targetItems) : null,
         maxUses: dto.maxUses ?? 0,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+        oncePerCustomer: dto.oncePerCustomer ?? false,
+        // minOrderAmount is taka-on-the-wire from the admin form;
+        // store paisa to match every other monetary column.
+        minOrderAmount: dto.minOrderAmount != null && dto.minOrderAmount > 0
+          ? Math.round(dto.minOrderAmount * 100)
+          : null,
       },
     });
   }
 
-  async updateCoupon(id: string, branchId: string, dto: { code?: string; name?: string; type?: string; value?: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string | null; isActive?: boolean }) {
+  async updateCoupon(id: string, branchId: string, dto: { code?: string; name?: string; type?: string; value?: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string | null; isActive?: boolean; oncePerCustomer?: boolean; minOrderAmount?: number | null }) {
     const c = await this.prisma.coupon.findFirst({ where: { id, branchId } });
     if (!c) throw new NotFoundException();
     return this.prisma.coupon.update({
@@ -108,6 +114,12 @@ export class DiscountService {
         ...(dto.maxUses !== undefined ? { maxUses: dto.maxUses } : {}),
         ...(dto.expiresAt !== undefined ? { expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...(dto.oncePerCustomer !== undefined ? { oncePerCustomer: dto.oncePerCustomer } : {}),
+        ...(dto.minOrderAmount !== undefined ? {
+          minOrderAmount: dto.minOrderAmount != null && dto.minOrderAmount > 0
+            ? Math.round(dto.minOrderAmount * 100)
+            : null,
+        } : {}),
       },
     });
   }
