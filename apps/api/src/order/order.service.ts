@@ -822,7 +822,16 @@ export class OrderService {
     loyaltyResult: { pointsEarned: number; newBalance: number; newExpiresAt: Date | null } | null,
   ): Promise<void> {
     const settings = await this.prisma.branchSetting.findUnique({ where: { branchId } });
-    if (!settings?.smsPaymentNotifyEnabled) return;
+    if (!settings) return;
+    // Payment-thank-you and first-visit-welcome are TWO independent
+    // features. Don't let one's toggle silently disable the other —
+    // generate the welcome coupon and send the welcome SMS even when
+    // smsPaymentNotifyEnabled is off. The two are merged into one
+    // outgoing SMS at render time when both fire (saves SMS cost),
+    // sent separately otherwise.
+    const paymentSmsEnabled = !!settings.smsPaymentNotifyEnabled;
+    const welcomeFeatureEnabled = !!settings.firstVisitCouponEnabled;
+    if (!paymentSmsEnabled && !welcomeFeatureEnabled) return;
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { customer: true, payments: true, branch: { select: { name: true } } },
@@ -862,7 +871,7 @@ export class OrderService {
     let welcomeCouponValueDisplay: string | null = null;
     let welcomeCouponExpiresDisplay: string | null = null;
     let isFirstPaidOrder = false;
-    if (settings.firstVisitCouponEnabled && order.customer && order.customerId) {
+    if (welcomeFeatureEnabled && order.customer && order.customerId) {
       // Also skip if a first-visit coupon has already been issued for
       // this customer — defends against the SMS path running twice
       // (e.g. payment retry) so the diner doesn't end up with two
@@ -922,27 +931,24 @@ export class OrderService {
       }
     }
 
-    // Default template includes the loyalty + welcome lines if the
-    // admin hasn't customised one. When the admin saved a custom
-    // template and didn't add the new placeholders, those values
-    // simply don't render — backwards compatible.
-    let defaultTemplate =
-      'Thanks for Dining with {{brand}}. Your payment {{amount}} Taka has been received with {{method}}.';
-    if (loyaltyResult && loyaltyResult.pointsEarned > 0) {
-      defaultTemplate += ' You earned {{points_earned}} pt. Total: {{points_balance}}.';
-    }
-    if (welcomeCouponCode) {
-      defaultTemplate += ' Welcome coupon: {{coupon_code}} ({{coupon_value}} off, valid till {{coupon_expires}}).';
-    }
-    const template = settings.smsPaymentTemplate && settings.smsPaymentTemplate.trim()
-      ? settings.smsPaymentTemplate
-      : defaultTemplate;
-
+    // Build the body in three layers, depending on which features are
+    // enabled and what fired:
+    //   1. Payment-thank-you body (only when paymentSmsEnabled)
+    //   2. Loyalty earning line (only when loyaltyResult > 0 AND
+    //      paymentSmsEnabled — loyalty piggybacks on the payment SMS)
+    //   3. Welcome-coupon line (only when a coupon was generated; rides
+    //      on the payment SMS when both are enabled, sent as its own
+    //      tiny SMS otherwise so the diner always gets the code)
+    //
+    // The merged-into-one path mirrors the old default template; the
+    // standalone welcome path is new and ensures the welcome coupon
+    // ALWAYS reaches the diner — even when the admin has a custom
+    // payment template that doesn't include {{coupon_code}}, or when
+    // payment-SMS is intentionally turned off.
     const pointsExpiresDisplay = loyaltyResult?.newExpiresAt
       ? loyaltyResult.newExpiresAt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
       : null;
-
-    const body = this.sms.renderTemplate(template, {
+    const renderVars = {
       name: order.customer?.name ?? 'Dear Customer',
       phone,
       amount,
@@ -954,13 +960,46 @@ export class OrderService {
       couponCode: welcomeCouponCode,
       couponValue: welcomeCouponValueDisplay,
       couponExpires: welcomeCouponExpiresDisplay,
-    });
+    };
+    const WELCOME_LINE = ' Welcome coupon: {{coupon_code}} ({{coupon_value}} off, valid till {{coupon_expires}}).';
 
-    await this.sms.sendAndLog(branchId, phone, body, {
-      kind: 'PAYMENT',
-      customerId: order.customerId,
-      orderId: order.id,
-    });
+    if (paymentSmsEnabled) {
+      // Build the default template and overlay the admin's custom
+      // template if they have one. Then ensure the welcome line is
+      // always present when a coupon was generated — the admin's
+      // custom template likely won't include {{coupon_code}}, so
+      // append it rather than silently dropping the welcome offer.
+      let defaultTemplate =
+        'Thanks for Dining with {{brand}}. Your payment {{amount}} Taka has been received with {{method}}.';
+      if (loyaltyResult && loyaltyResult.pointsEarned > 0) {
+        defaultTemplate += ' You earned {{points_earned}} pt. Total: {{points_balance}}.';
+      }
+      if (welcomeCouponCode) {
+        defaultTemplate += WELCOME_LINE;
+      }
+      let template = settings.smsPaymentTemplate && settings.smsPaymentTemplate.trim()
+        ? settings.smsPaymentTemplate
+        : defaultTemplate;
+      if (welcomeCouponCode && !template.includes('{{coupon_code}}')) {
+        template = template.trimEnd() + WELCOME_LINE;
+      }
+      const body = this.sms.renderTemplate(template, renderVars);
+      await this.sms.sendAndLog(branchId, phone, body, {
+        kind: 'PAYMENT',
+        customerId: order.customerId,
+        orderId: order.id,
+      });
+    } else if (welcomeCouponCode) {
+      // Payment-SMS is off but a welcome coupon fired — send the
+      // welcome on its own so the customer actually receives it.
+      // Branded with the brand name so the message has context.
+      const standaloneTemplate = 'Welcome to {{brand}}, {{name}}!' + WELCOME_LINE;
+      const body = this.sms.renderTemplate(standaloneTemplate, renderVars);
+      await this.sms.sendAndLog(branchId, phone, body, {
+        kind: 'CAMPAIGN',
+        customerId: order.customerId,
+      });
+    }
   }
 
   async applyDiscount(orderId: string, branchId: string, discountId: string) {
