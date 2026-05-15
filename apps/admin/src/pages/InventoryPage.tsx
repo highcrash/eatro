@@ -291,6 +291,33 @@ export default function InventoryPage() {
   });
   const usage30dById = new Map((suppliesReport?.rows ?? []).map((r) => [r.ingredientId, r] as const));
 
+  // Stock movements happen against the VARIANT ingredient row, not the
+  // parent shell — so usage30dById.get(parent.id) is 0 even when the
+  // variants are being consumed daily. Aggregate variant usage into the
+  // parent so the supplies row shows the total burn across the whole
+  // family. Days-of-cover is recomputed from currentStock (which is
+  // already rolled-up from variants) ÷ aggregated avg daily usage.
+  const aggregateUsageForParent = (ing: Ingredient): { ingredientId: string; usedQty: number; daysOfCover: number | null } | null => {
+    const own = usage30dById.get(ing.id);
+    if (!ing.hasVariants || !ing.variants?.length) return own ?? null;
+    let usedQty = own?.usedQty ?? 0;
+    let hasAnyData = !!own;
+    for (const v of ing.variants) {
+      const vu = usage30dById.get(v.id);
+      if (vu) {
+        usedQty += vu.usedQty;
+        hasAnyData = true;
+      }
+    }
+    if (!hasAnyData) return null;
+    // Window is the same 30 days the supplies query above asked for —
+    // dividing by 30 is the right avg-daily denominator for this view.
+    const avgDailyUsage = usedQty / 30;
+    const currentStock = Number(ing.currentStock);
+    const daysOfCover = avgDailyUsage > 0 ? currentStock / avgDailyUsage : null;
+    return { ingredientId: ing.id, usedQty, daysOfCover };
+  };
+
   // Per-ingredient usage map across menu + pre-ready recipes. Loaded
   // only when the Unused pill is active so we don't pay for the join
   // on every page visit. Server fans variant ↔ parent so a recipe on
@@ -1087,12 +1114,13 @@ export default function InventoryPage() {
                           {ing.hasVariants && <span className="ml-1 text-[#666] text-[10px]">(agg)</span>}
                         </span>
                         {kindFilter === 'supply' && ing.category === 'SUPPLY' && (() => {
-                          const u = usage30dById.get(ing.id);
+                          const u = aggregateUsageForParent(ing);
                           if (!u) return null;
                           const days = u.daysOfCover;
                           return (
                             <p className="text-[10px] font-body text-[#666] mt-0.5">
                               Used {u.usedQty.toFixed(0)} / 30d
+                              {hasVars && <span className="text-[#666]"> (across variants)</span>}
                               {days !== null && days < Infinity && (
                                 <span className={`ml-1 ${days < 7 ? 'text-[#D62B2B]' : days < 14 ? 'text-[#FFA726]' : 'text-[#666]'}`}>
                                   · ~{Math.round(days)} days left
@@ -1187,6 +1215,21 @@ export default function InventoryPage() {
                             <span className="font-body text-sm font-medium text-white">
                               {Number(v.currentStock).toFixed(2)}
                             </span>
+                            {kindFilter === 'supply' && ing.category === 'SUPPLY' && (() => {
+                              const vu = usage30dById.get(v.id);
+                              if (!vu) return null;
+                              const days = vu.daysOfCover;
+                              return (
+                                <p className="text-[10px] font-body text-[#666] mt-0.5">
+                                  Used {vu.usedQty.toFixed(0)} / 30d
+                                  {days !== null && days < Infinity && (
+                                    <span className={`ml-1 ${days < 7 ? 'text-[#D62B2B]' : days < 14 ? 'text-[#FFA726]' : 'text-[#666]'}`}>
+                                      · ~{Math.round(days)} days left
+                                    </span>
+                                  )}
+                                </p>
+                              );
+                            })()}
                           </td>
                           <td className="px-4 py-2 text-[#555] font-body text-sm">—</td>
                           <td className="px-4 py-2 text-[#999] font-body text-sm">৳{(Number(v.costPerUnit) / 100).toFixed(2)}</td>
