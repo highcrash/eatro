@@ -3,6 +3,27 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.84 — Staff can create reservations on behalf of a customer (2026-05-15)
+
+Renderer-only rebuild. The desktop bundles apps/pos/src/** directly,
+so the new "New Reservation" dialog on PosReservationsPage needs a
+fresh installer to ship.
+
+- Bookings screen gets a "+ New" button beside Refresh.
+- Click opens a modal with name/phone/date/partySize/time-slot/notes
+  fields. Existing-customer picker (same /customers/search endpoint
+  the order-screen picker uses) autofills name + phone when the
+  staff finds the customer in the directory; walk-in / first-time
+  diner can just type name + phone fresh.
+- Time-slot dropdown reads from /reservations/public/slots so the
+  staff sees which slots are full / how many seats are free per
+  slot. Capacity gating happens server-side in the same transaction
+  the public website booking flow uses — no double-booking risk.
+- Reservation lands as PENDING; staff confirms + assigns tables via
+  the existing Confirm button on the card.
+
+No native / IPC / printing changes.
+
 ## 1.0.83 — FREE_ITEM coupons auto-print kitchen tickets (2026-05-14)
 
 Renderer-only rebuild to ship the FREE_ITEM coupon support added on
