@@ -3,6 +3,31 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.21 — Edit existing reservations (date / time / party / notes) (2026-05-15)
+
+Renderer-only rebuild. The desktop bundles apps/pos/src/** directly,
+so the new Edit action on the Bookings cards needs a fresh installer
+to ship.
+
+- Bookings cards: PENDING + CONFIRMED reservations gain a small
+  pencil-icon Edit button in the action row (between Confirm/Reject
+  on PENDING, and between Arrived/No-Show on CONFIRMED).
+- Tapping it opens the same modal as "+ New", prefilled with the
+  reservation's current values and submitting via PATCH instead of
+  POST. Customer picker hidden in edit mode — admin shouldn't
+  reassign an existing booking to a different customer record.
+- Server (PATCH /reservations/:id) re-validates capacity against
+  the destination slot when date / time / party changes, excluding
+  the booking's own row so an in-place edit doesn't trip against
+  itself. CONFIRMED bookings whose slot moves are reset to PENDING
+  so the admin re-checks tables (orange notice in the dialog
+  explains this).
+- Terminal-status bookings (ARRIVED / COMPLETED / NO_SHOW /
+  CANCELLED) remain read-only — server rejects PATCH with a clear
+  error pointing to cancel + recreate.
+
+No native / IPC / printing changes.
+
 ## 2.0.20 — Reservation create dialog: time-slot dropdown now populates (2026-05-15)
 
 Renderer-only follow-up fix to 2.0.19. The "New Reservation" dialog

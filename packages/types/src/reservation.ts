@@ -39,6 +39,18 @@ export interface CreateReservationDto {
   agreedTerms: boolean;
 }
 
+/** Staff edit of an existing reservation. Status / table assignment
+ *  are managed by their own dedicated endpoints (/confirm, /cancel,
+ *  …) — this DTO is for changing the customer-facing fields. */
+export interface UpdateReservationDto {
+  customerName?: string;
+  customerPhone?: string;
+  date?: string;
+  timeSlot?: string;
+  partySize?: number;
+  notes?: string;
+}
+
 export interface ConfirmReservationDto {
   tableId?: string;
   tableIds?: string[];  // multiple table IDs

@@ -77,9 +77,11 @@ export default function ReservationsPage() {
   const [cancelling, setCancelling] = useState<Reservation | null>(null);
   const [cancelReason, setCancelReason] = useState('');
 
-  // Create-on-behalf modal — staff books a reservation for a walk-in
-  // or phone-in customer. Lands as PENDING; staff confirms via the
-  // existing Confirm button + table-assignment modal.
+  // Create-on-behalf / Edit modal — staff books a new reservation for
+  // a walk-in or phone-in customer, OR edits an existing one. When
+  // `editing` is set the dialog goes into edit mode and submits via
+  // PATCH instead of POST. Same form, two modes.
+  const [editingRes, setEditingRes] = useState<Reservation | null>(null);
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState<{
     customerId: string | null;
@@ -215,20 +217,31 @@ export default function ReservationsPage() {
   });
 
   const createMut = useMutation({
-    mutationFn: () =>
-      api.post('/reservations', {
-        customerId: createForm.customerId ?? undefined,
+    mutationFn: () => {
+      const payload = {
         customerName: createForm.customerName.trim(),
         customerPhone: createForm.customerPhone.trim(),
         date: createForm.date,
         timeSlot: createForm.timeSlot,
         partySize: createForm.partySize,
         notes: createForm.notes.trim() || undefined,
+      };
+      if (editingRes) {
+        // PATCH only sends the fields that can change. customerId
+        // is fixed at creation time; agreedTerms is a create-only
+        // contract field.
+        return api.patch(`/reservations/${editingRes.id}`, payload);
+      }
+      return api.post('/reservations', {
+        ...payload,
+        customerId: createForm.customerId ?? undefined,
         agreedTerms: true,
-      }),
+      });
+    },
     onSuccess: () => {
       invalidate();
       setCreating(false);
+      setEditingRes(null);
       setCreateError(null);
       setCreateForm({
         customerId: null,
@@ -250,6 +263,22 @@ export default function ReservationsPage() {
     setConfirmTimeSlot('');
     setConfirmNotes(r.notes ?? '');
     setConfirming(r);
+  };
+
+  const openEdit = (r: Reservation) => {
+    setCreateForm({
+      customerId: r.customerId ?? null,
+      customerName: r.customerName,
+      customerPhone: r.customerPhone,
+      date: typeof r.date === 'string' ? r.date.slice(0, 10) : new Date(r.date).toISOString().slice(0, 10),
+      timeSlot: r.timeSlot,
+      partySize: r.partySize,
+      notes: r.notes ?? '',
+    });
+    setCustomerSearch('');
+    setCreateError(null);
+    setEditingRes(r);
+    setCreating(true);
   };
 
   const openReject = (r: Reservation) => {
@@ -402,6 +431,12 @@ export default function ReservationsPage() {
                               Confirm
                             </button>
                             <button
+                              onClick={() => openEdit(r)}
+                              className="px-2 py-0.5 text-[10px] uppercase tracking-wider bg-[#2A2A2A] text-[#999] hover:text-white transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
                               onClick={() => openReject(r)}
                               className="px-2 py-0.5 text-[10px] uppercase tracking-wider bg-[#3a1a1a] text-[#D62B2B] hover:bg-[#4a2020] transition-colors"
                             >
@@ -416,6 +451,12 @@ export default function ReservationsPage() {
                               className="px-2 py-0.5 text-[10px] uppercase tracking-wider bg-[#1a3a1a] text-[#4CAF50] hover:bg-[#255025] transition-colors"
                             >
                               Arrived
+                            </button>
+                            <button
+                              onClick={() => openEdit(r)}
+                              className="px-2 py-0.5 text-[10px] uppercase tracking-wider bg-[#2A2A2A] text-[#999] hover:text-white transition-colors"
+                            >
+                              Edit
                             </button>
                             <button
                               onClick={() => noShowMut.mutate(r.id)}
@@ -607,14 +648,23 @@ export default function ReservationsPage() {
         </div>
       )}
 
-      {/* Create-on-behalf modal — phone-in / walk-in bookings made by staff */}
+      {/* Create-on-behalf / Edit modal — staff books or amends a
+          reservation. When editingRes is set the dialog submits via
+          PATCH; otherwise POST. Same form, two modes. */}
       {creating && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => !createMut.isPending && setCreating(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => { if (!createMut.isPending) { setCreating(false); setEditingRes(null); } }}>
           <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md p-6 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-display text-xl tracking-widest text-white mb-4">NEW RESERVATION</h3>
+            <h3 className="font-display text-xl tracking-widest text-white mb-4">{editingRes ? 'EDIT RESERVATION' : 'NEW RESERVATION'}</h3>
+            {editingRes && editingRes.status === 'CONFIRMED' && (
+              <p className="text-[10px] font-body text-[#FFA726] mb-3">
+                Changing date or time will reset this booking to PENDING — reconfirm afterwards to keep / change the table.
+              </p>
+            )}
 
-            {/* Existing-customer picker. Optional — leave blank for a
-                walk-in / first-time diner, name + phone is enough. */}
+            {/* Existing-customer picker. Hidden in edit mode — admin
+                shouldn't reassign a booking to a different customer. */}
+            {!editingRes && (
+              <>
             <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1">Existing customer (optional)</label>
             <input
               type="text"
@@ -643,6 +693,8 @@ export default function ReservationsPage() {
             )}
             {createForm.customerId && (
               <p className="text-[10px] font-body text-[#4CAF50] mb-2">Linked to existing customer.</p>
+            )}
+              </>
             )}
 
             <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1 mt-2">Name *</label>
@@ -711,7 +763,7 @@ export default function ReservationsPage() {
 
             <div className="flex justify-end gap-2">
               <button
-                onClick={() => { setCreating(false); setCreateError(null); }}
+                onClick={() => { setCreating(false); setEditingRes(null); setCreateError(null); }}
                 disabled={createMut.isPending}
                 className="px-4 py-1.5 text-xs font-body uppercase tracking-wider bg-[#2A2A2A] text-[#999] hover:text-white transition-colors"
               >
@@ -729,7 +781,7 @@ export default function ReservationsPage() {
                 }
                 className="px-4 py-1.5 text-xs font-body uppercase tracking-wider bg-[#D62B2B] text-white hover:bg-[#B71C1C] transition-colors disabled:opacity-50"
               >
-                {createMut.isPending ? 'Creating…' : 'Create Reservation'}
+                {createMut.isPending ? (editingRes ? 'Saving…' : 'Creating…') : (editingRes ? 'Save Changes' : 'Create Reservation')}
               </button>
             </div>
           </div>

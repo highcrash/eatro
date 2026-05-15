@@ -3,7 +3,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { JwtPayload, CreateReservationDto, ConfirmReservationDto, ReservationSettings } from '@restora/types';
+import type { JwtPayload, CreateReservationDto, ConfirmReservationDto, UpdateReservationDto, ReservationSettings } from '@restora/types';
 import { ReservationService } from './reservation.service';
 
 // ─── Public (no auth — website booking) ──────────────────────────────────────
@@ -91,6 +91,20 @@ export class ReservationController {
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.svc.findOne(id, user.branchId);
+  }
+
+  /**
+   * Edit customer-facing fields on an existing reservation (date,
+   * timeSlot, partySize, name, phone, notes). Status / table
+   * assignment use dedicated endpoints (/confirm, /cancel, etc.).
+   * Service rejects edits on terminal-state bookings (ARRIVED /
+   * COMPLETED / NO_SHOW / CANCELLED) and re-validates slot capacity
+   * when the destination changes.
+   */
+  @Patch(':id')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
+  update(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: UpdateReservationDto) {
+    return this.svc.update(id, user.branchId, dto);
   }
 
   @Patch(':id/confirm')
