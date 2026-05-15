@@ -60,11 +60,17 @@ const STATUS_BADGE: Record<ReservationStatus, string> = {
   CANCELLED: 'bg-gray-500/20 text-gray-500 line-through',
 };
 
-function minutesLate(timeSlot: string): number {
+function minutesLate(date: string, timeSlot: string): number {
+  // Combine the reservation's date with its time slot to get the
+  // actual slot moment. Without the date the helper compared against
+  // today's `timeSlot` and reported a future booking as "N min late"
+  // whenever its hh:mm had already passed *today* — confusing for a
+  // CONFIRMED card sitting on a future date. Date comes in as an ISO
+  // string from the API (full datetime) OR a yyyy-MM-dd date string,
+  // so slice the first 10 chars to be defensive about both.
   const now = new Date();
-  const [h, m] = timeSlot.split(':').map(Number);
-  const slot = new Date();
-  slot.setHours(h, m, 0, 0);
+  const dateStr = date.length >= 10 ? date.slice(0, 10) : date;
+  const slot = new Date(`${dateStr}T${timeSlot}:00`);
   const diff = Math.floor((now.getTime() - slot.getTime()) / 60_000);
   return diff > 0 ? diff : 0;
 }
@@ -156,7 +162,7 @@ function ReservationCard({
   r: Reservation;
   onAction: (action: string, id: string) => void;
 }) {
-  const late = r.status === 'CONFIRMED' ? minutesLate(r.timeSlot) : 0;
+  const late = r.status === 'CONFIRMED' ? minutesLate(r.date, r.timeSlot) : 0;
   const borderCls = r.status === 'CONFIRMED' && late > 0 ? lateClass(late) : 'border border-theme-border';
 
   return (

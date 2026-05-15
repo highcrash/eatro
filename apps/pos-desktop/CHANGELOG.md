@@ -3,6 +3,17 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.87 — Bookings: future reservations no longer show "N min late" (2026-05-15)
+
+Renderer-only fix. The minutesLate helper on PosReservationsPage
+compared the time slot against today's hh:mm only, ignoring the
+reservation's date — so a confirmed 13:00 booking three days from
+now reported "410 min late" the moment current clock time passed
+13:00 today. Combined date + timeSlot into a proper Date for the
+comparison, mirroring the admin page's existing logic.
+
+No native / IPC / printing changes.
+
 ## 1.0.86 — Edit existing reservations (date / time / party / notes) (2026-05-15)
 
 Renderer-only rebuild. The desktop bundles apps/pos/src/** directly,
