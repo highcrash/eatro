@@ -41,6 +41,21 @@ export class ReservationController {
     return this.svc.findAll(user.branchId, date, status);
   }
 
+  /**
+   * Staff-created reservation. Reuses the public booking path so
+   * capacity validation, slot-by-slot constraints, and the customer
+   * SMS all fire identically — the only difference is that the
+   * staff has already collected the customer's consent verbally, so
+   * `agreedTerms` is force-set to true server-side. Lands as
+   * PENDING; staff then uses the existing /confirm flow to assign
+   * a table.
+   */
+  @Post()
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
+  create(@CurrentUser() user: JwtPayload, @Body() dto: CreateReservationDto) {
+    return this.svc.create(user.branchId, { ...dto, agreedTerms: true });
+  }
+
   @Get('today')
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   findToday(@CurrentUser() user: JwtPayload) {

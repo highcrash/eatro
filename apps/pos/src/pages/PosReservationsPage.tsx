@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, Users, Phone, X, Clock, Check, XCircle, UserCheck, Ban } from 'lucide-react';
+import { RefreshCw, Users, Phone, X, Clock, Check, XCircle, UserCheck, Ban, Plus } from 'lucide-react';
 
 import { api } from '../lib/api';
 
@@ -30,6 +30,19 @@ interface Table {
   tableNumber: number;
   capacity: number;
   status: string;
+}
+
+interface ReservationSlot {
+  time: string;
+  availableBookings: number;
+  availablePersons: number;
+  isFull: boolean;
+}
+
+interface CustomerSearchResult {
+  id: string;
+  name: string;
+  phone: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -257,6 +270,7 @@ export default function PosReservationsPage() {
   const [tab, setTab] = useState<Tab>('upcoming');
   const [date, setDate] = useState(toDateStr(new Date()));
   const [confirmTarget, setConfirmTarget] = useState<Reservation | null>(null);
+  const [creating, setCreating] = useState(false);
 
   /* ---- Queries ---- */
   const {
@@ -376,12 +390,20 @@ export default function PosReservationsPage() {
             <button onClick={() => setDate(toDateStr(new Date()))} className="text-xs text-theme-accent hover:opacity-80">Today</button>
           )}
         </div>
-        <button
-          onClick={() => refetch()}
-          className="flex items-center gap-1.5 text-sm text-theme-text-muted hover:text-theme-text transition-colors"
-        >
-          <RefreshCw size={16} /> Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setCreating(true)}
+            className="flex items-center gap-1.5 text-sm bg-theme-accent text-white px-3 py-1.5 rounded-theme hover:bg-theme-accent-hover transition-colors font-semibold"
+          >
+            <Plus size={16} /> New
+          </button>
+          <button
+            onClick={() => refetch()}
+            className="flex items-center gap-1.5 text-sm text-theme-text-muted hover:text-theme-text transition-colors"
+          >
+            <RefreshCw size={16} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Tab bar */}
@@ -431,6 +453,189 @@ export default function PosReservationsPage() {
           onConfirm={(tableIds) => confirmMut.mutate({ id: confirmTarget.id, tableIds })}
         />
       )}
+
+      {/* Create-on-behalf modal */}
+      {creating && (
+        <CreateReservationModal
+          defaultDate={date}
+          onClose={() => setCreating(false)}
+          onCreated={() => { setCreating(false); invalidate(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Create-on-behalf Modal                                             */
+/* ------------------------------------------------------------------ */
+
+function CreateReservationModal({
+  defaultDate,
+  onClose,
+  onCreated,
+}: {
+  defaultDate: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [bookDate, setBookDate] = useState(defaultDate);
+  const [partySize, setPartySize] = useState(2);
+  const [timeSlot, setTimeSlot] = useState('');
+  const [notes, setNotes] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+
+  // Same customer-search endpoint the POS customer picker uses.
+  const { data: results = [] } = useQuery<CustomerSearchResult[]>({
+    queryKey: ['pos-reservation-customer-search', customerSearch],
+    queryFn: () => api.get(`/customers/search?q=${encodeURIComponent(customerSearch)}`),
+    enabled: customerSearch.trim().length >= 2,
+  });
+
+  // Slot capacity hints — disables full slots in the dropdown.
+  const { data: slots = [] } = useQuery<ReservationSlot[]>({
+    queryKey: ['pos-reservation-slots', bookDate],
+    queryFn: () => api.get(`/reservations/public/slots?date=${bookDate}`),
+    enabled: !!bookDate,
+  });
+
+  const createMut = useMutation({
+    mutationFn: () =>
+      api.post('/reservations', {
+        customerId: customerId ?? undefined,
+        customerName: name.trim(),
+        customerPhone: phone.trim(),
+        date: bookDate,
+        timeSlot,
+        partySize,
+        notes: notes.trim() || undefined,
+        agreedTerms: true,
+      }),
+    onSuccess: onCreated,
+    onError: (e: Error) => setErr(e.message),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !createMut.isPending && onClose()}>
+      <div className="bg-theme-surface rounded-theme p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-theme-text">New Reservation</h2>
+          <button onClick={onClose} className="text-theme-text-muted hover:text-theme-text">
+            <X size={20} />
+          </button>
+        </div>
+
+        <label className="block text-xs text-theme-text-muted mb-1">Existing customer (optional)</label>
+        <input
+          type="text"
+          value={customerSearch}
+          onChange={(e) => { setCustomerSearch(e.target.value); setCustomerId(null); }}
+          placeholder="Search by name or phone…"
+          className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent mb-1"
+        />
+        {customerSearch.trim().length >= 2 && results.length > 0 && (
+          <div className="bg-theme-bg border border-theme-border rounded-theme mb-3 max-h-40 overflow-auto">
+            {results.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  setCustomerId(c.id);
+                  setName(c.name);
+                  setPhone(c.phone);
+                  setCustomerSearch('');
+                }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-theme-surface flex justify-between border-b border-theme-border last:border-0"
+              >
+                <span className="text-theme-text">{c.name}</span>
+                <span className="text-theme-text-muted font-mono text-xs">{c.phone}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {customerId && (
+          <p className="text-xs text-green-500 mb-2">Linked to existing customer.</p>
+        )}
+
+        <label className="block text-xs text-theme-text-muted mb-1 mt-2">Name *</label>
+        <input
+          type="text" value={name} onChange={(e) => setName(e.target.value)}
+          className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent mb-3"
+        />
+
+        <label className="block text-xs text-theme-text-muted mb-1">Phone *</label>
+        <input
+          type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
+          className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent mb-3"
+        />
+
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="block text-xs text-theme-text-muted mb-1">Date *</label>
+            <input
+              type="date" value={bookDate}
+              onChange={(e) => { setBookDate(e.target.value); setTimeSlot(''); }}
+              className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-theme-text-muted mb-1">Party size *</label>
+            <input
+              type="number" min={1} value={partySize}
+              onChange={(e) => setPartySize(parseInt(e.target.value) || 1)}
+              className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent"
+            />
+          </div>
+        </div>
+
+        <label className="block text-xs text-theme-text-muted mb-1">Time slot *</label>
+        <select
+          value={timeSlot}
+          onChange={(e) => setTimeSlot(e.target.value)}
+          className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent mb-3"
+        >
+          <option value="">— Pick a time —</option>
+          {slots.map((s) => (
+            <option key={s.time} value={s.time} disabled={s.isFull}>
+              {s.time} {s.isFull ? '(full)' : `· ${s.availablePersons} seats free`}
+            </option>
+          ))}
+        </select>
+
+        <label className="block text-xs text-theme-text-muted mb-1">Notes (optional)</label>
+        <textarea
+          value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+          placeholder="Special requests, seating preferences…"
+          className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent mb-4 resize-none"
+        />
+
+        {err && <p className="text-red-500 text-xs mb-3">{err}</p>}
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose} disabled={createMut.isPending}
+            className="flex-1 py-3 rounded-theme border border-theme-border text-sm font-semibold text-theme-text-muted hover:bg-theme-bg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => createMut.mutate()}
+            disabled={
+              createMut.isPending
+              || !name.trim() || !phone.trim()
+              || !bookDate || !timeSlot
+              || partySize < 1
+            }
+            className="flex-1 py-3 rounded-theme bg-theme-accent text-white text-sm font-semibold hover:bg-theme-accent-hover transition-colors disabled:opacity-50"
+          >
+            {createMut.isPending ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

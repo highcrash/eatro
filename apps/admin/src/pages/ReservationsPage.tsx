@@ -77,6 +77,30 @@ export default function ReservationsPage() {
   const [cancelling, setCancelling] = useState<Reservation | null>(null);
   const [cancelReason, setCancelReason] = useState('');
 
+  // Create-on-behalf modal — staff books a reservation for a walk-in
+  // or phone-in customer. Lands as PENDING; staff confirms via the
+  // existing Confirm button + table-assignment modal.
+  const [creating, setCreating] = useState(false);
+  const [createForm, setCreateForm] = useState<{
+    customerId: string | null;
+    customerName: string;
+    customerPhone: string;
+    date: string;
+    timeSlot: string;
+    partySize: number;
+    notes: string;
+  }>({
+    customerId: null,
+    customerName: '',
+    customerPhone: '',
+    date: toDateStr(new Date()),
+    timeSlot: '',
+    partySize: 2,
+    notes: '',
+  });
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [customerSearch, setCustomerSearch] = useState('');
+
   // 30-second tick for "late" countdown
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
@@ -173,6 +197,52 @@ export default function ReservationsPage() {
     onSuccess: () => { invalidate(); setCancelling(null); },
   });
 
+  // Customer search for the create-on-behalf flow. Same endpoint the
+  // POS customer picker uses — keeps phone normalisation consistent.
+  const { data: customerResults = [] } = useQuery<{ id: string; name: string; phone: string }[]>({
+    queryKey: ['reservation-customer-search', customerSearch],
+    queryFn: () => api.get(`/customers/search?q=${encodeURIComponent(customerSearch)}`),
+    enabled: creating && customerSearch.trim().length >= 2,
+  });
+
+  // Slot capacity hints for the create dialog. Skipped until both
+  // creating AND date are set so we don't fire the query for nothing.
+  const { data: createSlots = [] } = useQuery<ReservationSlot[]>({
+    queryKey: ['reservation-create-slots', createForm.date],
+    queryFn: () => api.get(`/reservations/public/slots?date=${createForm.date}`),
+    enabled: creating && !!createForm.date,
+  });
+
+  const createMut = useMutation({
+    mutationFn: () =>
+      api.post('/reservations', {
+        customerId: createForm.customerId ?? undefined,
+        customerName: createForm.customerName.trim(),
+        customerPhone: createForm.customerPhone.trim(),
+        date: createForm.date,
+        timeSlot: createForm.timeSlot,
+        partySize: createForm.partySize,
+        notes: createForm.notes.trim() || undefined,
+        agreedTerms: true,
+      }),
+    onSuccess: () => {
+      invalidate();
+      setCreating(false);
+      setCreateError(null);
+      setCreateForm({
+        customerId: null,
+        customerName: '',
+        customerPhone: '',
+        date: toDateStr(new Date()),
+        timeSlot: '',
+        partySize: 2,
+        notes: '',
+      });
+      setCustomerSearch('');
+    },
+    onError: (e: Error) => setCreateError(e.message),
+  });
+
   // ── Helpers ──────────────────────────────────────────────────────────
   const openConfirm = (r: Reservation) => {
     setConfirmTableIds(r.tableIds ? JSON.parse(r.tableIds) : (r.tableId ? [r.tableId] : []));
@@ -210,6 +280,16 @@ export default function ReservationsPage() {
           {!date && (
             <button onClick={() => setDate(toDateStr(new Date()))} className="text-[#FFA726] hover:text-white font-body text-xs">Today</button>
           )}
+          <button
+            onClick={() => {
+              setCreating(true);
+              setCreateError(null);
+              setCreateForm((f) => ({ ...f, date: date || toDateStr(new Date()) }));
+            }}
+            className="bg-[#D62B2B] hover:bg-[#B71C1C] text-white text-xs font-body uppercase tracking-wider px-4 py-1.5 transition-colors ml-2"
+          >
+            + New Reservation
+          </button>
         </div>
       </div>
 
@@ -520,6 +600,135 @@ export default function ReservationsPage() {
                 className="px-4 py-1.5 text-xs font-body uppercase tracking-wider bg-[#D62B2B] text-white hover:bg-[#B71C1C] transition-colors disabled:opacity-50"
               >
                 {cancelMut.isPending ? 'Cancelling...' : 'Cancel Booking'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create-on-behalf modal — phone-in / walk-in bookings made by staff */}
+      {creating && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => !createMut.isPending && setCreating(false)}>
+          <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md p-6 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-display text-xl tracking-widest text-white mb-4">NEW RESERVATION</h3>
+
+            {/* Existing-customer picker. Optional — leave blank for a
+                walk-in / first-time diner, name + phone is enough. */}
+            <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1">Existing customer (optional)</label>
+            <input
+              type="text"
+              value={customerSearch}
+              onChange={(e) => { setCustomerSearch(e.target.value); setCreateForm((f) => ({ ...f, customerId: null })); }}
+              placeholder="Search by name or phone…"
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white text-sm font-body px-3 py-2 mb-1 focus:outline-none focus:border-[#D62B2B]"
+            />
+            {customerSearch.trim().length >= 2 && customerResults.length > 0 && (
+              <div className="bg-[#0D0D0D] border border-[#2A2A2A] mb-3 max-h-40 overflow-auto">
+                {customerResults.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setCreateForm((f) => ({ ...f, customerId: c.id, customerName: c.name, customerPhone: c.phone }));
+                      setCustomerSearch('');
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs font-body text-white hover:bg-[#1F1F1F] border-b border-[#2A2A2A] last:border-0 flex justify-between"
+                  >
+                    <span>{c.name}</span>
+                    <span className="text-[#999] font-mono">{c.phone}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {createForm.customerId && (
+              <p className="text-[10px] font-body text-[#4CAF50] mb-2">Linked to existing customer.</p>
+            )}
+
+            <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1 mt-2">Name *</label>
+            <input
+              type="text"
+              value={createForm.customerName}
+              onChange={(e) => setCreateForm((f) => ({ ...f, customerName: e.target.value }))}
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white text-sm font-body px-3 py-2 mb-3 focus:outline-none focus:border-[#D62B2B]"
+            />
+
+            <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1">Phone *</label>
+            <input
+              type="tel"
+              value={createForm.customerPhone}
+              onChange={(e) => setCreateForm((f) => ({ ...f, customerPhone: e.target.value }))}
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white text-sm font-body px-3 py-2 mb-3 focus:outline-none focus:border-[#D62B2B]"
+            />
+
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1">Date *</label>
+                <input
+                  type="date"
+                  value={createForm.date}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, date: e.target.value, timeSlot: '' }))}
+                  className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white text-sm font-body px-3 py-2 focus:outline-none focus:border-[#D62B2B]"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1">Party size *</label>
+                <input
+                  type="number" min={1}
+                  value={createForm.partySize}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, partySize: parseInt(e.target.value) || 1 }))}
+                  className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white text-sm font-body px-3 py-2 focus:outline-none focus:border-[#D62B2B]"
+                />
+              </div>
+            </div>
+
+            <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1">Time slot *</label>
+            <select
+              value={createForm.timeSlot}
+              onChange={(e) => setCreateForm((f) => ({ ...f, timeSlot: e.target.value }))}
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white text-sm font-body px-3 py-2 mb-3 focus:outline-none focus:border-[#D62B2B]"
+            >
+              <option value="">— Pick a time —</option>
+              {createSlots.map((s) => (
+                <option key={s.time} value={s.time} disabled={s.isFull}>
+                  {s.time} {s.isFull ? '(full)' : `· ${s.availablePersons} seats free`}
+                </option>
+              ))}
+            </select>
+
+            <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1">Notes (optional)</label>
+            <textarea
+              value={createForm.notes}
+              onChange={(e) => setCreateForm((f) => ({ ...f, notes: e.target.value }))}
+              rows={2}
+              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white text-sm font-body px-3 py-2 mb-4 resize-none focus:outline-none focus:border-[#D62B2B]"
+              placeholder="Special requests, seating preferences…"
+            />
+
+            {createError && (
+              <p className="text-[#D62B2B] text-xs font-body mb-3">{createError}</p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setCreating(false); setCreateError(null); }}
+                disabled={createMut.isPending}
+                className="px-4 py-1.5 text-xs font-body uppercase tracking-wider bg-[#2A2A2A] text-[#999] hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => createMut.mutate()}
+                disabled={
+                  createMut.isPending
+                  || !createForm.customerName.trim()
+                  || !createForm.customerPhone.trim()
+                  || !createForm.date
+                  || !createForm.timeSlot
+                  || createForm.partySize < 1
+                }
+                className="px-4 py-1.5 text-xs font-body uppercase tracking-wider bg-[#D62B2B] text-white hover:bg-[#B71C1C] transition-colors disabled:opacity-50"
+              >
+                {createMut.isPending ? 'Creating…' : 'Create Reservation'}
               </button>
             </div>
           </div>
