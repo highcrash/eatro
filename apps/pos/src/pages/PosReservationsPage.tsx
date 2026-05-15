@@ -496,10 +496,12 @@ function CreateReservationModal({
     enabled: customerSearch.trim().length >= 2,
   });
 
-  // Slot capacity hints — disables full slots in the dropdown.
+  // Slot capacity hints — uses the authenticated /reservations/slots
+  // endpoint so branchId is resolved from the JWT. Disables full slots
+  // in the dropdown.
   const { data: slots = [] } = useQuery<ReservationSlot[]>({
     queryKey: ['pos-reservation-slots', bookDate],
-    queryFn: () => api.get(`/reservations/public/slots?date=${bookDate}`),
+    queryFn: () => api.get(`/reservations/slots?date=${bookDate}`),
     enabled: !!bookDate,
   });
 

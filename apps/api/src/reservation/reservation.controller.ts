@@ -62,6 +62,19 @@ export class ReservationController {
     return this.svc.findToday(user.branchId);
   }
 
+  /**
+   * Authenticated slot availability for the staff-side create-on-
+   * behalf modal. Same data as /reservations/public/slots but resolves
+   * branchId from the JWT so the admin / POS dialog doesn't have to
+   * thread it through manually (and can't accidentally peek at another
+   * branch's capacity).
+   */
+  @Get('slots')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
+  getStaffSlots(@CurrentUser() user: JwtPayload, @Query('date') date: string) {
+    return this.svc.getAvailableSlots(user.branchId, date);
+  }
+
   @Get('settings')
   @Roles('OWNER', 'MANAGER', 'ADVISOR')
   getSettings(@CurrentUser() user: JwtPayload) {

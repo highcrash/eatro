@@ -205,11 +205,12 @@ export default function ReservationsPage() {
     enabled: creating && customerSearch.trim().length >= 2,
   });
 
-  // Slot capacity hints for the create dialog. Skipped until both
-  // creating AND date are set so we don't fire the query for nothing.
+  // Slot capacity hints for the create dialog. Uses the authenticated
+  // /reservations/slots endpoint which resolves branchId from the JWT
+  // — admin doesn't have to thread its current branch into the call.
   const { data: createSlots = [] } = useQuery<ReservationSlot[]>({
     queryKey: ['reservation-create-slots', createForm.date],
-    queryFn: () => api.get(`/reservations/public/slots?date=${createForm.date}`),
+    queryFn: () => api.get(`/reservations/slots?date=${createForm.date}`),
     enabled: creating && !!createForm.date,
   });
 
