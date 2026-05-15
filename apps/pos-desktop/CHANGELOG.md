@@ -3,6 +3,20 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.20 — Reservation create dialog: time-slot dropdown now populates (2026-05-15)
+
+Renderer-only follow-up fix to 2.0.19. The "New Reservation" dialog
+shipped with an empty time-slot dropdown because the slots query was
+hitting the PUBLIC /reservations/public/slots endpoint without the
+required branchId query param (the public endpoint takes branchId as
+a query string; the desktop session only carries it in the JWT).
+
+Switched to a new authenticated /reservations/slots endpoint that
+resolves branchId from user.branchId on the server. Same shape, no
+client-side branchId plumbing needed.
+
+No native / IPC / printing changes.
+
 ## 2.0.19 — Staff can create reservations on behalf of a customer (2026-05-15)
 
 Renderer-only rebuild. The desktop bundles apps/pos/src/** directly,
