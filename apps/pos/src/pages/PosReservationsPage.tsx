@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, Users, Phone, X, Clock, Check, XCircle, UserCheck, Ban, Plus } from 'lucide-react';
+import { RefreshCw, Users, Phone, X, Clock, Check, XCircle, UserCheck, Ban, Plus, Pencil } from 'lucide-react';
 
 import { api } from '../lib/api';
 
@@ -217,6 +217,13 @@ function ReservationCard({
               <Check size={16} /> Confirm
             </button>
             <button
+              onClick={() => onAction('edit', r.id)}
+              className="flex items-center justify-center gap-1 py-3 px-3 rounded-theme border border-theme-border text-theme-text-muted text-sm font-semibold hover:bg-theme-bg transition-colors"
+              title="Edit reservation"
+            >
+              <Pencil size={14} />
+            </button>
+            <button
               onClick={() => onAction('reject', r.id)}
               className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-theme bg-red-500/10 text-red-500 text-sm font-semibold hover:bg-red-500/20 transition-colors"
             >
@@ -231,6 +238,13 @@ function ReservationCard({
               className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-theme bg-green-500/10 text-green-500 text-sm font-semibold hover:bg-green-500/20 transition-colors"
             >
               <UserCheck size={16} /> Arrived
+            </button>
+            <button
+              onClick={() => onAction('edit', r.id)}
+              className="flex items-center justify-center gap-1 py-3 px-3 rounded-theme border border-theme-border text-theme-text-muted text-sm font-semibold hover:bg-theme-bg transition-colors"
+              title="Edit reservation"
+            >
+              <Pencil size={14} />
             </button>
             <button
               onClick={() => onAction('no-show', r.id)}
@@ -271,6 +285,7 @@ export default function PosReservationsPage() {
   const [date, setDate] = useState(toDateStr(new Date()));
   const [confirmTarget, setConfirmTarget] = useState<Reservation | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editingRes, setEditingRes] = useState<Reservation | null>(null);
 
   /* ---- Queries ---- */
   const {
@@ -343,6 +358,9 @@ export default function PosReservationsPage() {
     switch (action) {
       case 'confirm':
         setConfirmTarget(r);
+        break;
+      case 'edit':
+        setEditingRes(r);
         break;
       case 'reject':
         rejectMut.mutate(id);
@@ -458,8 +476,19 @@ export default function PosReservationsPage() {
       {creating && (
         <CreateReservationModal
           defaultDate={date}
+          editing={null}
           onClose={() => setCreating(false)}
           onCreated={() => { setCreating(false); invalidate(); }}
+        />
+      )}
+
+      {/* Edit modal — same form, PATCH mode. */}
+      {editingRes && (
+        <CreateReservationModal
+          defaultDate={date}
+          editing={editingRes}
+          onClose={() => setEditingRes(null)}
+          onCreated={() => { setEditingRes(null); invalidate(); }}
         />
       )}
     </div>
@@ -472,28 +501,36 @@ export default function PosReservationsPage() {
 
 function CreateReservationModal({
   defaultDate,
+  editing,
   onClose,
   onCreated,
 }: {
   defaultDate: string;
+  editing: Reservation | null;
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const isEdit = !!editing;
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerId, setCustomerId] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [bookDate, setBookDate] = useState(defaultDate);
-  const [partySize, setPartySize] = useState(2);
-  const [timeSlot, setTimeSlot] = useState('');
-  const [notes, setNotes] = useState('');
+  const [name, setName] = useState(editing?.customerName ?? '');
+  const [phone, setPhone] = useState(editing?.customerPhone ?? '');
+  const [bookDate, setBookDate] = useState(
+    editing
+      ? (typeof editing.date === 'string' ? editing.date.slice(0, 10) : new Date(editing.date).toISOString().slice(0, 10))
+      : defaultDate,
+  );
+  const [partySize, setPartySize] = useState(editing?.partySize ?? 2);
+  const [timeSlot, setTimeSlot] = useState(editing?.timeSlot ?? '');
+  const [notes, setNotes] = useState(editing?.notes ?? '');
   const [err, setErr] = useState<string | null>(null);
 
-  // Same customer-search endpoint the POS customer picker uses.
+  // Customer search disabled in edit mode — admin shouldn't reassign
+  // an existing booking to a different customer record.
   const { data: results = [] } = useQuery<CustomerSearchResult[]>({
     queryKey: ['pos-reservation-customer-search', customerSearch],
     queryFn: () => api.get(`/customers/search?q=${encodeURIComponent(customerSearch)}`),
-    enabled: customerSearch.trim().length >= 2,
+    enabled: !isEdit && customerSearch.trim().length >= 2,
   });
 
   // Slot capacity hints — uses the authenticated /reservations/slots
@@ -506,17 +543,24 @@ function CreateReservationModal({
   });
 
   const createMut = useMutation({
-    mutationFn: () =>
-      api.post('/reservations', {
-        customerId: customerId ?? undefined,
+    mutationFn: () => {
+      const payload = {
         customerName: name.trim(),
         customerPhone: phone.trim(),
         date: bookDate,
         timeSlot,
         partySize,
         notes: notes.trim() || undefined,
+      };
+      if (isEdit && editing) {
+        return api.patch(`/reservations/${editing.id}`, payload);
+      }
+      return api.post('/reservations', {
+        ...payload,
+        customerId: customerId ?? undefined,
         agreedTerms: true,
-      }),
+      });
+    },
     onSuccess: onCreated,
     onError: (e: Error) => setErr(e.message),
   });
@@ -525,42 +569,52 @@ function CreateReservationModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !createMut.isPending && onClose()}>
       <div className="bg-theme-surface rounded-theme p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-theme-text">New Reservation</h2>
+          <h2 className="text-lg font-bold text-theme-text">{isEdit ? 'Edit Reservation' : 'New Reservation'}</h2>
           <button onClick={onClose} className="text-theme-text-muted hover:text-theme-text">
             <X size={20} />
           </button>
         </div>
 
-        <label className="block text-xs text-theme-text-muted mb-1">Existing customer (optional)</label>
-        <input
-          type="text"
-          value={customerSearch}
-          onChange={(e) => { setCustomerSearch(e.target.value); setCustomerId(null); }}
-          placeholder="Search by name or phone…"
-          className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent mb-1"
-        />
-        {customerSearch.trim().length >= 2 && results.length > 0 && (
-          <div className="bg-theme-bg border border-theme-border rounded-theme mb-3 max-h-40 overflow-auto">
-            {results.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => {
-                  setCustomerId(c.id);
-                  setName(c.name);
-                  setPhone(c.phone);
-                  setCustomerSearch('');
-                }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-theme-surface flex justify-between border-b border-theme-border last:border-0"
-              >
-                <span className="text-theme-text">{c.name}</span>
-                <span className="text-theme-text-muted font-mono text-xs">{c.phone}</span>
-              </button>
-            ))}
-          </div>
+        {isEdit && editing && editing.status === 'CONFIRMED' && (
+          <p className="text-xs text-orange-400 mb-3">
+            Changing date or time will reset this booking to PENDING — reconfirm afterwards to keep / change the table.
+          </p>
         )}
-        {customerId && (
-          <p className="text-xs text-green-500 mb-2">Linked to existing customer.</p>
+
+        {!isEdit && (
+          <>
+            <label className="block text-xs text-theme-text-muted mb-1">Existing customer (optional)</label>
+            <input
+              type="text"
+              value={customerSearch}
+              onChange={(e) => { setCustomerSearch(e.target.value); setCustomerId(null); }}
+              placeholder="Search by name or phone…"
+              className="w-full bg-theme-bg border border-theme-border rounded-theme px-3 py-2 text-sm text-theme-text outline-none focus:border-theme-accent mb-1"
+            />
+            {customerSearch.trim().length >= 2 && results.length > 0 && (
+              <div className="bg-theme-bg border border-theme-border rounded-theme mb-3 max-h-40 overflow-auto">
+                {results.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setCustomerId(c.id);
+                      setName(c.name);
+                      setPhone(c.phone);
+                      setCustomerSearch('');
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-theme-surface flex justify-between border-b border-theme-border last:border-0"
+                  >
+                    <span className="text-theme-text">{c.name}</span>
+                    <span className="text-theme-text-muted font-mono text-xs">{c.phone}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {customerId && (
+              <p className="text-xs text-green-500 mb-2">Linked to existing customer.</p>
+            )}
+          </>
         )}
 
         <label className="block text-xs text-theme-text-muted mb-1 mt-2">Name *</label>
@@ -634,7 +688,7 @@ function CreateReservationModal({
             }
             className="flex-1 py-3 rounded-theme bg-theme-accent text-white text-sm font-semibold hover:bg-theme-accent-hover transition-colors disabled:opacity-50"
           >
-            {createMut.isPending ? 'Creating…' : 'Create'}
+            {createMut.isPending ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save Changes' : 'Create')}
           </button>
         </div>
       </div>

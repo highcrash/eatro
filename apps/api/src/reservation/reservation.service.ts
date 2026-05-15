@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
-import type { CreateReservationDto, ConfirmReservationDto, ReservationSlot, ReservationSettings } from '@restora/types';
+import type { CreateReservationDto, ConfirmReservationDto, UpdateReservationDto, ReservationSlot, ReservationSettings } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
 import { RealtimeGateway } from '../ws-gateway/realtime.gateway';
@@ -180,6 +180,98 @@ export class ReservationService {
     const r = await this.prisma.reservation.findFirst({ where: { id, branchId }, include: RESERVATION_INCLUDE });
     if (!r) throw new NotFoundException('Reservation not found');
     return r;
+  }
+
+  /**
+   * Staff edit of an existing reservation's customer-facing fields:
+   * customerName, customerPhone, date, timeSlot, partySize, notes.
+   * Status + table assignment use their own dedicated endpoints
+   * (/confirm, /cancel, etc.) — this method intentionally leaves
+   * them alone.
+   *
+   * Only PENDING + CONFIRMED reservations are editable. Terminal
+   * statuses (ARRIVED / COMPLETED / NO_SHOW / CANCELLED) are
+   * read-only — admins should cancel + recreate if they truly need
+   * to change a past booking.
+   *
+   * When date / timeSlot / partySize change, capacity is re-checked
+   * against the destination slot (excluding THIS reservation's own
+   * row so we don't double-count). When time-or-date changes on a
+   * CONFIRMED reservation the booking is bumped back to PENDING so
+   * the admin must re-confirm + verify the table is still suitable.
+   */
+  async update(id: string, branchId: string, dto: UpdateReservationDto) {
+    const r = await this.findOne(id, branchId);
+    if (r.status !== 'PENDING' && r.status !== 'CONFIRMED') {
+      throw new BadRequestException(`Cannot edit a ${r.status} reservation. Cancel + recreate instead.`);
+    }
+    if (dto.partySize != null && dto.partySize < 1) {
+      throw new BadRequestException('Party size must be at least 1');
+    }
+
+    // Resolve target slot for capacity validation. Compare to the
+    // current row's values so we only validate when something
+    // actually changes.
+    const currentDateStr = r.date.toISOString().slice(0, 10);
+    const newDateStr = dto.date ?? currentDateStr;
+    const newTimeSlot = dto.timeSlot ?? r.timeSlot;
+    const newPartySize = dto.partySize ?? r.partySize;
+    const slotChanged = newDateStr !== currentDateStr || newTimeSlot !== r.timeSlot;
+    const sizeChanged = newPartySize !== r.partySize;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (slotChanged || sizeChanged) {
+        const settings = await this.getSettings(branchId);
+        const bookDate = new Date(newDateStr + 'T00:00:00.000Z');
+        const bookDateNext = new Date(bookDate);
+        bookDateNext.setUTCDate(bookDateNext.getUTCDate() + 1);
+        const existing = await tx.reservation.findMany({
+          where: {
+            branchId,
+            date: { gte: bookDate, lt: bookDateNext },
+            timeSlot: newTimeSlot,
+            status: { notIn: ['CANCELLED', 'NO_SHOW'] },
+            // Exclude this reservation's own row so an in-place
+            // edit doesn't trip against itself.
+            id: { not: id },
+          },
+        });
+        if (existing.length >= settings.reservationMaxBookingsPerSlot) {
+          throw new ConflictException('Destination time slot is fully booked');
+        }
+        const totalPersons = existing.reduce((s, x) => s + x.partySize, 0);
+        if (totalPersons + newPartySize > settings.reservationMaxPersonsPerSlot) {
+          throw new ConflictException('Not enough capacity for this party size in the destination slot');
+        }
+      }
+
+      // When the slot moves on an already-CONFIRMED booking, bump
+      // back to PENDING so the admin re-checks tables — the
+      // previously assigned table may not be free at the new time.
+      const resetToPending = r.status === 'CONFIRMED' && slotChanged;
+      return tx.reservation.update({
+        where: { id },
+        data: {
+          ...(dto.customerName !== undefined ? { customerName: dto.customerName } : {}),
+          ...(dto.customerPhone !== undefined ? { customerPhone: dto.customerPhone } : {}),
+          ...(dto.date !== undefined ? { date: new Date(dto.date + 'T00:00:00.000Z') } : {}),
+          ...(dto.timeSlot !== undefined ? { timeSlot: dto.timeSlot } : {}),
+          ...(dto.partySize !== undefined ? { partySize: dto.partySize } : {}),
+          ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
+          ...(resetToPending ? {
+            status: 'PENDING' as const,
+            tableId: null,
+            tableIds: null,
+            confirmedById: null,
+            confirmedAt: null,
+          } : {}),
+        },
+        include: RESERVATION_INCLUDE,
+      });
+    });
+
+    this.ws.emitToBranch(branchId, 'reservation:updated', updated);
+    return updated;
   }
 
   async confirm(id: string, branchId: string, staffId: string, dto: ConfirmReservationDto) {
