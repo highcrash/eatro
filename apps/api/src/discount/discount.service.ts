@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SocialService } from '../social/social.service';
 
@@ -109,33 +109,71 @@ export class DiscountService {
   async createCoupon(branchId: string, dto: { code: string; name: string; type: string; value: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string; oncePerCustomer?: boolean; minOrderAmount?: number | null; freeMenuItemId?: string | null }) {
     const isFreeItem = dto.type === 'FREE_ITEM';
     const freeMenuItemId = isFreeItem ? await this.validateFreeItem(branchId, dto.freeMenuItemId) : null;
-    return this.prisma.coupon.create({
-      data: {
-        branchId,
-        code: dto.code.toUpperCase(),
-        name: dto.name,
-        type: dto.type as any,
-        // FREE_ITEM stores value 0 — the benefit lives on the
-        // freeMenuItem, not the value field.
-        value: isFreeItem ? 0 : dto.value,
-        scope: (dto.scope as any) ?? 'ALL_ITEMS',
-        targetItems: dto.targetItems ? JSON.stringify(dto.targetItems) : null,
-        maxUses: dto.maxUses ?? 0,
-        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
-        oncePerCustomer: dto.oncePerCustomer ?? false,
-        // minOrderAmount is taka-on-the-wire from the admin form;
-        // store paisa to match every other monetary column.
-        minOrderAmount: dto.minOrderAmount != null && dto.minOrderAmount > 0
-          ? Math.round(dto.minOrderAmount * 100)
-          : null,
-        freeMenuItemId,
-      },
+    const code = dto.code.toUpperCase();
+    // Friendly preflight: surface a clean 409 with the actual code
+    // instead of leaking the raw Prisma `Unique constraint failed`
+    // back to the admin form. The unique index on (branchId, code)
+    // still catches the race if two admins submit the same code
+    // simultaneously — see the try/catch below.
+    const existing = await this.prisma.coupon.findFirst({
+      where: { branchId, code },
+      select: { id: true },
     });
+    if (existing) {
+      throw new ConflictException(`Coupon code "${code}" already exists in this branch. Pick a different code or edit the existing one.`);
+    }
+    try {
+      return await this.prisma.coupon.create({
+        data: {
+          branchId,
+          code,
+          name: dto.name,
+          type: dto.type as any,
+          // FREE_ITEM stores value 0 — the benefit lives on the
+          // freeMenuItem, not the value field.
+          value: isFreeItem ? 0 : dto.value,
+          scope: (dto.scope as any) ?? 'ALL_ITEMS',
+          targetItems: dto.targetItems ? JSON.stringify(dto.targetItems) : null,
+          maxUses: dto.maxUses ?? 0,
+          expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+          oncePerCustomer: dto.oncePerCustomer ?? false,
+          // minOrderAmount is taka-on-the-wire from the admin form;
+          // store paisa to match every other monetary column.
+          minOrderAmount: dto.minOrderAmount != null && dto.minOrderAmount > 0
+            ? Math.round(dto.minOrderAmount * 100)
+            : null,
+          freeMenuItemId,
+        },
+      });
+    } catch (err) {
+      // Race-condition safety net — two admins POSTing the same code
+      // at the same time. Prisma's P2002 is the unique-constraint
+      // violation. Re-throw anything else.
+      if (err instanceof Error && 'code' in err && (err as { code?: string }).code === 'P2002') {
+        throw new ConflictException(`Coupon code "${code}" already exists in this branch.`);
+      }
+      throw err;
+    }
   }
 
   async updateCoupon(id: string, branchId: string, dto: { code?: string; name?: string; type?: string; value?: number; scope?: string; targetItems?: string[]; maxUses?: number; expiresAt?: string | null; isActive?: boolean; oncePerCustomer?: boolean; minOrderAmount?: number | null; freeMenuItemId?: string | null }) {
     const c = await this.prisma.coupon.findFirst({ where: { id, branchId } });
     if (!c) throw new NotFoundException();
+    // Rename collision check — admin tried to change the code to one
+    // that's already used by another coupon in this branch. Same
+    // friendly-409 treatment as createCoupon.
+    if (dto.code !== undefined) {
+      const newCode = dto.code.toUpperCase();
+      if (newCode !== c.code) {
+        const clash = await this.prisma.coupon.findFirst({
+          where: { branchId, code: newCode, id: { not: id } },
+          select: { id: true },
+        });
+        if (clash) {
+          throw new ConflictException(`Coupon code "${newCode}" already exists in this branch. Pick a different code.`);
+        }
+      }
+    }
     // Resolve the effective post-update type so we can decide whether
     // freeMenuItemId is required + valid.
     const effectiveType = dto.type ?? c.type;
@@ -150,27 +188,35 @@ export class DiscountService {
     } else if (dto.freeMenuItemId !== undefined) {
       freeMenuItemPatch = { freeMenuItemId: dto.freeMenuItemId };
     }
-    return this.prisma.coupon.update({
-      where: { id },
-      data: {
-        ...(dto.code !== undefined ? { code: dto.code.toUpperCase() } : {}),
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.type !== undefined ? { type: dto.type as any } : {}),
-        ...(dto.value !== undefined ? { value: effectiveType === 'FREE_ITEM' ? 0 : dto.value } : {}),
-        ...(dto.scope !== undefined ? { scope: dto.scope as any } : {}),
-        ...(dto.targetItems !== undefined ? { targetItems: JSON.stringify(dto.targetItems) } : {}),
-        ...(dto.maxUses !== undefined ? { maxUses: dto.maxUses } : {}),
-        ...(dto.expiresAt !== undefined ? { expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null } : {}),
-        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.oncePerCustomer !== undefined ? { oncePerCustomer: dto.oncePerCustomer } : {}),
-        ...(dto.minOrderAmount !== undefined ? {
-          minOrderAmount: dto.minOrderAmount != null && dto.minOrderAmount > 0
-            ? Math.round(dto.minOrderAmount * 100)
-            : null,
-        } : {}),
-        ...(freeMenuItemPatch ?? {}),
-      },
-    });
+    try {
+      return await this.prisma.coupon.update({
+        where: { id },
+        data: {
+          ...(dto.code !== undefined ? { code: dto.code.toUpperCase() } : {}),
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
+          ...(dto.type !== undefined ? { type: dto.type as any } : {}),
+          ...(dto.value !== undefined ? { value: effectiveType === 'FREE_ITEM' ? 0 : dto.value } : {}),
+          ...(dto.scope !== undefined ? { scope: dto.scope as any } : {}),
+          ...(dto.targetItems !== undefined ? { targetItems: JSON.stringify(dto.targetItems) } : {}),
+          ...(dto.maxUses !== undefined ? { maxUses: dto.maxUses } : {}),
+          ...(dto.expiresAt !== undefined ? { expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null } : {}),
+          ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+          ...(dto.oncePerCustomer !== undefined ? { oncePerCustomer: dto.oncePerCustomer } : {}),
+          ...(dto.minOrderAmount !== undefined ? {
+            minOrderAmount: dto.minOrderAmount != null && dto.minOrderAmount > 0
+              ? Math.round(dto.minOrderAmount * 100)
+              : null,
+          } : {}),
+          ...(freeMenuItemPatch ?? {}),
+        },
+      });
+    } catch (err) {
+      // Race-condition safety net for the rename-collision case.
+      if (err instanceof Error && 'code' in err && (err as { code?: string }).code === 'P2002') {
+        throw new ConflictException(`Coupon code already exists in this branch.`);
+      }
+      throw err;
+    }
   }
 
   async deleteCoupon(id: string, branchId: string) {
