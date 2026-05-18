@@ -35,6 +35,7 @@ import VoidReportPage from './pages/VoidReportPage';
 import ItemsSoldReportPage from './pages/ItemsSoldReportPage';
 import PerformanceReportPage from './pages/PerformanceReportPage';
 import SuppliesReportPage from './pages/SuppliesReportPage';
+import AggregatorPnLPage from './pages/AggregatorPnLPage';
 import MushakRegisterPage from './pages/MushakRegisterPage';
 import MushakInvoiceView from './pages/MushakInvoiceView';
 import BranchesPage from './pages/BranchesPage';
@@ -88,6 +89,7 @@ export default function AdminApp() {
         <Route path="/reports/items" element={<ItemsSoldReportPage />} />
         <Route path="/reports/performance" element={<PerformanceReportPage />} />
         <Route path="/reports/supplies" element={<SuppliesReportPage />} />
+        <Route path="/reports/aggregator-pnl" element={<AggregatorPnLPage />} />
         <Route path="/reports/mushak" element={<MushakRegisterPage />} />
         <Route path="/reports/activity-log" element={<ActivityLogPage />} />
         <Route path="/mushak/invoices/:id" element={<MushakInvoiceView />} />

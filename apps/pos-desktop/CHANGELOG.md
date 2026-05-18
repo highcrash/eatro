@@ -3,6 +3,27 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.23 — Takeaway tile shows live count + platform badges on cards (2026-05-18)
+
+Renderer-only rebuild for Lane A of the multi-aggregator delivery
+workflow. The desktop bundles apps/pos/src/** directly, so the
+Takeaway UI polish needs a fresh installer to ship.
+
+- Active-takeaway grid now sticky-scrolls above the tables section
+  with adaptive column count (1-2 cards stay big, 4+ pack tight).
+- Each card shows customer name OR notes, item count, total, and
+  age in minutes since creation.
+- Paid take-aways display a coloured platform pill (Foodpanda /
+  Foodie / Pathao / Hungrynaki / etc.) derived from the order's
+  payment method — cashier sees at a glance which aggregator the
+  order came from.
+- The Takeaway tile in the tables grid gains a live count chip
+  in its top-right corner showing the number of open take-aways.
+  Tapping the tile still creates a NEW take-away; existing ones
+  are accessed via the grid above.
+
+No native / IPC / printing changes.
+
 ## 2.0.22 — Bookings: future reservations no longer show "N min late" (2026-05-15)
 
 Renderer-only fix. The minutesLate helper on PosReservationsPage

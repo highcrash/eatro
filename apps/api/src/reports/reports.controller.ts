@@ -157,4 +157,21 @@ export class ReportsController {
   ) {
     return this.reportsService.getStockWatcher(user.branchId, ingredientId, from, to);
   }
+
+  /**
+   * Aggregator P&L — per food-delivery platform (Foodpanda / Foodie /
+   * Pathao Food / etc.) gross vs net for a date range. Surfaces
+   * commission + VAT + subscription deductions recorded against the
+   * matching creditor so the owner sees the real take-home from each
+   * platform.
+   */
+  @Get('aggregator-pnl')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  getAggregatorPnL(
+    @CurrentUser() user: JwtPayload,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.reportsService.getAggregatorPnL(user.branchId, from, to);
+  }
 }
