@@ -1439,4 +1439,174 @@ export class ReportsService {
       days,
     };
   }
+
+  /**
+   * Aggregator P&L report — per food-delivery platform breakdown of
+   * gross order revenue vs. the commission / VAT / subscription fees
+   * the platform later deducts from the settlement.
+   *
+   * Wiring relies on convention (no schema change):
+   *   - Each PaymentOption under the "FOOD_DELIVERY" PaymentMethodConfig
+   *     is treated as a platform. `option.code` is matched
+   *     case-insensitively against `OrderPayment.method` to find that
+   *     platform's gross.
+   *   - Each Creditor whose `name` matches the option's name (or code)
+   *     is treated as the settlement counterparty. `CreditorBill`
+   *     rows under that creditor in the window are summed as platform
+   *     fees. Admin can split a single Foodpanda invoice across line
+   *     items (commission, online-payment, VAT, subscription) — they
+   *     all roll up here.
+   *   - Outstanding settlement = `Account.balance` for the account
+   *     linked to the PaymentOption (the "Pending Settlement" account
+   *     pattern from Lane B).
+   *
+   * Net = gross − fees. Negative net (Foodpanda's 15 May invoice) shows
+   * up as a negative number — owners want to see that.
+   */
+  async getAggregatorPnL(branchId: string, from?: string, to?: string) {
+    const now = new Date();
+    const dateFrom = from ? new Date(from) : new Date(now.getFullYear(), now.getMonth(), 1);
+    dateFrom.setHours(0, 0, 0, 0);
+    const dateTo = to ? new Date(to) : now;
+    dateTo.setHours(23, 59, 59, 999);
+
+    // Step 1 — resolve the platforms. Anything under the "FOOD_DELIVERY"
+    // category (case-insensitive) is in scope. Falls back to any
+    // PaymentOption whose code looks aggregator-ish (FOOD_*, PATHAO*,
+    // HUNGRY*, UBER*) so a misconfigured admin who put Foodpanda under
+    // "DIGITAL" still gets surfaced.
+    const allOptions = await this.prisma.paymentOption.findMany({
+      where: { branchId, isActive: true },
+      include: { category: { select: { code: true, name: true } } },
+      orderBy: { sortOrder: 'asc' },
+    });
+    const aggregatorOptions = allOptions.filter((o) => {
+      const catCode = (o.category?.code ?? '').toUpperCase();
+      if (catCode === 'FOOD_DELIVERY' || catCode === 'DELIVERY') return true;
+      // Defensive fallback for aggregator codes filed under DIGITAL/etc.
+      return /^(FOOD|PATHAO|UBER|HUNGRY)/i.test(o.code);
+    });
+
+    if (aggregatorOptions.length === 0) {
+      return {
+        from: dateFrom.toISOString(),
+        to: dateTo.toISOString(),
+        rows: [],
+        totals: { orders: 0, grossPaisa: 0, feesPaisa: 0, netPaisa: 0, outstandingPaisa: 0 },
+      };
+    }
+
+    // Step 2 — sum gross from OrderPayment rows. Using OrderPayment
+    // (not Order.paymentMethod) handles split-payment cases cleanly:
+    // a part-cash, part-Foodpanda order would otherwise miscount.
+    const optionCodes = aggregatorOptions.map((o) => o.code.toUpperCase());
+    const payments = await this.prisma.orderPayment.findMany({
+      where: {
+        order: {
+          branchId,
+          deletedAt: null,
+          status: { in: ['PAID', 'SERVED', 'COMPLETED'] as never[] },
+          paidAt: { gte: dateFrom, lte: dateTo },
+        },
+      },
+      select: { method: true, amount: true, orderId: true },
+    });
+    const grossByCode = new Map<string, number>();
+    const orderIdsByCode = new Map<string, Set<string>>();
+    for (const p of payments) {
+      const code = (p.method ?? '').toUpperCase();
+      if (!optionCodes.includes(code)) continue;
+      grossByCode.set(code, (grossByCode.get(code) ?? 0) + p.amount.toNumber());
+      const set = orderIdsByCode.get(code) ?? new Set<string>();
+      set.add(p.orderId);
+      orderIdsByCode.set(code, set);
+    }
+
+    // Step 3 — sum CreditorBill amounts per matching creditor. Match
+    // by case-insensitive name OR code (convention: creditor "Foodpanda"
+    // matches platform "FOOD_PANDA" / "Foodpanda").
+    const creditors = await this.prisma.creditor.findMany({
+      where: { branchId, deletedAt: null },
+      select: { id: true, name: true },
+    });
+    const matchCreditor = (option: { code: string; name: string }) => {
+      const norm = option.name.replace(/\s+/g, '').toLowerCase();
+      const codeNorm = option.code.replace(/_/g, '').toLowerCase();
+      return creditors.find((c) => {
+        const n = c.name.replace(/\s+/g, '').toLowerCase();
+        return n.includes(norm) || norm.includes(n) || n.includes(codeNorm);
+      });
+    };
+
+    const billsByCreditor = new Map<string, number>();
+    if (creditors.length > 0) {
+      const bills = await this.prisma.creditorBill.findMany({
+        where: {
+          branchId,
+          creditorId: { in: creditors.map((c) => c.id) },
+          billDate: { gte: dateFrom, lte: dateTo },
+        },
+        select: { creditorId: true, amount: true },
+      });
+      for (const b of bills) {
+        billsByCreditor.set(b.creditorId, (billsByCreditor.get(b.creditorId) ?? 0) + b.amount.toNumber());
+      }
+    }
+
+    // Step 4 — outstanding settlement = balance of the linked Account.
+    const accountIds = aggregatorOptions
+      .map((o) => o.accountId)
+      .filter((id): id is string => !!id);
+    const accounts = accountIds.length > 0
+      ? await this.prisma.account.findMany({
+          where: { id: { in: accountIds } },
+          select: { id: true, balance: true },
+        })
+      : [];
+    const balanceByAccountId = new Map(accounts.map((a) => [a.id, a.balance.toNumber()] as const));
+
+    // Step 5 — assemble per-platform rows.
+    const rows = aggregatorOptions.map((opt) => {
+      const code = opt.code.toUpperCase();
+      const grossPaisa = grossByCode.get(code) ?? 0;
+      const orders = orderIdsByCode.get(code)?.size ?? 0;
+      const creditor = matchCreditor(opt);
+      const feesPaisa = creditor ? (billsByCreditor.get(creditor.id) ?? 0) : 0;
+      const netPaisa = grossPaisa - feesPaisa;
+      const outstandingPaisa = opt.accountId ? (balanceByAccountId.get(opt.accountId) ?? 0) : 0;
+      return {
+        platformCode: opt.code,
+        platformName: opt.name,
+        accountId: opt.accountId ?? null,
+        creditorId: creditor?.id ?? null,
+        creditorName: creditor?.name ?? null,
+        orders,
+        grossPaisa,
+        feesPaisa,
+        netPaisa,
+        outstandingPaisa,
+      };
+    });
+
+    const totals = rows.reduce(
+      (acc, r) => ({
+        orders: acc.orders + r.orders,
+        grossPaisa: acc.grossPaisa + r.grossPaisa,
+        feesPaisa: acc.feesPaisa + r.feesPaisa,
+        netPaisa: acc.netPaisa + r.netPaisa,
+        outstandingPaisa: acc.outstandingPaisa + r.outstandingPaisa,
+      }),
+      { orders: 0, grossPaisa: 0, feesPaisa: 0, netPaisa: 0, outstandingPaisa: 0 },
+    );
+
+    // Sort by gross descending so the busiest platform is on top.
+    rows.sort((a, b) => b.grossPaisa - a.grossPaisa);
+
+    return {
+      from: dateFrom.toISOString(),
+      to: dateTo.toISOString(),
+      rows,
+      totals,
+    };
+  }
 }

@@ -110,6 +110,7 @@ const NAV_GROUPS: Array<{
       { to: '/reports/items', icon: BarChart2, label: 'Items Sold', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/performance', icon: BarChart2, label: 'Performance', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/supplies', icon: BarChart2, label: 'Supplies', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/reports/aggregator-pnl', icon: BarChart2, label: 'Aggregator P&L', allowedRoles: ['OWNER', 'MANAGER', 'ADVISOR'] },
       { to: '/reports/daily', icon: BarChart2, label: 'Daily Reports', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/voids', icon: BarChart2, label: 'Void Audit', allowedRoles: OPERATIONAL_ROLES },
       { to: '/reports/activity-log', icon: History, label: 'Activity Log', allowedRoles: ['OWNER', 'MANAGER'] },

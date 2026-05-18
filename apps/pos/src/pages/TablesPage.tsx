@@ -22,6 +22,40 @@ const STATUS_BAR: Record<string, string> = {
   CLEANING:  'bg-theme-text-muted',
 };
 
+// ─── Aggregator-platform badge ──────────────────────────────────────────────
+// Maps a paid take-away's PaymentMethod code (FOOD_PANDA, FOODIE, …) to a
+// short display label + brand-ish colour for the badge on the takeaway card.
+// Convention-driven: when admin adds a new platform's PaymentOption code,
+// the badge gracefully degrades to the raw code in light grey — still
+// helpful, just unstyled. Keeps this list short rather than building a
+// runtime lookup against PaymentOption rows (the colours are decorative).
+const AGGREGATOR_PLATFORMS: Record<string, { label: string; color: string }> = {
+  FOOD_PANDA:  { label: 'Foodpanda', color: '#D70F64' },
+  FOODPANDA:   { label: 'Foodpanda', color: '#D70F64' },
+  FOODIE:      { label: 'Foodie',    color: '#1FB141' },
+  PATHAO_FOOD: { label: 'Pathao',    color: '#EA1B25' },
+  PATHAO:      { label: 'Pathao',    color: '#EA1B25' },
+  HUNGRYNAKI:  { label: 'Hungrynaki', color: '#FF6B00' },
+};
+
+function describeAggregatorPlatform(code: string | null | undefined): { label: string; color: string } | null {
+  if (!code) return null;
+  const norm = code.toUpperCase();
+  if (AGGREGATOR_PLATFORMS[norm]) return AGGREGATOR_PLATFORMS[norm];
+  // Fallback: unknown aggregator-ish code → grey pill with the raw code.
+  // Only show for codes that don't look like cash/card/bank to avoid
+  // false positives. Tight allowlist by prefix.
+  if (/^(FOOD|PATHAO|UBER|HUNGRY|DELIVERY)/i.test(norm)) {
+    return { label: norm.replace(/_/g, ' '), color: '#6B7280' };
+  }
+  return null;
+}
+
+function computeOrderAgeMin(createdAt: string | Date): number {
+  const t = typeof createdAt === 'string' ? new Date(createdAt).getTime() : createdAt.getTime();
+  return Math.max(0, Math.floor((Date.now() - t) / 60_000));
+}
+
 // ─── Table-status timer badge ────────────────────────────────────────────────
 
 interface TimerThresholds {
@@ -819,14 +853,23 @@ export default function TablesPage() {
 
         {/* Active Takeaway Orders */}
         {takeawayOrders.length > 0 && (
-          <div className="mb-6">
+          <div className="mb-6 sticky top-0 bg-theme-bg z-10 -mx-1 px-1 pb-2 pt-1">
             <p className="text-xs font-bold uppercase tracking-wider text-theme-text-muted mb-2">
-              Active Takeaway ({takeawayOrders.length})
+              🛍️ Active Takeaway ({takeawayOrders.length})
             </p>
-            <div className="grid grid-cols-4 gap-3">
+            <div className={`grid gap-3 ${
+              // Adaptive column count so 1-2 cards don't sprawl across
+              // the full width but 4+ still pack tight.
+              takeawayOrders.length === 1 ? 'grid-cols-2' :
+              takeawayOrders.length === 2 ? 'grid-cols-2' :
+              takeawayOrders.length === 3 ? 'grid-cols-3' :
+              'grid-cols-4'
+            }`}>
               {takeawayOrders.map((o) => {
                 const isPending = o.status === 'PENDING';
-                const billRequested = (o as any).billRequested;
+                const billRequested = (o as { billRequested?: boolean }).billRequested;
+                const platform = describeAggregatorPlatform(o.paymentMethod);
+                const ageMin = computeOrderAgeMin(o.createdAt);
                 return (
                   <button
                     key={o.id}
@@ -847,10 +890,26 @@ export default function TablesPage() {
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-2xl">🛍️</span>
                       <span className="text-[10px] font-bold uppercase text-theme-text-muted">Takeaway</span>
+                      {/* Platform pill derived from paymentMethod once the
+                          order is paid. Unpaid take-aways show no pill —
+                          tagging in-flight orders is Lane E (future). */}
+                      {platform && (
+                        <span
+                          className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-theme text-white"
+                          style={{ backgroundColor: platform.color }}
+                        >
+                          {platform.label}
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm font-bold text-theme-text">#{o.orderNumber}</p>
+                    {((o as { customerName?: string | null }).customerName || o.notes) && (
+                      <p className="text-[11px] text-theme-text-muted mt-0.5 truncate">
+                        {(o as { customerName?: string | null }).customerName || o.notes}
+                      </p>
+                    )}
                     <p className="text-[11px] text-theme-text-muted mt-0.5">
-                      {o.items?.filter((i) => !i.voidedAt).length ?? 0} items
+                      {o.items?.filter((i) => !i.voidedAt).length ?? 0} items · {ageMin}m ago
                     </p>
                     <p className="text-base font-extrabold text-theme-text mt-1">
                       {formatCurrency(Number(o.totalAmount))}
@@ -945,11 +1004,23 @@ export default function TablesPage() {
           {(statusFilter === 'ALL' || statusFilter === 'AVAILABLE') && !tableSearch && (
             <button
               onClick={() => { if (!workPeriod) { handleOpenStartDay(); return; } void navigate('/order'); }}
-              className="bg-theme-surface rounded-theme border-2 border-dashed border-theme-border p-6 flex flex-col items-center justify-center hover:border-theme-accent hover:bg-theme-surface-alt transition-all"
+              className="relative bg-theme-surface rounded-theme border-2 border-dashed border-theme-border p-6 flex flex-col items-center justify-center hover:border-theme-accent hover:bg-theme-surface-alt transition-all"
             >
+              {/* Live count of open take-aways so the cashier sees "3
+                  active" at a glance without scrolling up to the grid.
+                  Tapping the tile still creates a NEW take-away; the
+                  cards in the active-takeaway grid are the way to
+                  continue an existing one. */}
+              {takeawayOrders.length > 0 && (
+                <span className="absolute top-2 right-2 bg-theme-accent text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-full min-w-[20px] text-center">
+                  {takeawayOrders.length}
+                </span>
+              )}
               <span className="text-3xl mb-2">🛍️</span>
               <p className="text-base font-bold text-theme-text">Takeaway</p>
-              <p className="text-[10px] text-theme-text-muted mt-1">No table</p>
+              <p className="text-[10px] text-theme-text-muted mt-1">
+                {takeawayOrders.length > 0 ? '+ new order' : 'No table'}
+              </p>
             </button>
           )}
         </div>
