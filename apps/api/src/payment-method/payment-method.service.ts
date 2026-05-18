@@ -13,7 +13,7 @@ export class PaymentMethodService {
     });
   }
 
-  async create(branchId: string, dto: { code: string; name: string; sortOrder?: number }) {
+  async create(branchId: string, dto: { code: string; name: string; sortOrder?: number; isAggregator?: boolean }) {
     const code = dto.code.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
     const existing = await this.prisma.paymentMethodConfig.findFirst({
       where: { branchId, code },
@@ -21,17 +21,18 @@ export class PaymentMethodService {
     if (existing) throw new BadRequestException(`Payment method "${code}" already exists`);
 
     return this.prisma.paymentMethodConfig.create({
-      data: { branchId, code, name: dto.name, sortOrder: dto.sortOrder ?? 0 },
+      data: { branchId, code, name: dto.name, sortOrder: dto.sortOrder ?? 0, isAggregator: dto.isAggregator ?? false },
     });
   }
 
-  async update(id: string, _branchId: string, dto: { name?: string; isActive?: boolean; sortOrder?: number }) {
+  async update(id: string, _branchId: string, dto: { name?: string; isActive?: boolean; sortOrder?: number; isAggregator?: boolean }) {
     return this.prisma.paymentMethodConfig.update({
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+        ...(dto.isAggregator !== undefined ? { isAggregator: dto.isAggregator } : {}),
       },
     });
   }
@@ -53,17 +54,25 @@ export class PaymentMethodService {
     });
   }
 
-  async createOption(branchId: string, dto: { categoryId: string; code: string; name: string; accountId?: string; isDefault?: boolean }) {
+  async createOption(branchId: string, dto: { categoryId: string; code: string; name: string; accountId?: string; isDefault?: boolean; color?: string | null }) {
     const code = dto.code.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
     const existing = await this.prisma.paymentOption.findFirst({ where: { branchId, code } });
     if (existing) throw new BadRequestException(`Payment option "${code}" already exists`);
     return this.prisma.paymentOption.create({
-      data: { branchId, categoryId: dto.categoryId, code, name: dto.name, accountId: dto.accountId ?? null, isDefault: dto.isDefault ?? false },
+      data: {
+        branchId,
+        categoryId: dto.categoryId,
+        code,
+        name: dto.name,
+        accountId: dto.accountId ?? null,
+        isDefault: dto.isDefault ?? false,
+        color: dto.color ?? null,
+      },
       include: { category: { select: { id: true, code: true, name: true } }, account: { select: { id: true, name: true, type: true } } },
     });
   }
 
-  async updateOption(id: string, _branchId: string, dto: { name?: string; accountId?: string | null; isActive?: boolean; isDefault?: boolean; sortOrder?: number }) {
+  async updateOption(id: string, _branchId: string, dto: { name?: string; accountId?: string | null; isActive?: boolean; isDefault?: boolean; sortOrder?: number; color?: string | null }) {
     return this.prisma.paymentOption.update({
       where: { id },
       data: {
@@ -72,6 +81,7 @@ export class PaymentMethodService {
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.isDefault !== undefined ? { isDefault: dto.isDefault } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+        ...(dto.color !== undefined ? { color: dto.color || null } : {}),
       },
       include: { category: { select: { id: true, code: true, name: true } }, account: { select: { id: true, name: true, type: true } } },
     });

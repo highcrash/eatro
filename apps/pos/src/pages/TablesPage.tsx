@@ -22,33 +22,29 @@ const STATUS_BAR: Record<string, string> = {
   CLEANING:  'bg-theme-text-muted',
 };
 
-// ─── Aggregator-platform badge ──────────────────────────────────────────────
-// Maps a paid take-away's PaymentMethod code (FOOD_PANDA, FOODIE, …) to a
-// short display label + brand-ish colour for the badge on the takeaway card.
-// Convention-driven: when admin adds a new platform's PaymentOption code,
-// the badge gracefully degrades to the raw code in light grey — still
-// helpful, just unstyled. Keeps this list short rather than building a
-// runtime lookup against PaymentOption rows (the colours are decorative).
-const AGGREGATOR_PLATFORMS: Record<string, { label: string; color: string }> = {
-  FOOD_PANDA:  { label: 'Foodpanda', color: '#D70F64' },
-  FOODPANDA:   { label: 'Foodpanda', color: '#D70F64' },
-  FOODIE:      { label: 'Foodie',    color: '#1FB141' },
-  PATHAO_FOOD: { label: 'Pathao',    color: '#EA1B25' },
-  PATHAO:      { label: 'Pathao',    color: '#EA1B25' },
-  HUNGRYNAKI:  { label: 'Hungrynaki', color: '#FF6B00' },
-};
+// Shape of /payment-methods/options entries we care about for the
+// takeaway-platform badge. Admin marks the category isAggregator=true
+// in Settings → Payment Methods; every option under it then qualifies
+// for a badge here. Per-option `color` is optional — falls back to a
+// neutral grey at render time. Fully data-driven: adding a new
+// aggregator is just three rows of admin data, no code change.
+interface AggregatorOptionRow {
+  code: string;
+  name: string;
+  color?: string | null;
+  category?: { isAggregator?: boolean } | null;
+}
 
-function describeAggregatorPlatform(code: string | null | undefined): { label: string; color: string } | null {
-  if (!code) return null;
-  const norm = code.toUpperCase();
-  if (AGGREGATOR_PLATFORMS[norm]) return AGGREGATOR_PLATFORMS[norm];
-  // Fallback: unknown aggregator-ish code → grey pill with the raw code.
-  // Only show for codes that don't look like cash/card/bank to avoid
-  // false positives. Tight allowlist by prefix.
-  if (/^(FOOD|PATHAO|UBER|HUNGRY|DELIVERY)/i.test(norm)) {
-    return { label: norm.replace(/_/g, ' '), color: '#6B7280' };
+function buildAggregatorMap(options: AggregatorOptionRow[]): Map<string, { label: string; color: string }> {
+  const map = new Map<string, { label: string; color: string }>();
+  for (const o of options) {
+    if (!o.category?.isAggregator) continue;
+    map.set(o.code.toUpperCase(), {
+      label: o.name,
+      color: o.color || '#6B7280',
+    });
   }
-  return null;
+  return map;
 }
 
 function computeOrderAgeMin(createdAt: string | Date): number {
@@ -539,6 +535,17 @@ export default function TablesPage() {
     [pendingOrders, activeOrders],
   );
 
+  // Pull the branch's payment options once so the takeaway-card platform
+  // badges can render whatever aggregator codes the admin has set up —
+  // no hardcoded Foodpanda/Foodie/Pathao list on the client. Cached
+  // generously since admin rarely flips categories.
+  const { data: paymentOptions = [] } = useQuery<AggregatorOptionRow[]>({
+    queryKey: ['payment-methods', 'options'],
+    queryFn: () => api.get('/payment-methods/options'),
+    staleTime: 5 * 60_000,
+  });
+  const aggregatorMap = useMemo(() => buildAggregatorMap(paymentOptions), [paymentOptions]);
+
   // ─── Feature 2: Waiter list ──────────────────────────────────────────────────
   const { data: waiters = [] } = useQuery<{ id: string; name: string; role: string; isActive: boolean }[]>({
     queryKey: ['waiters'],
@@ -868,7 +875,9 @@ export default function TablesPage() {
               {takeawayOrders.map((o) => {
                 const isPending = o.status === 'PENDING';
                 const billRequested = (o as { billRequested?: boolean }).billRequested;
-                const platform = describeAggregatorPlatform(o.paymentMethod);
+                const platform = o.paymentMethod
+                  ? aggregatorMap.get(o.paymentMethod.toUpperCase()) ?? null
+                  : null;
                 const ageMin = computeOrderAgeMin(o.createdAt);
                 return (
                   <button

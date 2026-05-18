@@ -1470,21 +1470,21 @@ export class ReportsService {
     const dateTo = to ? new Date(to) : now;
     dateTo.setHours(23, 59, 59, 999);
 
-    // Step 1 — resolve the platforms. Anything under the "FOOD_DELIVERY"
-    // category (case-insensitive) is in scope. Falls back to any
-    // PaymentOption whose code looks aggregator-ish (FOOD_*, PATHAO*,
-    // HUNGRY*, UBER*) so a misconfigured admin who put Foodpanda under
-    // "DIGITAL" still gets surfaced.
-    const allOptions = await this.prisma.paymentOption.findMany({
-      where: { branchId, isActive: true },
-      include: { category: { select: { code: true, name: true } } },
+    // Step 1 — resolve the platforms. Pure flag-driven: any active
+    // PaymentOption whose parent PaymentMethodConfig has
+    // `isAggregator = true`. Admin marks a category once in Settings
+    // → Payment Methods and every option under it shows up here.
+    // No hardcoded code list, no prefix regex — the report scales to
+    // any future aggregator the user adds (Shohoz Food, Uber Eats,
+    // Khaas Food, whatever) without a code change.
+    const aggregatorOptions = await this.prisma.paymentOption.findMany({
+      where: {
+        branchId,
+        isActive: true,
+        category: { isAggregator: true },
+      },
+      include: { category: { select: { code: true, name: true, isAggregator: true } } },
       orderBy: { sortOrder: 'asc' },
-    });
-    const aggregatorOptions = allOptions.filter((o) => {
-      const catCode = (o.category?.code ?? '').toUpperCase();
-      if (catCode === 'FOOD_DELIVERY' || catCode === 'DELIVERY') return true;
-      // Defensive fallback for aggregator codes filed under DIGITAL/etc.
-      return /^(FOOD|PATHAO|UBER|HUNGRY)/i.test(o.code);
     });
 
     if (aggregatorOptions.length === 0) {
@@ -1585,6 +1585,7 @@ export class ReportsService {
       return {
         platformCode: opt.code,
         platformName: opt.name,
+        platformColor: opt.color ?? null,
         accountId: opt.accountId ?? null,
         creditorId: creditor?.id ?? null,
         creditorName: creditor?.name ?? null,

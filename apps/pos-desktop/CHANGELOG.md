@@ -3,6 +3,19 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.24 — Takeaway platform badges read from admin config (no hardcoded list) (2026-05-19)
+
+Renderer-only follow-up to 2.0.23. The platform-badge dictionary
+(Foodpanda / Foodie / Pathao / Hungrynaki labels + colours) used to
+live as a hardcoded const in TablesPage.tsx — adding a new aggregator
+required a code change. Now the POS fetches `/payment-methods/options`
+and builds the platform → label/colour map at runtime from the
+admin's data. Admin marks any category as `isAggregator` in
+Settings → Payment Methods, sets a per-option colour, and the
+takeaway pills + Aggregator P&L report pick it up automatically.
+
+No native / IPC / printing changes.
+
 ## 2.0.23 — Takeaway tile shows live count + platform badges on cards (2026-05-18)
 
 Renderer-only rebuild for Lane A of the multi-aggregator delivery

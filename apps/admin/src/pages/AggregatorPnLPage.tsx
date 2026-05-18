@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 interface AggregatorRow {
   platformCode: string;
   platformName: string;
+  platformColor: string | null;
   accountId: string | null;
   creditorId: string | null;
   creditorName: string | null;
@@ -165,7 +166,16 @@ export default function AggregatorPnLPage() {
                 return (
                   <tr key={r.platformCode} className="border-t border-[#2A2A2A] hover:bg-[#161616]">
                     <td className="px-4 py-3 text-white">
-                      <p className="font-medium">{r.platformName}</p>
+                      <p className="font-medium flex items-center gap-2">
+                        {r.platformColor && (
+                          <span
+                            className="w-2 h-2 inline-block rounded-sm"
+                            style={{ backgroundColor: r.platformColor }}
+                            aria-hidden
+                          />
+                        )}
+                        {r.platformName}
+                      </p>
                       <p className="text-[10px] font-mono text-[#666]">{r.platformCode}</p>
                     </td>
                     <td className="px-4 py-3 text-right text-[#DDD9D3]">{r.orders}</td>
