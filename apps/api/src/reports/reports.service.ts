@@ -1500,12 +1500,20 @@ export class ReportsService {
     // (not Order.paymentMethod) handles split-payment cases cleanly:
     // a part-cash, part-Foodpanda order would otherwise miscount.
     const optionCodes = aggregatorOptions.map((o) => o.code.toUpperCase());
+    // OrderStatus enum (see prisma/schema.prisma line 36): PENDING /
+    // CONFIRMED / PREPARING / READY / SERVED / PAID / VOID / REFUNDED
+    // / PARTIALLY_REFUNDED. Filtering to PAID + PARTIALLY_REFUNDED
+    // covers every order that actually generated revenue, dropping
+    // VOID / REFUNDED (no revenue) and in-flight states. Earlier code
+    // referenced a non-existent COMPLETED status which caused the
+    // /reports/aggregator-pnl endpoint to 500 — Prisma rejected the
+    // unknown enum value.
     const payments = await this.prisma.orderPayment.findMany({
       where: {
         order: {
           branchId,
           deletedAt: null,
-          status: { in: ['PAID', 'SERVED', 'COMPLETED'] as never[] },
+          status: { in: ['PAID', 'PARTIALLY_REFUNDED'] },
           paidAt: { gte: dateFrom, lte: dateTo },
         },
       },
