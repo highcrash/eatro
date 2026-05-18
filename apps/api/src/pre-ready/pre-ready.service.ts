@@ -1141,6 +1141,8 @@ export class PreReadyService {
         costPerUnit: true,
         producesIngredientId: true,
         producesIngredient: { select: { id: true, currentStock: true, costPerUnit: true } },
+        autoDeductInputs: true,
+        recipe: { include: { items: true } },
       } as never,
     }) as Array<{
       id: string;
@@ -1150,11 +1152,19 @@ export class PreReadyService {
       costPerUnit: { toNumber(): number };
       producesIngredientId: string | null;
       producesIngredient: { id: string; currentStock: { toNumber(): number }; costPerUnit: { toNumber(): number } } | null;
+      autoDeductInputs?: boolean | null;
+      recipe: {
+        yieldQuantity: { toNumber(): number };
+        items: Array<{ ingredientId: string; quantity: { toNumber(): number }; unit: string }>;
+      } | null;
     }>;
     const itemById = new Map(items.map((i) => [i.id, i] as const));
 
     const noteSuffix = dto.notes ? ` — ${dto.notes}` : '';
     const results: BulkPreReadyReconcileRowResult[] = [];
+    // Variant parents whose children we decremented — synced after the
+    // per-row loop so the parent.currentStock aggregate stays in step.
+    const parentSyncIds = new Set<string>();
 
     for (const row of dto.rows) {
       const item = itemById.get(row.preReadyItemId);
@@ -1215,35 +1225,149 @@ export class PreReadyService {
 
       try {
         if (delta > 0) {
-          // Production-side: bump pre-ready + mirror, record batch +
-          // PRODUCTION_RECEIVED movement. No raw ingredient deduction
-          // — admin already used the inputs at rush time. If the admin
-          // wants raw-deduction, they should use the regular Production
-          // Order flow instead.
+          // Production-side: deduct raw recipe ingredients (so the books
+          // balance — the kitchen really did consume those inputs to make
+          // the +delta units), then bump pre-ready + mirror, record batch
+          // + PRODUCTION_RECEIVED movement. Honours the per-item
+          // autoDeductInputs opt-out (some kitchens manually reconcile
+          // raw stock end-of-week and don't want production touching it).
+          const autoDeduct = item.autoDeductInputs !== false;
+          const recipe = item.recipe;
+
+          // Pre-compute unit conversions + ingredient costs OUTSIDE the
+          // transaction (mirrors completeProduction). Fresh costs are
+          // read from current ingredients, NOT the cached item
+          // costPerUnit — that way raw price changes flow into both the
+          // SALE movements AND the produced batch's basis.
+          const conversions: number[] = [];
+          const ingredientCosts: { costPerUnit: number }[] = [];
+          let totalProductionCost = 0;
+          if (autoDeduct && recipe && recipe.items.length > 0) {
+            const yieldQty = recipe.yieldQuantity.toNumber();
+            const ratio = delta / yieldQty;
+            for (const ri of recipe.items) {
+              let deductQty = ri.quantity.toNumber() * ratio;
+              const ing = await this.prisma.ingredient.findUnique({
+                where: { id: ri.ingredientId },
+                select: { unit: true, costPerUnit: true },
+              });
+              if (ing && ri.unit !== ing.unit) {
+                deductQty = await this.unitConversionService.convert(
+                  user.branchId,
+                  deductQty,
+                  ri.unit,
+                  ing.unit,
+                );
+              }
+              const costPerUnitNative = ing?.costPerUnit.toNumber() ?? 0;
+              conversions.push(deductQty);
+              ingredientCosts.push({ costPerUnit: costPerUnitNative });
+              totalProductionCost += deductQty * costPerUnitNative;
+            }
+          }
+          // Cost-per-produced-unit basis for this row. Falls back to the
+          // cached preReadyItem cost if there's no recipe (legacy items).
+          const costPerProducedUnit = (autoDeduct && recipe && recipe.items.length > 0 && delta > 0)
+            ? Math.round(totalProductionCost / delta)
+            : unitCost;
+
           await this.prisma.$transaction(async (tx) => {
+            // 1. Deduct raw ingredients per recipe (variant-aware FIFO).
+            if (autoDeduct && recipe && recipe.items.length > 0) {
+              for (let idx = 0; idx < recipe.items.length; idx++) {
+                const ri = recipe.items[idx];
+                const deductQty = conversions[idx];
+                const recipeIngCost = ingredientCosts[idx]?.costPerUnit ?? 0;
+                const notes = `Bulk reconcile production: ${item.name} +${delta} ${item.unit}${noteSuffix}`;
+
+                const ing = await tx.ingredient.findUnique({
+                  where: { id: ri.ingredientId },
+                  select: { hasVariants: true },
+                });
+                if (ing?.hasVariants) {
+                  const variants = await tx.ingredient.findMany({
+                    where: { parentId: ri.ingredientId, isActive: true, deletedAt: null, currentStock: { gt: 0 } },
+                    orderBy: { createdAt: 'asc' },
+                  });
+                  let remaining = deductQty;
+                  for (const variant of variants) {
+                    if (remaining <= 0) break;
+                    const available = Number(variant.currentStock);
+                    const take = Math.min(remaining, available);
+                    await tx.ingredient.update({ where: { id: variant.id }, data: { currentStock: { decrement: take } } });
+                    await tx.stockMovement.create({
+                      data: {
+                        branchId: user.branchId,
+                        ingredientId: variant.id,
+                        type: 'SALE',
+                        quantity: -take,
+                        notes,
+                        unitCostPaisa: Number(variant.costPerUnit),
+                      },
+                    });
+                    remaining -= take;
+                  }
+                  if (remaining > 0) {
+                    const fallback = variants[0] ?? await tx.ingredient.findFirst({
+                      where: { parentId: ri.ingredientId, isActive: true, deletedAt: null },
+                      orderBy: { createdAt: 'asc' },
+                    });
+                    if (fallback) {
+                      await tx.ingredient.update({ where: { id: fallback.id }, data: { currentStock: { decrement: remaining } } });
+                      await tx.stockMovement.create({
+                        data: {
+                          branchId: user.branchId,
+                          ingredientId: fallback.id,
+                          type: 'SALE',
+                          quantity: -remaining,
+                          notes: `${notes} (insufficient)`,
+                          unitCostPaisa: Number(fallback.costPerUnit),
+                        },
+                      });
+                    }
+                  }
+                  parentSyncIds.add(ri.ingredientId);
+                } else {
+                  await tx.ingredient.update({
+                    where: { id: ri.ingredientId },
+                    data: { currentStock: { decrement: deductQty } },
+                  });
+                  await tx.stockMovement.create({
+                    data: {
+                      branchId: user.branchId,
+                      ingredientId: ri.ingredientId,
+                      type: 'SALE',
+                      quantity: -deductQty,
+                      notes,
+                      unitCostPaisa: recipeIngCost,
+                    },
+                  });
+                }
+              }
+            }
+
+            // 2. Bump the pre-ready item's own stock.
             await tx.preReadyItem.update({
               where: { id: item.id },
               data: { currentStock: { increment: delta } },
             });
 
-            // Resolve / auto-create the mirror Ingredient.
+            // 3. Resolve / auto-create the mirror Ingredient.
             const mirrorIngredient = await this.resolveMirrorIngredient(
               tx,
               user.branchId,
               item,
               delta,
-              unitCost,
+              costPerProducedUnit,
             );
 
-            // Update mirror's weighted-average cost. Same math as
-            // completeProduction: (existingStock × existingCost +
-            // newQty × newCost) / totalStock.
+            // 4. Weighted-average cost update on the mirror.
             const existingStock = mirrorIngredient.currentStock.toNumber();
             const existingCost = mirrorIngredient.costPerUnit.toNumber();
             const totalStock = existingStock + delta;
             const weightedAvgCost = totalStock > 0
-              ? Math.round((existingStock * existingCost + delta * unitCost) / totalStock)
-              : unitCost;
+              ? Math.round((existingStock * existingCost + delta * costPerProducedUnit) / totalStock)
+              : costPerProducedUnit;
             await tx.ingredient.update({
               where: { id: mirrorIngredient.id },
               data: {
@@ -1252,6 +1376,7 @@ export class PreReadyService {
               },
             });
 
+            // 5. Batch + PRODUCTION_RECEIVED movement.
             await tx.preReadyBatch.create({
               data: {
                 branchId: user.branchId,
@@ -1270,7 +1395,7 @@ export class PreReadyService {
                 type: 'PRODUCTION_RECEIVED',
                 quantity: delta,
                 notes: `Bulk reconcile production: ${item.name} +${delta} ${item.unit}${noteSuffix}`,
-                unitCostPaisa: unitCost,
+                unitCostPaisa: costPerProducedUnit,
               },
             });
           });
@@ -1283,7 +1408,7 @@ export class PreReadyService {
             after: round4(before + delta),
             delta,
             outcome: 'produced',
-            valuePaisa: Math.round(delta * unitCost),
+            valuePaisa: Math.round(delta * costPerProducedUnit),
           });
         } else {
           // Wastage side: negative delta. Decrement both counters,
@@ -1357,6 +1482,13 @@ export class PreReadyService {
           error: (err as Error).message,
         });
       }
+    }
+
+    // Sync variant-parent aggregates (currentStock + costPerUnit roll-up)
+    // once all per-row transactions have committed. Same pattern as
+    // completeProduction's parentSyncIds loop.
+    for (const parentId of parentSyncIds) {
+      await this.ingredientService.syncParentStock(parentId);
     }
 
     const summary = this.summariseBulk(results);
