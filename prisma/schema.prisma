@@ -72,6 +72,14 @@ model PaymentMethodConfig {
   branchId  String
   code      String // CASH, CARD, MFS, DIGITAL, FOOD_DELIVERY
   name      String // "Cash", "Card", "Mobile Banking", "Digital Payment", "Food Delivery"
+  /// When true, every option in this category is treated as a
+  /// food-delivery aggregator (Foodpanda / Foodie / Pathao Food /
+  /// Hungrynaki / future platforms). Drives the Aggregator P&L
+  /// report's auto-discovery + the POS Takeaway card's platform
+  /// badge — admin marks a category once and every option under it
+  /// shows up automatically. Default false so legacy categories
+  /// stay unaffected.
+  isAggregator Boolean @default(false)
   isActive  Boolean  @default(true)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
@@ -93,6 +101,11 @@ model PaymentOption {
   code       String // CITY_POS, DBBL_POS, BKASH, NAGAD, FOOD_PANDA
   name       String // "City POS Machine", "bKash", "Food Panda"
   accountId  String? // linked Account for balance tracking
+  /// Optional brand colour for the POS Takeaway card platform pill
+  /// and the Aggregator P&L report. Hex string ("#D70F64") so the
+  /// admin can paste Foodpanda's exact pink, Pathao's red, etc.
+  /// Null falls back to a neutral grey at render time.
+  color      String?
   isActive   Boolean  @default(true)
   isDefault  Boolean  @default(false) // default option in its category
   sortOrder  Int      @default(0)

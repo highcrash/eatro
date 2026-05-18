@@ -1451,6 +1451,8 @@ interface PMOption {
   isDefault: boolean;
   sortOrder: number;
   account: { id: string; name: string; type: string } | null;
+  /** Brand badge colour for the POS takeaway card + Aggregator P&L. */
+  color?: string | null;
 }
 
 interface PMCategory {
@@ -1459,6 +1461,10 @@ interface PMCategory {
   name: string;
   isActive: boolean;
   sortOrder: number;
+  /** When true, options under this category appear on the Aggregator
+   *  P&L report and on POS takeaway cards as platform pills. Admin
+   *  flips it on for "Food Delivery" / "Delivery Partners" / similar. */
+  isAggregator?: boolean;
   options: PMOption[];
 }
 
@@ -1471,6 +1477,7 @@ function PaymentMethodsSection() {
   const [optCode, setOptCode] = useState('');
   const [optName, setOptName] = useState('');
   const [optAccountId, setOptAccountId] = useState('');
+  const [optColor, setOptColor] = useState('');
   const [addingCat, setAddingCat] = useState(false);
   const [newCatCode, setNewCatCode] = useState('');
   const [newCatName, setNewCatName] = useState('');
@@ -1492,7 +1499,7 @@ function PaymentMethodsSection() {
   });
 
   const createOptMut = useMutation({
-    mutationFn: (dto: { categoryId: string; code: string; name: string; accountId?: string; isDefault?: boolean }) =>
+    mutationFn: (dto: { categoryId: string; code: string; name: string; accountId?: string; isDefault?: boolean; color?: string | null }) =>
       api.post('/payment-methods/options', dto),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['payment-methods'] });
@@ -1500,12 +1507,19 @@ function PaymentMethodsSection() {
       setOptCode('');
       setOptName('');
       setOptAccountId('');
+      setOptColor('');
     },
   });
 
   const updateOptMut = useMutation({
-    mutationFn: ({ id, ...dto }: { id: string; name?: string; accountId?: string | null; isActive?: boolean; isDefault?: boolean }) =>
+    mutationFn: ({ id, ...dto }: { id: string; name?: string; accountId?: string | null; isActive?: boolean; isDefault?: boolean; color?: string | null }) =>
       api.patch(`/payment-methods/options/${id}`, dto),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['payment-methods'] }),
+  });
+
+  const toggleAggregatorMut = useMutation({
+    mutationFn: ({ id, isAggregator }: { id: string; isAggregator: boolean }) =>
+      api.patch(`/payment-methods/${id}`, { isAggregator }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['payment-methods'] }),
   });
 
@@ -1602,6 +1616,24 @@ function PaymentMethodsSection() {
                   {!cat.isActive && <span className="text-[#666] font-body text-[10px]">(inactive)</span>}
                 </div>
                 <div className="flex items-center gap-3">
+                  {/* Aggregator toggle. When on, every option under this
+                      category surfaces on the Aggregator P&L report and
+                      gets a brand pill on POS takeaway cards. */}
+                  <label
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-1.5 cursor-pointer select-none"
+                    title="Mark this category as a food-delivery aggregator group (Foodpanda, Foodie, Pathao Food, …). Drives the Aggregator P&L report and POS takeaway pills."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!cat.isAggregator}
+                      onChange={(e) => toggleAggregatorMut.mutate({ id: cat.id, isAggregator: e.target.checked })}
+                      className="accent-[#FFA726]"
+                    />
+                    <span className={`font-body text-[10px] tracking-widest uppercase ${cat.isAggregator ? 'text-[#FFA726]' : 'text-[#666]'}`}>
+                      Aggregator
+                    </span>
+                  </label>
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleCatMut.mutate({ id: cat.id, isActive: !cat.isActive }); }}
                     className={`font-body text-xs tracking-widest uppercase transition-colors ${cat.isActive ? 'text-[#FFA726] hover:text-white' : 'text-[#4CAF50] hover:text-white'}`}
@@ -1628,12 +1660,33 @@ function PaymentMethodsSection() {
                   {cat.options.map((opt) => (
                     <div key={opt.id} className="flex items-center justify-between bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2">
                       <div className="flex items-center gap-3">
+                        {/* Brand pill preview when option has a colour. */}
+                        {opt.color && (
+                          <span
+                            className="w-3 h-3 inline-block rounded-sm border border-[#2A2A2A]"
+                            style={{ backgroundColor: opt.color }}
+                            title={`Badge colour: ${opt.color}`}
+                          />
+                        )}
                         <span className="font-mono text-[#DDD9D3] text-[10px] bg-[#1A1A1A] px-1.5 py-0.5">{opt.code}</span>
                         <span className="text-white font-body text-sm">{opt.name}</span>
                         {opt.isDefault && <span className="text-[#4CAF50] font-body text-[10px]">(default)</span>}
                         {!opt.isActive && <span className="text-[#666] font-body text-[10px]">(inactive)</span>}
                       </div>
                       <div className="flex items-center gap-3">
+                        {/* Inline colour picker — only meaningful when the
+                            parent category is flagged isAggregator, but we
+                            show it everywhere so future categories can use
+                            it too (e.g. branded MFS pills). */}
+                        {cat.isAggregator && (
+                          <input
+                            type="color"
+                            value={opt.color || '#888888'}
+                            onChange={(e) => updateOptMut.mutate({ id: opt.id, color: e.target.value })}
+                            className="w-6 h-6 bg-[#161616] border border-[#2A2A2A] cursor-pointer"
+                            title="Brand colour for POS takeaway pill"
+                          />
+                        )}
                         {/* Account link */}
                         <select
                           value={opt.account?.id ?? ''}
@@ -1672,7 +1725,7 @@ function PaymentMethodsSection() {
                   {/* Add option form */}
                   {addingOptionFor === cat.id ? (
                     <div className="bg-[#0D0D0D] border border-[#2A2A2A] p-3 space-y-2">
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-4 gap-2">
                         <div className="flex flex-col gap-1">
                           <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Code *</label>
                           <input
@@ -1704,6 +1757,24 @@ function PaymentMethodsSection() {
                             ))}
                           </select>
                         </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[#666] text-[10px] font-body tracking-widest uppercase">Colour</label>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="color"
+                              value={optColor || '#888888'}
+                              onChange={(e) => setOptColor(e.target.value)}
+                              className="w-8 h-7 bg-[#161616] border border-[#2A2A2A] cursor-pointer"
+                              title="Brand colour for POS takeaway pill / P&L badge"
+                            />
+                            <input
+                              value={optColor}
+                              onChange={(e) => setOptColor(e.target.value)}
+                              placeholder="optional"
+                              className="flex-1 bg-[#161616] border border-[#2A2A2A] text-white px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#D62B2B]"
+                            />
+                          </div>
+                        </div>
                       </div>
                       {createOptMut.error && <p className="text-[#D62B2B] font-body text-xs">{(createOptMut.error as Error).message}</p>}
                       <div className="flex gap-2">
@@ -1715,6 +1786,7 @@ function PaymentMethodsSection() {
                             name: optName,
                             accountId: optAccountId || undefined,
                             isDefault: cat.options.length === 0,
+                            color: optColor || null,
                           })}
                           disabled={!optCode || !optName || createOptMut.isPending}
                           className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-xs px-3 py-1.5 transition-colors disabled:opacity-50"
@@ -1725,7 +1797,7 @@ function PaymentMethodsSection() {
                     </div>
                   ) : (
                     <button
-                      onClick={() => { setAddingOptionFor(cat.id); setOptCode(''); setOptName(''); setOptAccountId(''); }}
+                      onClick={() => { setAddingOptionFor(cat.id); setOptCode(''); setOptName(''); setOptAccountId(''); setOptColor(''); }}
                       className="text-[#D62B2B] hover:text-[#F03535] font-body text-xs transition-colors"
                     >
                       + Add Option
