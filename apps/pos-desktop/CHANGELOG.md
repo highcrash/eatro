@@ -3,6 +3,16 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.90 — Bundle refresh: bulk pre-ready reconciliation types (2026-05-19)
+
+Admin-only feature ship. The desktop bundle has no behavioural change
+— the new `BulkPreReadyReconcile*` types in `@restora/types` are
+consumed only by the admin panel. Version bumped to keep the
+`@restora/types` bundle hash on the desktop installer in lockstep
+with the rest of the repo per the pre-commit checklist.
+
+No native / IPC / printing changes.
+
 ## 1.0.89 — Takeaway platform badges read from admin config (no hardcoded list) (2026-05-19)
 
 Renderer-only follow-up to 1.0.88. The platform-badge dictionary
