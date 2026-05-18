@@ -5,7 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { JwtPayload, CreatePreReadyItemDto, UpsertPreReadyRecipeDto, CreateProductionOrderDto, CompleteProductionDto } from '@restora/types';
+import type { JwtPayload, CreatePreReadyItemDto, UpsertPreReadyRecipeDto, CreateProductionOrderDto, CompleteProductionDto, BulkPreReadyReconcileDto } from '@restora/types';
 
 @Controller('pre-ready')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -255,6 +255,25 @@ export class PreReadyController {
     @Body() dto: { reason?: string },
   ) {
     return this.preReadyService.wasteProduction(id, user.branchId, { reason: dto?.reason, staffId: user.sub });
+  }
+
+  /**
+   * Bulk Pre-Ready Reconciliation — admin types the physical count for
+   * every pre-ready item; server back-fills production batches for
+   * positive deltas and wastage logs for negative deltas. Use case:
+   * during a rush kitchen produces things manually without going
+   * through the Production Order flow; this endpoint catches up the
+   * bookkeeping in one shot. See class-level comment in pre-ready
+   * service for the routing rules.
+   *
+   * Role-gated to OWNER / MANAGER / ADVISOR — same level that can
+   * create production orders. KITCHEN can do per-order completes via
+   * the existing flow but shouldn't fire bulk reconciliations.
+   */
+  @Post('bulk-reconcile')
+  @Roles('OWNER', 'MANAGER', 'ADVISOR')
+  bulkReconcile(@CurrentUser() user: JwtPayload, @Body() dto: BulkPreReadyReconcileDto) {
+    return this.preReadyService.bulkReconcile(user, dto);
   }
 
   // Batches

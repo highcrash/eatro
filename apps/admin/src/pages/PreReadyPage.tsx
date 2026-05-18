@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, Unlink } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatCurrency, printPreReadyStockSheet } from '@restora/utils';
-import type { PreReadyItem, ProductionOrder, PreReadyBatch, Ingredient, ProductionStatus, Recipe } from '@restora/types';
+import type { PreReadyItem, ProductionOrder, PreReadyBatch, Ingredient, ProductionStatus, Recipe, BulkPreReadyReconcileDto, BulkPreReadyReconcileResult } from '@restora/types';
 import type { MenuItem } from '@restora/types';
 import { useStockUnits } from '../lib/units';
 
@@ -99,7 +99,7 @@ function convertLocally(value: number, fromUnit: string, toUnit: string): number
 
 export default function PreReadyPage() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'items' | 'production' | 'batches'>('items');
+  const [tab, setTab] = useState<'items' | 'production' | 'batches' | 'reconcile'>('items');
   const [showAddItem, setShowAddItem] = useState(false);
   const [itemForm, setItemForm] = useState({ name: '', unit: 'PCS', minimumStock: '0' });
   const [showRecipe, setShowRecipe] = useState<PreReadyItem | null>(null);
@@ -638,7 +638,7 @@ Fried Onion,500,G,Oil,100,ML`;
       </div>
 
       <div className="flex border-b border-[#2A2A2A]">
-        {(['items', 'production', 'batches'] as const).map((t) => (
+        {(['items', 'production', 'batches', 'reconcile'] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)} className={`px-6 py-3 font-body text-xs tracking-widest uppercase transition-colors border-b-2 -mb-px ${tab === t ? 'border-[#D62B2B] text-white' : 'border-transparent text-[#666] hover:text-[#999]'}`}>
             {t}
           </button>
@@ -854,6 +854,12 @@ Fried Onion,500,G,Oil,100,ML`;
           </table>
         </div>
       )}
+
+      {/* Reconcile Tab — bulk production / wastage entry. Mirrors the
+          Stock Reconciliation workflow: admin types the physical count
+          for every pre-ready item; server back-fills production batches
+          for positive deltas and wastage logs for negative deltas. */}
+      {tab === 'reconcile' && <ReconcileTab items={items} />}
 
       {/* Add Item Dialog */}
       {showAddItem && (
@@ -1636,6 +1642,329 @@ function PreReadyLinkPanel({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Reconcile tab — bulk pre-ready production / wastage entry.
+ *
+ * Cashier or chef physically counts every pre-ready item at shift change
+ * and types the on-hand count into one row each. The server compares
+ * against current stock and routes positive deltas as production batches
+ * (with the single making/expiry date set at the top) and negative deltas
+ * as wastage. Mirrors the raw-ingredient Stock Reconciliation flow.
+ */
+function ReconcileTab({ items }: { items: PreReadyItem[] }) {
+  const qc = useQueryClient();
+  const today = new Date().toISOString().split('T')[0];
+  const defaultExpiry = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d.toISOString().split('T')[0];
+  })();
+
+  const [makingDate, setMakingDate] = useState<string>(today);
+  const [expiryDate, setExpiryDate] = useState<string>(defaultExpiry);
+  const [notes, setNotes] = useState<string>('');
+  const [search, setSearch] = useState<string>('');
+  // physical[itemId] = raw string from the input. Empty string = not counted yet.
+  const [physical, setPhysical] = useState<Record<string, string>>({});
+  const [result, setResult] = useState<BulkPreReadyReconcileResult | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const activeItems = items.filter((i) => i.isActive !== false);
+  const filtered = search.trim()
+    ? activeItems.filter((i) => i.name.toLowerCase().includes(search.trim().toLowerCase()))
+    : activeItems;
+
+  // Live preview totals (before the server confirms).
+  let countedRows = 0;
+  let producedRows = 0;
+  let wastedRows = 0;
+  let producedQty = 0;
+  let wastedQty = 0;
+  let producedValue = 0;
+  let wastedValue = 0;
+  for (const it of activeItems) {
+    const raw = physical[it.id];
+    if (raw === undefined || raw === '') continue;
+    const phys = parseFloat(raw);
+    if (Number.isNaN(phys)) continue;
+    countedRows += 1;
+    const before = Number(it.currentStock) || 0;
+    const delta = phys - before;
+    const cost = Number(it.costPerUnit) || 0;
+    if (delta > 0) {
+      producedRows += 1;
+      producedQty += delta;
+      producedValue += delta * cost;
+    } else if (delta < 0) {
+      wastedRows += 1;
+      wastedQty += -delta;
+      wastedValue += -delta * cost;
+    }
+  }
+
+  const mut = useMutation({
+    mutationFn: (dto: BulkPreReadyReconcileDto) =>
+      api.post<BulkPreReadyReconcileResult>('/pre-ready/bulk-reconcile', dto),
+    onSuccess: (data) => {
+      setResult(data);
+      setSubmitError(null);
+      qc.invalidateQueries({ queryKey: ['pre-ready'] });
+      qc.invalidateQueries({ queryKey: ['pre-ready-batches'] });
+      qc.invalidateQueries({ queryKey: ['ingredients'] });
+    },
+    onError: (e: unknown) => {
+      const msg = e instanceof Error ? e.message : 'Bulk reconcile failed';
+      setSubmitError(msg);
+    },
+  });
+
+  const handleSubmit = () => {
+    setSubmitError(null);
+    setResult(null);
+    const rows: BulkPreReadyReconcileDto['rows'] = [];
+    for (const it of activeItems) {
+      const raw = physical[it.id];
+      if (raw === undefined || raw === '') continue;
+      const phys = parseFloat(raw);
+      if (Number.isNaN(phys) || phys < 0) continue;
+      rows.push({ preReadyItemId: it.id, physicalQty: phys });
+    }
+    if (rows.length === 0) {
+      setSubmitError('Enter at least one physical count before completing.');
+      return;
+    }
+    if (!makingDate || !expiryDate) {
+      setSubmitError('Making date and expiry date are required.');
+      return;
+    }
+    if (expiryDate < makingDate) {
+      setSubmitError('Expiry date must be on or after making date.');
+      return;
+    }
+    if (!confirm(`Apply ${rows.length} reconciliation row(s)?\n\nProduction: ${producedRows} • Wastage: ${wastedRows}`)) return;
+    mut.mutate({ rows, makingDate, expiryDate, notes: notes.trim() || undefined });
+  };
+
+  const handleReset = () => {
+    setPhysical({});
+    setNotes('');
+    setResult(null);
+    setSubmitError(null);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header — making/expiry dates + notes */}
+      <div className="bg-[#161616] border border-[#2A2A2A] p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div>
+          <label className="text-[#666] font-body text-[10px] tracking-widest uppercase block mb-1">Making Date</label>
+          <input
+            type="date"
+            value={makingDate}
+            onChange={(e) => setMakingDate(e.target.value)}
+            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+          />
+        </div>
+        <div>
+          <label className="text-[#666] font-body text-[10px] tracking-widest uppercase block mb-1">Expiry Date</label>
+          <input
+            type="date"
+            value={expiryDate}
+            min={makingDate}
+            onChange={(e) => setExpiryDate(e.target.value)}
+            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]"
+          />
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-[#666] font-body text-[10px] tracking-widest uppercase block mb-1">Notes (optional)</label>
+          <input
+            placeholder="e.g. Lunch rush catch-up, 2pm shift"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] placeholder:text-[#555]"
+          />
+        </div>
+      </div>
+
+      {/* Live totals strip */}
+      <div className="bg-[#0D0D0D] border border-[#2A2A2A] px-4 py-3 grid grid-cols-2 md:grid-cols-5 gap-3 text-xs font-body">
+        <div>
+          <div className="text-[#666] text-[10px] tracking-widest uppercase">Counted</div>
+          <div className="text-white text-base">{countedRows} / {activeItems.length}</div>
+        </div>
+        <div>
+          <div className="text-[#666] text-[10px] tracking-widest uppercase">Production rows</div>
+          <div className="text-[#4CAF50] text-base">+{producedRows}</div>
+        </div>
+        <div>
+          <div className="text-[#666] text-[10px] tracking-widest uppercase">Wastage rows</div>
+          <div className="text-[#D62B2B] text-base">{wastedRows > 0 ? `-${wastedRows}` : 0}</div>
+        </div>
+        <div>
+          <div className="text-[#666] text-[10px] tracking-widest uppercase">Est. produced value</div>
+          <div className="text-[#4CAF50] text-base">{formatCurrency(producedValue)}</div>
+        </div>
+        <div>
+          <div className="text-[#666] text-[10px] tracking-widest uppercase">Est. wastage value</div>
+          <div className="text-[#D62B2B] text-base">{formatCurrency(wastedValue)}</div>
+        </div>
+      </div>
+
+      {/* Search + action buttons */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <div className="relative flex-1 min-w-[240px]">
+          <input
+            placeholder="🔍 Search pre-ready item…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-xs font-body focus:outline-none focus:border-[#D62B2B] placeholder:text-[#555]"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#666] hover:text-white text-xs">{'✕'}</button>
+          )}
+        </div>
+        <button
+          onClick={handleReset}
+          disabled={mut.isPending}
+          className="bg-[#2A2A2A] hover:bg-[#3A3A3A] text-white font-body text-xs px-4 py-2 tracking-widest uppercase transition-colors disabled:opacity-50"
+        >
+          Reset
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={mut.isPending || countedRows === 0}
+          className="bg-[#D62B2B] hover:bg-[#F03535] disabled:bg-[#3a1a1a] disabled:text-[#666] text-white font-body text-xs px-4 py-2 tracking-widest uppercase transition-colors"
+        >
+          {mut.isPending ? 'Processing…' : 'Complete Production'}
+        </button>
+      </div>
+
+      {submitError && (
+        <div className="p-3 bg-[#3a1a1a] border border-[#D62B2B] text-[#F03535] font-body text-sm flex items-center justify-between">
+          <span>{submitError}</span>
+          <button onClick={() => setSubmitError(null)} className="text-[#666] hover:text-white ml-4">{'✕'}</button>
+        </div>
+      )}
+
+      {/* Result summary panel after a successful run */}
+      {result && (
+        <div className="bg-[#0D0D0D] border border-[#4CAF50] p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-white font-display text-sm tracking-widest uppercase">Reconciliation complete</h3>
+            <button onClick={() => setResult(null)} className="text-[#666] hover:text-white text-xs">{'✕'}</button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-body">
+            <div>
+              <div className="text-[#666] text-[10px] tracking-widest uppercase">Produced rows</div>
+              <div className="text-[#4CAF50] text-base">{result.producedRows} ({Number(result.totalQtyProduced).toFixed(2)})</div>
+              <div className="text-[#999]">{formatCurrency(result.valuePaisaProduced)}</div>
+            </div>
+            <div>
+              <div className="text-[#666] text-[10px] tracking-widest uppercase">Wasted rows</div>
+              <div className="text-[#D62B2B] text-base">{result.wastedRows} ({Number(result.totalQtyWasted).toFixed(2)})</div>
+              <div className="text-[#999]">{formatCurrency(result.valuePaisaWasted)}</div>
+            </div>
+            <div>
+              <div className="text-[#666] text-[10px] tracking-widest uppercase">Matched (no change)</div>
+              <div className="text-[#999] text-base">{result.skippedRows}</div>
+            </div>
+            <div>
+              <div className="text-[#666] text-[10px] tracking-widest uppercase">Failed</div>
+              <div className={`${result.failedRows > 0 ? 'text-[#D62B2B]' : 'text-[#666]'} text-base`}>{result.failedRows}</div>
+            </div>
+          </div>
+          {result.rows.some((r) => r.outcome === 'failed') && (
+            <div className="border-t border-[#2A2A2A] pt-2">
+              <div className="text-[#D62B2B] font-body text-xs tracking-widest uppercase mb-1">Failures</div>
+              <ul className="text-[#F03535] font-body text-xs space-y-0.5">
+                {result.rows.filter((r) => r.outcome === 'failed').map((r) => (
+                  <li key={r.preReadyItemId}>• {r.preReadyItemName}: {r.error ?? 'unknown error'}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Main reconciliation table */}
+      <div className="bg-[#161616] border border-[#2A2A2A] overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-[#2A2A2A]">
+              {['Item', 'Unit', 'Current Stock', 'Physical Count', 'Delta', 'Outcome', 'Cost / Unit'].map((h) => (
+                <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((it) => {
+              const raw = physical[it.id] ?? '';
+              const phys = raw === '' ? null : parseFloat(raw);
+              const before = Number(it.currentStock) || 0;
+              const cost = Number(it.costPerUnit) || 0;
+              const hasInput = raw !== '' && phys !== null && !Number.isNaN(phys);
+              const delta = hasInput ? (phys! - before) : 0;
+              const rowResult = result?.rows.find((r) => r.preReadyItemId === it.id);
+              return (
+                <tr key={it.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
+                  <td className="px-4 py-3 text-white font-body text-sm">{it.name}</td>
+                  <td className="px-4 py-3 text-[#999] font-body text-xs">{it.unit}</td>
+                  <td className="px-4 py-3 text-white font-body text-sm">{before.toFixed(2)}</td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      inputMode="decimal"
+                      placeholder="—"
+                      value={raw}
+                      onChange={(e) => setPhysical((p) => ({ ...p, [it.id]: e.target.value }))}
+                      className="w-28 bg-[#0D0D0D] border border-[#2A2A2A] text-white px-2 py-1.5 text-sm font-body focus:outline-none focus:border-[#D62B2B] placeholder:text-[#555]"
+                    />
+                  </td>
+                  <td className="px-4 py-3 font-body text-sm">
+                    {!hasInput ? (
+                      <span className="text-[#444]">—</span>
+                    ) : delta > 0 ? (
+                      <span className="text-[#4CAF50]">+{delta.toFixed(2)} {it.unit}</span>
+                    ) : delta < 0 ? (
+                      <span className="text-[#D62B2B]">{delta.toFixed(2)} {it.unit} wastage</span>
+                    ) : (
+                      <span className="text-[#666]">matched</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 font-body text-xs">
+                    {rowResult ? (
+                      rowResult.outcome === 'produced' ? <span className="text-[#4CAF50] bg-[#1a3a1a] px-2 py-0.5">PRODUCED</span> :
+                      rowResult.outcome === 'wasted' ? <span className="text-[#D62B2B] bg-[#3a1a1a] px-2 py-0.5">WASTED</span> :
+                      rowResult.outcome === 'skipped' ? <span className="text-[#666] bg-[#2A2A2A] px-2 py-0.5">MATCHED</span> :
+                      <span className="text-[#F03535] bg-[#3a0000] px-2 py-0.5">FAILED</span>
+                    ) : !hasInput ? (
+                      <span className="text-[#444]">—</span>
+                    ) : delta > 0 ? (
+                      <span className="text-[#4CAF50]">→ batch</span>
+                    ) : delta < 0 ? (
+                      <span className="text-[#D62B2B]">→ wastage</span>
+                    ) : (
+                      <span className="text-[#666]">no change</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-[#999] font-body text-xs">
+                    {cost > 0 ? `${formatCurrency(cost)} / ${it.unit}` : <span className="text-[#444]">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-[#666] font-body text-sm">No matching pre-ready items.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

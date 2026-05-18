@@ -1,8 +1,18 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import type { CreatePreReadyItemDto, UpsertPreReadyRecipeDto, CreateProductionOrderDto, CompleteProductionDto } from '@restora/types';
+import type {
+  CreatePreReadyItemDto,
+  UpsertPreReadyRecipeDto,
+  CreateProductionOrderDto,
+  CompleteProductionDto,
+  BulkPreReadyReconcileDto,
+  BulkPreReadyReconcileResult,
+  BulkPreReadyReconcileRowResult,
+  JwtPayload,
+} from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
 import { IngredientService } from '../ingredient/ingredient.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 @Injectable()
 export class PreReadyService {
@@ -10,6 +20,7 @@ export class PreReadyService {
     private readonly prisma: PrismaService,
     private readonly unitConversionService: UnitConversionService,
     private readonly ingredientService: IngredientService,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   // ── Pre-Ready Items ───────────────────────────────────────────────────────
@@ -1075,4 +1086,406 @@ export class PreReadyService {
     }
     return { updated, total: items.length };
   }
+
+  // ── Bulk Reconciliation ──────────────────────────────────────────────────
+  //
+  // Use case: during a rush the kitchen produces pre-ready dishes manually
+  // (no time to walk through the Production Order → Approve → Start →
+  // Complete flow per item). Once things calm down, admin opens the
+  // Reconcile tab, types the actual on-hand count for every pre-ready
+  // item, and the system back-fills the bookkeeping in one shot:
+  //
+  //   delta = physical − currentStock
+  //     delta >  0  →  production batch + mirror Ingredient increment +
+  //                    PRODUCTION_RECEIVED stock movement (no raw input
+  //                    deduction — admin already consumed the inputs in
+  //                    the kitchen).
+  //     delta == 0  →  skipped.
+  //     delta <  0  →  WasteLog row + mirror Ingredient decrement +
+  //                    WASTE stock movement.
+  //
+  // Mirrors ReconciliationService.submit() but for PreReadyItems instead
+  // of Ingredients. Single making/expiry date in the DTO applies to every
+  // production-side row.
+
+  /**
+   * Apply a bulk pre-ready stocktake. See class-level comment above for
+   * the routing rules. Returns a row-by-row report so the UI can show
+   * "+12 G Biryani Sauce produced, −40 G Curry Base wasted, …".
+   *
+   * Each row's writes happen inside the per-row try block so a partial
+   * failure leaves earlier successful rows committed — the operator can
+   * re-submit just the failed rows instead of starting over.
+   */
+  async bulkReconcile(user: JwtPayload, dto: BulkPreReadyReconcileDto): Promise<BulkPreReadyReconcileResult> {
+    if (!Array.isArray(dto.rows) || dto.rows.length === 0) {
+      throw new BadRequestException('At least one row is required');
+    }
+    const makingDate = new Date(dto.makingDate);
+    const expiryDate = new Date(dto.expiryDate);
+    if (Number.isNaN(makingDate.getTime()) || Number.isNaN(expiryDate.getTime())) {
+      throw new BadRequestException('makingDate and expiryDate must be valid dates');
+    }
+    if (expiryDate < makingDate) {
+      throw new BadRequestException('expiryDate cannot be before makingDate');
+    }
+
+    const ids = Array.from(new Set(dto.rows.map((r) => r.preReadyItemId)));
+    const items = await this.prisma.preReadyItem.findMany({
+      where: { id: { in: ids }, branchId: user.branchId, deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        unit: true,
+        currentStock: true,
+        costPerUnit: true,
+        producesIngredientId: true,
+        producesIngredient: { select: { id: true, currentStock: true, costPerUnit: true } },
+      } as never,
+    }) as Array<{
+      id: string;
+      name: string;
+      unit: string;
+      currentStock: { toNumber(): number };
+      costPerUnit: { toNumber(): number };
+      producesIngredientId: string | null;
+      producesIngredient: { id: string; currentStock: { toNumber(): number }; costPerUnit: { toNumber(): number } } | null;
+    }>;
+    const itemById = new Map(items.map((i) => [i.id, i] as const));
+
+    const noteSuffix = dto.notes ? ` — ${dto.notes}` : '';
+    const results: BulkPreReadyReconcileRowResult[] = [];
+
+    for (const row of dto.rows) {
+      const item = itemById.get(row.preReadyItemId);
+      if (!item) {
+        results.push({
+          preReadyItemId: row.preReadyItemId,
+          preReadyItemName: '(unknown)',
+          unit: '',
+          before: 0,
+          after: 0,
+          delta: 0,
+          outcome: 'failed',
+          valuePaisa: 0,
+          error: 'Pre-ready item not found in this branch',
+        });
+        continue;
+      }
+
+      const physical = Number(row.physicalQty);
+      if (!Number.isFinite(physical) || physical < 0) {
+        results.push({
+          preReadyItemId: item.id,
+          preReadyItemName: item.name,
+          unit: item.unit,
+          before: item.currentStock.toNumber(),
+          after: item.currentStock.toNumber(),
+          delta: 0,
+          outcome: 'failed',
+          valuePaisa: 0,
+          error: 'Physical count must be a non-negative number',
+        });
+        continue;
+      }
+
+      // The mirror Ingredient is the single source of truth when the link
+      // is in place — read from there so the delta matches what the rest
+      // of the system sees. Fall back to the PreReadyItem column for
+      // legacy items that aren't linked yet.
+      const before = item.producesIngredient
+        ? item.producesIngredient.currentStock.toNumber()
+        : item.currentStock.toNumber();
+      const delta = round4(physical - before);
+      const unitCost = item.costPerUnit.toNumber();
+
+      if (Math.abs(delta) < 0.0001) {
+        results.push({
+          preReadyItemId: item.id,
+          preReadyItemName: item.name,
+          unit: item.unit,
+          before,
+          after: before,
+          delta: 0,
+          outcome: 'skipped',
+          valuePaisa: 0,
+        });
+        continue;
+      }
+
+      try {
+        if (delta > 0) {
+          // Production-side: bump pre-ready + mirror, record batch +
+          // PRODUCTION_RECEIVED movement. No raw ingredient deduction
+          // — admin already used the inputs at rush time. If the admin
+          // wants raw-deduction, they should use the regular Production
+          // Order flow instead.
+          await this.prisma.$transaction(async (tx) => {
+            await tx.preReadyItem.update({
+              where: { id: item.id },
+              data: { currentStock: { increment: delta } },
+            });
+
+            // Resolve / auto-create the mirror Ingredient.
+            const mirrorIngredient = await this.resolveMirrorIngredient(
+              tx,
+              user.branchId,
+              item,
+              delta,
+              unitCost,
+            );
+
+            // Update mirror's weighted-average cost. Same math as
+            // completeProduction: (existingStock × existingCost +
+            // newQty × newCost) / totalStock.
+            const existingStock = mirrorIngredient.currentStock.toNumber();
+            const existingCost = mirrorIngredient.costPerUnit.toNumber();
+            const totalStock = existingStock + delta;
+            const weightedAvgCost = totalStock > 0
+              ? Math.round((existingStock * existingCost + delta * unitCost) / totalStock)
+              : unitCost;
+            await tx.ingredient.update({
+              where: { id: mirrorIngredient.id },
+              data: {
+                currentStock: { increment: delta },
+                costPerUnit: weightedAvgCost,
+              },
+            });
+
+            await tx.preReadyBatch.create({
+              data: {
+                branchId: user.branchId,
+                preReadyItemId: item.id,
+                quantity: delta,
+                remainingQty: delta,
+                makingDate,
+                expiryDate,
+              },
+            });
+
+            await tx.stockMovement.create({
+              data: {
+                branchId: user.branchId,
+                ingredientId: mirrorIngredient.id,
+                type: 'PRODUCTION_RECEIVED',
+                quantity: delta,
+                notes: `Bulk reconcile production: ${item.name} +${delta} ${item.unit}${noteSuffix}`,
+                unitCostPaisa: unitCost,
+              },
+            });
+          });
+
+          results.push({
+            preReadyItemId: item.id,
+            preReadyItemName: item.name,
+            unit: item.unit,
+            before,
+            after: round4(before + delta),
+            delta,
+            outcome: 'produced',
+            valuePaisa: Math.round(delta * unitCost),
+          });
+        } else {
+          // Wastage side: negative delta. Decrement both counters,
+          // write a WasteLog row + WASTE stock movement on the mirror.
+          // We don't decrement raw ingredients — the wastage is on the
+          // FINISHED pre-ready stock, not the raw inputs.
+          const shortfall = Math.abs(delta);
+          await this.prisma.$transaction(async (tx) => {
+            await tx.preReadyItem.update({
+              where: { id: item.id },
+              data: { currentStock: { decrement: shortfall } },
+            });
+
+            const mirrorIngredient = await this.resolveMirrorIngredient(
+              tx,
+              user.branchId,
+              item,
+              0,
+              unitCost,
+            );
+
+            await tx.ingredient.update({
+              where: { id: mirrorIngredient.id },
+              data: { currentStock: { decrement: shortfall } },
+            });
+
+            await tx.stockMovement.create({
+              data: {
+                branchId: user.branchId,
+                ingredientId: mirrorIngredient.id,
+                type: 'WASTE',
+                quantity: -shortfall,
+                notes: `Bulk reconcile wastage: ${item.name} -${shortfall} ${item.unit}${noteSuffix}`,
+                unitCostPaisa: unitCost,
+              },
+            });
+
+            await tx.wasteLog.create({
+              data: {
+                branchId: user.branchId,
+                ingredientId: mirrorIngredient.id,
+                quantity: shortfall,
+                reason: 'SPOILAGE',
+                notes: `Bulk pre-ready reconciliation${noteSuffix}`,
+                recordedById: user.sub,
+              },
+            });
+          });
+
+          results.push({
+            preReadyItemId: item.id,
+            preReadyItemName: item.name,
+            unit: item.unit,
+            before,
+            after: round4(before + delta),
+            delta,
+            outcome: 'wasted',
+            valuePaisa: Math.round(shortfall * unitCost),
+          });
+        }
+      } catch (err) {
+        results.push({
+          preReadyItemId: item.id,
+          preReadyItemName: item.name,
+          unit: item.unit,
+          before,
+          after: before,
+          delta: 0,
+          outcome: 'failed',
+          valuePaisa: 0,
+          error: (err as Error).message,
+        });
+      }
+    }
+
+    const summary = this.summariseBulk(results);
+
+    void this.activityLog.log({
+      branchId: user.branchId,
+      actor: user,
+      category: 'PRE_READY',
+      action: 'UPDATE',
+      entityType: 'preReadyReconcile',
+      entityId: `prr-${new Date().toISOString()}`,
+      entityName: dto.notes?.trim() || 'Bulk Pre-Ready Reconcile',
+      summary: `Bulk reconcile: ${summary.producedRows} produced, ${summary.wastedRows} wasted, ${summary.skippedRows} matched, ${summary.failedRows} failed`,
+      after: {
+        notes: dto.notes ?? null,
+        makingDate: dto.makingDate,
+        expiryDate: dto.expiryDate,
+        producedRows: summary.producedRows,
+        wastedRows: summary.wastedRows,
+        skippedRows: summary.skippedRows,
+        failedRows: summary.failedRows,
+        totalQtyProduced: summary.totalQtyProduced,
+        totalQtyWasted: summary.totalQtyWasted,
+        valuePaisaProduced: summary.valuePaisaProduced,
+        valuePaisaWasted: summary.valuePaisaWasted,
+      },
+    });
+
+    return summary;
+  }
+
+  /**
+   * Resolve the mirror Ingredient for a PreReadyItem, creating one if
+   * needed. Mirrors the resolution cascade used inside
+   * completeProduction so a bulk-reconcile row produces the same
+   * lookup behaviour as a regular production-order completion.
+   *
+   * The `newQty` + `unitCost` are used only when we have to CREATE the
+   * mirror (no existing link, no name match) — they seed the new
+   * Ingredient's currentStock + costPerUnit. For existing mirrors we
+   * leave those fields untouched and the caller bumps them after.
+   */
+  private async resolveMirrorIngredient(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    branchId: string,
+    item: { id: string; name: string; unit: string; producesIngredientId: string | null },
+    newQty: number,
+    unitCost: number,
+  ): Promise<{ id: string; currentStock: { toNumber(): number }; costPerUnit: { toNumber(): number } }> {
+    if (item.producesIngredientId) {
+      const linked = await tx.ingredient.findFirst({
+        where: { id: item.producesIngredientId, branchId, deletedAt: null },
+        select: { id: true, currentStock: true, costPerUnit: true },
+      });
+      if (linked) return linked;
+    }
+    const ingredientName = `[PR] ${item.name}`;
+    const byName = await tx.ingredient.findFirst({
+      where: { branchId, name: ingredientName, deletedAt: null },
+      select: { id: true, currentStock: true, costPerUnit: true },
+    });
+    if (byName) {
+      // Backfill the link for future runs.
+      await tx.preReadyItem.update({
+        where: { id: item.id },
+        data: { producesIngredientId: byName.id } as never,
+      });
+      return byName;
+    }
+    // None exists — create it.
+    const created = await tx.ingredient.create({
+      data: {
+        branchId,
+        name: ingredientName,
+        unit: item.unit as never,
+        category: 'OTHER',
+        currentStock: newQty,
+        minimumStock: 0,
+        costPerUnit: unitCost,
+        itemCode: `PR-${item.id.slice(-6).toUpperCase()}`,
+      },
+      select: { id: true, currentStock: true, costPerUnit: true },
+    });
+    await tx.preReadyItem.update({
+      where: { id: item.id },
+      data: { producesIngredientId: created.id } as never,
+    });
+    return created;
+  }
+
+  private summariseBulk(rows: BulkPreReadyReconcileRowResult[]): BulkPreReadyReconcileResult {
+    let producedRows = 0;
+    let wastedRows = 0;
+    let skippedRows = 0;
+    let failedRows = 0;
+    let totalQtyProduced = 0;
+    let totalQtyWasted = 0;
+    let valuePaisaProduced = 0;
+    let valuePaisaWasted = 0;
+    for (const r of rows) {
+      if (r.outcome === 'produced') {
+        producedRows += 1;
+        totalQtyProduced += r.delta;
+        valuePaisaProduced += r.valuePaisa;
+      } else if (r.outcome === 'wasted') {
+        wastedRows += 1;
+        totalQtyWasted += Math.abs(r.delta);
+        valuePaisaWasted += r.valuePaisa;
+      } else if (r.outcome === 'skipped') {
+        skippedRows += 1;
+      } else {
+        failedRows += 1;
+      }
+    }
+    return {
+      countedRows: rows.length,
+      producedRows,
+      wastedRows,
+      skippedRows,
+      failedRows,
+      totalQtyProduced: round4(totalQtyProduced),
+      totalQtyWasted: round4(totalQtyWasted),
+      valuePaisaProduced,
+      valuePaisaWasted,
+      rows,
+    };
+  }
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
 }
