@@ -440,18 +440,21 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-/** Money fields are stamped as paisa (1/100 of a taka). The renderer
- *  spots them by suffix so the audit log shows "৳12.50" instead of
- *  "1250". */
+/** Money fields stored as paisa (1/100 of a taka). The renderer spots
+ *  them by suffix so the audit log shows "৳12.50" instead of "1250".
+ *  `amount` is included here because — despite the name — every
+ *  `Decimal(14,2)` `amount` column in this codebase (Expense,
+ *  AccountTransaction, SupplierPayment, CreditorBill, …) is stored
+ *  in paisa. Without this, an Expense of ৳200 displays as ৳20,000. */
 function isPaisaField(field: string): boolean {
-  return /paisa$/i.test(field);
+  return /paisa$|^amount$|amount$/i.test(field);
 }
 
-/** Display-known-quantity fields end in Cents (legacy) or Amount
- *  (already stored in major units). Both render with the currency
- *  prefix for instant readability. */
+/** Legacy "Cents" suffix — historical sub-paisa amounts that some old
+ *  rows still carry. Treated as already-in-major-units to preserve
+ *  whatever the historical renderer showed. */
 function isCurrencyField(field: string): boolean {
-  return /amount$|cents$/i.test(field);
+  return /cents$/i.test(field);
 }
 
 function fmtPaisa(n: number): string {
