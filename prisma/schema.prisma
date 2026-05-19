@@ -2631,6 +2631,7 @@ enum ActivityCategory {
   PERMISSIONS
   COOKING_STATION
   TABLE
+  ATTENDANCE
 }
 
 enum ActivityAction {

@@ -7,7 +7,8 @@ type ActivityCategory =
   | 'MENU' | 'RECIPE' | 'INGREDIENT' | 'SUPPLIER' | 'PURCHASING'
   | 'EXPENSE' | 'ACCOUNT' | 'PAYROLL' | 'CUSTOMER' | 'STAFF'
   | 'BRANCH' | 'DISCOUNT' | 'RESERVATION' | 'WASTE' | 'PRE_READY'
-  | 'SETTINGS' | 'PERMISSIONS' | 'COOKING_STATION' | 'TABLE';
+  | 'SETTINGS' | 'PERMISSIONS' | 'COOKING_STATION' | 'TABLE'
+  | 'ATTENDANCE';
 
 type ActivityAction = 'CREATE' | 'UPDATE' | 'DELETE';
 
@@ -37,6 +38,7 @@ const CATEGORIES: ActivityCategory[] = [
   'EXPENSE', 'ACCOUNT', 'PAYROLL', 'CUSTOMER', 'STAFF',
   'BRANCH', 'DISCOUNT', 'RESERVATION', 'WASTE', 'PRE_READY',
   'SETTINGS', 'PERMISSIONS', 'COOKING_STATION', 'TABLE',
+  'ATTENDANCE',
 ];
 
 const ACTION_BADGE: Record<ActivityAction, string> = {
