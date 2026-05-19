@@ -1,13 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { MarkAttendanceDto } from '@restora/types';
+import type { MarkAttendanceDto, JwtPayload } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TipsoiSyncService } from '../tipsoi/tipsoi.sync.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 @Injectable()
 export class AttendanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tipsoiSync: TipsoiSyncService,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   findAll(branchId: string, date?: string, staffId?: string) {
@@ -27,8 +29,16 @@ export class AttendanceService {
    *  + manualOverride=true so the next Tipsoi sync skips this row.
    *  Admin clears the override via clearOverride() to re-enable
    *  Tipsoi-driven updates for that day. */
-  async mark(branchId: string, dto: MarkAttendanceDto) {
-    return this.prisma.attendance.upsert({
+  async mark(user: JwtPayload, dto: MarkAttendanceDto) {
+    const branchId = user.branchId;
+    // Capture the pre-state so the activity log diff shows what the
+    // admin changed (status flip, clock-in adjustment, etc.).
+    const before = await this.prisma.attendance.findUnique({
+      where: { staffId_date: { staffId: dto.staffId, date: new Date(dto.date) } },
+      include: { staff: { select: { name: true } } },
+    });
+
+    const row = await this.prisma.attendance.upsert({
       where: { staffId_date: { staffId: dto.staffId, date: new Date(dto.date) } },
       create: {
         branchId,
@@ -51,16 +61,51 @@ export class AttendanceService {
       },
       include: { staff: { select: { id: true, name: true, role: true } } },
     });
+
+    const action = before ? 'UPDATE' : 'CREATE';
+    const dateLabel = new Date(dto.date).toISOString().slice(0, 10);
+    void this.activityLog.log({
+      branchId,
+      actor: user,
+      category: 'ATTENDANCE',
+      action,
+      entityType: 'attendance',
+      entityId: row.id,
+      entityName: `${row.staff.name} — ${dateLabel}`,
+      before: before ? {
+        status: before.status,
+        clockIn: before.clockIn,
+        clockOut: before.clockOut,
+        notes: before.notes,
+        source: before.source,
+        manualOverride: before.manualOverride,
+      } : null,
+      after: {
+        status: row.status,
+        clockIn: row.clockIn,
+        clockOut: row.clockOut,
+        notes: row.notes,
+        source: row.source,
+        manualOverride: row.manualOverride,
+      },
+      summary: before
+        ? `Manual edit: ${before.status} → ${row.status}`
+        : `Manual mark: ${row.status}`,
+    });
+
+    return row;
   }
 
   /** Drop the manual-override flag on a single (staff, date) row and
    *  immediately re-fetch from Tipsoi so the row repopulates with
    *  whatever the device says. Used by the "Restore from Tipsoi"
    *  button on the AttendancePage. */
-  async clearOverride(branchId: string, staffId: string, date: string) {
+  async clearOverride(user: JwtPayload, staffId: string, date: string) {
+    const branchId = user.branchId;
     const target = new Date(date);
     const row = await this.prisma.attendance.findUnique({
       where: { staffId_date: { staffId, date: target } },
+      include: { staff: { select: { name: true } } },
     });
     if (!row) throw new NotFoundException('Attendance row not found');
     await this.prisma.attendance.update({
@@ -71,10 +116,38 @@ export class AttendanceService {
     // the sync service and stamped onto BranchSetting; we surface the
     // post-sync row regardless so the UI re-renders.
     await this.tipsoiSync.syncOne(branchId, staffId, target).catch(() => { /* logged in sync service */ });
-    return this.prisma.attendance.findUnique({
+    const refreshed = await this.prisma.attendance.findUnique({
       where: { staffId_date: { staffId, date: target } },
       include: { staff: { select: { id: true, name: true, role: true } } },
     });
+
+    const dateLabel = target.toISOString().slice(0, 10);
+    void this.activityLog.log({
+      branchId,
+      actor: user,
+      category: 'ATTENDANCE',
+      action: 'UPDATE',
+      entityType: 'attendance',
+      entityId: row.id,
+      entityName: `${row.staff.name} — ${dateLabel}`,
+      before: {
+        status: row.status,
+        clockIn: row.clockIn,
+        clockOut: row.clockOut,
+        manualOverride: row.manualOverride,
+        source: row.source,
+      },
+      after: refreshed ? {
+        status: refreshed.status,
+        clockIn: refreshed.clockIn,
+        clockOut: refreshed.clockOut,
+        manualOverride: refreshed.manualOverride,
+        source: refreshed.source,
+      } : null,
+      summary: 'Cleared manual override — re-pulled from Tipsoi',
+    });
+
+    return refreshed;
   }
 
   async getMonthSummary(branchId: string, year: number, month: number) {

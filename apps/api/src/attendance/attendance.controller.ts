@@ -23,7 +23,7 @@ export class AttendanceController {
 
   @Post()
   mark(@CurrentUser() user: JwtPayload, @Body() dto: MarkAttendanceDto) {
-    return this.attendanceService.mark(user.branchId, dto);
+    return this.attendanceService.mark(user, dto);
   }
 
   /** Drop the manual-override flag on (staff, date) and re-pull from
@@ -32,7 +32,7 @@ export class AttendanceController {
   @Post('clear-override')
   clearOverride(@CurrentUser() user: JwtPayload, @Body() dto: { staffId: string; date: string }) {
     if (!dto.staffId || !dto.date) throw new BadRequestException('staffId + date required');
-    return this.attendanceService.clearOverride(user.branchId, dto.staffId, dto.date);
+    return this.attendanceService.clearOverride(user, dto.staffId, dto.date);
   }
 
   @Get('summary')
