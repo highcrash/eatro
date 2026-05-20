@@ -460,7 +460,17 @@ export class WorkPeriodService {
 
     // ── Consumed ingredients (SALE-type stock movements) ───────────────────
     // SALE movements are recorded with negative quantity (deduction).
-    // We aggregate by ingredient and use abs() so the displayed value is positive.
+    // We aggregate by ingredient and use abs() so the displayed value is
+    // positive.
+    //
+    // Value uses the PER-ROW `unitCostPaisa` stamped at the moment of the
+    // sale (recipe.service writes it on every SALE movement). Reading the
+    // current `ingredient.costPerUnit` instead would let later cost
+    // recalcs (Recalc button, weighted-avg from a new purchase, manual
+    // edits, etc.) retroactively rewrite past report values — and if the
+    // current cost ever drifted negative, multiply through to a
+    // negative consumed-value row. Falling back to current cost only
+    // when the historical stamp is missing covers pre-2025 legacy rows.
     const saleMovements = await this.prisma.stockMovement.findMany({
       where: { branchId, type: 'SALE', createdAt: { gte: from, lte: to } },
       include: { ingredient: { select: { id: true, name: true, unit: true, costPerUnit: true } } },
@@ -470,12 +480,12 @@ export class WorkPeriodService {
     for (const mv of saleMovements) {
       if (!mv.ingredient) continue;
       const qty = Math.abs(mv.quantity.toNumber());
-      // Defensive: ingredient costPerUnit can legitimately be 0 (new
-      // pre-ready mirrors before first recalc) but should never be
-      // negative. If a stray negative value sneaks in (manual edit,
-      // bad weighted-avg math), clamp at 0 here so the End-Day report
-      // never shows a negative consumed-value row.
-      const cost = Math.max(0, mv.ingredient.costPerUnit.toNumber());
+      // Prefer the historical stamp; clamp at 0 either way so a stray
+      // negative cost (bad data) can never produce a negative value.
+      const stampedCost = mv.unitCostPaisa != null
+        ? Number(mv.unitCostPaisa)
+        : mv.ingredient.costPerUnit.toNumber();
+      const cost = Math.max(0, stampedCost);
       const existing = consumedMap.get(mv.ingredientId);
       if (existing) {
         existing.quantity += qty;
