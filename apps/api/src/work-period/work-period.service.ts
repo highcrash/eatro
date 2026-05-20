@@ -470,7 +470,12 @@ export class WorkPeriodService {
     for (const mv of saleMovements) {
       if (!mv.ingredient) continue;
       const qty = Math.abs(mv.quantity.toNumber());
-      const cost = mv.ingredient.costPerUnit.toNumber();
+      // Defensive: ingredient costPerUnit can legitimately be 0 (new
+      // pre-ready mirrors before first recalc) but should never be
+      // negative. If a stray negative value sneaks in (manual edit,
+      // bad weighted-avg math), clamp at 0 here so the End-Day report
+      // never shows a negative consumed-value row.
+      const cost = Math.max(0, mv.ingredient.costPerUnit.toNumber());
       const existing = consumedMap.get(mv.ingredientId);
       if (existing) {
         existing.quantity += qty;
@@ -497,7 +502,11 @@ export class WorkPeriodService {
     for (const w of wasteLogs) {
       if (!w.ingredient) continue;
       const qty = w.quantity.toNumber();
-      const cost = w.ingredient.costPerUnit.toNumber();
+      // Same defensive clamp as the consumed loop — wastage value can
+      // never be a negative number on a report (it represents money
+      // lost; an "ingredient with negative cost" is bad data, not a
+      // legitimate credit).
+      const cost = Math.max(0, w.ingredient.costPerUnit.toNumber());
       const existing = wasteMap.get(w.ingredientId);
       if (existing) {
         existing.quantity += qty;
