@@ -1498,6 +1498,31 @@ function PaymentMethodsSection() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['payment-methods'] }),
   });
 
+  // Reorder by sending a fresh sortOrder = new-array-index to EVERY
+  // category in one go. Cheap (handful of rows) and immune to stale or
+  // duplicate sortOrder values that legacy data carries.
+  const reorderCatsMut = useMutation({
+    mutationFn: async (ordered: PMCategory[]) => {
+      await Promise.all(
+        ordered.map((c, idx) =>
+          c.sortOrder === idx
+            ? Promise.resolve()
+            : api.patch(`/payment-methods/${c.id}`, { sortOrder: idx }),
+        ),
+      );
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['payment-methods'] }),
+  });
+
+  const moveCat = (fromIdx: number, direction: -1 | 1) => {
+    const toIdx = fromIdx + direction;
+    if (toIdx < 0 || toIdx >= categories.length) return;
+    const next = [...categories];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    reorderCatsMut.mutate(next);
+  };
+
   const createOptMut = useMutation({
     mutationFn: (dto: { categoryId: string; code: string; name: string; accountId?: string; isDefault?: boolean; color?: string | null }) =>
       api.post('/payment-methods/options', dto),
@@ -1599,7 +1624,7 @@ function PaymentMethodsSection() {
             </div>
           </div>
         )}
-        {categories.map((cat) => {
+        {categories.map((cat, idx) => {
           const isExpanded = expandedCat === cat.id;
           return (
             <div key={cat.id} className="border border-[#2A2A2A]">
@@ -1609,6 +1634,30 @@ function PaymentMethodsSection() {
                 onClick={() => toggleExpand(cat.id)}
               >
                 <div className="flex items-center gap-3">
+                  {/* Reorder buttons \u2014 set the order categories appear in
+                      on POS / receipts / reports. Stacked \u2191\u2193 to keep the
+                      header compact; disabled at the extremes. */}
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex flex-col leading-none -my-1"
+                  >
+                    <button
+                      onClick={() => moveCat(idx, -1)}
+                      disabled={idx === 0 || reorderCatsMut.isPending}
+                      title="Move up"
+                      className="text-[#666] hover:text-white disabled:opacity-20 disabled:cursor-default text-xs px-1"
+                    >
+                      {'\u25B2'}
+                    </button>
+                    <button
+                      onClick={() => moveCat(idx, 1)}
+                      disabled={idx === categories.length - 1 || reorderCatsMut.isPending}
+                      title="Move down"
+                      className="text-[#666] hover:text-white disabled:opacity-20 disabled:cursor-default text-xs px-1"
+                    >
+                      {'\u25BC'}
+                    </button>
+                  </div>
                   <span className="text-[#666] text-xs">{isExpanded ? '\u25BC' : '\u25B6'}</span>
                   <span className="font-mono text-white text-xs bg-[#2A2A2A] px-2 py-0.5">{cat.code}</span>
                   <span className="text-white font-body text-sm">{cat.name}</span>
