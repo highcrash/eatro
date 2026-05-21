@@ -2086,28 +2086,61 @@ export class OrderService {
 
     const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
 
-    // Recalculate target order totals
+    // Recalculate target order totals. The target may carry its own
+    // coupon / discount (independent of source's) — re-evaluate against
+    // the new item set so a moved-in coupon-target item bumps the
+    // discount upward without leaving the existing discountAmount
+    // column stale.
+    const targetOrder = await this.prisma.order.findFirstOrThrow({
+      where: { id: targetOrderId },
+      select: { discountId: true, couponId: true },
+    });
     const targetItems = await this.prisma.orderItem.findMany({
       where: { orderId: targetOrderId, voidedAt: null },
     });
     const tSubtotal = targetItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
-    const tTotals = computeTotals(branch, tSubtotal, 0);
+    const tDiscount = await this.recomputeDiscountAmount(
+      branchId,
+      targetItems.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      targetOrder.discountId ?? null,
+      targetOrder.couponId ?? null,
+      targetOrderId,
+    );
+    const tTotals = computeTotals(branch, tSubtotal, tDiscount);
     await this.prisma.order.update({
       where: { id: targetOrderId },
-      data: { subtotal: tSubtotal, taxAmount: tTotals.taxAmount, serviceChargeAmount: tTotals.serviceChargeAmount, totalAmount: tTotals.totalAmount, roundAdjustment: tTotals.roundAdjustment },
+      data: {
+        subtotal: tSubtotal,
+        discountAmount: tDiscount,
+        taxAmount: tTotals.taxAmount,
+        serviceChargeAmount: tTotals.serviceChargeAmount,
+        totalAmount: tTotals.totalAmount,
+        roundAdjustment: tTotals.roundAdjustment,
+      },
     });
 
-    // Recalculate source order totals
+    // Recalculate source order totals against its surviving items —
+    // also against its existing coupon/discount, so moving a
+    // coupon-target item OUT shrinks the saving rather than leaving a
+    // stale discountAmount that no longer matches the items.
     const srcItems = await this.prisma.orderItem.findMany({
       where: { orderId, voidedAt: null },
     });
     const sSubtotal = srcItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
-    const sTotals = computeTotals(branch, sSubtotal, 0);
+    const sDiscount = await this.recomputeDiscountAmount(
+      branchId,
+      srcItems.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      order.discountId ?? null,
+      order.couponId ?? null,
+      orderId,
+    );
+    const sTotals = computeTotals(branch, sSubtotal, sDiscount);
     const sourceEmpty = srcItems.length === 0;
     const updatedSource = await this.prisma.order.update({
       where: { id: orderId },
       data: {
         subtotal: sSubtotal,
+        discountAmount: sourceEmpty ? 0 : sDiscount,
         taxAmount: sTotals.taxAmount,
         serviceChargeAmount: sTotals.serviceChargeAmount,
         totalAmount: sTotals.totalAmount,
