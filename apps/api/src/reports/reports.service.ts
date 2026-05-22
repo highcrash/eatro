@@ -665,7 +665,13 @@ export class ReportsService {
         };
       }
       const qty = Math.abs(m.quantity.toNumber());
-      if (m.type === 'SALE') byIngredient[key].consumed += qty;
+      // Only count SALE rows tied to a customer order. Pre-ready
+      // production also writes SALEs (orderId = null) when deducting
+      // raw inputs to make a batch — counting those here would
+      // double-book against the menu-sale SALE that fires on the
+      // produced mirror Ingredient later. See work-period.service for
+      // the longer-form reasoning.
+      if (m.type === 'SALE' && m.orderId != null) byIngredient[key].consumed += qty;
       else if (m.type === 'WASTE') byIngredient[key].wasted += qty;
       else if (m.type === 'OPERATIONAL_USE') byIngredient[key].suppliesUsed += qty;
       else if (m.type === 'PURCHASE' || m.type === 'VOID_RETURN') byIngredient[key].received += qty;

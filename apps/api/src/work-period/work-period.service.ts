@@ -463,6 +463,18 @@ export class WorkPeriodService {
     // We aggregate by ingredient and use abs() so the displayed value is
     // positive.
     //
+    // The `orderId: { not: null }` filter is load-bearing — pre-ready
+    // production also writes SALE movements when it deducts raw inputs
+    // (flour, oil, spices) inside completeProduction / bulkReconcile,
+    // but those have orderId = null because no customer is being served
+    // yet. Including them would DOUBLE-count: once when raw flour gets
+    // deducted to make dough, again when the dough's mirror Ingredient
+    // gets deducted by the customer's order. The mirror's weighted-avg
+    // costPerUnit already absorbs the raw cost, so the customer-side
+    // SALE (orderId set) values the consumption correctly on its own.
+    // Production-side SALEs remain in the DB and still surface on the
+    // per-ingredient Stock Watcher drill-in for audit.
+    //
     // Value uses the PER-ROW `unitCostPaisa` stamped at the moment of the
     // sale (recipe.service writes it on every SALE movement). Reading the
     // current `ingredient.costPerUnit` instead would let later cost
@@ -472,7 +484,7 @@ export class WorkPeriodService {
     // negative consumed-value row. Falling back to current cost only
     // when the historical stamp is missing covers pre-2025 legacy rows.
     const saleMovements = await this.prisma.stockMovement.findMany({
-      where: { branchId, type: 'SALE', createdAt: { gte: from, lte: to } },
+      where: { branchId, type: 'SALE', orderId: { not: null }, createdAt: { gte: from, lte: to } },
       include: { ingredient: { select: { id: true, name: true, unit: true, costPerUnit: true } } },
     });
     type Agg = { id: string; name: string; unit: string; quantity: number; value: number };
