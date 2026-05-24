@@ -879,9 +879,27 @@ export default function InventoryPage() {
                       alert(`Scanned ${r.scanned} variants, fixed ${r.fixed}, re-synced ${r.parentsResynced} parents.`);
                       await qc.invalidateQueries({ queryKey: ['ingredients'] });
                     }}
-                    className="w-full text-left px-3 py-2 text-xs font-body text-[#FFA726] hover:bg-[#1F1F1F] hover:text-white transition-colors"
+                    className="w-full text-left px-3 py-2 text-xs font-body text-[#FFA726] hover:bg-[#1F1F1F] hover:text-white transition-colors border-b border-[#2A2A2A]"
                   >
                     ↻ Repair variant Cost/Unit
+                  </button>
+                  {/* Re-run the parent-aggregate recompute for every
+                      variant-parent on the branch. Use when a parent's
+                      (agg) stock or cost drifts away from the sum of its
+                      variants — typically after a manual DB poke or a
+                      historic logic gap that wrote to parent.currentStock
+                      directly. Safe to re-run anytime. */}
+                  <button
+                    onClick={async () => {
+                      setShowCSVUpload(false);
+                      if (!confirm('Re-sync every parent ingredient\'s aggregate stock + cost from its variants? Use this if a parent\'s (agg) value looks wrong.')) return;
+                      const r = await api.post<{ resynced: number }>('/ingredients/resync-variant-parents', {});
+                      alert(`Re-synced ${r.resynced} parent ingredient${r.resynced === 1 ? '' : 's'}.`);
+                      await qc.invalidateQueries({ queryKey: ['ingredients'] });
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs font-body text-[#FFA726] hover:bg-[#1F1F1F] hover:text-white transition-colors"
+                  >
+                    ↻ Resync parent stock aggregates
                   </button>
                 </div>
               )}
