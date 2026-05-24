@@ -74,6 +74,19 @@ export class ReportsController {
     return this.reportsService.getDailyConsumption(user.branchId, date ?? new Date().toISOString().split('T')[0]);
   }
 
+  /** Per-ingredient summary of ADJUSTMENT stockMovements written by
+   *  the shopping-request approval flow with the "Miscalculation:"
+   *  notes prefix. Surfaces chronic shrinkage so admin can spot
+   *  which ingredients keep miscounting and adjust ordering /
+   *  storage habits. Defaults to the current month. */
+  @Get('miscalculation')
+  getMiscalculationReport(@CurrentUser() user: JwtPayload, @Query('from') from?: string, @Query('to') to?: string) {
+    const now = new Date();
+    const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const defaultTo = now.toISOString().split('T')[0];
+    return this.reportsService.getMiscalculationReport(user.branchId, from ?? defaultFrom, to ?? defaultTo);
+  }
+
   @Get('stock')
   getStockReport(@CurrentUser() user: JwtPayload) {
     return this.reportsService.getStockReport(user.branchId);

@@ -68,10 +68,10 @@ enum RefundReason {
 
 // Level 1: Payment Category (e.g., CASH, CARD, MFS, DIGITAL, FOOD_DELIVERY)
 model PaymentMethodConfig {
-  id        String   @id @default(cuid())
-  branchId  String
-  code      String // CASH, CARD, MFS, DIGITAL, FOOD_DELIVERY
-  name      String // "Cash", "Card", "Mobile Banking", "Digital Payment", "Food Delivery"
+  id           String   @id @default(cuid())
+  branchId     String
+  code         String // CASH, CARD, MFS, DIGITAL, FOOD_DELIVERY
+  name         String // "Cash", "Card", "Mobile Banking", "Digital Payment", "Food Delivery"
   /// When true, every option in this category is treated as a
   /// food-delivery aggregator (Foodpanda / Foodie / Pathao Food /
   /// Hungrynaki / future platforms). Drives the Aggregator P&L
@@ -79,10 +79,10 @@ model PaymentMethodConfig {
   /// badge — admin marks a category once and every option under it
   /// shows up automatically. Default false so legacy categories
   /// stay unaffected.
-  isAggregator Boolean @default(false)
-  isActive  Boolean  @default(true)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
+  isAggregator Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
 
   // Relations
   branch  Branch          @relation(fields: [branchId], references: [id])
@@ -285,6 +285,7 @@ model Branch {
   leaveBalances       LeaveBalance[]
   loyaltyTransactions LoyaltyTransaction[]
   couponCampaigns     CouponCampaign[]
+  shoppingRequests    ShoppingRequest[]
 
   @@index([isActive])
   @@map("branches")
@@ -633,6 +634,8 @@ model Staff {
   leaveRule                 LeaveRule?           @relation(fields: [leaveRuleId], references: [id])
   leaveBalances             LeaveBalance[]
   couponCampaignsCreated    CouponCampaign[]     @relation("CouponCampaignCreator")
+  shoppingRequestsRequested ShoppingRequest[]    @relation("ShoppingRequestRequester")
+  shoppingRequestsApproved  ShoppingRequest[]    @relation("ShoppingRequestApprover")
 
   @@index([branchId, isActive])
   @@index([email])
@@ -1188,18 +1191,18 @@ model Discount {
 }
 
 model Coupon {
-  id          String        @id @default(cuid())
-  branchId    String
-  code        String
-  name        String
-  type        DiscountType
-  value       Decimal       @db.Decimal(14, 2)
-  scope       DiscountScope @default(ALL_ITEMS)
-  targetItems String?
-  maxUses     Int           @default(0) // 0 = unlimited
-  usedCount   Int           @default(0)
-  expiresAt   DateTime?
-  isActive    Boolean       @default(true)
+  id              String        @id @default(cuid())
+  branchId        String
+  code            String
+  name            String
+  type            DiscountType
+  value           Decimal       @db.Decimal(14, 2)
+  scope           DiscountScope @default(ALL_ITEMS)
+  targetItems     String?
+  maxUses         Int           @default(0) // 0 = unlimited
+  usedCount       Int           @default(0)
+  expiresAt       DateTime?
+  isActive        Boolean       @default(true)
   /// When true, the same customer can only redeem this code once
   /// across all of their orders. Independent of `maxUses` (which is
   /// the global cap). Existing customer-scoped coupons (campaign +
@@ -1207,13 +1210,13 @@ model Coupon {
   /// this flag makes it work for shared codes too — admin can
   /// publish "FIRST10" to everyone and still cap each customer to
   /// one redemption. Default false = legacy behavior.
-  oncePerCustomer Boolean   @default(false)
+  oncePerCustomer Boolean       @default(false)
   /// Minimum order subtotal in PAISA required for the coupon to
   /// apply. Null = no minimum. The check runs against the order's
   /// active-items subtotal (pre-discount, pre-tax) so an admin can
   /// run "৳50 off when you spend at least ৳500" promos without the
   /// coupon shrinking the threshold itself.
-  minOrderAmount Decimal?  @db.Decimal(14, 2)
+  minOrderAmount  Decimal?      @db.Decimal(14, 2)
   /// Required when type === FREE_ITEM: the menu item that auto-adds
   /// to the order at ৳0 when this coupon is applied. Null for FLAT
   /// and PERCENTAGE coupons. Variant-parent items rejected at apply
@@ -1225,18 +1228,18 @@ model Coupon {
   /// customer (matched on the order's customerId). Null = legacy
   /// shared-code behaviour, unchanged. Generated campaign coupons +
   /// the first-visit welcome coupon always set this + maxUses=1.
-  customerId  String?
+  customerId      String?
   /// Campaign label so generated codes can be grouped + audited.
   /// Set to the CouponCampaign.id for batch-generated codes, or
   /// "first-visit" for auto-generated welcome coupons. Null on
   /// admin-typed shared codes.
-  campaignTag String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  campaignTag     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  branch        Branch     @relation(fields: [branchId], references: [id])
-  customer      Customer?  @relation(fields: [customerId], references: [id])
-  freeMenuItem  MenuItem?  @relation("CouponFreeItem", fields: [freeMenuItemId], references: [id])
+  branch         Branch      @relation(fields: [branchId], references: [id])
+  customer       Customer?   @relation(fields: [customerId], references: [id])
+  freeMenuItem   MenuItem?   @relation("CouponFreeItem", fields: [freeMenuItemId], references: [id])
   /// OrderItems auto-inserted by this coupon (FREE_ITEM redemption
   /// trail). Used by removeDiscount to void the freebies when the
   /// coupon is detached from an order.
@@ -1649,13 +1652,14 @@ model Supplier {
   deletedAt        DateTime?
 
   // Relations
-  branch              Branch               @relation(fields: [branchId], references: [id])
-  ingredients         Ingredient[]
-  ingredientSuppliers IngredientSupplier[]
-  purchaseOrders      PurchaseOrder[]
-  payments            SupplierPayment[]
-  returns             PurchaseReturn[]
-  adjustments         SupplierAdjustment[]
+  branch               Branch                @relation(fields: [branchId], references: [id])
+  ingredients          Ingredient[]
+  ingredientSuppliers  IngredientSupplier[]
+  purchaseOrders       PurchaseOrder[]
+  payments             SupplierPayment[]
+  returns              PurchaseReturn[]
+  adjustments          SupplierAdjustment[]
+  shoppingRequestLines ShoppingRequestLine[]
 
   @@index([branchId, isActive])
   @@map("suppliers")
@@ -1849,22 +1853,23 @@ model Ingredient {
   websiteDisplayName String? // optional alias rendered to customers (e.g. "Aromatic Garlic" hides internal "Garlic Powder"); falls back to `name` when null
 
   // Relations
-  branch              Branch               @relation(fields: [branchId], references: [id])
-  supplier            Supplier?            @relation(fields: [supplierId], references: [id])
-  suppliers           IngredientSupplier[]
-  recipeItems         RecipeItem[]
-  movements           StockMovement[]
-  purchaseOrderItems  PurchaseOrderItem[]
-  wasteLogs           WasteLog[]
-  preReadyRecipeItems PreReadyRecipeItem[]
-  returnItems         PurchaseReturnItem[]
-  parent              Ingredient?          @relation("IngredientVariants", fields: [parentId], references: [id])
-  variants            Ingredient[]         @relation("IngredientVariants")
+  branch               Branch                @relation(fields: [branchId], references: [id])
+  supplier             Supplier?             @relation(fields: [supplierId], references: [id])
+  suppliers            IngredientSupplier[]
+  recipeItems          RecipeItem[]
+  movements            StockMovement[]
+  purchaseOrderItems   PurchaseOrderItem[]
+  wasteLogs            WasteLog[]
+  preReadyRecipeItems  PreReadyRecipeItem[]
+  returnItems          PurchaseReturnItem[]
+  shoppingRequestLines ShoppingRequestLine[]
+  parent               Ingredient?           @relation("IngredientVariants", fields: [parentId], references: [id])
+  variants             Ingredient[]          @relation("IngredientVariants")
   /// Reverse-link to any PreReadyItem that produces stock for this
   /// Ingredient. One Ingredient should be paired with at most one
   /// PreReadyItem in v1; the array exists because Prisma requires it
   /// for the relation, not because multi-link is supported in code.
-  producedBy          PreReadyItem[]       @relation("PreReadyProducesIngredient")
+  producedBy           PreReadyItem[]        @relation("PreReadyProducesIngredient")
 
   @@index([branchId, isActive])
   @@index([itemCode])
@@ -1947,9 +1952,10 @@ model StockMovement {
   createdAt             DateTime          @default(now())
 
   // Relations
-  branch        Branch         @relation(fields: [branchId], references: [id])
-  ingredient    Ingredient     @relation(fields: [ingredientId], references: [id])
-  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  branch              Branch               @relation(fields: [branchId], references: [id])
+  ingredient          Ingredient           @relation(fields: [ingredientId], references: [id])
+  purchaseOrder       PurchaseOrder?       @relation(fields: [purchaseOrderId], references: [id])
+  shoppingRequestLine ShoppingRequestLine? @relation("ShoppingRequestAdjustmentMovement")
 
   @@index([branchId, createdAt])
   @@index([ingredientId, createdAt])
@@ -1996,16 +2002,21 @@ model PurchaseOrder {
   deletedAt   DateTime?
 
   // Relations
-  branch           Branch              @relation(fields: [branchId], references: [id])
-  supplier         Supplier            @relation(fields: [supplierId], references: [id])
-  createdBy        Staff               @relation("POCreatedBy", fields: [createdById], references: [id])
-  items            PurchaseOrderItem[]
-  supplierPayments SupplierPayment[]
-  returns          PurchaseReturn[]
+  branch               Branch                @relation(fields: [branchId], references: [id])
+  supplier             Supplier              @relation(fields: [supplierId], references: [id])
+  createdBy            Staff                 @relation("POCreatedBy", fields: [createdById], references: [id])
+  items                PurchaseOrderItem[]
+  supplierPayments     SupplierPayment[]
+  returns              PurchaseReturn[]
   /// Back-relation for the per-PO list of stock movements
   /// (PURCHASE-type rows on receive). Lets the Stock Watcher report
   /// join supplier + PO context without parsing notes.
-  stockMovements   StockMovement[]
+  stockMovements       StockMovement[]
+  /// Back-relation for shopping-request lines that converted into
+  /// PO items at approval time. One PO can contain lines sourced from
+  /// multiple ShoppingRequests if admin approves several requests for
+  /// the same supplier on the same day.
+  shoppingRequestLines ShoppingRequestLine[]
 
   @@index([branchId, status])
   @@map("purchase_orders")
@@ -2213,13 +2224,19 @@ model WasteLog {
   quantity     Decimal     @db.Decimal(14, 4)
   reason       WasteReason @default(OTHER)
   notes        String?
+  /// Optional uploaded photo URL (returned by POST /upload/image).
+  /// Populated when a mobile shopping-request line tagged WASTE
+  /// captured a photo at the floor; admin sees the thumbnail on the
+  /// review screen and on this waste log entry itself.
+  photoUrl     String?
   recordedById String
   createdAt    DateTime    @default(now())
 
   // Relations
-  branch     Branch     @relation(fields: [branchId], references: [id])
-  ingredient Ingredient @relation(fields: [ingredientId], references: [id])
-  recordedBy Staff      @relation("WasteRecorder", fields: [recordedById], references: [id])
+  branch              Branch               @relation(fields: [branchId], references: [id])
+  ingredient          Ingredient           @relation(fields: [ingredientId], references: [id])
+  recordedBy          Staff                @relation("WasteRecorder", fields: [recordedById], references: [id])
+  shoppingRequestLine ShoppingRequestLine? @relation("ShoppingRequestWasteLog")
 
   @@index([branchId, createdAt])
   @@index([ingredientId])
@@ -3059,4 +3076,97 @@ model CouponCampaign {
 
   @@index([branchId, createdAt])
   @@map("coupon_campaigns")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHOPPING REQUESTS — mobile staff-submitted shopping/restock list
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Kitchen / advisor / manager / owner staff use the mobile-friendly
+// /mobile/shopping screen to submit a shopping list to admin. Each line
+// can optionally flag a "stock mismatch" with a physical-count diagnosis;
+// admin reviews, picks a supplier per line, and approves → one DRAFT
+// PurchaseOrder per supplier is generated and mismatch lines fire either
+// a WasteLog (for WASTE) or an ADJUSTMENT stockMovement (other reasons)
+// in the same transaction.
+
+enum MismatchReason {
+  WASTE // shortage: spoiled / used and not logged at the time
+  MISCALCULATION // shortage: counted wrong / shrinkage
+  MISSING_PURCHASE // overage: stock arrived without a PO posting
+  ADJUSTMENT // overage: catch-all (donated, transferred-in)
+}
+
+enum ShoppingRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model ShoppingRequest {
+  id              String                @id @default(cuid())
+  branchId        String
+  requestedById   String
+  status          ShoppingRequestStatus @default(PENDING)
+  notes           String?
+  approvedById    String?
+  approvedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  branch      Branch                @relation(fields: [branchId], references: [id])
+  requestedBy Staff                 @relation("ShoppingRequestRequester", fields: [requestedById], references: [id])
+  approvedBy  Staff?                @relation("ShoppingRequestApprover", fields: [approvedById], references: [id])
+  lines       ShoppingRequestLine[]
+
+  @@index([branchId, status, createdAt])
+  @@map("shopping_requests")
+}
+
+model ShoppingRequestLine {
+  id                   String          @id @default(cuid())
+  requestId            String
+  ingredientId         String
+  /// Quantity admin should order (in the ingredient's purchase unit).
+  /// Optional: a row can exist purely to flag a mismatch with zero
+  /// reorder amount.
+  requestedQuantity    Decimal?        @db.Decimal(14, 3)
+  /// Physical on-hand count entered by staff when flagging a mismatch.
+  /// Compared against `softwareCountAtTime` to compute the variance and
+  /// route to either WasteLog or ADJUSTMENT stockMovement on approval.
+  physicalCount        Decimal?        @db.Decimal(14, 3)
+  /// Snapshot of `Ingredient.currentStock` at the moment staff submitted
+  /// the request, so admin's review reflects what staff saw — not the
+  /// possibly-moved-since current stock.
+  softwareCountAtTime  Decimal?        @db.Decimal(14, 3)
+  mismatchReason       MismatchReason?
+  mismatchPhotoUrl     String?
+  mismatchNotes        String?
+  /// Optional unit-cost override the admin sets at review time.
+  /// Paisa per purchase-unit. Falls back to the ingredient's
+  /// costPerPurchaseUnit when null.
+  unitCostPaisa        Int?
+  /// Admin-side resolution: which supplier this line lands with on
+  /// approval. Defaults to the ingredient's primary IngredientSupplier
+  /// when null.
+  supplierId           String?
+  /// Back-pointer set at approval — the PO this line landed in (one
+  /// PO per supplier group; a line with no requestedQuantity stays
+  /// null because it never became a PO item).
+  purchaseOrderId      String?
+  /// Back-pointer for mismatch resolution.
+  wasteLogId           String?         @unique
+  adjustmentMovementId String?         @unique
+
+  request            ShoppingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  ingredient         Ingredient      @relation(fields: [ingredientId], references: [id])
+  supplier           Supplier?       @relation(fields: [supplierId], references: [id])
+  purchaseOrder      PurchaseOrder?  @relation(fields: [purchaseOrderId], references: [id])
+  wasteLog           WasteLog?       @relation("ShoppingRequestWasteLog", fields: [wasteLogId], references: [id])
+  adjustmentMovement StockMovement?  @relation("ShoppingRequestAdjustmentMovement", fields: [adjustmentMovementId], references: [id])
+
+  @@index([requestId])
+  @@index([ingredientId])
+  @@map("shopping_request_lines")
 }

@@ -34,6 +34,7 @@ import { LoyaltyModule } from './loyalty/loyalty.module';
 import { ExpenseModule } from './expense/expense.module';
 import { AccountModule } from './account/account.module';
 import { PreReadyModule } from './pre-ready/pre-ready.module';
+import { ShoppingRequestModule } from './shopping-request/shopping-request.module';
 import { LeaveModule } from './leave/leave.module';
 import { WorkPeriodModule } from './work-period/work-period.module';
 import { CookingStationModule } from './cooking-station/cooking-station.module';
@@ -137,6 +138,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // Pre-Ready Foods
     PreReadyModule,
+
+    // Mobile Shopping Requests
+    ShoppingRequestModule,
 
     // Leave Management
     LeaveModule,

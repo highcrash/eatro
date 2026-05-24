@@ -82,6 +82,11 @@ export const BACKUP_MODELS: readonly { accessor: string; table: string; hasSelfR
   { accessor: 'creditorPayment', table: 'creditor_payments' },
   { accessor: 'creditorAdjustment', table: 'creditor_adjustments' },
   { accessor: 'wasteLog', table: 'waste_logs' },
+  // Shopping requests — mobile staff-submitted lists with mismatch
+  // flags. Restore after wasteLog + stockMovement + purchaseOrder so
+  // the optional back-pointer FKs on each line resolve.
+  { accessor: 'shoppingRequest', table: 'shopping_requests' },
+  { accessor: 'shoppingRequestLine', table: 'shopping_request_lines' },
 
   // Tier 7 — discounts, coupons, campaigns & reservation
   { accessor: 'discount', table: 'discounts' },

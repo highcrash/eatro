@@ -32,6 +32,7 @@ type Scope =
   | 'payroll'
   | 'sms-logs'
   | 'waste-logs'
+  | 'shopping-requests'
   | 'reset-all';
 
 interface Action {
@@ -133,6 +134,7 @@ const SECTIONS: Section[] = [
     title: 'Purchases',
     actions: [
       { scope: 'purchases', label: 'Delete all purchase orders', desc: 'Removes purchase orders and their items.' },
+      { scope: 'shopping-requests', label: 'Delete all shopping requests', desc: 'Removes mobile-submitted shopping lists and their lines. WasteLog / ADJUSTMENT side-effects created at approval time stay where they are — wipe those separately via Inventory cleanups.' },
     ],
   },
   {

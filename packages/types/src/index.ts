@@ -15,3 +15,4 @@ export * from './pre-ready';
 export * from './permissions';
 export * from './reservation';
 export * from './liabilities';
+export * from './shopping-request';
