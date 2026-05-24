@@ -34,6 +34,7 @@ export type CleanupScope =
   | 'waste-logs'
   | 'fb-scheduled-posts'
   | 'activity-logs'
+  | 'shopping-requests'
   | 'reset-all';
 
 @Injectable()
@@ -321,6 +322,17 @@ export class CleanupService {
         break;
       }
 
+      case 'shopping-requests': {
+        // ShoppingRequestLine is cascade-deleted via FK; delete the
+        // header rows and Prisma takes care of the children. Mismatch
+        // side-effects (WasteLog, ADJUSTMENT stockMovement) stay where
+        // they are — they're part of the inventory audit trail and
+        // are handled separately by waste-logs / stock-movements
+        // cleanups.
+        deleted.shoppingRequests = (await p.shoppingRequest.deleteMany({ where })).count;
+        break;
+      }
+
       case 'reset-all': {
         // Wipe all transactional data, keep: branch, settings, staff, payment methods, branding
         // FB queue first — its FK to menuItemDiscount uses SetNull,
@@ -337,6 +349,9 @@ export class CleanupService {
 
         deleted.purchaseReturnItems = (await p.purchaseReturnItem.deleteMany({ where: { purchaseReturn: { branchId } } })).count;
         deleted.purchaseReturns = (await p.purchaseReturn.deleteMany({ where })).count;
+        // ShoppingRequest before PurchaseOrder + WasteLog + StockMovement so
+        // its line-level FKs don't restrict the parent deletes below.
+        deleted.shoppingRequests = (await p.shoppingRequest.deleteMany({ where })).count;
         deleted.purchaseOrderItems = (await p.purchaseOrderItem.deleteMany({ where: { purchaseOrder: { branchId } } })).count;
         deleted.purchaseOrders = (await p.purchaseOrder.deleteMany({ where })).count;
         deleted.supplierAdjustments = (await p.supplierAdjustment.deleteMany({ where: { supplier: { branchId } } })).count;

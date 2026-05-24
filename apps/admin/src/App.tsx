@@ -55,9 +55,14 @@ import SmsPage from './pages/SmsPage';
 import DevicesPage from './pages/DevicesPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import ReservationsPage from './pages/ReservationsPage';
+import MobileShoppingRequestPage from './pages/MobileShoppingRequestPage';
+import MobileShoppingHistoryPage from './pages/MobileShoppingHistoryPage';
+import ShoppingRequestsPage from './pages/ShoppingRequestsPage';
+import MiscalculationReportPage from './pages/MiscalculationReportPage';
 
 export default function AdminApp() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const role = useAuthStore((s) => s.user?.role);
 
   if (!isAuthenticated) {
     return <LoginPage />;
@@ -65,8 +70,16 @@ export default function AdminApp() {
 
   return (
     <Routes>
+      {/* Mobile shopping flow — rendered OUTSIDE AdminLayout so it
+          looks like a phone app and KITCHEN role can use it without
+          drowning in admin-only sidebar items. */}
+      <Route path="/mobile/shopping" element={<MobileShoppingRequestPage />} />
+      <Route path="/mobile/shopping/history" element={<MobileShoppingHistoryPage />} />
+
       <Route element={<AdminLayout />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        {/* KITCHEN role default-lands on the mobile shopping page —
+            most admin nav items are hidden for them anyway. */}
+        <Route index element={<Navigate to={role === 'KITCHEN' ? '/mobile/shopping' : '/dashboard'} replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/menu" element={<MenuPage />} />
         <Route path="/menu/custom" element={<CustomMenuPage />} />
@@ -81,6 +94,7 @@ export default function AdminApp() {
         <Route path="/pre-ready" element={<PreReadyPage />} />
         <Route path="/purchasing" element={<PurchasingPage />} />
         <Route path="/shopping-list" element={<ShoppingListPage />} />
+        <Route path="/shopping-requests" element={<ShoppingRequestsPage />} />
         <Route path="/qr-codes" element={<QrCodesPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/reports/sales" element={<SalesReportPage />} />
@@ -89,6 +103,7 @@ export default function AdminApp() {
         <Route path="/reports/items" element={<ItemsSoldReportPage />} />
         <Route path="/reports/performance" element={<PerformanceReportPage />} />
         <Route path="/reports/supplies" element={<SuppliesReportPage />} />
+        <Route path="/reports/miscalculation" element={<MiscalculationReportPage />} />
         <Route path="/reports/aggregator-pnl" element={<AggregatorPnLPage />} />
         <Route path="/reports/mushak" element={<MushakRegisterPage />} />
         <Route path="/reports/activity-log" element={<ActivityLogPage />} />

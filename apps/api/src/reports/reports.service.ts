@@ -703,6 +703,66 @@ export class ReportsService {
   }
 
   /**
+   * Miscalculation report — per-ingredient roll-up of ADJUSTMENT
+   * stockMovements whose notes start with "Miscalculation:" (the
+   * exact prefix written by ShoppingRequestService.approve for the
+   * MISCALCULATION reason). Surfaces chronic shrinkage so admin can
+   * spot ingredients that keep counting wrong and tighten storage
+   * / portioning / receipt-checking habits.
+   *
+   * Signed quantity sum + paisa value (qty × stamped unitCostPaisa,
+   * falling back to current ingredient cost when the stamp is null).
+   */
+  async getMiscalculationReport(branchId: string, from: string, to: string) {
+    const fromDate = new Date(from);
+    fromDate.setHours(0, 0, 0, 0);
+    const toDate = new Date(to);
+    toDate.setHours(23, 59, 59, 999);
+
+    const movements = await this.prisma.stockMovement.findMany({
+      where: {
+        branchId,
+        type: 'ADJUSTMENT',
+        createdAt: { gte: fromDate, lte: toDate },
+        notes: { startsWith: 'Miscalculation:' },
+      },
+      include: {
+        ingredient: { select: { id: true, name: true, unit: true, costPerUnit: true } },
+      },
+    });
+
+    const byIngredient = new Map<string, { ingredientId: string; ingredientName: string; unit: string; signedQty: number; valuePaisa: number; count: number }>();
+    for (const m of movements) {
+      if (!m.ingredient) continue;
+      const qty = m.quantity.toNumber();
+      const stampedCost = m.unitCostPaisa != null ? Number(m.unitCostPaisa) : m.ingredient.costPerUnit.toNumber();
+      const cost = Math.max(0, stampedCost);
+      const existing = byIngredient.get(m.ingredientId);
+      if (existing) {
+        existing.signedQty += qty;
+        existing.valuePaisa += Math.abs(qty) * cost;
+        existing.count += 1;
+      } else {
+        byIngredient.set(m.ingredientId, {
+          ingredientId: m.ingredient.id,
+          ingredientName: m.ingredient.name,
+          unit: m.ingredient.unit,
+          signedQty: qty,
+          valuePaisa: Math.abs(qty) * cost,
+          count: 1,
+        });
+      }
+    }
+    const rows = Array.from(byIngredient.values()).sort((a, b) => b.valuePaisa - a.valuePaisa);
+    return {
+      from: fromDate.toISOString(),
+      to: toDate.toISOString(),
+      rows,
+      totalValuePaisa: rows.reduce((s, r) => s + r.valuePaisa, 0),
+    };
+  }
+
+  /**
    * Supplies report — one row per SUPPLY-category ingredient over a
    * date window. Surfaces purchase total, manual usage (the
    * OPERATIONAL_USE log), waste, on-hand value, and a trailing 30-day
