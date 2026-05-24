@@ -152,10 +152,51 @@ function fmtQty(qty: number, unit: string): string {
   return `${rounded.toString()} ${unit}`;
 }
 
+// Movement-bucket filters surfaced in the header. The day-by-day view
+// hides sections whose key is not in the active set, so admin can drill
+// in on (say) just wastage without the noise of sales + purchases. The
+// summary tiles + reconciliation strip stay unfiltered so the totals
+// remain honest regardless of which buckets are visible.
+type MovementKind = 'purchase' | 'usage' | 'wastage' | 'void' | 'adjustment';
+const ALL_KINDS: MovementKind[] = ['purchase', 'usage', 'wastage', 'void', 'adjustment'];
+const KIND_LABEL: Record<MovementKind, string> = {
+  purchase: 'Purchase',
+  usage: 'Usage',
+  wastage: 'Wastage',
+  void: 'Void Returns',
+  adjustment: 'Adjustment',
+};
+const KIND_COLOR: Record<MovementKind, string> = {
+  purchase: '#4CAF50',
+  usage: '#FFA726',
+  wastage: '#D62B2B',
+  void: '#29B6F6',
+  adjustment: '#9E9E9E',
+};
+
 export default function StockWatcherPage() {
   const [ingredientId, setIngredientId] = useState<string>('');
   const [from, setFrom] = useState<string>(monthAgoIso());
   const [to, setTo] = useState<string>(todayIso());
+  const [activeKinds, setActiveKinds] = useState<Set<MovementKind>>(
+    () => new Set(ALL_KINDS),
+  );
+  const showPurchase = activeKinds.has('purchase');
+  const showUsage = activeKinds.has('usage');
+  const showWastage = activeKinds.has('wastage');
+  const showVoid = activeKinds.has('void');
+  const showAdjustment = activeKinds.has('adjustment');
+  const toggleKind = (k: MovementKind) => {
+    setActiveKinds((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      // Don't allow zero selection — leaves nothing rendered, which is
+      // confusing. Treat "all off" as "all on" (matches the GMail-style
+      // filter chip pattern).
+      if (next.size === 0) return new Set(ALL_KINDS);
+      return next;
+    });
+  };
 
   const { data: ingredients = [] } = useQuery<Ingredient[]>({
     queryKey: ['ingredients-for-watcher'],
@@ -378,6 +419,45 @@ export default function StockWatcherPage() {
         </button>
       </div>
 
+      {/* ── Movement-bucket filter chips ──────────────────────
+          Per-section toggle. All five enabled = unfiltered view.
+          Toggling a chip off hides that movement type in the
+          day-by-day breakdown below — totals + reconciliation are
+          unaffected so the summary always reflects the full picture.
+          Hidden in print so the hardcopy is full-ledger by default. */}
+      <div className="flex items-center gap-2 flex-wrap no-print">
+        <span className="text-[10px] uppercase tracking-widest text-[#888]">Show:</span>
+        {ALL_KINDS.map((k) => {
+          const on = activeKinds.has(k);
+          const color = KIND_COLOR[k];
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => toggleKind(k)}
+              className="text-[11px] uppercase tracking-widest px-3 py-1 border transition-colors"
+              style={{
+                background: on ? color : 'transparent',
+                color: on ? '#000' : color,
+                borderColor: color,
+                fontWeight: on ? 700 : 500,
+              }}
+            >
+              {KIND_LABEL[k]}
+            </button>
+          );
+        })}
+        {activeKinds.size < ALL_KINDS.length && (
+          <button
+            type="button"
+            onClick={() => setActiveKinds(new Set(ALL_KINDS))}
+            className="text-[11px] uppercase tracking-widest text-[#888] hover:text-white ml-1"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+
       {isError && (
         <div className="bg-[#3a1a1a] border border-[#D62B2B] text-[#F03535] p-4 text-sm">
           Failed to load: {(error as Error)?.message ?? 'unknown error'}
@@ -489,11 +569,29 @@ export default function StockWatcherPage() {
           {data.days.length === 0 && (
             <p className="text-[#999] text-sm">No movements in this date range.</p>
           )}
-          {data.days.map((day) => (
+          {data.days.map((day) => {
+            // Split the "other" bucket so the filter chips can target
+            // VOID_RETURN and ADJUSTMENT independently. Anything that
+            // doesn't fall in either bucket (e.g. legacy types) is
+            // grouped under adjustment so it still has a home.
+            const voidRows = day.other.filter((r) => r.type === 'VOID_RETURN');
+            const adjustmentRows = day.other.filter((r) => r.type !== 'VOID_RETURN');
+            const hasPurchase = showPurchase && day.purchases.length > 0;
+            const hasUsage = showUsage && day.sales.length > 0;
+            const hasWastage = showWastage && day.wastage.length > 0;
+            const hasVoid = showVoid && voidRows.length > 0;
+            const hasAdjustment = showAdjustment && adjustmentRows.length > 0;
+            // Hide the whole day card when no enabled bucket has rows
+            // for it — keeps the scroll surface tight when the admin
+            // narrows down to (say) only Wastage.
+            if (!hasPurchase && !hasUsage && !hasWastage && !hasVoid && !hasAdjustment) {
+              return null;
+            }
+            return (
             <div key={day.date} className="sw-day">
               <div className="sw-day-title">{fmtDate(day.date)}</div>
 
-              {day.purchases.length > 0 && (
+              {hasPurchase && (
                 <>
                   <p className="sw-section-label">Purchases</p>
                   <table className="sw-table">
@@ -526,7 +624,7 @@ export default function StockWatcherPage() {
                 </>
               )}
 
-              {day.sales.length > 0 && (
+              {hasUsage && (
                 <>
                   <p className="sw-section-label">Sales / Usage</p>
                   <table className="sw-table">
@@ -559,7 +657,7 @@ export default function StockWatcherPage() {
                 </>
               )}
 
-              {day.wastage.length > 0 && (
+              {hasWastage && (
                 <>
                   <p className="sw-section-label">Wastage</p>
                   <table className="sw-table">
@@ -594,9 +692,40 @@ export default function StockWatcherPage() {
                 </>
               )}
 
-              {day.other.length > 0 && (
+              {hasVoid && (
                 <>
-                  <p className="sw-section-label">Adjustments / Returns</p>
+                  <p className="sw-section-label">Void Returns</p>
+                  <table className="sw-table">
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Description</th>
+                        <th>Order</th>
+                        <th className="num">Qty</th>
+                        <th className="num">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {voidRows.map((r, i) => (
+                        <tr key={i}>
+                          <td>{fmtTime(r.time)}</td>
+                          <td className="text-[#ccc]">
+                            {r.notes ?? '—'}
+                            {r.variantName && <span className="block text-[10px] text-[#888]">{r.variantName}</span>}
+                          </td>
+                          <td className="text-[#ccc]">{r.orderNumber ?? '—'}</td>
+                          <td className="num">{r.signedQuantity >= 0 ? '+' : '−'}{fmtQty(Math.abs(r.signedQuantity), data.ingredient.unit)}</td>
+                          <td className="num">{formatCurrency(r.totalPaisa)}{r.isApprox && <span className="text-[#888] text-[10px]"> (approx.)</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+
+              {hasAdjustment && (
+                <>
+                  <p className="sw-section-label">Adjustments</p>
                   <table className="sw-table">
                     <thead>
                       <tr>
@@ -609,7 +738,7 @@ export default function StockWatcherPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {day.other.map((r, i) => (
+                      {adjustmentRows.map((r, i) => (
                         <tr key={i}>
                           <td>{fmtTime(r.time)}</td>
                           <td>{r.type}</td>
@@ -627,7 +756,8 @@ export default function StockWatcherPage() {
                 </>
               )}
             </div>
-          ))}
+            );
+          })}
         </>
       )}
     </div>
