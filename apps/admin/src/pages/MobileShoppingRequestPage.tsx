@@ -29,22 +29,51 @@ import { OVERAGE_REASONS, SHORTAGE_REASONS } from '@restora/types';
  * and approves.
  */
 
-type LineDraft = {
-  /** Stable client-side id (Date.now() + index) so React keys stay
-   *  put when ingredients reorder. Server doesn't see it. */
-  key: string;
-  ingredientId: string;
-  ingredientName: string;
-  unit: string;
-  purchaseUnit: string | null;
+/** Mismatch state for one variant (or for a standalone — modeled as
+ *  a single-variant "family" for uniform rendering). */
+type VariantMismatchDraft = {
+  variantId: string;
+  /** Display label inside the mismatch section ("Pushti Packet KG"),
+   *  or '' for a standalone. */
+  label: string;
+  /** The variant's own currentStock at the moment the row was added. */
   currentStock: number;
-  /** Display strings — converted to number on submit. */
-  requestedQuantity: string;
   physicalCount: string;
-  showMismatch: boolean;
   mismatchReason: MismatchReason | null;
   mismatchPhotoUrl: string | null;
   mismatchNotes: string;
+};
+
+type LineDraft = {
+  /** Stable client-side id so React keys survive reorder. Server doesn't see it. */
+  key: string;
+  /** Variant ingredient the staff picked from the search — this is the
+   *  one the "order qty" line targets so admin's review knows exactly
+   *  which brand to reorder. */
+  pickedVariantId: string;
+  /** Parent ingredient id (same as pickedVariantId for standalones). */
+  parentId: string;
+  /** Display name combining parent + variant brand (e.g.
+   *  "Pulao Rice PACK — Pushti Packet KG"). */
+  pickedLabel: string;
+  /** Parent name only ("Pulao Rice PACK") — used in the mismatch
+   *  expander when listing siblings. */
+  parentName: string;
+  unit: string;
+  purchaseUnit: string | null;
+  /** Aggregate across all variants of the parent family (or the
+   *  standalone's own stock). Shown next to the per-variant stock so
+   *  staff sees both numbers at a glance. */
+  totalStock: number;
+  /** Order-qty input — targets the picked variant. Admin can change
+   *  supplier per line at review time. */
+  requestedQuantity: string;
+  showMismatch: boolean;
+  /** One entry per variant in the parent family (including the picked
+   *  one). Single entry for standalones. Each carries its own
+   *  physical count + reason + photo so the kitchen can reconcile
+   *  every brand of the same staple in one row. */
+  variants: VariantMismatchDraft[];
 };
 
 const REASON_LABEL: Record<MismatchReason, string> = {
@@ -70,27 +99,61 @@ export default function MobileShoppingRequestPage() {
   });
 
   // Flatten parents + variants into a single picker list so staff can
-  // pick a specific brand variant directly when relevant.
-  const pickerOptions = useMemo(() => {
-    const rows: Array<{ id: string; label: string; unit: string; purchaseUnit: string | null; currentStock: number }> = [];
+  // pick a specific brand variant directly when relevant. Each row
+  // carries `parentId` + the per-variant + aggregate stock so the
+  // mismatch expander can fan out across siblings without an extra
+  // lookup at add time.
+  type PickerOption = {
+    id: string;
+    label: string;
+    parentId: string;
+    parentName: string;
+    unit: string;
+    purchaseUnit: string | null;
+    currentStock: number;
+    /** Sum across the parent's whole family — equals currentStock for
+     *  standalones. Drives the "Total: NN G" badge on the line card. */
+    totalStock: number;
+    /** All siblings under the same parent (including the picked one)
+     *  with their own stock + brand label, in createdAt order. Empty
+     *  for standalones (a single-entry family is built at add time). */
+    siblings: Array<{ variantId: string; label: string; currentStock: number }>;
+  };
+  const pickerOptions = useMemo<PickerOption[]>(() => {
+    const rows: PickerOption[] = [];
     for (const ing of ingredients) {
       if (ing.hasVariants) {
-        for (const v of (ing as Ingredient & { variants?: Ingredient[] }).variants ?? []) {
+        const variants = (ing as Ingredient & { variants?: Ingredient[] }).variants ?? [];
+        const totalStock = variants.reduce((s, v) => s + Number(v.currentStock), 0);
+        const siblings = variants.map((v) => ({
+          variantId: v.id,
+          label: v.brandName ?? v.name,
+          currentStock: Number(v.currentStock),
+        }));
+        for (const v of variants) {
           rows.push({
             id: v.id,
             label: `${ing.name} — ${v.brandName ?? v.name}`,
+            parentId: ing.id,
+            parentName: ing.name,
             unit: v.unit,
             purchaseUnit: v.purchaseUnit ?? ing.purchaseUnit ?? null,
             currentStock: Number(v.currentStock),
+            totalStock,
+            siblings,
           });
         }
       } else if (!ing.parentId) {
         rows.push({
           id: ing.id,
           label: ing.name,
+          parentId: ing.id,
+          parentName: ing.name,
           unit: ing.unit,
           purchaseUnit: ing.purchaseUnit ?? null,
           currentStock: Number(ing.currentStock),
+          totalStock: Number(ing.currentStock),
+          siblings: [],
         });
       }
     }
@@ -108,28 +171,51 @@ export default function MobileShoppingRequestPage() {
     return pickerOptions.filter((o) => o.label.toLowerCase().includes(q)).slice(0, 50);
   }, [pickerOptions, query]);
 
-  const addLine = (opt: { id: string; label: string; unit: string; purchaseUnit: string | null; currentStock: number }) => {
-    if (lines.some((l) => l.ingredientId === opt.id)) {
-      // Already added — focus its row instead of duplicating.
-      const el = document.getElementById(`line-${opt.id}`);
+  const addLine = (opt: PickerOption) => {
+    // Dedup at the parent level — if any variant of this parent is
+    // already on the list, focus that row instead of adding a duplicate
+    // (the mismatch expander already covers every sibling).
+    const existing = lines.find((l) => l.parentId === opt.parentId);
+    if (existing) {
+      const el = document.getElementById(`line-${existing.parentId}`);
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
+    // Build the per-variant mismatch slots up front. Standalones get a
+    // single-entry list so the rendering path stays uniform.
+    const variantSlots: VariantMismatchDraft[] = opt.siblings.length > 0
+      ? opt.siblings.map((s) => ({
+          variantId: s.variantId,
+          label: s.label,
+          currentStock: s.currentStock,
+          physicalCount: '',
+          mismatchReason: null,
+          mismatchPhotoUrl: null,
+          mismatchNotes: '',
+        }))
+      : [{
+          variantId: opt.id,
+          label: '',
+          currentStock: opt.currentStock,
+          physicalCount: '',
+          mismatchReason: null,
+          mismatchPhotoUrl: null,
+          mismatchNotes: '',
+        }];
     setLines((prev) => [
       ...prev,
       {
         key: `${Date.now()}-${prev.length}`,
-        ingredientId: opt.id,
-        ingredientName: opt.label,
+        pickedVariantId: opt.id,
+        parentId: opt.parentId,
+        pickedLabel: opt.label,
+        parentName: opt.parentName,
         unit: opt.unit,
         purchaseUnit: opt.purchaseUnit,
-        currentStock: opt.currentStock,
+        totalStock: opt.totalStock,
         requestedQuantity: '',
-        physicalCount: '',
         showMismatch: false,
-        mismatchReason: null,
-        mismatchPhotoUrl: null,
-        mismatchNotes: '',
+        variants: variantSlots,
       },
     ]);
     setQuery('');
@@ -137,6 +223,15 @@ export default function MobileShoppingRequestPage() {
 
   const updateLine = (key: string, patch: Partial<LineDraft>) => {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  };
+  const updateVariant = (lineKey: string, variantId: string, patch: Partial<VariantMismatchDraft>) => {
+    setLines((prev) =>
+      prev.map((l) =>
+        l.key !== lineKey
+          ? l
+          : { ...l, variants: l.variants.map((v) => (v.variantId === variantId ? { ...v, ...patch } : v)) },
+      ),
+    );
   };
   const removeLine = (key: string) => setLines((prev) => prev.filter((l) => l.key !== key));
 
@@ -158,36 +253,71 @@ export default function MobileShoppingRequestPage() {
   const hasSubmittable = lines.some((l) => {
     const qty = parseFloat(l.requestedQuantity);
     const hasQty = !Number.isNaN(qty) && qty > 0;
-    return hasQty || l.mismatchReason != null;
+    const hasAnyMismatch = l.variants.some((v) => {
+      const p = parseFloat(v.physicalCount);
+      return v.mismatchReason != null && !Number.isNaN(p) && p >= 0;
+    });
+    return hasQty || hasAnyMismatch;
   });
 
   const handleSubmit = () => {
     setSubmitError(null);
-    const dto: CreateShoppingRequestDto = {
-      notes: notes.trim() || null,
-      lines: lines
-        .map((l) => {
-          const qty = parseFloat(l.requestedQuantity);
-          const physical = parseFloat(l.physicalCount);
-          const hasQty = !Number.isNaN(qty) && qty > 0;
-          const hasMismatch = l.mismatchReason != null && !Number.isNaN(physical) && physical >= 0;
-          if (!hasQty && !hasMismatch) return null;
+    const payload: CreateShoppingRequestDto['lines'] = [];
+    for (const l of lines) {
+      const qty = parseFloat(l.requestedQuantity);
+      const hasQty = !Number.isNaN(qty) && qty > 0;
+
+      // Pick up every per-variant mismatch entry the staff filled in.
+      const mismatchEntries = l.variants
+        .map((v) => {
+          const physical = parseFloat(v.physicalCount);
+          const hasPhysical = !Number.isNaN(physical) && physical >= 0;
+          if (!hasPhysical || v.mismatchReason == null) return null;
           return {
-            ingredientId: l.ingredientId,
-            requestedQuantity: hasQty ? qty : null,
-            physicalCount: hasMismatch ? physical : null,
-            mismatchReason: hasMismatch ? l.mismatchReason : null,
-            mismatchPhotoUrl: hasMismatch && l.mismatchReason === 'WASTE' ? l.mismatchPhotoUrl : null,
-            mismatchNotes: hasMismatch ? l.mismatchNotes.trim() || null : null,
+            variantId: v.variantId,
+            physical,
+            reason: v.mismatchReason,
+            photoUrl: v.mismatchReason === 'WASTE' ? v.mismatchPhotoUrl : null,
+            notes: v.mismatchNotes.trim() || null,
           };
         })
-        .filter((x): x is NonNullable<typeof x> => x !== null),
-    };
-    if (dto.lines.length === 0) {
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+
+      // The order-qty row targets the variant the staff picked. If the
+      // picked variant ALSO has a mismatch entry, fold it into the same
+      // line so the server gets one row per (ingredient, intent) pair
+      // instead of two for the same ingredient.
+      if (hasQty) {
+        const sameVariantMismatch = mismatchEntries.find((m) => m.variantId === l.pickedVariantId);
+        payload.push({
+          ingredientId: l.pickedVariantId,
+          requestedQuantity: qty,
+          physicalCount: sameVariantMismatch ? sameVariantMismatch.physical : null,
+          mismatchReason: sameVariantMismatch ? sameVariantMismatch.reason : null,
+          mismatchPhotoUrl: sameVariantMismatch ? sameVariantMismatch.photoUrl : null,
+          mismatchNotes: sameVariantMismatch ? sameVariantMismatch.notes : null,
+        });
+      }
+
+      // Every other variant with a mismatch becomes its own line.
+      for (const m of mismatchEntries) {
+        if (hasQty && m.variantId === l.pickedVariantId) continue;
+        payload.push({
+          ingredientId: m.variantId,
+          requestedQuantity: null,
+          physicalCount: m.physical,
+          mismatchReason: m.reason,
+          mismatchPhotoUrl: m.photoUrl,
+          mismatchNotes: m.notes,
+        });
+      }
+    }
+
+    if (payload.length === 0) {
       setSubmitError('Add a quantity to order or flag a mismatch on at least one line.');
       return;
     }
-    submitMut.mutate(dto);
+    submitMut.mutate({ notes: notes.trim() || null, lines: payload });
   };
 
   return (
@@ -247,6 +377,7 @@ export default function MobileShoppingRequestPage() {
             key={line.key}
             line={line}
             onChange={(patch) => updateLine(line.key, patch)}
+            onVariantChange={(variantId, patch) => updateVariant(line.key, variantId, patch)}
             onRemove={() => removeLine(line.key)}
           />
         ))}
@@ -300,40 +431,36 @@ export default function MobileShoppingRequestPage() {
   );
 }
 
-function LineCard({ line, onChange, onRemove }: {
+function LineCard({ line, onChange, onVariantChange, onRemove }: {
   line: LineDraft;
   onChange: (patch: Partial<LineDraft>) => void;
+  onVariantChange: (variantId: string, patch: Partial<VariantMismatchDraft>) => void;
   onRemove: () => void;
 }) {
-  const photoInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const isFamily = line.variants.length > 1;
+  const pickedVariant = line.variants.find((v) => v.variantId === line.pickedVariantId);
+  const pickedStock = pickedVariant?.currentStock ?? line.totalStock;
 
-  const physical = parseFloat(line.physicalCount);
-  const hasPhysical = !Number.isNaN(physical) && physical >= 0;
-  const delta = hasPhysical ? physical - line.currentStock : 0;
-  const reasonOptions: MismatchReason[] =
-    !hasPhysical || Math.abs(delta) < 0.0001
-      ? []
-      : delta < 0 ? SHORTAGE_REASONS : OVERAGE_REASONS;
-
-  const handlePhoto = async (file: File) => {
-    setUploading(true);
-    try {
-      const res = await api.upload<{ url: string }>('/upload/image', file);
-      onChange({ mismatchPhotoUrl: res.url });
-    } catch (e) {
-      alert(`Photo upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
-    } finally {
-      setUploading(false);
-    }
+  const cancelMismatch = () => {
+    onChange({
+      showMismatch: false,
+      variants: line.variants.map((v) => ({
+        ...v, physicalCount: '', mismatchReason: null, mismatchPhotoUrl: null, mismatchNotes: '',
+      })),
+    });
   };
 
   return (
-    <div id={`line-${line.ingredientId}`} className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-2">
+    <div id={`line-${line.parentId}`} className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-2">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-white truncate">{line.ingredientName}</p>
-          <p className="text-[10px] text-[#888]">Software: {line.currentStock.toFixed(2)} {line.unit}</p>
+          <p className="text-sm text-white truncate">{line.pickedLabel}</p>
+          <p className="text-[10px] text-[#888]">
+            Software: {pickedStock.toFixed(2)} {line.unit}
+            {isFamily && (
+              <span className="text-[#FFA726]"> · Total: {line.totalStock.toFixed(2)} {line.unit} across {line.variants.length} variants</span>
+            )}
+          </p>
         </div>
         <button onClick={onRemove} className="text-[#666] hover:text-[#D62B2B] p-1 -m-1">
           <Trash2 size={16} />
@@ -364,118 +491,170 @@ function LineCard({ line, onChange, onRemove }: {
           + Stock mismatch?
         </button>
       ) : (
-        <div className="border-t border-[#2A2A2A] pt-2 space-y-2">
+        <div className="border-t border-[#2A2A2A] pt-2 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[10px] tracking-widest uppercase text-[#FFA726] flex items-center gap-1">
-              <AlertTriangle size={12} /> Mismatch
+              <AlertTriangle size={12} /> Mismatch{isFamily && ` · per variant`}
             </span>
-            <button
-              onClick={() => onChange({ showMismatch: false, physicalCount: '', mismatchReason: null, mismatchPhotoUrl: null, mismatchNotes: '' })}
-              className="text-[10px] text-[#666] hover:text-white"
-            >
+            <button onClick={cancelMismatch} className="text-[10px] text-[#666] hover:text-white">
               Cancel
             </button>
           </div>
 
-          <div>
-            <label className="block text-[10px] tracking-widest uppercase text-[#888] mb-1">
-              Physical count ({line.unit})
-            </label>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              min="0"
-              value={line.physicalCount}
-              onChange={(e) => onChange({ physicalCount: e.target.value })}
-              placeholder="Type what you counted"
-              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2.5 text-sm outline-none focus:border-[#D62B2B]"
+          {line.variants.map((variant) => (
+            <VariantMismatchEditor
+              key={variant.variantId}
+              variant={variant}
+              unit={line.unit}
+              showLabel={isFamily}
+              onChange={(patch) => onVariantChange(variant.variantId, patch)}
             />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Per-variant mismatch sub-card. When the line is a single-variant
+ *  family (standalone), `showLabel` is false and we render the inputs
+ *  flush with the parent card. For a multi-variant family every
+ *  sibling gets its own collapsible-style row with the brand name. */
+function VariantMismatchEditor({ variant, unit, showLabel, onChange }: {
+  variant: VariantMismatchDraft;
+  unit: string;
+  showLabel: boolean;
+  onChange: (patch: Partial<VariantMismatchDraft>) => void;
+}) {
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const physical = parseFloat(variant.physicalCount);
+  const hasPhysical = !Number.isNaN(physical) && physical >= 0;
+  const delta = hasPhysical ? physical - variant.currentStock : 0;
+  const reasonOptions: MismatchReason[] =
+    !hasPhysical || Math.abs(delta) < 0.0001
+      ? []
+      : delta < 0 ? SHORTAGE_REASONS : OVERAGE_REASONS;
+
+  const handlePhoto = async (file: File) => {
+    setUploading(true);
+    try {
+      const res = await api.upload<{ url: string }>('/upload/image', file);
+      onChange({ mismatchPhotoUrl: res.url });
+    } catch (e) {
+      alert(`Photo upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className={showLabel ? 'bg-[#0D0D0D] border border-[#2A2A2A] p-2.5 space-y-2' : 'space-y-2'}>
+      {showLabel && (
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-white">{variant.label}</p>
+          <p className="text-[10px] text-[#888]">Software: {variant.currentStock.toFixed(2)} {unit}</p>
+        </div>
+      )}
+
+      <div>
+        <label className="block text-[10px] tracking-widest uppercase text-[#888] mb-1">
+          Physical count ({unit})
+        </label>
+        <input
+          type="number"
+          inputMode="decimal"
+          step="0.01"
+          min="0"
+          value={variant.physicalCount}
+          onChange={(e) => onChange({ physicalCount: e.target.value })}
+          placeholder="Type what you counted"
+          className="w-full bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2.5 text-sm outline-none focus:border-[#D62B2B]"
+        />
+      </div>
+
+      {hasPhysical && (
+        <div className="text-xs">
+          {Math.abs(delta) < 0.0001 ? (
+            <span className="text-[#888]">Counts match — no mismatch.</span>
+          ) : delta < 0 ? (
+            <span className="text-[#D62B2B]">Short by {Math.abs(delta).toFixed(2)} {unit}</span>
+          ) : (
+            <span className="text-[#4CAF50]">Over by {delta.toFixed(2)} {unit}</span>
+          )}
+        </div>
+      )}
+
+      {reasonOptions.length > 0 && (
+        <div>
+          <label className="block text-[10px] tracking-widest uppercase text-[#888] mb-1">Reason</label>
+          <div className="grid grid-cols-2 gap-2">
+            {reasonOptions.map((r) => (
+              <button
+                key={r}
+                onClick={() => onChange({ mismatchReason: r, mismatchPhotoUrl: r === 'WASTE' ? variant.mismatchPhotoUrl : null })}
+                className={`text-xs py-2 px-2 border transition-colors ${
+                  variant.mismatchReason === r
+                    ? 'bg-[#D62B2B] border-[#D62B2B] text-white'
+                    : 'bg-[#161616] border-[#2A2A2A] text-[#999] hover:border-[#D62B2B]'
+                }`}
+              >
+                <div className="font-bold">{REASON_LABEL[r]}</div>
+                <div className="text-[9px] text-[#666] mt-0.5">{REASON_DESC[r]}</div>
+              </button>
+            ))}
           </div>
+        </div>
+      )}
 
-          {hasPhysical && (
-            <div className="text-xs">
-              {Math.abs(delta) < 0.0001 ? (
-                <span className="text-[#888]">Counts match — no mismatch.</span>
-              ) : delta < 0 ? (
-                <span className="text-[#D62B2B]">Short by {Math.abs(delta).toFixed(2)} {line.unit}</span>
-              ) : (
-                <span className="text-[#4CAF50]">Over by {delta.toFixed(2)} {line.unit}</span>
-              )}
+      {variant.mismatchReason === 'WASTE' && (
+        <div>
+          <label className="block text-[10px] tracking-widest uppercase text-[#888] mb-1">Photo (optional)</label>
+          {variant.mismatchPhotoUrl ? (
+            <div className="relative inline-block">
+              <img src={variant.mismatchPhotoUrl} alt="Waste" className="h-20 w-20 object-cover border border-[#2A2A2A]" />
+              <button
+                onClick={() => onChange({ mismatchPhotoUrl: null })}
+                className="absolute -top-2 -right-2 bg-[#D62B2B] text-white rounded-full w-5 h-5 flex items-center justify-center"
+              >
+                <X size={10} />
+              </button>
             </div>
+          ) : (
+            <button
+              onClick={() => photoInputRef.current?.click()}
+              disabled={uploading}
+              className="inline-flex items-center gap-2 bg-[#161616] border border-[#2A2A2A] text-[#999] hover:border-[#D62B2B] text-xs px-3 py-2"
+            >
+              {uploading ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
+              {uploading ? 'Uploading…' : 'Capture photo'}
+            </button>
           )}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handlePhoto(f);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      )}
 
-          {reasonOptions.length > 0 && (
-            <div>
-              <label className="block text-[10px] tracking-widest uppercase text-[#888] mb-1">Reason</label>
-              <div className="grid grid-cols-2 gap-2">
-                {reasonOptions.map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => onChange({ mismatchReason: r, mismatchPhotoUrl: r === 'WASTE' ? line.mismatchPhotoUrl : null })}
-                    className={`text-xs py-2 px-2 border transition-colors ${
-                      line.mismatchReason === r
-                        ? 'bg-[#D62B2B] border-[#D62B2B] text-white'
-                        : 'bg-[#0D0D0D] border-[#2A2A2A] text-[#999] hover:border-[#D62B2B]'
-                    }`}
-                  >
-                    <div className="font-bold">{REASON_LABEL[r]}</div>
-                    <div className="text-[9px] text-[#666] mt-0.5">{REASON_DESC[r]}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {line.mismatchReason === 'WASTE' && (
-            <div>
-              <label className="block text-[10px] tracking-widest uppercase text-[#888] mb-1">Photo (optional)</label>
-              {line.mismatchPhotoUrl ? (
-                <div className="relative inline-block">
-                  <img src={line.mismatchPhotoUrl} alt="Waste" className="h-20 w-20 object-cover border border-[#2A2A2A]" />
-                  <button
-                    onClick={() => onChange({ mismatchPhotoUrl: null })}
-                    className="absolute -top-2 -right-2 bg-[#D62B2B] text-white rounded-full w-5 h-5 flex items-center justify-center"
-                  >
-                    <X size={10} />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => photoInputRef.current?.click()}
-                  disabled={uploading}
-                  className="inline-flex items-center gap-2 bg-[#0D0D0D] border border-[#2A2A2A] text-[#999] hover:border-[#D62B2B] text-xs px-3 py-2"
-                >
-                  {uploading ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
-                  {uploading ? 'Uploading…' : 'Capture photo'}
-                </button>
-              )}
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handlePhoto(f);
-                  e.target.value = '';
-                }}
-              />
-            </div>
-          )}
-
-          {line.mismatchReason && (
-            <div>
-              <label className="block text-[10px] tracking-widest uppercase text-[#888] mb-1">Notes (optional)</label>
-              <textarea
-                value={line.mismatchNotes}
-                onChange={(e) => onChange({ mismatchNotes: e.target.value })}
-                rows={2}
-                className="w-full bg-[#0D0D0D] border border-[#2A2A2A] text-white px-3 py-2 text-sm outline-none focus:border-[#D62B2B] resize-none"
-              />
-            </div>
-          )}
+      {variant.mismatchReason && (
+        <div>
+          <label className="block text-[10px] tracking-widest uppercase text-[#888] mb-1">Notes (optional)</label>
+          <textarea
+            value={variant.mismatchNotes}
+            onChange={(e) => onChange({ mismatchNotes: e.target.value })}
+            rows={2}
+            className="w-full bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm outline-none focus:border-[#D62B2B] resize-none"
+          />
         </div>
       )}
     </div>
