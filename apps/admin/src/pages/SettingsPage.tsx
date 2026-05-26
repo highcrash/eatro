@@ -612,11 +612,21 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
   const dispNeg = touched ? negotiate : (settings.customMenuNegotiateMargin == null ? '' : String(settings.customMenuNegotiateMargin));
   const dispMax = touched ? maxMargin : (settings.customMenuMaxMargin == null ? '' : String(settings.customMenuMaxMargin));
 
+  /** Margins are clamped to [0, 99] — values >= 100 divide by zero in
+   *  the selling-price formula (selling = cost / (1 - margin/100)) and
+   *  silently behave like 99%, producing a sky-high ceiling that
+   *  doesn't match the label the admin typed. Clamp on save so the
+   *  persisted value matches the actually-applied math. */
   const parseDecimal = (s: string): number | null => {
     const t = s.trim();
     if (!t) return null;
     const n = Number(t);
-    return Number.isFinite(n) && n >= 0 ? n : null;
+    if (!Number.isFinite(n) || n < 0) return null;
+    return n > 99 ? 99 : n;
+  };
+  const overLimit = (s: string) => {
+    const n = Number(s);
+    return Number.isFinite(n) && n > 99;
   };
 
   const saveCustomMenu = () => {
@@ -705,6 +715,9 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
             <p className="text-[10px] text-[#555] mt-1 leading-relaxed">
               60 → ৳40 cost = ৳100 floor (60% of selling is profit). 80 → ৳40 cost = ৳200 floor.
             </p>
+            {overLimit(dispCost) && (
+              <p className="text-[10px] text-[#FFA726] mt-1">Capped at 99% — values ≥ 100% are mathematically infinite.</p>
+            )}
           </div>
           <div>
             <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Negotiate Margin %</label>
@@ -715,6 +728,9 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
               className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-2 text-sm font-body text-white outline-none focus:border-[#D62B2B]"
             />
             <p className="text-[10px] text-[#555] mt-1 leading-relaxed">10 = cashier may price 10% below floor. Empty / 0 = locked.</p>
+            {overLimit(dispNeg) && (
+              <p className="text-[10px] text-[#FFA726] mt-1">Capped at 99%.</p>
+            )}
           </div>
           <div>
             <label className="block text-[10px] font-body text-[#666] tracking-widest uppercase mb-1">Max Margin %</label>
@@ -727,6 +743,11 @@ function KitchenSettingsSection({ isOwner }: { isOwner: boolean }) {
             <p className="text-[10px] text-[#555] mt-1 leading-relaxed">
               80 = max selling = 5&times; cost. 90 = 10&times; cost. Empty = no cap.
             </p>
+            {overLimit(dispMax) && (
+              <p className="text-[10px] text-[#FFA726] mt-1">
+                Capped at 99% (= 100&times; cost). 200% margin is mathematically impossible — gross margin can't exceed 100%. If you want unlimited ceiling, leave this empty.
+              </p>
+            )}
           </div>
         </div>
         <div className="px-5 py-3 border-t border-[#2A2A2A] flex justify-end">
