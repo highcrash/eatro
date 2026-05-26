@@ -3,6 +3,22 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.27 — Custom-menu margin label matches the actually-applied value (2026-05-26)
+
+POS Custom Menu dialog showed "Ceiling (200% MARGIN)" with a price
+of ৳26,736 on a ৳267 cost — wildly off. Internally the math always
+clamps margin at 99% (gross margin can't mathematically exceed 100%),
+but the label kept printing the raw configured value. Admin saw a
+label that didn't match the math.
+
+Now the Floor / Negotiate / Ceiling labels show the clamped value
+(`clampMargin()`), so a configured 200% margin renders as "(99%
+margin)" — the price reads as truthful instead of nonsensical.
+Admin Settings → Kitchen also surfaces an inline warning when a
+value > 99 is typed.
+
+No native / IPC / printing changes.
+
 ## 2.0.26 — Receipt attachments on goods-receive (2026-05-26)
 
 POS cashier can now attach a photo or PDF of the supplier invoice

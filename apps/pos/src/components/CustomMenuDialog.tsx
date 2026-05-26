@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { X, Plus, Trash2, Search, Copy, History, Pencil } from 'lucide-react';
 
 import type { CreateCustomMenuDto, MenuItem } from '@restora/types';
-import { formatCurrency, computeMarginBand } from '@restora/utils';
+import { formatCurrency, computeMarginBand, clampMargin } from '@restora/utils';
 import { api } from '../lib/api';
 import ApprovalOtpDialog from './ApprovalOtpDialog';
 
@@ -314,19 +314,19 @@ export default function CustomMenuDialog({ approval, onClose, onCreated }: Props
             </div>
             <div className="flex justify-between items-center">
               <span className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">
-                Floor {costMargin != null && <span className="text-theme-text-muted">({Number(costMargin)}% margin)</span>}
+                Floor {costMargin != null && <span className="text-theme-text-muted">({clampMargin(Number(costMargin))}% margin)</span>}
               </span>
               <span className="text-sm text-theme-text">{formatCurrency(floorPrice)}</span>
             </div>
             {negotiate != null && Number(negotiate) > 0 && (
               <div className="flex justify-between items-center">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Negotiate Floor (−{Number(negotiate)}%)</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Negotiate Floor (−{clampMargin(Number(negotiate))}%)</span>
                 <span className="text-sm text-[#FFA726]">{formatCurrency(minPrice)}</span>
               </div>
             )}
             {maxPrice != null && (
               <div className="flex justify-between items-center">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Ceiling ({Number(maxMargin)}% margin)</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Ceiling ({clampMargin(Number(maxMargin))}% margin)</span>
                 <span className="text-sm text-theme-text">{formatCurrency(maxPrice)}</span>
               </div>
             )}
