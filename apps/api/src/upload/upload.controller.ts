@@ -12,6 +12,10 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+/** Receipts allow PDFs in addition to images — supplier invoices come
+ *  in either format. Kept separate from the image-only allow-list so a
+ *  rogue avatar-upload caller can't sneak a PDF through. */
+const RECEIPT_ALLOWED_TYPES = [...ALLOWED_TYPES, 'application/pdf'];
 const MAX_SIZE = 20 * 1024 * 1024; // 20 MB
 
 // ─── Storage selector ──────────────────────────────────────────────────────
@@ -97,5 +101,38 @@ export class UploadController {
 
     // Local disk (dev)
     return { url: `/uploads/${file.filename}` };
+  }
+
+  /** Receipt uploader — accepts images AND PDFs. Used by the goods-
+   *  receive flow on both admin (PurchasingPage) and POS
+   *  (PosPurchasingPage) to attach a supplier-invoice photo/scan to a
+   *  PurchaseOrder. The PO row keeps an append-only array of the
+   *  returned URLs so multi-shipment deliveries preserve every
+   *  receipt. CASHIER role is included since POS users handle most
+   *  receives in practice. */
+  @Post('receipt')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage,
+      limits: { fileSize: MAX_SIZE },
+      fileFilter: (_req, file, cb) => {
+        if (RECEIPT_ALLOWED_TYPES.includes(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(new BadRequestException('Only JPEG, PNG, WebP, GIF, or PDF files are allowed'), false);
+        }
+      },
+    }),
+  )
+  uploadReceipt(@UploadedFile() file: UploadedFileWithLocation) {
+    if (!file) throw new BadRequestException('No file provided');
+    const type: 'image' | 'pdf' = file.mimetype === 'application/pdf' ? 'pdf' : 'image';
+
+    if (useSpaces) {
+      const url = file.location ?? `${SPACES_PUBLIC_BASE}/${file.key}`;
+      return { url, type };
+    }
+    return { url: `/uploads/${file.filename}`, type };
   }
 }

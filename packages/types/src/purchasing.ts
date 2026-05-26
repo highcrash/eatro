@@ -36,6 +36,10 @@ export interface PurchaseOrder {
   receiptDiscount?: number;
   receiptDiscountReason?: string | null;
   receiptExtraFees?: ReceiptExtraFee[] | null;
+  /** Append-only list of receipt attachments (image or PDF) uploaded
+   *  at receive time. Each receive call pushes new entries so the
+   *  full delivery paper trail survives multi-shipment POs. */
+  receiptAttachments?: ReceiptAttachment[] | null;
   /** Meta message id of the last "Send PO via WhatsApp" — null = never sent. */
   whatsappMessageId?: string | null;
   whatsappSentAt?: Date | string | null;
@@ -69,6 +73,16 @@ export interface ReceiptExtraFee {
   amount: number;
 }
 
+/** One uploaded receipt file (supplier invoice photo / scan / PDF).
+ *  `url` is whatever the /upload/receipt endpoint returned — public
+ *  Spaces URL in prod, /uploads/* path in dev. `uploadedAt` is the
+ *  ISO timestamp at which receive ingested the file. */
+export interface ReceiptAttachment {
+  url: string;
+  type: 'image' | 'pdf';
+  uploadedAt: string;
+}
+
 export interface ReceiveGoodsDto {
   items: {
     purchaseOrderItemId: string;
@@ -100,6 +114,11 @@ export interface ReceiveGoodsDto {
   /** Extra fees added at delivery (delivery, labour, etc.). Each fee is
    *  ADDED to the supplier ledger total. */
   receiptExtraFees?: ReceiptExtraFee[];
+  /** Receipt photo / PDF attachments captured at this receive event.
+   *  Multiple files allowed (e.g. invoice page + delivery slip).
+   *  Each receive call APPENDS these onto the PO's running list — it
+   *  does NOT overwrite earlier receipts. */
+  receiptAttachments?: ReceiptAttachment[];
 }
 
 // ─── Purchase Returns ────────────────────────────────────────────────────────

@@ -3,6 +3,23 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.26 — Receipt attachments on goods-receive (2026-05-26)
+
+POS cashier can now attach a photo or PDF of the supplier invoice
+when receiving goods against a purchase order. Adds an "+ Photo /
+PDF" picker inside `apps/pos/src/pages/PosPurchasingPage.tsx`'s
+Receive form that posts to the new `/upload/receipt` endpoint
+(accepts JPG / PNG / WebP / GIF / PDF, max 20 MB). The returned
+URLs ride along on the existing `/cashier-ops/purchase-order/
+receive` call and get appended to the PO's running attachment list
+on the server — multi-shipment receives keep every paper.
+
+Adds an `upload` helper to `apps/pos/src/lib/api.ts` for clean
+multipart posts (was missing before — the admin wrapper already
+had one).
+
+No native / IPC / printing changes.
+
 ## 2.0.25 — Bundle refresh: bulk pre-ready reconciliation types (2026-05-19)
 
 Admin-only feature ship. The desktop bundle has no behavioural change

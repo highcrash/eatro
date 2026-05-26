@@ -61,4 +61,23 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /** Multipart upload — used by goods-receive to attach receipt
+   *  images / PDFs. Bypasses the JSON Content-Type so the browser
+   *  picks the boundary header itself; still attaches the bearer
+   *  token like every other request. */
+  upload: async <T>(path: string, file: File, fieldName = 'file'): Promise<T> => {
+    const token = useAuthStore.getState().accessToken;
+    const fd = new FormData();
+    fd.append(fieldName, file);
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      body: fd,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error((err as { message?: string }).message ?? res.statusText);
+    }
+    return res.json() as Promise<T>;
+  },
 };

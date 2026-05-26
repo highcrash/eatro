@@ -1989,6 +1989,14 @@ model PurchaseOrder {
   receiptDiscountReason String?
   /// JSON array of { label: string; amount: number } in paisa.
   receiptExtraFees      Json?
+  /// Receipt attachments uploaded at receive time — image or PDF of
+  /// the physical receipt. Append-only JSON array of
+  /// `{ url: string; type: 'image' | 'pdf'; uploadedAt: string }`.
+  /// Each receive call PUSHES new entries (rather than overwriting)
+  /// so a multi-shipment PO keeps the full delivery paper trail.
+  /// Surfaces as a paperclip icon on the PO list + as inline links
+  /// inside the Supplier ledger card.
+  receiptAttachments    Json?
   /// Meta message id returned when this PO PDF was last sent over
   /// WhatsApp. Null = never sent. Useful for tracing back to Meta
   /// Business Manager and a future delivery-receipt webhook hookup.
