@@ -505,6 +505,8 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
   const [rcvDiscount, setRcvDiscount] = useState('');
   const [rcvDiscountReason, setRcvDiscountReason] = useState('');
   const [rcvExtraFees, setRcvExtraFees] = useState<{ label: string; amount: string }[]>([]);
+  const [rcvAttachments, setRcvAttachments] = useState<Array<{ url: string; type: 'image' | 'pdf' }>>([]);
+  const [rcvAttachmentUploading, setRcvAttachmentUploading] = useState(false);
 
   const itemsSubtotal = (po
     ? po.items.reduce((sum, item) => {
@@ -533,6 +535,7 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
       setRcvDiscount('');
       setRcvDiscountReason('');
       setRcvExtraFees([]);
+      setRcvAttachments([]);
       setClosePartialCheck(false);
       setError('Goods received ✓');
     },
@@ -579,9 +582,32 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
         receiptDiscount,
         receiptDiscountReason: receiptDiscount ? (rcvDiscountReason.trim() || undefined) : undefined,
         receiptExtraFees: receiptExtraFees.length > 0 ? receiptExtraFees : undefined,
+        receiptAttachments: rcvAttachments.length > 0 ? rcvAttachments : undefined,
         actionOtp: otp ?? undefined,
       });
     });
+  };
+
+  // Receipt file upload — runs each file through /upload/receipt
+  // (accepts JPG/PNG/WebP/GIF/PDF, max 20 MB). The URL + type get
+  // pushed onto `rcvAttachments`; submit appends them to the PO's
+  // running attachment list, so multi-shipment receives keep every
+  // paper without overwriting earlier ones.
+  const handleAttachmentUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setRcvAttachmentUploading(true);
+    try {
+      const added = await Promise.all(
+        Array.from(files).map((file) =>
+          api.upload<{ url: string; type: 'image' | 'pdf' }>('/upload/receipt', file),
+        ),
+      );
+      setRcvAttachments((prev) => [...prev, ...added]);
+    } catch (e) {
+      setError(`Upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+    } finally {
+      setRcvAttachmentUploading(false);
+    }
   };
 
   return (
@@ -868,6 +894,52 @@ function ReceiveTab({ openPOs, ingredients, guardAndRun, qc }: {
                 <span className="text-theme-text-muted"> Any un-received items stay on the PO for audit, but the status goes to Received (no more deliveries expected).</span>
               </span>
             </label>
+          )}
+        </div>
+      )}
+
+      {/* Receipt attachments — supplier invoice photo / PDF captured
+          at receive time. The whole array gets appended to the PO's
+          running attachment list so a multi-shipment PO keeps every
+          paper. */}
+      {po && (
+        <div className="mt-4 border-t border-theme-border pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-theme-text-muted">Receipt attachments</p>
+            <label className={`text-[11px] font-bold tracking-wider uppercase cursor-pointer ${rcvAttachmentUploading ? 'text-theme-text-muted' : 'text-theme-pop hover:underline'}`}>
+              {rcvAttachmentUploading ? 'Uploading…' : '+ Photo / PDF'}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+                multiple
+                disabled={rcvAttachmentUploading}
+                onChange={(e) => { handleAttachmentUpload(e.target.files); e.target.value = ''; }}
+                className="hidden"
+              />
+            </label>
+          </div>
+          {rcvAttachments.length === 0 ? (
+            <p className="text-[11px] text-theme-text-muted">Optional — attach a photo / PDF of the supplier invoice.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {rcvAttachments.map((att, idx) => (
+                <div key={idx} className="relative border border-theme-border bg-theme-bg p-1 flex items-center gap-2">
+                  {att.type === 'image' ? (
+                    <img src={att.url} alt="Receipt" className="h-16 w-16 object-cover" />
+                  ) : (
+                    <div className="h-16 w-16 flex items-center justify-center text-theme-pop text-[11px] tracking-wider">PDF</div>
+                  )}
+                  <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-theme-pop text-[11px] underline">View</a>
+                  <button
+                    onClick={() => setRcvAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                    className="absolute -top-2 -right-2 bg-theme-danger text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center"
+                    title="Remove (does not delete from server)"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}

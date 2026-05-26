@@ -165,6 +165,11 @@ export default function PurchasingPage() {
   const [receiveDiscount, setReceiveDiscount] = useState('');
   const [receiveDiscountReason, setReceiveDiscountReason] = useState('');
   const [receiveExtraFees, setReceiveExtraFees] = useState<{ label: string; amount: string }[]>([]);
+  // Receipt attachments captured at receive — image or PDF of the
+  // supplier invoice. Each receive call appends these to the PO's
+  // running list, so multi-shipment deliveries keep every paper.
+  const [receiveAttachments, setReceiveAttachments] = useState<Array<{ url: string; type: 'image' | 'pdf' }>>([]);
+  const [receiveAttachmentUploading, setReceiveAttachmentUploading] = useState(false);
 
   // Return form state
   const [showReturnForm, setShowReturnForm] = useState(false);
@@ -261,7 +266,7 @@ export default function PurchasingPage() {
   });
 
   const receiveMutation = useMutation({
-    mutationFn: ({ id, items, additionalItems, notes, receiptDiscount, receiptDiscountReason, receiptExtraFees }: {
+    mutationFn: ({ id, items, additionalItems, notes, receiptDiscount, receiptDiscountReason, receiptExtraFees, receiptAttachments }: {
       id: string;
       items: { purchaseOrderItemId: string; quantityReceived: number; unitPrice?: number; ingredientIdOverride?: string }[];
       additionalItems?: { ingredientId: string; quantityReceived: number; unitPrice?: number }[];
@@ -269,12 +274,14 @@ export default function PurchasingPage() {
       receiptDiscount?: number;
       receiptDiscountReason?: string;
       receiptExtraFees?: { label: string; amount: number }[];
+      receiptAttachments?: { url: string; type: 'image' | 'pdf' }[];
     }) =>
-      api.post(`/purchasing/${id}/receive`, { items, additionalItems, notes, receiptDiscount, receiptDiscountReason, receiptExtraFees }),
+      api.post(`/purchasing/${id}/receive`, { items, additionalItems, notes, receiptDiscount, receiptDiscountReason, receiptExtraFees, receiptAttachments }),
     onSuccess: (updated) => {
       void qc.invalidateQueries({ queryKey: ['purchase-orders'] });
       void qc.invalidateQueries({ queryKey: ['ingredients'] });
       void qc.invalidateQueries({ queryKey: ['stock-movements'] });
+      void qc.invalidateQueries({ queryKey: ['suppliers'] });
       setSelectedPO(updated as PurchaseOrder);
       setReceiveQtys({});
       setReceivePrices({});
@@ -284,6 +291,7 @@ export default function PurchasingPage() {
       setReceiveDiscount('');
       setReceiveDiscountReason('');
       setReceiveExtraFees([]);
+      setReceiveAttachments([]);
     },
   });
 
@@ -397,7 +405,29 @@ export default function PurchasingPage() {
       receiptDiscount,
       receiptDiscountReason: receiptDiscount ? (receiveDiscountReason.trim() || undefined) : undefined,
       receiptExtraFees: receiptExtraFees.length > 0 ? receiptExtraFees : undefined,
+      receiptAttachments: receiveAttachments.length > 0 ? receiveAttachments : undefined,
     });
+  };
+
+  // Receipt file upload — runs the file through /upload/receipt which
+  // accepts JPG/PNG/WebP/GIF/PDF (max 20 MB). The returned URL + type
+  // get pushed onto `receiveAttachments`; the receive mutation appends
+  // them to the PO's running attachment list on submit.
+  const handleReceiveAttachmentUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setReceiveAttachmentUploading(true);
+    try {
+      const uploads = Array.from(files).map(async (file) => {
+        const res = await api.upload<{ url: string; type: 'image' | 'pdf' }>('/upload/receipt', file);
+        return { url: res.url, type: res.type };
+      });
+      const added = await Promise.all(uploads);
+      setReceiveAttachments((prev) => [...prev, ...added]);
+    } catch (e) {
+      alert(`Upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+    } finally {
+      setReceiveAttachmentUploading(false);
+    }
   };
 
   const [returnError, setReturnError] = useState('');
@@ -515,13 +545,17 @@ export default function PurchasingPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[#2A2A2A]">
-                    {['PO #', 'Supplier', 'Items', 'Status', 'Created', 'Actions'].map((h) => (
+                    {['PO #', 'Supplier', 'Items', 'Status', 'Created', 'Receipt', 'Actions'].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map((po) => (
+                  {orders.map((po) => {
+                    const attachments = Array.isArray((po as { receiptAttachments?: unknown }).receiptAttachments)
+                      ? ((po as { receiptAttachments: Array<{ url: string; type: 'image' | 'pdf' }> }).receiptAttachments)
+                      : [];
+                    return (
                     <tr key={po.id} className="border-b border-[#2A2A2A] last:border-0 hover:bg-[#1F1F1F]">
                       <td className="px-4 py-3 font-mono text-white text-xs">{po.id.slice(-8).toUpperCase()}</td>
                       <td className="px-4 py-3 text-white font-body text-sm">{po.supplier?.name ?? '—'}</td>
@@ -531,14 +565,30 @@ export default function PurchasingPage() {
                       </td>
                       <td className="px-4 py-3 text-[#666] font-body text-xs">{new Date(po.createdAt).toLocaleDateString()}</td>
                       <td className="px-4 py-3">
+                        {attachments.length > 0 ? (
+                          <a
+                            href={attachments[0].url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`View receipt${attachments.length > 1 ? ` (${attachments.length} attached — open detail for all)` : ''}`}
+                            className="inline-flex items-center gap-1 text-[#FFA726] hover:text-white font-body text-xs"
+                          >
+                            📎 {attachments.length > 1 ? `${attachments.length}` : ''}
+                          </a>
+                        ) : (
+                          <span className="text-[#444] text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
                         <button onClick={() => openDetail(po)} className="text-[#999] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">
                           View
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {orders.length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-[#666] font-body text-sm">No purchase orders yet.</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-[#666] font-body text-sm">No purchase orders yet.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -783,6 +833,41 @@ export default function PurchasingPage() {
                 </div>
               )}
             </div>
+            {/* Receipt attachments — surfaces every image/PDF the
+                cashier or admin attached at receive time. Click opens
+                in a new tab. */}
+            {(() => {
+              const attachments = Array.isArray((selectedPO as { receiptAttachments?: unknown }).receiptAttachments)
+                ? ((selectedPO as { receiptAttachments: Array<{ url: string; type: 'image' | 'pdf'; uploadedAt?: string }> }).receiptAttachments)
+                : [];
+              if (attachments.length === 0) return null;
+              return (
+                <div className="mt-4 pt-4 border-t border-[#2A2A2A]">
+                  <p className="text-[#666] font-body text-xs tracking-widest uppercase mb-2">Receipt Attachments ({attachments.length})</p>
+                  <div className="flex flex-wrap gap-3">
+                    {attachments.map((att, idx) => (
+                      <a
+                        key={idx}
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={att.uploadedAt ? `Uploaded ${new Date(att.uploadedAt).toLocaleString()}` : 'Open attachment'}
+                        className="border border-[#2A2A2A] bg-[#0D0D0D] p-1 hover:border-[#FFA726] block"
+                      >
+                        {att.type === 'image' ? (
+                          <img src={att.url} alt="Receipt" className="h-20 w-20 object-cover" />
+                        ) : (
+                          <div className="h-20 w-20 flex flex-col items-center justify-center bg-[#161616] text-[#FFA726]">
+                            <span className="text-xs tracking-widest">PDF</span>
+                            <span className="text-[9px] text-[#666] mt-1">Open</span>
+                          </div>
+                        )}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             {/* Actions */}
             <div className="flex gap-2 mt-4">
               {selectedPO.status === 'DRAFT' && (
@@ -1246,6 +1331,53 @@ export default function PurchasingPage() {
                   </div>
                 );
               })()}
+
+              {/* Receipt attachments — image or PDF of the physical
+                  supplier invoice. Files accepted: JPG / PNG / WebP /
+                  GIF / PDF, max 20 MB each. Each successful receive
+                  appends these to the PO's running list so multi-
+                  shipment deliveries keep every paper. */}
+              <div className="mt-4 pt-4 border-t border-[#2A2A2A]">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[#999] text-xs font-body tracking-widest uppercase">Receipt Attachments</p>
+                  <label className={`text-[11px] font-body tracking-widest uppercase cursor-pointer ${receiveAttachmentUploading ? 'text-[#666]' : 'text-[#FFA726] hover:text-white'}`}>
+                    {receiveAttachmentUploading ? 'Uploading…' : '+ Attach photo / PDF'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+                      multiple
+                      disabled={receiveAttachmentUploading}
+                      onChange={(e) => { handleReceiveAttachmentUpload(e.target.files); e.target.value = ''; }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                {receiveAttachments.length === 0 ? (
+                  <p className="text-[#555] text-[11px] font-body">Optional — attach the physical receipt to keep the paper trail.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {receiveAttachments.map((att, idx) => (
+                      <div key={idx} className="relative border border-[#2A2A2A] bg-[#0D0D0D] p-1 flex items-center gap-2">
+                        {att.type === 'image' ? (
+                          <img src={att.url} alt="Receipt" className="h-16 w-16 object-cover" />
+                        ) : (
+                          <div className="h-16 w-16 flex flex-col items-center justify-center bg-[#161616] text-[#FFA726]">
+                            <span className="text-[10px] tracking-widest">PDF</span>
+                          </div>
+                        )}
+                        <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-[#FFA726] hover:text-white text-[11px] tracking-widest uppercase">View</a>
+                        <button
+                          onClick={() => setReceiveAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                          className="absolute -top-2 -right-2 bg-[#D62B2B] text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center"
+                          title="Remove (does not delete from server)"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {receiveMutation.error && (
                 <p className="text-[#F03535] text-xs font-body mt-2">{(receiveMutation.error as Error).message}</p>

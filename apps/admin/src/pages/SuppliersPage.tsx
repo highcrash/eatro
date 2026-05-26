@@ -55,6 +55,7 @@ interface LedgerPO {
   receiptDiscount?: number;
   receiptDiscountReason?: string | null;
   receiptExtraFees?: Array<{ label: string; amount: number }>;
+  receiptAttachments?: Array<{ url: string; type: 'image' | 'pdf'; uploadedAt?: string }>;
   total: number;
 }
 
@@ -662,6 +663,36 @@ export default function SuppliersPage() {
                               ))}
                             </tbody>
                           </table>
+
+                          {/* Receipt attachments — image / PDF of the
+                              physical supplier invoice captured at
+                              goods-receive time. Click opens in a new
+                              tab. Multiple receipts surface side by
+                              side when the PO was received in
+                              multiple shipments. */}
+                          {po.receiptAttachments && po.receiptAttachments.length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-[#2A2A2A]">
+                              <p className="text-[#666] font-body text-[10px] tracking-widest uppercase mb-1">Receipts</p>
+                              <div className="flex flex-wrap gap-2">
+                                {po.receiptAttachments.map((att, idx) => (
+                                  <a
+                                    key={idx}
+                                    href={att.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={att.uploadedAt ? `Uploaded ${new Date(att.uploadedAt).toLocaleString()}` : 'Open receipt'}
+                                    className="border border-[#2A2A2A] bg-[#161616] p-1 hover:border-[#FFA726] block"
+                                  >
+                                    {att.type === 'image' ? (
+                                      <img src={att.url} alt="Receipt" className="h-12 w-12 object-cover" />
+                                    ) : (
+                                      <div className="h-12 w-12 flex items-center justify-center text-[#FFA726] text-[10px] tracking-widest">PDF</div>
+                                    )}
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
 
                           {/* Receipt-level extras — visibility for the
                               delivery / freight / discount lines that

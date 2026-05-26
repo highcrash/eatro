@@ -396,6 +396,25 @@ export class PurchasingService {
       const cleanedFees: { label: string; amount: number }[] = (dto.receiptExtraFees ?? [])
         .filter((f) => f && typeof f.label === 'string' && f.label.trim().length > 0 && Number(f.amount) > 0)
         .map((f) => ({ label: f.label.trim(), amount: Math.round(Number(f.amount)) }));
+
+      // Receipt attachments — sanitise + stamp uploadedAt server-side
+      // so the client can't backdate. Appends to the existing array on
+      // the PO; passing zero attachments leaves the prior list intact.
+      const incomingAttachments = Array.isArray(dto.receiptAttachments)
+        ? dto.receiptAttachments
+            .filter((a) => a && typeof a.url === 'string' && a.url.trim().length > 0)
+            .map((a) => ({
+              url: a.url.trim(),
+              type: a.type === 'pdf' ? 'pdf' as const : 'image' as const,
+              uploadedAt: new Date().toISOString(),
+            }))
+        : [];
+      const rawExistingAttachments = (po as unknown as { receiptAttachments?: unknown }).receiptAttachments;
+      const existingAttachments: Array<{ url: string; type: 'image' | 'pdf'; uploadedAt: string }> =
+        Array.isArray(rawExistingAttachments)
+          ? (rawExistingAttachments as Array<{ url: string; type: 'image' | 'pdf'; uploadedAt: string }>)
+          : [];
+      const mergedAttachments = [...existingAttachments, ...incomingAttachments];
       const extraFeesTotal = cleanedFees.reduce((s, f) => s + f.amount, 0);
       const netDelta = Math.max(0, receiptTotal + extraFeesTotal - discountPaisa);
 
@@ -467,6 +486,11 @@ export class PurchasingService {
                 receiptDiscountReason: (dto.receiptDiscountReason ?? '').trim() || null,
                 receiptExtraFees: cleanedFees as unknown as object,
               }
+            : {}),
+          // Only re-write the column when this receive added attachments,
+          // so a no-attachment receive doesn't wipe earlier uploads.
+          ...(incomingAttachments.length > 0
+            ? { receiptAttachments: mergedAttachments as unknown as object }
             : {}),
         },
         include: {

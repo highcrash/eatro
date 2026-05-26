@@ -180,6 +180,11 @@ export class SupplierService {
         const fees = ((po as unknown as { receiptExtraFees?: Array<{ label: string; amount: number }> | null }).receiptExtraFees ?? null);
         const feesArr = Array.isArray(fees) ? fees : [];
         const feesTotal = feesArr.reduce((s, f) => s + Number(f?.amount ?? 0), 0);
+        const rawAttachments = (po as unknown as { receiptAttachments?: unknown }).receiptAttachments;
+        const attachments: Array<{ url: string; type: 'image' | 'pdf'; uploadedAt?: string }> =
+          Array.isArray(rawAttachments)
+            ? (rawAttachments as Array<{ url: string; type: 'image' | 'pdf'; uploadedAt?: string }>)
+            : [];
         return {
           id: po.id,
           status: po.status,
@@ -198,6 +203,7 @@ export class SupplierService {
           receiptDiscount: discount,
           receiptDiscountReason: discountReason,
           receiptExtraFees: feesArr,
+          receiptAttachments: attachments,
           // Net total — what actually moves the supplier ledger.
           total: Math.max(0, itemsTotal + feesTotal - discount),
         };
