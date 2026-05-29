@@ -285,6 +285,84 @@ export class AccountService {
   }
 
   /**
+   * Undo a prior EXPENSE posting against the account linked to a
+   * payment method. Mirrors `reverseSalePosting`'s lookup chain so it
+   * lands on the same account row the original expense debited.
+   * Increments the balance back by the expense amount and writes an
+   * ADJUSTMENT line with a clear "reversal" description.
+   *
+   * Used by `ExpenseService.remove()` so soft-deleting an expense also
+   * un-debits the cash / bKash / card account that originally took the
+   * hit. Without this, deleting an expense from the Expenses page left
+   * the Accounts ledger holding a phantom outflow that the admin had
+   * to manually adjust away.
+   */
+  async reverseExpensePosting(
+    branchId: string,
+    paymentOptionCode: string,
+    amount: number,
+    description: string,
+  ) {
+    const option = await this.prisma.paymentOption.findFirst({
+      where: { branchId, code: paymentOptionCode, isActive: true },
+      select: { accountId: true, categoryId: true },
+    });
+
+    let account;
+    if (option?.accountId) {
+      account = await this.prisma.account.findFirst({ where: { id: option.accountId, isActive: true } });
+    }
+
+    if (!account) {
+      account = await this.prisma.account.findFirst({
+        where: { branchId, linkedPaymentMethod: paymentOptionCode, isActive: true },
+      });
+    }
+
+    if (!account && option?.categoryId) {
+      const cat = await this.prisma.paymentMethodConfig.findFirst({
+        where: { id: option.categoryId },
+        include: { options: { where: { isDefault: true, isActive: true }, select: { accountId: true } } },
+      });
+      if (cat?.options[0]?.accountId) {
+        account = await this.prisma.account.findFirst({ where: { id: cat.options[0].accountId, isActive: true } });
+      }
+      if (!account && cat) {
+        account = await this.prisma.account.findFirst({
+          where: { branchId, linkedPaymentMethod: cat.code, isActive: true },
+        });
+      }
+    }
+
+    if (!account) {
+      const cat = await this.prisma.paymentMethodConfig.findFirst({
+        where: { branchId, code: paymentOptionCode },
+        include: { options: { where: { isDefault: true, isActive: true }, select: { accountId: true } } },
+      });
+      if (cat?.options[0]?.accountId) {
+        account = await this.prisma.account.findFirst({ where: { id: cat.options[0].accountId, isActive: true } });
+      }
+    }
+
+    if (!account) return;
+
+    await this.prisma.account.update({
+      where: { id: account.id },
+      data: { balance: { increment: amount } },
+    });
+
+    await this.prisma.accountTransaction.create({
+      data: {
+        branchId,
+        accountId: account.id,
+        type: 'ADJUSTMENT',
+        amount,
+        description,
+      },
+    });
+  }
+
+  /**
    * One-shot retroactive sweep that posts an AccountTransaction for any
    * SupplierPayment whose payment method resolves to an Account but never
    * had a corresponding ledger entry written.
