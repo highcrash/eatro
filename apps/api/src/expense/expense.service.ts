@@ -108,11 +108,27 @@ export class ExpenseService {
   }
 
   async remove(id: string, branchId: string) {
-    await this.findOne(id, branchId);
-    return this.prisma.expense.update({
+    // Fetch the expense BEFORE the soft-delete so we still have the
+    // amount + paymentMethod available for the account reversal.
+    const expense = await this.findOne(id, branchId);
+    const updated = await this.prisma.expense.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+    // Reverse the account posting that fired when this expense was
+    // created. Mirrors the create flow (which calls
+    // accountService.updateAccountForPayment with type 'EXPENSE'), so
+    // the cash / bKash / etc. account that originally took the hit gets
+    // credited back. Fire-and-forget — a missing account row (e.g. the
+    // payment method isn't linked anywhere) silently no-ops the
+    // reversal, same way the original posting silently skips.
+    void this.accountService.reverseExpensePosting(
+      branchId,
+      expense.paymentMethod,
+      expense.amount.toNumber(),
+      `Reversal of expense: ${expense.description} (deleted)`,
+    );
+    return updated;
   }
 
   async getSummary(branchId: string, from: string, to: string) {
