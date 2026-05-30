@@ -114,25 +114,89 @@ export default function ReportsPage() {
   const totalRevenue = summary?.totalRevenue ?? 0;
   const maxDailyRevenue = Math.max(...dailySales.map((d) => d.revenue), 1);
 
+  const periodLabel =
+    period === 'today' ? 'Today' :
+    period === 'week' ? 'This Week' :
+    period === 'month' ? 'This Month' : 'This Year';
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl text-white tracking-widest">FINANCE & REPORTS</h1>
-        {/* Period selector */}
-        <div className="flex">
-          {(['today', 'week', 'month', 'year'] as Period[]).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-4 py-2 font-body text-xs tracking-widest uppercase transition-colors border border-[#2A2A2A] -ml-px first:ml-0 ${
-                period === p ? 'bg-[#D62B2B] text-white border-[#D62B2B] z-10 relative' : 'bg-[#161616] text-[#666] hover:text-[#999]'
-              }`}
-            >
-              {p === 'today' ? 'Today' : p === 'week' ? 'This Week' : p === 'month' ? 'This Month' : 'This Year'}
-            </button>
-          ))}
+    <div className="space-y-6 reports-page">
+      {/* ── Print styles ─────────────────────────────────────────────
+          Same isolation trick as StockWatcher: visibility:hidden on
+          everything except the report subtree, then force the report
+          to position:absolute at top:0 so the browser prints only the
+          page content without the admin chrome. Use Ctrl+P / Cmd+P
+          and pick "Save as PDF" in the destination dropdown for a PDF
+          export. */}
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 12mm; }
+          html, body { background: #fff !important; }
+          body * { visibility: hidden !important; }
+          .reports-page, .reports-page * {
+            visibility: visible !important;
+          }
+          .reports-page {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            padding: 0 !important;
+            background: #fff !important;
+            color: #000 !important;
+            font-family: Arial, sans-serif !important;
+          }
+          .reports-page * {
+            color: #000 !important;
+            background: transparent !important;
+            border-color: #999 !important;
+          }
+          .no-print { display: none !important; }
+          .reports-page table th, .reports-page table td {
+            border: 1px solid #ccc !important;
+            padding: 4px 8px !important;
+          }
+          .reports-page .grid > div { page-break-inside: avoid; }
+        }
+      `}</style>
+
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="font-display text-3xl text-white tracking-widest">FINANCE & REPORTS</h1>
+          <p className="text-xs text-[#999] mt-1 print-only" style={{ display: 'none' }}>
+            {/* Visible only in print — shows the date range so the hardcopy
+                stands on its own without the period chip. */}
+            {periodLabel} · {summary?.from ?? ''} → {summary?.to ?? ''}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Period selector */}
+          <div className="flex no-print">
+            {(['today', 'week', 'month', 'year'] as Period[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-4 py-2 font-body text-xs tracking-widest uppercase transition-colors border border-[#2A2A2A] -ml-px first:ml-0 ${
+                  period === p ? 'bg-[#D62B2B] text-white border-[#D62B2B] z-10 relative' : 'bg-[#161616] text-[#666] hover:text-[#999]'
+                }`}
+              >
+                {p === 'today' ? 'Today' : p === 'week' ? 'This Week' : p === 'month' ? 'This Month' : 'This Year'}
+              </button>
+            ))}
+          </div>
+          {/* Print / Save as PDF — relies on the browser's native
+              print dialog (Ctrl+P). Hidden in print so the button
+              doesn't show on the hardcopy itself. */}
+          <button
+            onClick={() => window.print()}
+            title="Print or save as PDF (Ctrl+P / ⌘+P also works)"
+            className="no-print px-4 py-2 bg-[#2A2A2A] hover:bg-[#D62B2B] text-white text-xs tracking-widest uppercase transition-colors"
+          >
+            🖨 Print / PDF
+          </button>
         </div>
       </div>
+      <style>{`@media print { .print-only { display: block !important; color: #444 !important; font-style: italic; } }`}</style>
 
       {summaryLoading ? (
         <p className="text-[#666] font-body text-sm">Loading…</p>
