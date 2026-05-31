@@ -3,6 +3,24 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.29 — +ADD KT print now records status (Reprint button reflects add-items failures) (2026-06-01)
+
+Follow-up to 2.0.28. The +ADD Kitchen Ticket fired by "Add Items"
+on an existing order was using the shared `printKitchenTicketUtil`,
+which fires `window.desktop.print.kitchen` as fire-and-forget — the
+success/failure result was thrown away. So a +ADD print failure
+silently left the order's `lastKitchenPrintStatus` unchanged, and
+the Reprint KT button kept showing the prior state ("✓ printed")
+even though the latest +ADD never reached the kitchen.
+
+`printNewItemsKT` now talks to the desktop IPC directly (same path
+as the initial-print helper): awaits the result, alerts the cashier
+on failure, AND posts to `/orders/:id/kitchen-print-status` so the
+order's badge + audit reflects what actually happened. Browser
+fallback also reports status on popup blocked.
+
+No native / IPC / printing changes.
+
 ## 2.0.28 — Reprint Kitchen Ticket from POS (2026-06-01)
 
 When the network thermal printer is unreachable (e.g. router rebooted,
