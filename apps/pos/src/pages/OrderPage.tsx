@@ -976,7 +976,7 @@ function ActiveOrderView({
     mutationFn: (items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: { groupId: string; addonItemId: string }[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[] }[]) =>
       api.post<Order>(`/orders/${order.id}/items`, items),
     onSuccess: (updated) => {
-      if (!branchSettings || !branchSettings.useKds) printNewItemsKT(updated, newItemCart);
+      if (!branchSettings || !branchSettings.useKds) void printNewItemsKT(updated, newItemCart);
       setOrder(updated);
       setShowAddItems(false);
       setNewItemCart([]);
@@ -984,14 +984,15 @@ function ActiveOrderView({
     },
   });
 
-  const printNewItemsKT = (ord: Order, newItems: CartItem[]) => {
+  const printNewItemsKT = async (ord: Order, newItems: CartItem[]) => {
     // Build a KitchenTicketInput-shaped ticket for the +ADD lines and
-    // hand it to the shared printer. Routes through the desktop ESC/POS
-    // path (window.desktop.print.kitchen) when available and falls back
-    // to the shared HTML popup template otherwise. The previous inline
-    // browser fallback rendered only quantity + name, so customise
-    // ("NO GARLIC") and addon ("+ Cheese Sauce") lines vanished from
-    // the +ADD ticket.
+    // hand it to the desktop printer DIRECTLY (not via
+    // printKitchenTicketUtil). Reason: that shared helper fires
+    // window.desktop.print.kitchen as fire-and-forget — throwing away
+    // the success/failure result. Without the result we couldn't
+    // report status to /orders/:id/kitchen-print-status, so a +ADD
+    // KT failure left lastKitchenPrintStatus unchanged and the
+    // Reprint KT button never reflected it.
     // Build a map of menuItemId → recipe row so the +ADD ticket
     // gets the same recipe-attached treatment as a fresh KOT.
     const recipeById = new Map((ktRecipes ?? []).map((r) => [r.menuItemId, r] as const));
@@ -1018,9 +1019,38 @@ function ActiveOrderView({
         };
       }),
     };
+
+    const reportStatus = (ok: boolean, error?: string) => {
+      void api.post(`/orders/${ord.id}/kitchen-print-status`, {
+        ok,
+        error: ok ? undefined : (error ?? null),
+        isReprint: false,
+      }).catch(() => { /* swallow */ });
+    };
+
+    const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
+    if (desktopPrint) {
+      try {
+        const res = await desktopPrint(ticket);
+        if (!res?.ok) {
+          reportStatus(false, res?.message ?? 'unknown error');
+          alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
+        } else {
+          reportStatus(true);
+        }
+      } catch (err) {
+        const msg = (err as Error).message;
+        reportStatus(false, msg);
+        alert(`Kitchen print failed: ${msg}`);
+      }
+      return;
+    }
     const ok = printKitchenTicketUtil(ticket);
     if (!ok) {
+      reportStatus(false, 'popup blocked');
       alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
+    } else {
+      reportStatus(true);
     }
   };
 
