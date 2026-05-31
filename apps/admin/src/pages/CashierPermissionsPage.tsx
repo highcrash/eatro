@@ -20,6 +20,7 @@ const ACTION_LABELS: Record<CashierAction, { label: string; description: string 
   payPayroll:           { label: 'Pay Payroll',            description: 'Cashier can disburse a generated payroll' },
   createPreReadyKT:     { label: 'Pre-Ready Kitchen Ticket', description: 'Cashier can create a kitchen production ticket for pre-ready items' },
   createCustomMenu:     { label: 'Create Custom Menu Item', description: 'Cashier can build a one-off menu item from existing recipes (POS Customised Menu)' },
+  reprintKitchenTicket: { label: 'Reprint Kitchen Ticket',  description: 'Cashier can manually reprint a Kitchen Ticket from an existing order. The confirmation dialog warns about duplicate-print risk; OTP mode adds a manager challenge on top.' },
 };
 
 const EXPENSE_CATEGORIES: ExpenseCategory[] = [
@@ -242,6 +243,7 @@ export default function CashierPermissionsPage() {
         <Section icon={<ShieldAlert size={14} className="text-[#D62B2B]" />} title="Production">
           <ActionRow action="createPreReadyKT" value={perms.createPreReadyKT} onChange={(v) => setAction('createPreReadyKT', v)} />
           <ActionRow action="createCustomMenu" value={perms.createCustomMenu} onChange={(v) => setAction('createCustomMenu', v)} />
+          <ActionRow action="reprintKitchenTicket" value={perms.reprintKitchenTicket} onChange={(v) => setAction('reprintKitchenTicket', v)} />
         </Section>
 
         <div className="text-[10px] font-body text-[#666] flex items-center gap-3 pt-2">

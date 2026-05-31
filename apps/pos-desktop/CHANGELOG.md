@@ -3,6 +3,37 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 1.0.93 — Reprint Kitchen Ticket from POS (2026-06-01)
+
+When the network thermal printer is unreachable (e.g. router rebooted,
+LAN cable kicked), POS used to show an error dialog and the kitchen
+never got the ticket — no recovery path. Adds a "Reprint KT" button
+in the active-order action row that surfaces the last print outcome
+and lets the cashier re-fire the ticket safely.
+
+- Status badge on the button itself: "Reprint KT · ✓" when the last
+  attempt succeeded (grey), "Reprint KT · ✗" when it failed (red,
+  draws the eye).
+- Confirmation dialog before any reprint, with two distinct colour
+  bands: orange "Last print FAILED — safe to reprint" vs red
+  "Last print succeeded — duplicate cooking risk".
+- Initial auto-prints (order create, item-add, accept, approve,
+  coupon free-item) now post their outcome to a new API endpoint
+  `POST /orders/:id/kitchen-print-status` so the badge is honest
+  the next time the order is opened.
+- Each manual reprint increments `Order.kitchenReprintCount` and
+  writes an ActivityLog row under COOKING_STATION so admin can
+  audit chronically-reprinted orders.
+- Gated by a new `reprintKitchenTicket` cashier permission
+  (default: enabled, AUTO). Admin can hide it for CASHIER role or
+  require manager OTP via Cashier Permissions.
+- Hidden entirely on KDS branches — the KDS screen handles
+  recovery there.
+
+No native / IPC / printing changes; reuses the existing
+`window.desktop.print.kitchen` handler and the `attachRecipesToTicket`
+builder unchanged.
+
 ## 1.0.92 — Custom-menu margin label matches the actually-applied value (2026-05-26)
 
 POS Custom Menu dialog showed "Ceiling (200% MARGIN)" with a price

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 
 import type { Prisma } from '@prisma/client';
-import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason, CorrectPaymentDto, AddonSelectionInput, OrderItemAddonSnapshot } from '@restora/types';
+import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason, CorrectPaymentDto, AddonSelectionInput, OrderItemAddonSnapshot, RecordKitchenPrintStatusDto, JwtPayload } from '@restora/types';
 import { generateOrderNumber, computeMarginBand, type MushakLineItem, type MushakBuyerBlock } from '@restora/utils';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +14,7 @@ import { SmsService } from '../sms/sms.service';
 import { MushakService } from '../mushak/mushak.service';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MarketingService } from '../marketing/marketing.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 /**
  * Service charge + VAT calculator used by every place that recomputes an
@@ -110,6 +111,7 @@ export class OrderService {
     private readonly mushak: MushakService,
     private readonly loyalty: LoyaltyService,
     private readonly marketing: MarketingService,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   /**
@@ -237,6 +239,76 @@ export class OrderService {
       }),
       notes: order.notes,
     };
+  }
+
+  /** Stamp the outcome of a Kitchen-Ticket print attempt onto the
+   *  order so the POS Reprint button can show context (last printed
+   *  at, ✓ / ✗, error message) and admins can audit failures +
+   *  reprints over time. Posted by the POS after every auto-print
+   *  AND every manual reprint. Initial auto-prints carry
+   *  `isReprint = false`; only manual reprints bump the counter. */
+  async recordKitchenPrintStatus(id: string, user: JwtPayload, dto: RecordKitchenPrintStatusDto) {
+    const order = await this.prisma.order.findFirst({
+      where: { id, branchId: user.branchId, deletedAt: null },
+      select: { id: true, orderNumber: true },
+    });
+    if (!order) throw new NotFoundException(`Order ${id} not found`);
+
+    const isReprint = dto.isReprint === true;
+    const status = dto.ok ? 'SUCCESS' : 'FAILED';
+    // Trim long error strings — printer libraries can throw multi-
+    // line stacktraces. 400 chars is enough to read the cause
+    // without bloating the column.
+    const error = dto.ok ? null : (dto.error ?? '').trim().slice(0, 400) || null;
+
+    const updated = await this.prisma.order.update({
+      where: { id },
+      data: {
+        lastKitchenPrintAt: new Date(),
+        lastKitchenPrintStatus: status,
+        lastKitchenPrintError: error,
+        ...(isReprint ? { kitchenReprintCount: { increment: 1 } } : {}),
+      },
+      select: {
+        id: true,
+        orderNumber: true,
+        lastKitchenPrintAt: true,
+        lastKitchenPrintStatus: true,
+        lastKitchenPrintError: true,
+        kitchenReprintCount: true,
+      },
+    });
+
+    // Only emit an ActivityLog row on MANUAL reprints — initial
+    // auto-prints would flood the audit table with one entry per
+    // order. The failure detail (error message) still surfaces on the
+    // order row itself for diagnostics.
+    if (isReprint) {
+      void this.activityLog.log({
+        branchId: user.branchId,
+        actor: user,
+        // ActivityCategory enum has no ORDER value; COOKING_STATION
+        // is the closest semantic fit for "this was a kitchen-print
+        // event", so reprints land alongside other kitchen-routing
+        // history.
+        category: 'COOKING_STATION',
+        action: 'UPDATE',
+        entityType: 'order',
+        entityId: order.id,
+        entityName: `Order #${order.orderNumber}`,
+        after: {
+          kitchenReprint: true,
+          status,
+          error,
+          totalReprints: updated.kitchenReprintCount,
+        },
+        summary: dto.ok
+          ? `Reprinted Kitchen Ticket (total reprints: ${updated.kitchenReprintCount})`
+          : `Kitchen Ticket reprint FAILED: ${error ?? 'unknown error'}`,
+      });
+    }
+
+    return updated;
   }
 
   /**

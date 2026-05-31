@@ -29,6 +29,7 @@ const POS_ACTIONS: Array<{ key: keyof CashierPermissions; label: string }> = [
   { key: 'createExpense', label: 'Create Expense' },
   { key: 'payPayroll', label: 'Pay Payroll' },
   { key: 'createPreReadyKT', label: 'Pre-Ready Kitchen Ticket' },
+  { key: 'reprintKitchenTicket', label: 'Reprint Kitchen Ticket' },
 ];
 
 const APPROVAL_MODES = ['NONE', 'AUTO', 'OTP'] as const;

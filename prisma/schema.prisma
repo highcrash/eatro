@@ -1081,6 +1081,25 @@ model Order {
   /// device. JSON-encoded string array. Each entry can edit the order
   /// exactly like the primary device. Null = no shares yet.
   sharedDeviceIds     String?     @db.Text
+  /// Timestamp of the most recent Kitchen-Ticket print attempt — set
+  /// by POS posting to /orders/:id/kitchen-print-status after every
+  /// auto-print or manual reprint. Drives the Reprint KT button's
+  /// "last printed" badge so the cashier can tell at a glance whether
+  /// a reprint is recovering from a real failure or risks
+  /// duplicating a ticket the kitchen already received.
+  lastKitchenPrintAt     DateTime?
+  /// 'SUCCESS' = all stations printed, 'FAILED' = at least one
+  /// station threw. Null until the first print attempt completes.
+  lastKitchenPrintStatus String?
+  /// Trimmed error message from the most recent failed print
+  /// attempt (e.g. "Printer at 192.168.1.87:9100 is not reachable").
+  /// Surfaces in the Reprint confirmation dialog + admin audit.
+  lastKitchenPrintError  String?
+  /// How many times the cashier explicitly clicked Reprint KT. The
+  /// initial auto-print does NOT count — only the manual recovery
+  /// path increments this. > 1 means the order has been reprinted
+  /// multiple times; flagged in the admin Activity Log.
+  kitchenReprintCount    Int         @default(0)
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt
   deletedAt           DateTime?

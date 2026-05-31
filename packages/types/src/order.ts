@@ -117,6 +117,32 @@ export interface Order extends AuditFields {
    *  underlying transition happens. */
   firstKitchenStartAt?: Date | string | null;
   firstKitchenDoneAt?: Date | string | null;
+  /** Outcome of the most recent kitchen-ticket print attempt. POS
+   *  stamps these after every auto-print or manual reprint via
+   *  POST /orders/:id/kitchen-print-status. Drives the Reprint KT
+   *  button's "last printed" badge + duplicate-warning dialog. */
+  lastKitchenPrintAt?: Date | string | null;
+  lastKitchenPrintStatus?: KitchenPrintStatus | null;
+  lastKitchenPrintError?: string | null;
+  /** Number of times the cashier explicitly clicked Reprint KT.
+   *  Initial auto-print does NOT count. Surfaces in admin Activity
+   *  Log so a repeatedly-reprinted order is investigable. */
+  kitchenReprintCount?: number;
+}
+
+export type KitchenPrintStatus = 'SUCCESS' | 'FAILED';
+
+/** Body for POST /orders/:id/kitchen-print-status. POS posts this
+ *  after every kitchen-ticket print attempt so the server can stamp
+ *  the four `lastKitchenPrint*` fields on the order. */
+export interface RecordKitchenPrintStatusDto {
+  ok: boolean;
+  /** Trimmed error message when ok=false. Ignored when ok=true. */
+  error?: string | null;
+  /** True when this attempt was a manual reprint (the cashier hit
+   *  the Reprint button). Server increments kitchenReprintCount on
+   *  reprint attempts only — initial auto-prints leave it alone. */
+  isReprint?: boolean;
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
