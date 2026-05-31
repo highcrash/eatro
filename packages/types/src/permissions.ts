@@ -18,7 +18,8 @@ export type CashierAction =
   | 'createExpense'
   | 'payPayroll'
   | 'createPreReadyKT'
-  | 'createCustomMenu';
+  | 'createCustomMenu'
+  | 'reprintKitchenTicket';
 
 export interface ActionPermission {
   enabled: boolean;
@@ -41,6 +42,11 @@ export interface CashierPermissions {
   payPayroll: ActionPermission;
   createPreReadyKT: ActionPermission;
   createCustomMenu: ActionPermission;
+  /** Reprint a Kitchen Ticket from POS. The cashier sees a
+   *  confirmation dialog before the print fires; turning this off
+   *  hides the Reprint KT button entirely (the kitchen can still
+   *  reprint at the printer if they have access). */
+  reprintKitchenTicket: ActionPermission;
 }
 
 /** Defaults applied when BranchSetting.cashierPermissions is null or invalid. */
@@ -53,6 +59,11 @@ export const DEFAULT_CASHIER_PERMISSIONS: CashierPermissions = {
   payPayroll:           { enabled: false, approval: 'OTP' },
   createPreReadyKT:     { enabled: false, approval: 'AUTO' },
   createCustomMenu:     { enabled: false, approval: 'AUTO' },
+  // Reprint defaults to ENABLED + AUTO — the dialog itself is the
+  // duplicate-print guard, so an extra OTP would slow recovery from a
+  // genuine printer failure. Admin can tighten to OTP if their
+  // workflow needs an explicit approval.
+  reprintKitchenTicket: { enabled: true,  approval: 'AUTO' },
 };
 
 export function parseCashierPermissions(raw: string | null | undefined): CashierPermissions {
@@ -77,6 +88,7 @@ export function parseCashierPermissions(raw: string | null | undefined): Cashier
       payPayroll:           fix(merged.payPayroll),
       createPreReadyKT:     fix(merged.createPreReadyKT),
       createCustomMenu:     fix(merged.createCustomMenu),
+      reprintKitchenTicket: fix(merged.reprintKitchenTicket),
     };
   } catch {
     return DEFAULT_CASHIER_PERMISSIONS;

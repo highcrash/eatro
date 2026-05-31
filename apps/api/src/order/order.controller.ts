@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 
-import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, CorrectPaymentDto, JwtPayload } from '@restora/types';
+import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, CorrectPaymentDto, RecordKitchenPrintStatusDto, JwtPayload } from '@restora/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -39,6 +39,21 @@ export class OrderController {
   @Get(':id/kitchen-ticket')
   getKitchenTicket(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.orderService.getKitchenTicket(id, user.branchId);
+  }
+
+  /** POS fire-and-forget status report after every Kitchen Ticket
+   *  print attempt — initial auto-print or manual reprint. Stamps
+   *  `lastKitchenPrint*` on the Order so the Reprint button can show
+   *  the cashier what happened, and the admin Activity Log captures
+   *  each reprint event for audit. Body shape:
+   *  `{ ok: boolean; error?: string; isReprint?: boolean }`. */
+  @Post(':id/kitchen-print-status')
+  recordKitchenPrintStatus(
+    @Param('id') id: string,
+    @Body() dto: RecordKitchenPrintStatusDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.orderService.recordKitchenPrintStatus(id, user, dto);
   }
 
   @Post()

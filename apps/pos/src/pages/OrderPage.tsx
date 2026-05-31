@@ -849,6 +849,20 @@ function ActiveOrderView({
   const [voidingItem, setVoidingItem] = useState<OrderItem | null>(null);
   const [showAddItems, setShowAddItems] = useState(false);
   const [newItemCart, setNewItemCart] = useState<CartItem[]>([]);
+  // Reprint KT confirmation dialog. Shown when the cashier taps the
+  // Reprint button; gating on a confirm() alone wouldn't surface the
+  // last-print status + error, which is the whole point of the
+  // duplicate-print guard.
+  const [showReprintKt, setShowReprintKt] = useState(false);
+  const [reprintKtPending, setReprintKtPending] = useState(false);
+  // Cashier permissions — drives the Reprint KT button visibility.
+  // Admin can disable the button entirely for CASHIER role (e.g. if
+  // they want only OWNER / MANAGER to reprint).
+  const { data: activeOrderCashierPerms } = useCashierPermissions();
+  const reprintKtPerm = activeOrderCashierPerms?.reprintKitchenTicket;
+  const canReprintKt = !branchSettings?.useKds
+    && reprintKtPerm?.enabled === true
+    && reprintKtPerm?.approval !== 'NONE';
 
   const { data: orderWaiters = [] } = useQuery<{ id: string; name: string; role: string; isActive: boolean }[]>({
     queryKey: ['waiters'],
@@ -872,13 +886,27 @@ function ActiveOrderView({
    * Defined as a function declaration so it's reachable from the
    * mutations declared just below — `const` arrow form would TDZ.
    */
-  async function maybePrintKitchenTicket(order: Order) {
+  async function maybePrintKitchenTicket(order: Order, opts?: { isReprint?: boolean; silent?: boolean }) {
     // Only auto-print when KDS is disabled — otherwise the KDS screen handles it.
     if (branchSettings && branchSettings.useKds) return;
     // Decorate the order with each item's recipe block + the branch's
     // master kotShowRecipe toggle so the renderer can draw the small
     // recipe rows under each line.
     const ticket = attachRecipesToTicket(order, ktRecipes, branchSettings);
+    const isReprint = opts?.isReprint === true;
+    const silent = opts?.silent === true;
+
+    // Helper to report outcome back to the server so the Reprint
+    // button can render an honest "last printed" badge. Fire-and-
+    // forget — a status-post failure must never block the order flow.
+    const reportStatus = (ok: boolean, error?: string) => {
+      void api.post(`/orders/${order.id}/kitchen-print-status`, {
+        ok,
+        error: ok ? undefined : (error ?? null),
+        isReprint,
+      }).catch(() => { /* swallow */ });
+    };
+
     // Desktop path — await the IPC so a printer failure actually surfaces
     // instead of being swallowed into a fire-and-forget promise.
     const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
@@ -886,17 +914,25 @@ function ActiveOrderView({
       try {
         const res = await desktopPrint(ticket);
         if (!res?.ok) {
-          alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
+          reportStatus(false, res?.message ?? 'unknown error');
+          if (!silent) alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
+        } else {
+          reportStatus(true);
         }
       } catch (err) {
-        alert(`Kitchen print failed: ${(err as Error).message}`);
+        const msg = (err as Error).message;
+        reportStatus(false, msg);
+        if (!silent) alert(`Kitchen print failed: ${msg}`);
       }
       return;
     }
     // Browser fallback — popup window + auto-print.
     const ok = printKitchenTicketUtil(ticket);
     if (!ok) {
-      alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
+      reportStatus(false, 'popup blocked');
+      if (!silent) alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
+    } else {
+      reportStatus(true);
     }
   }
 
@@ -1665,6 +1701,28 @@ function ActiveOrderView({
                 <Plus size={14} />
                 Add Items
               </button>
+              {canReprintKt && (
+                <button
+                  onClick={() => setShowReprintKt(true)}
+                  title={
+                    order.lastKitchenPrintStatus === 'FAILED'
+                      ? `Last KT print FAILED at ${order.lastKitchenPrintAt ? new Date(order.lastKitchenPrintAt).toLocaleTimeString() : '—'}`
+                      : order.lastKitchenPrintStatus === 'SUCCESS'
+                        ? `Last KT printed OK at ${order.lastKitchenPrintAt ? new Date(order.lastKitchenPrintAt).toLocaleTimeString() : '—'}`
+                        : 'No KT print recorded yet'
+                  }
+                  className={`flex items-center gap-1.5 px-4 py-3 border text-sm font-theme-body transition-colors ${
+                    order.lastKitchenPrintStatus === 'FAILED'
+                      ? 'border-theme-danger text-theme-danger hover:bg-theme-danger hover:text-white font-bold'
+                      : 'border-theme-border text-theme-text-muted hover:border-theme-text hover:text-theme-text'
+                  }`}
+                >
+                  <Printer size={14} />
+                  {order.lastKitchenPrintStatus === 'FAILED' ? 'Reprint KT · ✗' :
+                   order.lastKitchenPrintStatus === 'SUCCESS' ? 'Reprint KT · ✓' :
+                   'Reprint KT'}
+                </button>
+              )}
               <button
                 onClick={() => setShowPayment(true)}
                 disabled={activeItems.length === 0}
@@ -1702,6 +1760,86 @@ function ActiveOrderView({
 
       {showBill && (
         <BillModal order={order} onClose={() => setShowBill(false)} />
+      )}
+
+      {showReprintKt && (
+        <div
+          onClick={() => { if (!reprintKtPending) setShowReprintKt(false); }}
+          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-theme-surface border border-theme-border rounded-theme max-w-md w-full p-5 space-y-4"
+          >
+            <div>
+              <h3 className="font-bold text-lg text-theme-text">Reprint Kitchen Ticket?</h3>
+              <p className="text-xs text-theme-text-muted mt-1">Order #{order.orderNumber}</p>
+            </div>
+
+            {/* Status panel — different colour bands so the cashier sees
+                at a glance whether they're recovering from a failure
+                (orange) or risking a duplicate (grey). */}
+            {order.lastKitchenPrintStatus === 'FAILED' ? (
+              <div className="border border-theme-danger bg-theme-danger/10 p-3 text-xs space-y-1">
+                <p className="font-bold text-theme-danger">
+                  ✗ Last print FAILED
+                  {order.lastKitchenPrintAt && ` at ${new Date(order.lastKitchenPrintAt).toLocaleTimeString()}`}
+                </p>
+                {order.lastKitchenPrintError && (
+                  <p className="text-theme-text-muted break-words">{order.lastKitchenPrintError}</p>
+                )}
+                <p className="text-theme-text mt-2">Safe to reprint — the kitchen never received this ticket.</p>
+              </div>
+            ) : order.lastKitchenPrintStatus === 'SUCCESS' ? (
+              <div className="border border-theme-border bg-theme-bg p-3 text-xs space-y-1">
+                <p className="font-bold text-theme-text">
+                  ✓ Last print succeeded
+                  {order.lastKitchenPrintAt && ` at ${new Date(order.lastKitchenPrintAt).toLocaleTimeString()}`}
+                </p>
+                <p className="text-theme-danger font-semibold mt-2">
+                  ⚠ The kitchen already received this ticket. Reprinting WILL cause duplicate cooking — only continue if the original was lost / damaged.
+                </p>
+              </div>
+            ) : (
+              <div className="border border-theme-border bg-theme-bg p-3 text-xs">
+                <p className="text-theme-text-muted">No previous print recorded for this order.</p>
+              </div>
+            )}
+
+            {(order.kitchenReprintCount ?? 0) > 0 && (
+              <p className="text-[11px] text-theme-text-muted">
+                Already reprinted {order.kitchenReprintCount} time{order.kitchenReprintCount === 1 ? '' : 's'} on this order.
+              </p>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setShowReprintKt(false)}
+                disabled={reprintKtPending}
+                className="flex-1 border border-theme-border text-theme-text-muted hover:text-theme-text py-2.5 rounded-theme text-sm font-semibold transition-colors disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setReprintKtPending(true);
+                  await maybePrintKitchenTicket(order, { isReprint: true, silent: true });
+                  // Re-fetch so the badge + counter reflect the new status.
+                  const refreshed = await api.get<Order>(`/orders/${order.id}`).catch(() => null);
+                  if (refreshed) setOrder(refreshed);
+                  setReprintKtPending(false);
+                  setShowReprintKt(false);
+                }}
+                disabled={reprintKtPending}
+                className={`flex-1 py-2.5 rounded-theme text-sm font-bold text-white transition-opacity disabled:opacity-40 ${
+                  order.lastKitchenPrintStatus === 'SUCCESS' ? 'bg-theme-danger hover:opacity-90' : 'bg-theme-pop hover:opacity-90'
+                }`}
+              >
+                {reprintKtPending ? 'Reprinting…' : (order.lastKitchenPrintStatus === 'SUCCESS' ? 'Reprint Anyway' : 'Reprint KT')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showPayment && (
@@ -2212,22 +2350,36 @@ function NewOrderView({
   // Local copy of the helper — NewOrderView is a separate function
   // component so it can't see the one declared in ActiveOrderView.
   // Same logic: skip when KDS is on, hit the desktop IPC if present,
-  // otherwise pop a print window in the browser.
+  // otherwise pop a print window in the browser. Also posts the
+  // outcome back to /orders/:id/kitchen-print-status so the Reprint
+  // KT button on ActiveOrderView can render an honest "last printed"
+  // badge after the order opens.
   async function maybePrintKitchenTicket(order: Order) {
     if (newOrderBranchSettings && newOrderBranchSettings.useKds) return;
     const ticket = attachRecipesToTicket(order, newOrderKtRecipes, newOrderBranchSettings);
+    const reportStatus = (ok: boolean, error?: string) => {
+      void api.post(`/orders/${order.id}/kitchen-print-status`, {
+        ok,
+        error: ok ? undefined : (error ?? null),
+        isReprint: false,
+      }).catch(() => { /* swallow */ });
+    };
     const desktopPrint = (window as unknown as { desktop?: { print?: { kitchen?: (t: unknown) => Promise<{ ok: boolean; message?: string }> } } }).desktop?.print?.kitchen;
     if (desktopPrint) {
       try {
         const res = await desktopPrint(ticket);
-        if (!res?.ok) alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`);
+        if (!res?.ok) { reportStatus(false, res?.message ?? 'unknown error'); alert(`Kitchen print failed: ${res?.message ?? 'unknown error'}`); }
+        else reportStatus(true);
       } catch (err) {
-        alert(`Kitchen print failed: ${(err as Error).message}`);
+        const msg = (err as Error).message;
+        reportStatus(false, msg);
+        alert(`Kitchen print failed: ${msg}`);
       }
       return;
     }
     const ok = printKitchenTicketUtil(ticket);
-    if (!ok) alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.');
+    if (!ok) { reportStatus(false, 'popup blocked'); alert('Kitchen print failed — popup was blocked. Please allow popups for this site or print manually.'); }
+    else reportStatus(true);
   }
 
   const createOrderMutation = useMutation({
