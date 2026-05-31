@@ -43,10 +43,24 @@ export class MenuService {
    * distinguish "no recipe configured" from "lookup failed".
    */
   async findKtRecipes(branchId: string) {
+    // Custom menu items (`isCustom: true`) ARE included here but the
+    // map output forces `kotHideRecipe: true` for them. Reason: the
+    // cashier built the item ad-hoc by composing recipe lines in the
+    // POS Custom Menu dialog. Printing those same lines back as a
+    // "recipe:" block on the kitchen ticket is redundant — the chef
+    // already sees the item name + selected addons + removed
+    // ingredients on the line itself. Pre-fix, excluding custom items
+    // entirely from this map dropped them through to the renderer's
+    // "(no recipe — sold as-is)" fallback, which was equally noisy.
+    // If admin wants the recipe printed for a specific custom item
+    // (e.g. a one-off the chef has never made), they can graduate it
+    // to a real menu item via Admin → Menu → "Make permanent", which
+    // flips isCustom to false and brings recipe printing back.
     const items = await this.prisma.menuItem.findMany({
-      where: { branchId, deletedAt: null, isCustom: false, isAddon: false },
+      where: { branchId, deletedAt: null, isAddon: false },
       select: {
         id: true,
+        isCustom: true,
         kotHideRecipe: true,
         recipe: {
           select: {
@@ -63,7 +77,7 @@ export class MenuService {
     });
     return items.map((m) => ({
       menuItemId: m.id,
-      kotHideRecipe: m.kotHideRecipe,
+      kotHideRecipe: m.isCustom ? true : m.kotHideRecipe,
       recipe: (m.recipe?.items ?? []).map((ri) => ({
         ingredientName: ri.ingredient.name,
         quantity: Number(ri.quantity),
