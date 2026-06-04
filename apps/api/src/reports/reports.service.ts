@@ -83,6 +83,24 @@ export class ReportsService {
   }
 
   private getDateRange(period: string): DateRange {
+    // YYYY-MM period selector (e.g. '2026-03') — admin uses the
+    // month-picker on /reports to view any historic month, not just
+    // current-month-to-date. Format is strict 4-digit year + dash +
+    // 2-digit month; we treat anything else as the legacy enum.
+    const monthMatch = /^(\d{4})-(\d{2})$/.exec(period);
+    if (monthMatch) {
+      const year = parseInt(monthMatch[1], 10);
+      const month = parseInt(monthMatch[2], 10); // 1-12
+      if (year >= 2000 && year <= 2100 && month >= 1 && month <= 12) {
+        const from = new Date(year, month - 1, 1, 0, 0, 0, 0);
+        // Last day of the picked month at 23:59:59.999 — `new Date(y, m, 0)`
+        // with m as 1-based gives the previous month's last day, which is
+        // exactly what we want.
+        const to = new Date(year, month, 0, 23, 59, 59, 999);
+        return { from, to };
+      }
+    }
+
     const now = new Date();
     const to = new Date(now);
     to.setHours(23, 59, 59, 999);
