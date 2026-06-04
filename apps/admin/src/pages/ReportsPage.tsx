@@ -3,7 +3,12 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatCurrency } from '@restora/utils';
 
-type Period = 'today' | 'week' | 'month' | 'year';
+type PresetPeriod = 'today' | 'week' | 'month' | 'year';
+/** `Period` is either a built-in preset chip OR an explicit YYYY-MM
+ *  month string (e.g. '2026-03'). Both are passed through the same
+ *  `?period=…` query param — backend `getDateRange` parses the
+ *  YYYY-MM shape and falls back to preset handling otherwise. */
+type Period = PresetPeriod | string;
 
 interface SalesSummary {
   period: string;
@@ -60,7 +65,21 @@ const CAT_LABELS: Record<string, string> = {
   FOOD_COST: 'Food Cost', STAFF_FOOD: 'Staff Food', MISCELLANEOUS: 'Misc',
 };
 
-function rangeForPeriod(period: 'today' | 'week' | 'month' | 'year'): { from: string; to: string } {
+function rangeForPeriod(period: Period): { from: string; to: string } {
+  // YYYY-MM picked from the month dropdown — same parsing the backend
+  // does (kept in sync so the expense summary endpoint, which takes
+  // from/to, gets the right window).
+  const monthMatch = /^(\d{4})-(\d{2})$/.exec(period);
+  if (monthMatch) {
+    const year = parseInt(monthMatch[1], 10);
+    const month = parseInt(monthMatch[2], 10); // 1-12
+    const from = new Date(year, month - 1, 1);
+    const to = new Date(year, month, 0); // last day of picked month
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+    };
+  }
   const now = new Date();
   const to = now.toISOString().slice(0, 10);
   const from = new Date(now);
@@ -76,8 +95,29 @@ function rangeForPeriod(period: 'today' | 'week' | 'month' | 'year'): { from: st
   return { from: from.toISOString().slice(0, 10), to };
 }
 
+/** Build the last 24 months as { value: 'YYYY-MM', label: 'Mar 2026' }
+ *  for the month-picker dropdown. Two-year window keeps the menu
+ *  scannable without forcing a year+month two-step selector. */
+function recentMonths(): Array<{ value: string; label: string }> {
+  const out: Array<{ value: string; label: string }> = [];
+  const now = new Date();
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const monthName = d.toLocaleString('en', { month: 'short' });
+    out.push({
+      value: `${y}-${String(m).padStart(2, '0')}`,
+      label: `${monthName} ${y}`,
+    });
+  }
+  return out;
+}
+
 export default function ReportsPage() {
   const [period, setPeriod] = useState<Period>('today');
+  const months = recentMonths();
+  const isMonthPick = /^\d{4}-\d{2}$/.test(period);
 
   const { data: summary, isLoading: summaryLoading } = useQuery<SalesSummary>({
     queryKey: ['reports-summary', period],
@@ -117,7 +157,10 @@ export default function ReportsPage() {
   const periodLabel =
     period === 'today' ? 'Today' :
     period === 'week' ? 'This Week' :
-    period === 'month' ? 'This Month' : 'This Year';
+    period === 'month' ? 'This Month' :
+    period === 'year' ? 'This Year' :
+    isMonthPick ? (months.find((m) => m.value === period)?.label ?? period) :
+    String(period);
 
   return (
     <div className="space-y-6 reports-page">
@@ -169,10 +212,10 @@ export default function ReportsPage() {
             {periodLabel} · {summary?.from ?? ''} → {summary?.to ?? ''}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           {/* Period selector */}
           <div className="flex no-print">
-            {(['today', 'week', 'month', 'year'] as Period[]).map((p) => (
+            {(['today', 'week', 'month', 'year'] as PresetPeriod[]).map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriod(p)}
@@ -184,6 +227,25 @@ export default function ReportsPage() {
               </button>
             ))}
           </div>
+          {/* Month picker — view any historic month independently of
+              the preset chips. Selecting a month flips period to its
+              YYYY-MM value; the backend's getDateRange parses that
+              shape into the month's [first…last] window. */}
+          <select
+            value={isMonthPick ? period : ''}
+            onChange={(e) => { if (e.target.value) setPeriod(e.target.value); }}
+            title="Pick any month (last 24 months)"
+            className={`no-print font-body text-xs tracking-widest uppercase px-3 py-2 border transition-colors ${
+              isMonthPick
+                ? 'bg-[#D62B2B] text-white border-[#D62B2B]'
+                : 'bg-[#161616] text-[#666] border-[#2A2A2A] hover:text-[#999]'
+            }`}
+          >
+            <option value="">Pick month…</option>
+            {months.map((m) => (
+              <option key={m.value} value={m.value} className="bg-[#161616] text-white">{m.label}</option>
+            ))}
+          </select>
           {/* Print / Save as PDF — relies on the browser's native
               print dialog (Ctrl+P). Hidden in print so the button
               doesn't show on the hardcopy itself. */}
