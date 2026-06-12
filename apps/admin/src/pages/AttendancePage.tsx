@@ -20,6 +20,8 @@ interface MonthSummary {
   halfDay: number;
 }
 
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
 const STATUS_OPTIONS: { value: AttendanceStatus; label: string; color: string; short: string }[] = [
   { value: 'PRESENT', label: 'Present', color: 'text-[#4CAF50]', short: 'P' },
   { value: 'LATE', label: 'Late', color: 'text-[#FFA726]', short: 'L' },
@@ -32,12 +34,20 @@ const STATUS_OPTIONS: { value: AttendanceStatus; label: string; color: string; s
 
 export default function AttendancePage() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'daily' | 'summary'>('daily');
+  const [tab, setTab] = useState<'daily' | 'summary' | 'sheet'>('daily');
   const today = new Date().toISOString().split('T')[0];
   const [selectedDate, setSelectedDate] = useState(today);
   const now = new Date();
   const [summaryYear, setSummaryYear] = useState(now.getFullYear());
   const [summaryMonth, setSummaryMonth] = useState(now.getMonth() + 1);
+
+  // Print Sheet tab state — picks ONE staff for a specific month so
+  // admin can print a per-staff timesheet with daily clock-in /
+  // clock-out / hours. Defaults to the current month and the first
+  // active staff member as soon as the staff list loads.
+  const [sheetStaffId, setSheetStaffId] = useState<string>('');
+  const [sheetYear, setSheetYear] = useState(now.getFullYear());
+  const [sheetMonth, setSheetMonth] = useState(now.getMonth() + 1);
 
   const { data: staff = [] } = useQuery<StaffMember[]>({
     queryKey: ['staff-active'],
@@ -54,6 +64,18 @@ export default function AttendancePage() {
     queryKey: ['attendance-summary', summaryYear, summaryMonth],
     queryFn: () => api.get(`/attendance/summary?year=${summaryYear}&month=${summaryMonth}`),
     enabled: tab === 'summary',
+  });
+
+  // Sheet data: one staff × one calendar month. Server returns rows
+  // in chronological order when the from/to range is supplied.
+  const sheetFrom = `${sheetYear}-${String(sheetMonth).padStart(2, '0')}-01`;
+  // Last day of the picked month — `new Date(y, m, 0)` with 1-based m
+  // returns the previous month's last day, which is what we want.
+  const sheetTo = new Date(sheetYear, sheetMonth, 0).toISOString().slice(0, 10);
+  const { data: sheetRows = [] } = useQuery<Attendance[]>({
+    queryKey: ['attendance-sheet', sheetStaffId, sheetFrom, sheetTo],
+    queryFn: () => api.get(`/attendance?staffId=${sheetStaffId}&from=${sheetFrom}&to=${sheetTo}`),
+    enabled: tab === 'sheet' && !!sheetStaffId,
   });
 
   const markMutation = useMutation({
@@ -84,17 +106,103 @@ export default function AttendancePage() {
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   };
 
-  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  /** Hours between clockIn and clockOut, formatted "8h 35m". Handles
+   *  overnight shifts (clockOut < clockIn) by adding 24h. Returns
+   *  empty string when either side is missing. */
+  const hoursBetween = (inIso: string | Date | null, outIso: string | Date | null): string => {
+    if (!inIso || !outIso) return '';
+    const a = new Date(inIso).getTime();
+    const b = new Date(outIso).getTime();
+    if (Number.isNaN(a) || Number.isNaN(b)) return '';
+    let ms = b - a;
+    if (ms < 0) ms += 24 * 3600 * 1000; // overnight wrap
+    const totalMin = Math.round(ms / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return `${h}h ${m}m`;
+  };
+
+  /** Decimal hours used for the running monthly total. */
+  const decimalHours = (inIso: string | Date | null, outIso: string | Date | null): number => {
+    if (!inIso || !outIso) return 0;
+    const a = new Date(inIso).getTime();
+    const b = new Date(outIso).getTime();
+    if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+    let ms = b - a;
+    if (ms < 0) ms += 24 * 3600 * 1000;
+    return ms / 3600000;
+  };
+
+  // Default the print-sheet staff to the first active staff member
+  // as soon as that list arrives — saves admin a click.
+  if (!sheetStaffId && staff.length > 0) {
+    // Setting state inside render is allowed for first-paint defaults
+    // when guarded by a condition that becomes false after the set.
+    setSheetStaffId(staff[0].id);
+  }
+
+  const sheetStaff = staff.find((s) => s.id === sheetStaffId);
+  // Build a Date → row index so we can render one row per calendar
+  // day even when the DB has no attendance entry for that day
+  // (weekly off, future days). Sorted ascending by the server.
+  const sheetByDate = new Map<string, Attendance>(
+    sheetRows.map((r) => [String(r.date).slice(0, 10), r] as const),
+  );
+  const daysInMonth = new Date(sheetYear, sheetMonth, 0).getDate();
+  const sheetDays = Array.from({ length: daysInMonth }, (_, i) => {
+    const day = i + 1;
+    const iso = `${sheetYear}-${String(sheetMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    return { iso, day, row: sheetByDate.get(iso) ?? null };
+  });
+  const sheetTotalHours = sheetDays.reduce(
+    (sum, d) => sum + decimalHours(d.row?.clockIn ?? null, d.row?.clockOut ?? null),
+    0,
+  );
+  const sheetPresentCount = sheetDays.filter((d) => d.row && d.row.status !== 'ABSENT').length;
+  const sheetMonthLabel = `${MONTHS[sheetMonth - 1]} ${sheetYear}`;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 attendance-page">
+      {/* Print styles — same isolation trick used by ReportsPage /
+          StockWatcher. Hides admin chrome + the tabs + form controls
+          so only the printable attendance sheet survives Ctrl+P. */}
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 12mm; }
+          html, body { background: #fff !important; }
+          body * { visibility: hidden !important; }
+          .attendance-page, .attendance-page * {
+            visibility: visible !important;
+          }
+          .attendance-page {
+            position: absolute !important;
+            left: 0 !important; top: 0 !important;
+            width: 100% !important;
+            padding: 0 !important;
+            background: #fff !important;
+            color: #000 !important;
+            font-family: Arial, sans-serif !important;
+          }
+          .attendance-page * {
+            color: #000 !important;
+            background: transparent !important;
+            border-color: #999 !important;
+          }
+          .no-print { display: none !important; }
+          .attendance-page table th, .attendance-page table td {
+            border: 1px solid #ccc !important;
+            padding: 4px 8px !important;
+          }
+        }
+      `}</style>
+
+      <div className="flex items-center justify-between no-print">
         <h1 className="font-display text-3xl text-white tracking-widest">ATTENDANCE</h1>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-[#2A2A2A]">
-        {(['daily', 'summary'] as const).map((t) => (
+      <div className="flex border-b border-[#2A2A2A] no-print">
+        {(['daily', 'summary', 'sheet'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -102,7 +210,7 @@ export default function AttendancePage() {
               tab === t ? 'border-[#D62B2B] text-white' : 'border-transparent text-[#666] hover:text-[#999]'
             }`}
           >
-            {t === 'daily' ? 'Daily Attendance' : 'Monthly Summary'}
+            {t === 'daily' ? 'Daily Attendance' : t === 'summary' ? 'Monthly Summary' : 'Print Sheet'}
           </button>
         ))}
       </div>
@@ -268,6 +376,136 @@ export default function AttendancePage() {
                   <tr><td colSpan={10} className="px-4 py-8 text-center text-[#666] font-body text-sm">No attendance records for this period.</td></tr>
                 )}
               </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* Print Sheet Tab — per-staff monthly timesheet.
+          Admin picks a staff + month → printable table with one row
+          per calendar day showing clock-in / clock-out / hours /
+          status / notes. The print stylesheet at the top of this
+          page hides the form controls + page chrome so Ctrl+P (or
+          Save as PDF) produces a clean A4 hardcopy. */}
+      {tab === 'sheet' && (
+        <>
+          <div className="flex flex-wrap items-end gap-4 no-print">
+            <div className="flex flex-col gap-1 min-w-[220px]">
+              <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Staff</label>
+              <select
+                value={sheetStaffId}
+                onChange={(e) => setSheetStaffId(e.target.value)}
+                className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
+              >
+                {staff.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} · {s.role}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Month</label>
+              <select
+                value={sheetMonth}
+                onChange={(e) => setSheetMonth(parseInt(e.target.value))}
+                className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors"
+              >
+                {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">Year</label>
+              <input
+                type="number" min="2020" max="2099"
+                value={sheetYear}
+                onChange={(e) => setSheetYear(parseInt(e.target.value))}
+                className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B] transition-colors w-24"
+              />
+            </div>
+            <button
+              onClick={() => window.print()}
+              disabled={!sheetStaffId}
+              title="Print or save as PDF (Ctrl+P / ⌘+P also works)"
+              className="px-4 py-2 bg-[#2A2A2A] hover:bg-[#D62B2B] text-white text-xs tracking-widest uppercase transition-colors disabled:opacity-40"
+            >
+              🖨 Print / PDF
+            </button>
+          </div>
+
+          {/* Printable header — visible on screen too so the page
+              looks coherent. The print stylesheet collapses the rest
+              of the admin chrome, so this header anchors the
+              hardcopy. */}
+          {sheetStaff && (
+            <div className="bg-[#161616] border border-[#2A2A2A] p-4">
+              <div className="flex items-end justify-between flex-wrap gap-2">
+                <div>
+                  <p className="text-[#D62B2B] text-[10px] tracking-widest uppercase">Attendance Sheet</p>
+                  <p className="font-display text-2xl text-white tracking-wide">{sheetStaff.name}</p>
+                  <p className="text-xs text-[#999]">{sheetStaff.role} · {sheetMonthLabel}</p>
+                </div>
+                <div className="text-right text-xs text-[#ccc] font-body">
+                  <p>
+                    <span className="text-[#666]">Days marked:</span> <span className="text-white font-bold">{sheetPresentCount}</span> / {daysInMonth}
+                  </p>
+                  <p>
+                    <span className="text-[#666]">Total hours:</span> <span className="text-[#4CAF50] font-bold">{sheetTotalHours.toFixed(1)} h</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-[#161616] border border-[#2A2A2A]">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[#2A2A2A]">
+                  {['Date', 'Day', 'Clock In', 'Clock Out', 'Hours', 'Status', 'Source', 'Notes'].map((h) => (
+                    <th key={h} className="text-left px-4 py-2 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sheetDays.map(({ iso, day, row }) => {
+                  const d = new Date(iso);
+                  const weekday = d.toLocaleDateString(undefined, { weekday: 'short' });
+                  const status = row?.status ?? null;
+                  return (
+                    <tr key={iso} className="border-b border-[#2A2A2A] last:border-0">
+                      <td className="px-4 py-2 text-white font-body text-xs">{String(day).padStart(2, '0')}</td>
+                      <td className="px-4 py-2 text-[#999] font-body text-xs">{weekday}</td>
+                      <td className="px-4 py-2 text-[#ccc] font-body text-xs">
+                        {row?.clockIn ? fmtTime(row.clockIn as unknown as Date) : <span className="text-[#444]">—</span>}
+                      </td>
+                      <td className="px-4 py-2 text-[#ccc] font-body text-xs">
+                        {row?.clockOut ? fmtTime(row.clockOut as unknown as Date) : <span className="text-[#444]">—</span>}
+                      </td>
+                      <td className="px-4 py-2 text-white font-body text-xs font-medium">
+                        {hoursBetween(row?.clockIn ?? null, row?.clockOut ?? null) || <span className="text-[#444]">—</span>}
+                      </td>
+                      <td className="px-4 py-2">
+                        {status ? (
+                          <span className={`font-body text-[10px] tracking-widest uppercase ${STATUS_OPTIONS.find((o) => o.value === status)?.color ?? 'text-[#999]'}`}>
+                            {STATUS_OPTIONS.find((o) => o.value === status)?.short ?? status}
+                          </span>
+                        ) : <span className="text-[#444] text-xs">—</span>}
+                      </td>
+                      <td className="px-4 py-2 text-[#666] font-body text-[10px] tracking-widest uppercase">
+                        {row?.manualOverride ? 'Override' : row?.source === 'TIPSOI' ? 'Tipsoi' : row ? 'Manual' : '—'}
+                      </td>
+                      <td className="px-4 py-2 text-[#999] font-body text-xs">{row?.notes ?? ''}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-[#2A2A2A] bg-[#0D0D0D]">
+                  <td colSpan={4} className="px-4 py-2 text-right text-[#666] font-body text-xs tracking-widest uppercase">Month total</td>
+                  <td className="px-4 py-2 text-[#4CAF50] font-body text-xs font-bold">{sheetTotalHours.toFixed(1)} h</td>
+                  <td colSpan={3} className="px-4 py-2 text-[#666] font-body text-xs">
+                    Days marked: {sheetPresentCount} / {daysInMonth}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </>
