@@ -12,16 +12,33 @@ export class AttendanceService {
     private readonly activityLog: ActivityLogService,
   ) {}
 
-  findAll(branchId: string, date?: string, staffId?: string) {
+  findAll(branchId: string, date?: string, staffId?: string, from?: string, to?: string) {
+    // `date` is a single-day exact match (legacy daily-tab query).
+    // `from`/`to` open the door to a date range — used by the
+    // admin's "Print Staff Attendance" tab to fetch a whole month
+    // for one staff member at once. Ranges win when supplied.
+    const dateFilter: { gte?: Date; lte?: Date } | undefined =
+      from || to
+        ? {
+            ...(from ? { gte: new Date(from) } : {}),
+            ...(to ? { lte: new Date(to) } : {}),
+          }
+        : undefined;
     return this.prisma.attendance.findMany({
       where: {
         branchId,
-        ...(date ? { date: new Date(date) } : {}),
+        ...(dateFilter ? { date: dateFilter } : (date ? { date: new Date(date) } : {})),
         ...(staffId ? { staffId } : {}),
       },
       include: { staff: { select: { id: true, name: true, role: true } } },
-      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-      take: 200,
+      // Range queries want chronological (oldest → newest) so the
+      // print table reads top-to-bottom. Single-day / no-filter
+      // queries keep the existing newest-first ordering.
+      orderBy: [{ date: dateFilter ? 'asc' : 'desc' }, { createdAt: 'desc' }],
+      // Bumped from 200 to cover a full month per staff member (≤31
+      // rows when filtered to one staffId; bigger when admin queries
+      // the whole branch over a month).
+      take: dateFilter ? 1000 : 200,
     });
   }
 

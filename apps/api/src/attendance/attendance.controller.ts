@@ -17,8 +17,10 @@ export class AttendanceController {
     @CurrentUser() user: JwtPayload,
     @Query('date') date?: string,
     @Query('staffId') staffId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.attendanceService.findAll(user.branchId, date, staffId);
+    return this.attendanceService.findAll(user.branchId, date, staffId, from, to);
   }
 
   @Post()
