@@ -253,7 +253,7 @@ export class PayrollService {
     if (dto.amount > remaining + 1) throw new BadRequestException(`Payment exceeds remaining amount (${remaining})`);
 
     // Create payment record
-    await this.prisma.payrollPayment.create({
+    const payment = await this.prisma.payrollPayment.create({
       data: {
         payrollId: id,
         amount: dto.amount,
@@ -281,7 +281,12 @@ export class PayrollService {
       },
     });
 
-    // Auto-create SALARY expense for this payment
+    // Auto-create SALARY expense for this payment.
+    // `reference` carries a typed back-pointer so deleting the expense
+    // can find + reverse the matching PayrollPayment (decrement
+    // Payroll.paidAmount, flip PAID → APPROVED if no longer fully paid,
+    // delete the PayrollPayment row). Without this back-pointer the
+    // expense delete left the payroll showing "paid" forever.
     const method = dto.paymentMethod ?? 'CASH';
     await this.prisma.expense.create({
       data: {
@@ -290,6 +295,7 @@ export class PayrollService {
         description: `Salary ${fullyPaid ? 'paid' : 'partial'} — ${updated.staff?.name}${dto.notes ? ` (${dto.notes})` : ''}`,
         amount: dto.amount,
         paymentMethod: method,
+        reference: `PAYROLL_PAYMENT:${payment.id}`,
         date: new Date(),
         recordedById: staffId,
         approvedById: staffId,
@@ -310,5 +316,49 @@ export class PayrollService {
       include: { paidBy: { select: { id: true, name: true } } },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /** Undo a single PayrollPayment (called when admin deletes the
+   *  SALARY-category Expense that mirrored it). Decrements
+   *  Payroll.paidAmount, flips status from PAID → APPROVED when the
+   *  payroll is no longer fully paid, and deletes the PayrollPayment
+   *  row so the payment history + paidAmount stay in sync.
+   *
+   *  Silent no-op when the PayrollPayment doesn't exist (race with
+   *  manual cleanup, expense from a different branch's payroll, etc.)
+   *  so an expense delete never throws because of a stale back-pointer.
+   *  Branch-scoped lookup is enforced through Payroll → branchId. */
+  async reverseSalaryPaymentForDeletedExpense(branchId: string, payrollPaymentId: string) {
+    const payment = await this.prisma.payrollPayment.findUnique({
+      where: { id: payrollPaymentId },
+      include: { payroll: { select: { id: true, branchId: true, paidAmount: true, netPayable: true, status: true } } },
+    });
+    if (!payment || payment.payroll.branchId !== branchId) return;
+
+    const decrementBy = payment.amount.toNumber();
+    const currentPaid = payment.payroll.paidAmount.toNumber();
+    const newPaid = Math.max(0, currentPaid - decrementBy);
+    const net = payment.payroll.netPayable.toNumber();
+    const stillFullyPaid = newPaid >= net - 1;
+
+    await this.prisma.$transaction([
+      this.prisma.payroll.update({
+        where: { id: payment.payrollId },
+        data: {
+          paidAmount: newPaid,
+          // If this reversal drops us below the "fully paid" threshold,
+          // flip the status back to APPROVED so the payroll list shows
+          // it as outstanding again. Leave APPROVED rows alone — they
+          // were never marked PAID to begin with.
+          ...(payment.payroll.status === 'PAID' && !stillFullyPaid
+            ? { status: 'APPROVED', paidAt: null }
+            : {}),
+        },
+      }),
+      // Hard-delete the PayrollPayment so the payment history table on
+      // the payroll detail doesn't keep showing the reversed entry. The
+      // ActivityLog row for the expense delete is the audit trail.
+      this.prisma.payrollPayment.delete({ where: { id: payrollPaymentId } }),
+    ]);
   }
 }
