@@ -2,12 +2,14 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import type { CreateExpenseDto, UpdateExpenseDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountService } from '../account/account.service';
+import { PayrollService } from '../payroll/payroll.service';
 
 @Injectable()
 export class ExpenseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accountService: AccountService,
+    private readonly payrollService: PayrollService,
   ) {}
 
   findAll(branchId: string, filters?: { from?: string; to?: string; category?: string }) {
@@ -109,7 +111,8 @@ export class ExpenseService {
 
   async remove(id: string, branchId: string) {
     // Fetch the expense BEFORE the soft-delete so we still have the
-    // amount + paymentMethod available for the account reversal.
+    // amount + paymentMethod + reference (payroll back-pointer)
+    // available for the downstream reversals.
     const expense = await this.findOne(id, branchId);
     const updated = await this.prisma.expense.update({
       where: { id },
@@ -128,6 +131,25 @@ export class ExpenseService {
       expense.amount.toNumber(),
       `Reversal of expense: ${expense.description} (deleted)`,
     );
+
+    // If this is a SALARY expense that was auto-created by
+    // PayrollService.makePayment, the reference column carries a
+    // `PAYROLL_PAYMENT:{id}` back-pointer. Reverse the PayrollPayment
+    // so the payroll's paidAmount drops + status flips from PAID back
+    // to APPROVED when appropriate. Without this the payroll list kept
+    // showing the staff as PAID even after admin deleted the matching
+    // expense. Old SALARY expenses created before this back-pointer
+    // landed have no `PAYROLL_PAYMENT:` reference — those silently
+    // skip and admin has to unpay the payroll manually.
+    if (expense.category === 'SALARY' && expense.reference?.startsWith('PAYROLL_PAYMENT:')) {
+      const payrollPaymentId = expense.reference.slice('PAYROLL_PAYMENT:'.length);
+      if (payrollPaymentId) {
+        void this.payrollService
+          .reverseSalaryPaymentForDeletedExpense(branchId, payrollPaymentId)
+          .catch(() => { /* logged inside payroll service if it ever throws */ });
+      }
+    }
+
     return updated;
   }
 
