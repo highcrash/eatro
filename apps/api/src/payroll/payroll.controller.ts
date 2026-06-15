@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { PayrollService } from './payroll.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -17,11 +17,28 @@ export class PayrollController {
     return this.payrollService.findAll(user.branchId);
   }
 
-  // Prefill route MUST come before `:id` so /payroll/prefill/:staffId
-  // doesn't get parsed as findOne('prefill').
+  // Routes with literal first segments MUST be declared before `:id`
+  // or Nest parses them as findOne('prefill'|'staff-summary'|'staff').
+
   @Get('prefill/:staffId')
   prefill(@Param('staffId') staffId: string, @CurrentUser() user: JwtPayload) {
     return this.payrollService.getPrefillForStaff(user.branchId, staffId);
+  }
+
+  /** One row per staff with rolled-up payroll stats — drives the
+   *  staff-first /payroll list. */
+  @Get('staff-summary')
+  getStaffSummary(
+    @CurrentUser() user: JwtPayload,
+    @Query('includeInactive') includeInactive?: string,
+  ) {
+    return this.payrollService.getStaffSummary(user.branchId, includeInactive === 'true');
+  }
+
+  /** Full payroll history for one staff — drives the per-staff drilldown. */
+  @Get('staff/:staffId')
+  findForStaff(@Param('staffId') staffId: string, @CurrentUser() user: JwtPayload) {
+    return this.payrollService.findForStaff(user.branchId, staffId);
   }
 
   @Get(':id')
