@@ -20,7 +20,8 @@ import ShoppingListPage from './pages/ShoppingListPage';
 import QrCodesPage from './pages/QrCodesPage';
 import ReportsPage from './pages/ReportsPage';
 import AttendancePage from './pages/AttendancePage';
-import PayrollPage from './pages/PayrollPage';
+import PayrollStaffListPage from './pages/PayrollStaffListPage';
+import PayrollStaffDetailPage from './pages/PayrollStaffDetailPage';
 import WastePage from './pages/WastePage';
 import ExpensesPage from './pages/ExpensesPage';
 import AccountsPage from './pages/AccountsPage';
@@ -115,7 +116,8 @@ export default function AdminApp() {
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/reviews" element={<ReviewsPage />} />
         <Route path="/attendance" element={<AttendancePage />} />
-        <Route path="/payroll" element={<PayrollPage />} />
+        <Route path="/payroll" element={<PayrollStaffListPage />} />
+        <Route path="/payroll/staff/:staffId" element={<PayrollStaffDetailPage />} />
         <Route path="/salary-structures" element={<SalaryStructuresPage />} />
         <Route path="/leave-rules" element={<LeaveRulesPage />} />
         <Route path="/leave" element={<LeavePage />} />

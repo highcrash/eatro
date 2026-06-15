@@ -25,6 +25,117 @@ export class PayrollService {
     });
   }
 
+  /** Full payroll history for one staff (no 100-row cap — supports the
+   *  per-staff drilldown view). */
+  findForStaff(branchId: string, staffId: string) {
+    return this.prisma.payroll.findMany({
+      where: { branchId, staffId },
+      include: this.payrollInclude,
+      orderBy: { periodEnd: 'desc' },
+      take: 240,
+    });
+  }
+
+  /** One row per staff with rolled-up payroll stats — powers the
+   *  staff-first /payroll list. Active staff are always included;
+   *  inactive staff are also included when they still carry an
+   *  outstanding APPROVED balance (so deactivation can't hide debts),
+   *  or unconditionally when ?includeInactive=true. */
+  async getStaffSummary(branchId: string, includeInactive: boolean) {
+    const staffWhere = includeInactive
+      ? { branchId, deletedAt: null }
+      : { branchId, deletedAt: null, isActive: true };
+    const staff = await this.prisma.staff.findMany({
+      where: staffWhere,
+      select: { id: true, name: true, role: true, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+
+    const allPayrolls = await this.prisma.payroll.findMany({
+      where: { branchId },
+      select: {
+        id: true,
+        staffId: true,
+        status: true,
+        periodStart: true,
+        periodEnd: true,
+        netPayable: true,
+        paidAmount: true,
+      },
+      orderBy: { periodEnd: 'desc' },
+    });
+
+    const allPayments = await this.prisma.payrollPayment.findMany({
+      where: { payroll: { branchId } },
+      select: { createdAt: true, payroll: { select: { staffId: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const lastPaidByStaff = new Map<string, Date>();
+    for (const p of allPayments) {
+      const sId = p.payroll.staffId;
+      if (!lastPaidByStaff.has(sId)) lastPaidByStaff.set(sId, p.createdAt);
+    }
+
+    const buildRowForStaff = (s: typeof staff[number]) => {
+      const mine = allPayrolls.filter((p) => p.staffId === s.id);
+      const latest = mine[0] ?? null;
+      let balanceOwed = 0;
+      let totalPaid = 0;
+      let draftCount = 0;
+      for (const p of mine) {
+        const net = p.netPayable.toNumber();
+        const paid = p.paidAmount.toNumber();
+        totalPaid += paid;
+        if (p.status === 'APPROVED') balanceOwed += Math.max(0, net - paid);
+        if (p.status === 'DRAFT') draftCount += 1;
+      }
+      return {
+        staffId: s.id,
+        staff: { id: s.id, name: s.name, role: s.role, isActive: s.isActive },
+        latestPayroll: latest
+          ? {
+              id: latest.id,
+              status: latest.status,
+              periodStart: latest.periodStart.toISOString(),
+              periodEnd: latest.periodEnd.toISOString(),
+              netPayable: latest.netPayable.toNumber(),
+              paidAmount: latest.paidAmount.toNumber(),
+            }
+          : null,
+        balanceOwed,
+        totalPaid,
+        payrollCount: mine.length,
+        draftCount,
+        lastPaidAt: lastPaidByStaff.get(s.id)?.toISOString() ?? null,
+      };
+    };
+
+    const rows = staff.map(buildRowForStaff);
+
+    // Always surface inactive staff who still carry an unpaid APPROVED
+    // balance — deactivating someone shouldn't hide what we owe them.
+    if (!includeInactive) {
+      const includedIds = new Set(rows.map((r) => r.staffId));
+      const extraStaffIds = new Set<string>();
+      for (const p of allPayrolls) {
+        if (includedIds.has(p.staffId)) continue;
+        if (p.status !== 'APPROVED') continue;
+        if (p.netPayable.toNumber() - p.paidAmount.toNumber() > 0) {
+          extraStaffIds.add(p.staffId);
+        }
+      }
+      if (extraStaffIds.size > 0) {
+        const extras = await this.prisma.staff.findMany({
+          where: { id: { in: [...extraStaffIds] }, branchId, deletedAt: null },
+          select: { id: true, name: true, role: true, isActive: true },
+        });
+        rows.push(...extras.map(buildRowForStaff));
+      }
+    }
+
+    return rows.sort((a, b) => a.staff.name.localeCompare(b.staff.name));
+  }
+
   async findOne(id: string, branchId: string) {
     const payroll = await this.prisma.payroll.findFirst({
       where: { id, branchId },

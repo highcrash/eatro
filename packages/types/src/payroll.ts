@@ -66,6 +66,24 @@ export interface Payroll {
   payments?: PayrollPayment[];
 }
 
+export interface PayrollStaffSummaryRow {
+  staffId: string;
+  staff: { id: string; name: string; role: string; isActive: boolean };
+  latestPayroll: {
+    id: string;
+    status: PayrollStatus;
+    periodStart: string;
+    periodEnd: string;
+    netPayable: number;
+    paidAmount: number;
+  } | null;
+  balanceOwed: number;
+  totalPaid: number;
+  payrollCount: number;
+  draftCount: number;
+  lastPaidAt: string | null;
+}
+
 export interface PayrollPayment {
   id: string;
   payrollId: string;
