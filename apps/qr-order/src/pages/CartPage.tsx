@@ -27,9 +27,20 @@ export default function CartPage() {
   // change). Skip those so a single bad row doesn't crash the page
   // on render — the symptom was a black/blank cart screen.
   const items = rawItems.filter((c) => c && c.menuItem && typeof c.menuItem.id === 'string');
+  // Public menu endpoint stamps a `discountedPrice` field on items
+  // with an active MenuItemDiscount (see applyDiscounts in
+  // public.service.ts). Cart must mirror it — server re-applies the
+  // same discount when creating the order, so showing the base price
+  // here scared customers into thinking the bill was wrong.
+  const effectiveUnitPrice = (mi: typeof items[number]['menuItem']) => {
+    const base = Number(mi.price);
+    const raw = (mi as { discountedPrice?: unknown }).discountedPrice;
+    const disc = Number(raw);
+    return Number.isFinite(disc) && disc > 0 && disc < base ? disc : base;
+  };
   const subtotal = items.reduce((s, c) => {
     const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
-    return s + (Number(c.menuItem.price) + addonsTotal) * c.quantity;
+    return s + (effectiveUnitPrice(c.menuItem) + addonsTotal) * c.quantity;
   }, 0);
   const isAddingToOrder = !!activeOrderId;
 
@@ -136,7 +147,10 @@ export default function CartPage() {
             {items.map((line) => {
               const { menuItem, quantity, addons, notes, key } = line;
               const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
-              const unitPrice = Number(menuItem.price) + addonsTotal;
+              const basePrice = Number(menuItem.price);
+              const discountedUnit = effectiveUnitPrice(menuItem);
+              const unitPrice = discountedUnit + addonsTotal;
+              const hasDiscount = discountedUnit < basePrice;
               return (
               <div key={key} className="flex gap-3 items-start py-3 border-b border-[#F2F1EE] last:border-0">
                 {/* Image */}
@@ -185,7 +199,16 @@ export default function CartPage() {
                   <button onClick={() => removeItem(key)} className="text-[#CCC] hover:text-[#D62B2B] transition-colors p-0.5">
                     <X size={14} />
                   </button>
-                  <p className="font-display text-lg text-[#111] tracking-wide mt-auto">{formatCurrency(unitPrice * quantity)}</p>
+                  <div className="mt-auto text-right">
+                    {hasDiscount && (
+                      <p className="font-body text-[11px] text-[#999] line-through leading-none">
+                        {formatCurrency((basePrice + addonsTotal) * quantity)}
+                      </p>
+                    )}
+                    <p className={`font-display text-lg tracking-wide ${hasDiscount ? 'text-[#D62B2B]' : 'text-[#111]'}`}>
+                      {formatCurrency(unitPrice * quantity)}
+                    </p>
+                  </div>
                 </div>
               </div>
               );
