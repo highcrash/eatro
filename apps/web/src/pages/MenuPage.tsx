@@ -415,32 +415,40 @@ export default function MenuPage() {
           </div>
 
         ) : active ? (
-          /* ── Category selected — show sub-category sections ── */
+          /* ── Category selected — direct items first, then sub-category sections ── */
           <div className="space-y-12">
             {(() => {
               const children = childrenOf.get(active) ?? [];
-              if (children.length > 0) {
-                // Parent with sub-categories: show each sub-cat as a section
-                return children.map((sub) => {
-                  const subItems = groupedByCategory.get(sub.id);
-                  if (!subItems || subItems.length === 0) return null;
-                  return (
+              // Items filed DIRECTLY under the active parent (not in
+              // any sub-category). Previously omitted when the parent
+              // had sub-categories — anything filed straight under the
+              // parent silently vanished. Now they render at the top
+              // as an unlabeled grid, then sub-category sections
+              // follow.
+              const directItems = groupedByCategory.get(active) ?? [];
+              const subSections = children
+                .map((sub) => ({ sub, items: groupedByCategory.get(sub.id) ?? [] }))
+                .filter(({ items }) => items.length > 0);
+              const total = directItems.length + subSections.reduce((s, x) => s + x.items.length, 0);
+              if (total === 0) {
+                return <p className="text-muted text-center py-8">No items in this category.</p>;
+              }
+              return (
+                <>
+                  {directItems.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                      {directItems.map((it) => <ItemCard key={it.id} it={it} navigate={navigate} />)}
+                    </div>
+                  )}
+                  {subSections.map(({ sub, items: subItems }) => (
                     <div key={sub.id}>
                       <h2 className="font-display text-3xl tracking-wider mb-4">{sub.name}</h2>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         {subItems.map((it) => <ItemCard key={it.id} it={it} navigate={navigate} />)}
                       </div>
                     </div>
-                  );
-                });
-              }
-              // Leaf category (no children) — show grid directly
-              return items.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {items.map((it) => <ItemCard key={it.id} it={it} navigate={navigate} />)}
-                </div>
-              ) : (
-                <p className="text-muted text-center py-8">No items in this category.</p>
+                  ))}
+                </>
               );
             })()}
           </div>
