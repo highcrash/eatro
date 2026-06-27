@@ -79,11 +79,18 @@ export default function HomepageItemStrip({ label, items }: Props) {
                     <span className="font-display text-xs text-[#C8FF00]">{formatCurrency(discountedPrice!)}</span>
                     <span className="font-body text-[10px] text-[#666] line-through">{formatCurrency(basePrice)}</span>
                   </div>
-                ) : (
+                ) : displayPrice > 0 ? (
                   <p className="font-display text-xs text-white mt-1">
                     {showFromPrefix && <span className="text-[9px] text-[#888] font-body font-normal mr-1">From</span>}
                     {formatCurrency(displayPrice)}
                   </p>
+                ) : (
+                  // Belt-and-suspenders: a variant parent that slipped
+                  // through with no usable price reads "BDT 0.00" which
+                  // looks like a billing bug. Hide the price line
+                  // entirely — the backend filter is the real fix; this
+                  // is just so a regression never resurfaces the issue.
+                  <p className="font-body text-[10px] text-[#888] mt-1">See options</p>
                 )}
               </div>
             </button>
