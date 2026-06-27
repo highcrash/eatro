@@ -97,6 +97,13 @@ const PUBLIC_CATEGORY_SELECT = {
   icon: true,
   parentId: true,
   sortOrder: true,
+  // Exposed so the frontend can keep child categories in the
+  // hierarchy walk (for parent-click roll-up) without showing them
+  // as their own tabs when admin has marked them hidden. Backend
+  // no longer filters categories by websiteVisible — the client
+  // decides what shows in the tab row, but always uses the full
+  // tree to gather items under a parent click.
+  websiteVisible: true,
 } as const;
 
 @Injectable()
@@ -312,11 +319,18 @@ export class PublicService {
     const hiddenCatIds: string[] = content?.hiddenCategoryIds ? this.safeParseArray(content.hiddenCategoryIds) : [];
     const hiddenItemIds: string[] = content?.hiddenItemIds ? this.safeParseArray(content.hiddenItemIds) : [];
 
+    // NB: websiteVisible is intentionally NOT filtered here. Child
+    // categories marked hidden still need to come down so the QR +
+    // website hierarchy walk can roll their items up to the visible
+    // parent on a parent-click. The clients filter the tab row by
+    // websiteVisible themselves. Admin's per-branch
+    // WebsiteContent.hiddenCategoryIds is still applied below as a
+    // hard exclude (those rows shouldn't appear anywhere on the
+    // public site, not even rolled up).
     const catWhere: any = {
       branchId,
       isActive: true,
       deletedAt: null,
-      websiteVisible: true,
     };
     if (hiddenCatIds.length > 0) catWhere.id = { notIn: hiddenCatIds };
 

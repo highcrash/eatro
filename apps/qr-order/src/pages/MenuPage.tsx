@@ -122,7 +122,14 @@ export default function MenuPage() {
   // top-level (parent) categories — sub-categories are folded into
   // their parent so a tap on "Beverages" lights up Tea + Coffee +
   // Juices items together. Matches website behaviour.
-  const parentCategories = useMemo(() => categories.filter((c) => !c.parentId), [categories]);
+  // Hidden children (websiteVisible=false) are kept in the full
+  // categories array so the hierarchy walk below can still roll
+  // their items up to the visible parent — admin uses the flag to
+  // say "don't show as its own tab", not "hide my items entirely".
+  const parentCategories = useMemo(
+    () => categories.filter((c) => !c.parentId && (c as any).websiteVisible !== false),
+    [categories],
+  );
   const childIdsByParent = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const c of categories) {

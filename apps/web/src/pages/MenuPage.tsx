@@ -94,7 +94,7 @@ function ItemCard({ it, navigate }: { it: any; navigate: (path: string) => void 
 }
 
 interface PublicMenu {
-  categories: Array<{ id: string; name: string; parentId?: string | null }>;
+  categories: Array<{ id: string; name: string; parentId?: string | null; websiteVisible?: boolean }>;
   items: Array<{
     id: string;
     name: string;
@@ -165,7 +165,16 @@ export default function MenuPage() {
   }, [allItems, searchQ]);
 
   // Build parent→children map
-  const parentCategories = useMemo(() => categories.filter((c) => !c.parentId), [categories]);
+  // Tab row shows only top-level categories that admin hasn't
+  // explicitly hidden. Hidden CHILD categories still come down in
+  // the full `categories` array so getCategoryIds() below can roll
+  // their items up to the visible parent on a parent-click — admin
+  // marking a child websiteVisible=false means "don't show as its
+  // own tab", not "hide my items entirely".
+  const parentCategories = useMemo(
+    () => categories.filter((c) => !c.parentId && c.websiteVisible !== false),
+    [categories],
+  );
   const childrenOf = useMemo(() => {
     const map = new Map<string, typeof categories>();
     for (const c of categories) {
