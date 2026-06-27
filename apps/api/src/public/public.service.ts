@@ -365,7 +365,19 @@ export class PublicService {
       variantParentId: null,
       OR: [
         { websiteVisible: true },
+        // Items in a CHILD (sub-)category bypass per-item
+        // websiteVisible — admin organised them there as a roll-up.
         ...(childCategoryIds.length > 0 ? [{ categoryId: { in: childCategoryIds } }] : []),
+        // Variant PARENTS bypass per-item websiteVisible too. They're
+        // shells (price=0); their real visibility is decided later by
+        // the visibleItems filter which drops parents with no
+        // published variants. Without this, a variant parent in a
+        // top-level category whose websiteVisible=false (often
+        // toggled by admin to mask the "BDT 0.00" parent on the menu
+        // grid) is filtered before its variants subquery runs, and
+        // the entire item — variants and all — disappears from the
+        // QR / website grid even though its variants are published.
+        { isVariantParent: true },
       ],
     };
     if (hiddenItemIds.length > 0) itemWhere.id = { notIn: hiddenItemIds };
