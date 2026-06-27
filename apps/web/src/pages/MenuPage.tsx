@@ -28,9 +28,15 @@ function ItemCard({ it, navigate }: { it: any; navigate: (path: string) => void 
     .slice()
     .sort((a, b) => Number(a.price) - Number(b.price));
   const baseVariantPrice = sortedVariants[0]?.price ?? 0;
+  const topVariantPrice = sortedVariants[sortedVariants.length - 1]?.price ?? 0;
   const isVariantParent = !!it.isVariantParent && sortedVariants.length > 0;
   // For variant parents the displayed price = cheapest variant.
   const displayPrice = isVariantParent && Number(it.price) === 0 ? baseVariantPrice : Number(it.price);
+  // Range pricing — when variants have different prices, show
+  // "BDT 220 - 399" so the spread is visible on the card itself
+  // (matches the customer-facing brief). Single-price parents and
+  // standalones keep the existing "From X" / "X" render.
+  const isVariantPriceRange = isVariantParent && Number(topVariantPrice) > Number(baseVariantPrice);
   return (
     <button
       onClick={() => navigate(`/menu/${it.slug || it.id}`)}
@@ -57,6 +63,10 @@ function ItemCard({ it, navigate }: { it: any; navigate: (path: string) => void 
               <span className="text-accent font-bold">{formatCurrency(it.discountedPrice!)}</span>
               <span className="text-muted text-xs line-through">{formatCurrency(displayPrice)}</span>
             </>
+          ) : isVariantPriceRange ? (
+            <span className="text-accent font-bold">
+              {formatCurrency(Number(baseVariantPrice))} - {formatCurrency(Number(topVariantPrice))}
+            </span>
           ) : (
             <span className="text-accent font-bold">
               {isVariantParent && <span className="text-muted text-xs font-normal mr-1">From</span>}

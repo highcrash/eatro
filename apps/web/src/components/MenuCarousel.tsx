@@ -69,7 +69,15 @@ export default function MenuCarousel({ items, onItemClick }: MenuCarouselProps) 
           const cheapestVariantPrice = variants.length > 0
             ? variants.reduce((min, v) => Math.min(min, Number(v.price)), Number(variants[0].price))
             : 0;
+          const dearestVariantPrice = variants.length > 0
+            ? variants.reduce((max, v) => Math.max(max, Number(v.price)), Number(variants[0].price))
+            : 0;
           const isParentWithVariants = !!item.isVariantParent && variants.length > 0;
+          // Show a price range (e.g. "BDT 220 - 399") on a variant
+          // parent whose children have different prices — gives both
+          // ends upfront instead of just the cheapest with a "From"
+          // prefix.
+          const isVariantPriceRange = isParentWithVariants && dearestVariantPrice > cheapestVariantPrice;
           const displayPrice = isParentWithVariants && Number(item.price) === 0
             ? cheapestVariantPrice
             : Number(item.price);
@@ -110,9 +118,13 @@ export default function MenuCarousel({ items, onItemClick }: MenuCarouselProps) 
                       <span className="text-accent font-bold text-sm">{formatCurrency(item.discountedPrice!)}</span>
                       <span className="text-muted text-xs line-through">{formatCurrency(displayPrice)}</span>
                     </div>
+                  ) : isVariantPriceRange ? (
+                    <span className="text-accent font-bold text-sm">
+                      {formatCurrency(cheapestVariantPrice)} - {formatCurrency(dearestVariantPrice)}
+                    </span>
                   ) : displayPrice > 0 ? (
                     <span className="text-accent font-bold text-sm">
-                      {isParentWithVariants && <span className="text-muted text-xs font-normal mr-1">From</span>}
+                      {isParentWithVariants && !isVariantPriceRange && <span className="text-muted text-xs font-normal mr-1">From</span>}
                       {formatCurrency(displayPrice)}
                     </span>
                   ) : (

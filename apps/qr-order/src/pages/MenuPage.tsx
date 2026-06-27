@@ -447,6 +447,15 @@ function FoodCard({ item, onAdd, onTap }: { item: MenuItem; onAdd: (item: MenuIt
   const cheapestVariantPrice = variants.length > 0
     ? variants.reduce((min, v) => Math.min(min, Number(v.price)), Number(variants[0].price))
     : 0;
+  // Show a range (e.g. "BDT 220 - 399") on a variant parent whose
+  // children have DIFFERENT prices, so the customer sees both ends
+  // upfront instead of just the cheapest with a "From" prefix.
+  // Single-price variant parents (all variants priced the same) and
+  // non-variant items keep the existing single-price render.
+  const dearestVariantPrice = variants.length > 0
+    ? variants.reduce((max, v) => Math.max(max, Number(v.price)), Number(variants[0].price))
+    : 0;
+  const isVariantPriceRange = isVariantParent && dearestVariantPrice > cheapestVariantPrice;
 
   // Sum the cheapest required pick from each REQUIRED addon group
   // (minPicks > 0). Optional groups don't push the floor up.
@@ -531,6 +540,10 @@ function FoodCard({ item, onAdd, onTap }: { item: MenuItem; onAdd: (item: MenuIt
               {formatCurrency(basePrice)}
             </span>
           </div>
+        ) : isVariantPriceRange ? (
+          <p className="font-display text-base text-white tracking-wide mt-1.5">
+            {formatCurrency(cheapestVariantPrice)} - {formatCurrency(dearestVariantPrice)}
+          </p>
         ) : (
           <p className="font-display text-base text-white tracking-wide mt-1.5">
             {showFromPrefix && <span className="text-[10px] text-[#888] font-body font-normal mr-1">From</span>}
