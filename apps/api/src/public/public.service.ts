@@ -334,11 +334,27 @@ export class PublicService {
     };
     if (hiddenCatIds.length > 0) catWhere.id = { notIn: hiddenCatIds };
 
+    // Pull categories first so we know which IDs are children. Items
+    // filed under a child category roll up to the visible parent on a
+    // parent-click — and admin's per-item websiteVisible flag is
+    // bypassed for them. Reason: admin who organized items under a
+    // sub-category usually didn't realize they ALSO had to flip each
+    // item's own websiteVisible on; the rolled-up behaviour expects
+    // them visible. Items directly under a top-level category still
+    // respect their own websiteVisible (admin's per-item hide there
+    // is intentional). WebsiteContent.hiddenItemIds still wins as
+    // the explicit "hide everywhere" override.
+    const categories = await this.prisma.menuCategory.findMany({
+      where: catWhere,
+      orderBy: { sortOrder: 'asc' },
+      select: PUBLIC_CATEGORY_SELECT,
+    });
+    const childCategoryIds = categories.filter((c) => c.parentId).map((c) => c.id);
+
     const itemWhere: any = {
       branchId,
       isAvailable: true,
       deletedAt: null,
-      websiteVisible: true,
       isAddon: false,
       // Show parents + standalones in the grid; hide individual
       // variants — the website renders them as tabs on the parent's
@@ -347,21 +363,18 @@ export class PublicService {
       // (no parent) and variant parents both have variantParentId =
       // null, so this filter keeps both.
       variantParentId: null,
+      OR: [
+        { websiteVisible: true },
+        ...(childCategoryIds.length > 0 ? [{ categoryId: { in: childCategoryIds } }] : []),
+      ],
     };
     if (hiddenItemIds.length > 0) itemWhere.id = { notIn: hiddenItemIds };
 
-    const [categories, items] = await Promise.all([
-      this.prisma.menuCategory.findMany({
-        where: catWhere,
-        orderBy: { sortOrder: 'asc' },
-        select: PUBLIC_CATEGORY_SELECT,
-      }),
-      this.prisma.menuItem.findMany({
-        where: itemWhere,
-        orderBy: { sortOrder: 'asc' },
-        select: PUBLIC_MENU_ITEM_SELECT,
-      }),
-    ]);
+    const items = await this.prisma.menuItem.findMany({
+      where: itemWhere,
+      orderBy: { sortOrder: 'asc' },
+      select: PUBLIC_MENU_ITEM_SELECT,
+    });
 
     // Drop variant parents whose every variant got filtered out by
     // websiteVisible. Without this the parent shell would render
