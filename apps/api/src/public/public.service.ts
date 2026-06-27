@@ -351,24 +351,33 @@ export class PublicService {
     });
     const childCategoryIds = categories.filter((c) => c.parentId).map((c) => c.id);
 
-    // Grid policy: each variant gets its own card; variant PARENTS
-    // are dropped (admin uses them as organisational shells in POS,
-    // but customer-facing the variants are the real, priced,
-    // orderable rows). So we pull standalones + variant children,
-    // and drop the parent shells in post-processing. Without this
-    // the customer saw e.g. one "MeatBalls Of The Grand Line" card
-    // with a "From BDT 480" label and had to click in to see Rice /
-    // Spaghetti — the user wants both as separate menu cards.
     const itemWhere: any = {
       branchId,
       isAvailable: true,
       deletedAt: null,
       isAddon: false,
+      // Show parents + standalones in the grid; hide individual
+      // variants — the website renders them as tabs on the parent's
+      // detail page so customers see "Hargao" once with a Prawn /
+      // Chicken switcher instead of two separate cards. Standalones
+      // (no parent) and variant parents both have variantParentId =
+      // null, so this filter keeps both.
+      variantParentId: null,
       OR: [
         { websiteVisible: true },
         // Items in a CHILD (sub-)category bypass per-item
         // websiteVisible — admin organised them there as a roll-up.
         ...(childCategoryIds.length > 0 ? [{ categoryId: { in: childCategoryIds } }] : []),
+        // Variant PARENTS bypass per-item websiteVisible too. They're
+        // shells (price=0); their real visibility is decided later by
+        // the visibleItems filter which drops parents with no
+        // published variants. Without this, a variant parent in a
+        // top-level category whose websiteVisible=false (often
+        // toggled by admin to mask the "BDT 0.00" parent on the menu
+        // grid) is filtered before its variants subquery runs, and
+        // the entire item — variants and all — disappears from the
+        // QR / website grid even though its variants are published.
+        { isVariantParent: true },
       ],
     };
     if (hiddenItemIds.length > 0) itemWhere.id = { notIn: hiddenItemIds };
@@ -379,14 +388,13 @@ export class PublicService {
       select: PUBLIC_MENU_ITEM_SELECT,
     });
 
-    // Drop variant parents — their variants come through as
-    // first-class cards (variantParentId is no longer filtered in
-    // itemWhere). Without this drop the grid would show BOTH the
-    // parent shell AND each variant as separate cards — confusing
-    // duplicate-looking rows.
-    const flatItems = items.filter((it: any) => !it.isVariantParent);
+    // Drop variant parents whose every variant got filtered out by
+    // websiteVisible. Without this the parent shell would render
+    // as an empty card (parent's own price is 0 by convention) and
+    // clicking it would land on a detail page with no tabs.
+    const visibleItems = items.filter((it: any) => !it.isVariantParent || ((it.variants ?? []).length > 0));
 
-    const itemsWithDiscount = await this.applyDiscounts(branchId, flatItems);
+    const itemsWithDiscount = await this.applyDiscounts(branchId, visibleItems);
     return { categories, items: itemsWithDiscount };
   }
 
