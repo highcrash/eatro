@@ -110,11 +110,18 @@ export default function MenuCarousel({ items, onItemClick }: MenuCarouselProps) 
                       <span className="text-accent font-bold text-sm">{formatCurrency(item.discountedPrice!)}</span>
                       <span className="text-muted text-xs line-through">{formatCurrency(displayPrice)}</span>
                     </div>
-                  ) : (
+                  ) : displayPrice > 0 ? (
                     <span className="text-accent font-bold text-sm">
                       {isParentWithVariants && <span className="text-muted text-xs font-normal mr-1">From</span>}
                       {formatCurrency(displayPrice)}
                     </span>
+                  ) : (
+                    // Belt-and-suspenders: a variant parent that slipped
+                    // through with no usable price would otherwise read
+                    // "BDT 0.00". The backend filter is the real fix;
+                    // this just prevents a regression from resurfacing
+                    // the alarming zero-price card.
+                    <span className="text-muted text-xs">See options</span>
                   )}
                   <svg className="w-4 h-4 text-muted group-hover/card:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />

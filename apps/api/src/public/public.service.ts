@@ -709,7 +709,13 @@ export class PublicService {
     });
     const byId = new Map(items.map((it) => [it.id, it]));
     const sorted = orderedIds.map((id) => byId.get(id)).filter(Boolean) as typeof items;
-    return this.applyDiscounts(branchId, sorted);
+    // Mirror the main /menu filter: drop variant parents that come
+    // back without any visible variants (websiteVisible-toggled-off
+    // children, or shells with no variants set up yet). Their
+    // price=0 convention would otherwise render the strip card as
+    // "BDT 0.00" since the frontend can't infer a "From X" price.
+    const visibleSorted = sorted.filter((it: any) => !it.isVariantParent || ((it.variants ?? []).length > 0));
+    return this.applyDiscounts(branchId, visibleSorted);
   }
 
   /**
@@ -721,6 +727,8 @@ export class PublicService {
    * to the rest of the menu.
    */
   async getNewItems(branchId: string, take = 10) {
+    // Over-fetch so the variant-parent visibility filter below can
+    // drop empty-variant shells without leaving the strip thin.
     const items = await this.prisma.menuItem.findMany({
       where: {
         branchId,
@@ -735,10 +743,19 @@ export class PublicService {
         variantParentId: null,
       },
       orderBy: { createdAt: 'desc' },
-      take,
+      take: take * 2,
       select: { ...PUBLIC_MENU_ITEM_SELECT, category: { select: PUBLIC_CATEGORY_SELECT } },
     });
-    return this.applyDiscounts(branchId, items);
+    // Mirror the main /menu filter at public.service.ts visibleItems:
+    // drop variant parents whose every variant got filtered out by
+    // websiteVisible (or that simply have no variants configured
+    // yet). Without this the parent's price=0 convention leaks into
+    // the strip and the card reads "BDT 0.00" because the frontend
+    // can't recover a "From X" price from an empty variants[].
+    const visibleItems = items
+      .filter((it: any) => !it.isVariantParent || ((it.variants ?? []).length > 0))
+      .slice(0, take);
+    return this.applyDiscounts(branchId, visibleItems);
   }
 
   async getDiscountedItems(branchId: string) {
