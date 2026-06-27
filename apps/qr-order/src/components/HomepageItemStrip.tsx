@@ -46,7 +46,14 @@ export default function HomepageItemStrip({ label, items }: Props) {
           const cheapestVariantPrice = isVariantParent
             ? variants.reduce((min, v) => Math.min(min, Number(v.price)), Number(variants[0].price))
             : 0;
-          const showFromPrefix = isVariantParent && cheapestVariantPrice > basePrice;
+          const dearestVariantPrice = isVariantParent
+            ? variants.reduce((max, v) => Math.max(max, Number(v.price)), Number(variants[0].price))
+            : 0;
+          // Range display (e.g. "BDT 220 - 399") on a parent whose
+          // variants are differently priced — gives both ends upfront
+          // instead of just "From" + the cheapest.
+          const isVariantPriceRange = isVariantParent && dearestVariantPrice > cheapestVariantPrice;
+          const showFromPrefix = isVariantParent && cheapestVariantPrice > basePrice && !isVariantPriceRange;
           const displayPrice = isVariantParent && basePrice === 0 ? cheapestVariantPrice : basePrice;
           const rawDiscounted = (item as any).discountedPrice;
           const hasDiscount = rawDiscounted != null
@@ -79,6 +86,10 @@ export default function HomepageItemStrip({ label, items }: Props) {
                     <span className="font-display text-xs text-[#C8FF00]">{formatCurrency(discountedPrice!)}</span>
                     <span className="font-body text-[10px] text-[#666] line-through">{formatCurrency(basePrice)}</span>
                   </div>
+                ) : isVariantPriceRange ? (
+                  <p className="font-display text-xs text-white mt-1">
+                    {formatCurrency(cheapestVariantPrice)} - {formatCurrency(dearestVariantPrice)}
+                  </p>
                 ) : displayPrice > 0 ? (
                   <p className="font-display text-xs text-white mt-1">
                     {showFromPrefix && <span className="text-[9px] text-[#888] font-body font-normal mr-1">From</span>}
