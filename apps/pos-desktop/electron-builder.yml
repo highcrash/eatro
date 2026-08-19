@@ -55,8 +55,16 @@ win:
   executableName: Your Restaurant POS
   artifactName: YourRestaurantPOS-Setup-${version}.${ext}
   # icon auto-resolves from build/icon.ico (Windows) or build/icon.png.
-  # Drop a 256x256+ .ico in build/ before cutting a real release — the
-  # default Electron icon ships until then.
+  # signAndEditExecutable is off because electron-builder's built-in icon/
+  # version-info step needs the "winCodeSign" vendor archive, which bundles
+  # macOS codesign tooling (symlinks) alongside the Windows tools it
+  # actually uses — extracting it needs the "Create symbolic links"
+  # Windows privilege, unavailable on some machines. build/afterPack.js
+  # does the same job with the standalone `rcedit` package instead, which
+  # has no such requirement.
+  signAndEditExecutable: false
+
+afterPack: build/afterPack.js
 
 nsis:
   oneClick: false
