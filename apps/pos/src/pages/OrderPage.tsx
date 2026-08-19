@@ -21,6 +21,7 @@ import CustomMenuDialog from '../components/CustomMenuDialog';
 import VariantPickerDialog from '../components/VariantPickerDialog';
 import CustomiseLineDialog from '../components/CustomiseLineDialog';
 import AddonPickerDialog from '../components/AddonPickerDialog';
+import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
 import { useCashierPermissions } from '../lib/permissions';
 
 interface CartItem {
@@ -1150,6 +1151,7 @@ function ActiveOrderView({
   const [newCustName, setNewCustName] = useState('');
   const [showMoveTable, setShowMoveTable] = useState(false);
   const [movingItem, setMovingItem] = useState<OrderItem | null>(null);
+  const [pendingMoveApproval, setPendingMoveApproval] = useState<null | { summary: string; run: (otp: string | null) => void }>(null);
 
   const { data: availableDiscounts = [] } = useQuery<{ id: string; name: string; type: string; value: number; scope: string; isActive: boolean }[]>({
     queryKey: ['active-discounts'],
@@ -1246,7 +1248,8 @@ function ActiveOrderView({
   });
 
   const moveTableMut = useMutation({
-    mutationFn: (newTableId: string) => api.post<Order>(`/orders/${order.id}/move-table`, { tableId: newTableId }),
+    mutationFn: ({ tableId, actionOtp }: { tableId: string; actionOtp?: string | null }) =>
+      api.post<Order>(`/orders/${order.id}/move-table`, { tableId, actionOtp: actionOtp ?? undefined }),
     onSuccess: (updated) => {
       setOrder(updated);
       setShowMoveTable(false);
@@ -1256,8 +1259,8 @@ function ActiveOrderView({
   });
 
   const moveItemMut = useMutation({
-    mutationFn: ({ itemId, tableId }: { itemId: string; tableId: string }) =>
-      api.post<Order>(`/orders/${order.id}/items/${itemId}/move-table`, { tableId }),
+    mutationFn: ({ itemId, tableId, actionOtp }: { itemId: string; tableId: string; actionOtp?: string | null }) =>
+      api.post<Order>(`/orders/${order.id}/items/${itemId}/move-table`, { tableId, actionOtp: actionOtp ?? undefined }),
     onSuccess: (updated) => {
       setOrder(updated);
       setMovingItem(null);
@@ -1265,6 +1268,34 @@ function ActiveOrderView({
       void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
     },
   });
+
+  const recordBillPrintMut = useMutation({
+    mutationFn: () => api.post<Order>(`/orders/${order.id}/bill-print-status`, {}),
+    onSuccess: (updated) => setOrder(updated),
+  });
+
+  // ─── Post-bill-print move gate ─────────────────────────────────────────────
+  // Once the bill has been printed, moving items may need manager approval —
+  // see the moveItemAfterBillPrint cashier permission (Admin → Cashier
+  // Permissions). Mirrors the guardAndRun pattern in PosPurchasingPage.tsx.
+  const moveGateCfg = activeOrderCashierPerms?.moveItemAfterBillPrint;
+  const isManager = user?.role === 'OWNER' || user?.role === 'MANAGER';
+
+  const guardMove = (summary: string, run: (otp: string | null) => void) => {
+    if (!order.billPrintedAt || isManager || !moveGateCfg?.enabled) {
+      run(null);
+      return;
+    }
+    if (moveGateCfg.approval === 'NONE') {
+      alert('Only a manager can move items after the bill has been printed.');
+      return;
+    }
+    if (moveGateCfg.approval === 'AUTO') {
+      run(null);
+      return;
+    }
+    setPendingMoveApproval({ summary, run });
+  };
 
   const discount = Number(order.discountAmount);
 
@@ -1789,7 +1820,20 @@ function ActiveOrderView({
       )}
 
       {showBill && (
-        <BillModal order={order} onClose={() => setShowBill(false)} />
+        <BillModal order={order} onClose={() => setShowBill(false)} onPrinted={() => recordBillPrintMut.mutate()} />
+      )}
+
+      {pendingMoveApproval && (
+        <ApprovalOtpDialog
+          action="moveItemAfterBillPrint"
+          summary={pendingMoveApproval.summary}
+          onClose={() => setPendingMoveApproval(null)}
+          onApproved={(otp) => {
+            const { run } = pendingMoveApproval;
+            setPendingMoveApproval(null);
+            run(otp);
+          }}
+        />
       )}
 
       {showReprintKt && (
@@ -2090,7 +2134,10 @@ function ActiveOrderView({
                     return (
                       <button
                         key={t.id}
-                        onClick={() => enabled && moveItemMut.mutate({ itemId: movingItem.id, tableId: t.id })}
+                        onClick={() => enabled && guardMove(
+                          `Move ${movingItem.quantity}× ${movingItem.menuItemName} to Table ${t.tableNumber}`,
+                          (otp) => moveItemMut.mutate({ itemId: movingItem.id, tableId: t.id, actionOtp: otp }),
+                        )}
                         disabled={!enabled || moveItemMut.isPending}
                         className={`aspect-square rounded-theme border-2 flex flex-col items-center justify-center transition-colors ${
                           isVacant
@@ -2161,7 +2208,10 @@ function ActiveOrderView({
                     return (
                       <button
                         key={t.id}
-                        onClick={() => isVacant && moveTableMut.mutate(t.id)}
+                        onClick={() => isVacant && guardMove(
+                          `Move order to Table ${t.tableNumber}`,
+                          (otp) => moveTableMut.mutate({ tableId: t.id, actionOtp: otp }),
+                        )}
                         disabled={!isVacant || moveTableMut.isPending}
                         className={`aspect-square rounded-theme border-2 flex flex-col items-center justify-center transition-colors ${
                           isVacant

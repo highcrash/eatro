@@ -14,6 +14,7 @@ import { MushakService } from '../mushak/mushak.service';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MarketingService } from '../marketing/marketing.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
+import { PermissionsService } from '../permissions/permissions.service';
 
 /**
  * Service charge + VAT calculator used by every place that recomputes an
@@ -108,6 +109,7 @@ export class OrderService {
     private readonly loyalty: LoyaltyService,
     private readonly marketing: MarketingService,
     private readonly activityLog: ActivityLogService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   /**
@@ -2087,10 +2089,21 @@ export class OrderService {
     return updated;
   }
 
-  async moveItemToTable(orderId: string, itemId: string, branchId: string, targetTableId: string) {
+  async moveItemToTable(
+    orderId: string,
+    itemId: string,
+    branchId: string,
+    targetTableId: string,
+    role: string,
+    customRoleId?: string | null,
+    actionOtp?: string,
+  ) {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') {
       throw new BadRequestException('Cannot move items from this order');
+    }
+    if (order.billPrintedAt) {
+      await this.permissions.requirePostBillPrintMove(branchId, role, actionOtp, customRoleId);
     }
 
     const item = order.items.find((i) => i.id === itemId);
@@ -2253,10 +2266,20 @@ export class OrderService {
     return updatedSource;
   }
 
-  async moveTable(orderId: string, branchId: string, newTableId: string) {
+  async moveTable(
+    orderId: string,
+    branchId: string,
+    newTableId: string,
+    role: string,
+    customRoleId?: string | null,
+    actionOtp?: string,
+  ) {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') {
       throw new BadRequestException('Cannot move a completed order');
+    }
+    if (order.billPrintedAt) {
+      await this.permissions.requirePostBillPrintMove(branchId, role, actionOtp, customRoleId);
     }
 
     const newTable = await this.prisma.diningTable.findFirst({
@@ -2312,6 +2335,27 @@ export class OrderService {
     this.ws.emitToBranch(branchId, 'order:updated', updated);
 
     return { message: 'Bill request sent to staff' };
+  }
+
+  /** POS reports a successful bill/check print via
+   *  POST /orders/:id/bill-print-status. Stamps billPrintedAt so
+   *  moveItemToTable / moveTable start enforcing manager approval
+   *  (when the branch has that gate enabled). */
+  async recordBillPrint(orderId: string, branchId: string) {
+    const order = await this.findOne(orderId, branchId);
+    if (order.status === 'PAID' || order.status === 'VOID') {
+      throw new BadRequestException('Cannot record bill print for this order');
+    }
+
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { billPrintedAt: new Date() },
+      include: { items: true, payments: true },
+    });
+
+    this.ws.emitToBranch(branchId, 'order:updated', updated);
+
+    return updated;
   }
 
   async voidOrder(id: string, branchId: string, dto: VoidOrderDto) {

@@ -106,8 +106,9 @@ export class OrderController {
   }
 
   @Post(':id/move-table')
-  moveTable(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { tableId: string }) {
-    return this.orderService.moveTable(id, user.branchId, dto.tableId);
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
+  moveTable(@Param('id') id: string, @CurrentUser() user: JwtPayload, @Body() dto: { tableId: string; actionOtp?: string }) {
+    return this.orderService.moveTable(id, user.branchId, dto.tableId, user.role, user.customRoleId ?? null, dto.actionOtp);
   }
 
   @Post(':id/items/:itemId/move-table')
@@ -116,9 +117,19 @@ export class OrderController {
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @CurrentUser() user: JwtPayload,
-    @Body() dto: { tableId: string },
+    @Body() dto: { tableId: string; actionOtp?: string },
   ) {
-    return this.orderService.moveItemToTable(id, itemId, user.branchId, dto.tableId);
+    return this.orderService.moveItemToTable(id, itemId, user.branchId, dto.tableId, user.role, user.customRoleId ?? null, dto.actionOtp);
+  }
+
+  /** POS fire-and-forget report after a successful bill/check print
+   *  (BillModal). Stamps billPrintedAt so subsequent item moves on
+   *  this order start enforcing manager approval, if the branch has
+   *  the moveItemAfterBillPrint gate enabled. */
+  @Post(':id/bill-print-status')
+  @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
+  recordBillPrint(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.orderService.recordBillPrint(id, user.branchId);
   }
 
   @Patch(':id/items/:itemId/notes')
@@ -556,7 +567,11 @@ export class QrOrderController {
       });
     }
 
-    return this.orderService.moveTable(id, branchId, dto.tableId);
+    // QR customer, not staff — no JwtPayload role to pass. If the branch
+    // has turned on the post-bill-print approval gate, this call has no
+    // way to supply a manager OTP, so it correctly 401s in that (rare)
+    // case rather than silently bypassing it.
+    return this.orderService.moveTable(id, branchId, dto.tableId, 'QR_CUSTOMER');
   }
 
   @Post('qr/:id/items')

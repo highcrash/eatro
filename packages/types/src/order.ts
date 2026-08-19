@@ -110,6 +110,10 @@ export interface Order extends AuditFields {
   waiterId: string | null;
   guestCount: number;
   billRequested: boolean;
+  /** Set when POS reports a successful bill/check print via
+   *  POST /orders/:id/bill-print-status. Once set, moving items off
+   *  this order requires manager approval (moveItemAfterBillPrint). */
+  billPrintedAt?: Date | string | null;
   paymentMethod: PaymentMethod | null;
   paidAt: Date | null;
   /** Table-status timer milestones — used by POS Tables to render

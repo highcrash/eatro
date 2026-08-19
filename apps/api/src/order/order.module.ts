@@ -11,12 +11,13 @@ import { MushakModule } from '../mushak/mushak.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { MarketingModule } from '../marketing/marketing.module';
 import { ActivityLogModule } from '../activity-log/activity-log.module';
+import { PermissionsModule } from '../permissions/permissions.module';
 
 @Module({
   imports: [
     WsGatewayModule, RecipeModule, AccountModule, BranchSettingsModule,
     QrGateModule, SmsModule, MushakModule, LoyaltyModule, MarketingModule,
-    ActivityLogModule,
+    ActivityLogModule, PermissionsModule,
   ],
   controllers: [OrderController, QrOrderController],
   providers: [OrderService],

@@ -21,6 +21,10 @@ const ACTION_LABELS: Record<CashierAction, { label: string; description: string 
   createPreReadyKT:     { label: 'Pre-Ready Kitchen Ticket', description: 'Cashier can create a kitchen production ticket for pre-ready items' },
   createCustomMenu:     { label: 'Create Custom Menu Item', description: 'Cashier can build a one-off menu item from existing recipes (POS Customised Menu)' },
   reprintKitchenTicket: { label: 'Reprint Kitchen Ticket',  description: 'Cashier can manually reprint a Kitchen Ticket from an existing order. The confirmation dialog warns about duplicate-print risk; OTP mode adds a manager challenge on top.' },
+  moveItemAfterBillPrint: {
+    label: 'Move Item After Bill Printed',
+    description: 'Once a bill/check has been printed for an order, moving an item (or the whole order) to another table needs approval. Note the reversed meaning here: Disabled = unrestricted, same as today. Hidden = only OWNER/MANAGER can move items once billed — no OTP escape hatch. Manager OTP = cashier can proceed with a manager-issued code.',
+  },
 };
 
 const EXPENSE_CATEGORIES: ExpenseCategory[] = [
@@ -244,6 +248,11 @@ export default function CashierPermissionsPage() {
           <ActionRow action="createPreReadyKT" value={perms.createPreReadyKT} onChange={(v) => setAction('createPreReadyKT', v)} />
           <ActionRow action="createCustomMenu" value={perms.createCustomMenu} onChange={(v) => setAction('createCustomMenu', v)} />
           <ActionRow action="reprintKitchenTicket" value={perms.reprintKitchenTicket} onChange={(v) => setAction('reprintKitchenTicket', v)} />
+        </Section>
+
+        {/* Order-handling actions */}
+        <Section icon={<Shield size={14} className="text-[#D62B2B]" />} title="Order Handling">
+          <ActionRow action="moveItemAfterBillPrint" value={perms.moveItemAfterBillPrint} onChange={(v) => setAction('moveItemAfterBillPrint', v)} />
         </Section>
 
         <div className="text-[10px] font-body text-[#666] flex items-center gap-3 pt-2">

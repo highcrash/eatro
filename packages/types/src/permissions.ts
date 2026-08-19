@@ -19,7 +19,8 @@ export type CashierAction =
   | 'payPayroll'
   | 'createPreReadyKT'
   | 'createCustomMenu'
-  | 'reprintKitchenTicket';
+  | 'reprintKitchenTicket'
+  | 'moveItemAfterBillPrint';
 
 export interface ActionPermission {
   enabled: boolean;
@@ -47,6 +48,18 @@ export interface CashierPermissions {
    *  hides the Reprint KT button entirely (the kitchen can still
    *  reprint at the printer if they have access). */
   reprintKitchenTicket: ActionPermission;
+  /** Gate on moving an item (or the whole order) to another table
+   *  AFTER the bill/check has already been printed. Unlike every other
+   *  entry in this matrix, `enabled: false` here does NOT mean "hidden" —
+   *  moving items already works today for every role. It means "no extra
+   *  restriction is applied post-bill-print" (today's behavior). Only
+   *  when `enabled: true` does the `approval` mode kick in:
+   *  NONE = only OWNER/MANAGER may move items once billed (no OTP
+   *  escape hatch); AUTO = gate on but no challenge; OTP = cashier/
+   *  waiter/advisor need a manager-issued OTP. See
+   *  PermissionsService.requirePostBillPrintMove — this action is
+   *  intentionally NOT enforced via the generic requirePermission(). */
+  moveItemAfterBillPrint: ActionPermission;
 }
 
 /** Defaults applied when BranchSetting.cashierPermissions is null or invalid. */
@@ -64,6 +77,10 @@ export const DEFAULT_CASHIER_PERMISSIONS: CashierPermissions = {
   // genuine printer failure. Admin can tighten to OTP if their
   // workflow needs an explicit approval.
   reprintKitchenTicket: { enabled: true,  approval: 'AUTO' },
+  // Off by default — existing branches see no behavior change until an
+  // owner opts in. See the doc-comment on CashierPermissions above for
+  // why `enabled: false` means something different for this one action.
+  moveItemAfterBillPrint: { enabled: false, approval: 'OTP' },
 };
 
 export function parseCashierPermissions(raw: string | null | undefined): CashierPermissions {
@@ -89,6 +106,11 @@ export function parseCashierPermissions(raw: string | null | undefined): Cashier
       createPreReadyKT:     fix(merged.createPreReadyKT),
       createCustomMenu:     fix(merged.createCustomMenu),
       reprintKitchenTicket: fix(merged.reprintKitchenTicket),
+      // NOT run through fix(): enabled+NONE is a deliberate, meaningful
+      // state here ("only OWNER/MANAGER may move items once billed, no
+      // OTP escape hatch"), unlike every other action where NONE means
+      // "hidden" and is contradictory when paired with enabled:true.
+      moveItemAfterBillPrint: merged.moveItemAfterBillPrint,
     };
   } catch {
     return DEFAULT_CASHIER_PERMISSIONS;
