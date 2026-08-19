@@ -9,9 +9,13 @@ import { printReceiptSmart } from '../lib/print-receipt';
 interface BillModalProps {
   order: Order;
   onClose: () => void;
+  /** Called after the bill has been sent to print. The caller is
+   *  responsible for reporting this to the server (POST
+   *  /orders/:id/bill-print-status) so item moves get gated. */
+  onPrinted?: () => void;
 }
 
-export default function BillModal({ order, onClose }: BillModalProps) {
+export default function BillModal({ order, onClose, onPrinted }: BillModalProps) {
   const { data: branding } = useBranding();
   const brandName = branding?.name ?? 'Your Restaurant';
   const subtotal = Number(order.subtotal);
@@ -31,7 +35,9 @@ export default function BillModal({ order, onClose }: BillModalProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const handlePrint = () => void printReceiptSmart(order, branding ?? undefined, { openCashDrawer: false });
+  const handlePrint = () => {
+    void printReceiptSmart(order, branding ?? undefined, { openCashDrawer: false }).then(() => onPrinted?.());
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">

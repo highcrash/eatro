@@ -1060,6 +1060,11 @@ model Order {
   waiterId            String?
   guestCount          Int         @default(0) // number of guests at the table (printed on bill/receipt)
   billRequested       Boolean     @default(false)
+  /// Set when POS reports a successful bill/check print via
+  /// POST /orders/:id/bill-print-status. Once set, moving items off
+  /// this order (moveItemToTable / moveTable) requires manager
+  /// approval per the moveItemAfterBillPrint cashier-permission gate.
+  billPrintedAt       DateTime?
   /// First time any item on this order moved to PREPARING — drives the
   /// table-status "kitchen acked" timer on the POS Tables page.
   firstKitchenStartAt DateTime?

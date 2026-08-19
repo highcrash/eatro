@@ -106,6 +106,43 @@ export class PermissionsService {
   }
 
   /**
+   * Post-bill-print item-move gate. Deliberately NOT routed through
+   * requirePermission() — that method's `!cfg.enabled → 403` branch means
+   * "this action doesn't exist for you," which is right for every other
+   * CashierAction (they're opt-in capabilities) but wrong here: moving an
+   * item already works today for every role, and this gate only adds an
+   * *extra* restriction on top when an owner opts in. So `enabled: false`
+   * must mean "no extra restriction" (today's behavior), not "forbidden."
+   *
+   *   enabled: false           → no gate, always passes (default)
+   *   enabled: true, NONE      → only OWNER/MANAGER may move; no OTP escape
+   *   enabled: true, AUTO      → gate on, no challenge
+   *   enabled: true, OTP       → CASHIER/ADVISOR/WAITER need a manager OTP
+   */
+  async requirePostBillPrintMove(
+    branchId: string,
+    role: string,
+    actionOtp?: string,
+    customRoleId?: string | null,
+  ): Promise<void> {
+    if (role === 'OWNER' || role === 'MANAGER') return;
+
+    const perms = await this.getPermissionsForStaff(branchId, customRoleId);
+    const cfg = perms.moveItemAfterBillPrint;
+    if (!cfg.enabled) return;
+
+    if (cfg.approval === 'NONE') {
+      throw new ForbiddenException('Moving items after the bill is printed requires a manager');
+    }
+    if (cfg.approval === 'AUTO') return;
+
+    // OTP required
+    if (!actionOtp) throw new UnauthorizedException('Manager OTP required');
+    const result = this.sms.verifyActionOtp(branchId, 'moveItemAfterBillPrint', actionOtp);
+    if (!result.valid) throw new UnauthorizedException(result.error ?? 'Invalid OTP');
+  }
+
+  /**
    * Resolve the effective approval mode for an expense category, falling back
    * to the action-level mode when there's no category override.
    */
