@@ -299,6 +299,14 @@ export class ReportsService {
       },
     });
 
+    // Prefetch this branch's unit conversions once instead of hitting the
+    // DB per (order-item × recipe-ingredient) pair. Over a wide date range
+    // that combination can run into the hundreds of thousands and the old
+    // per-call `unitConversion.convert()` query turned this endpoint into
+    // an effective N+1 that ran long enough to hit the platform's request
+    // timeout (surfacing as a 503) instead of ever returning.
+    const convertUnit = await this.unitConversion.createSyncConverter(branchId);
+
     // Variant-fallback cost lookup. Cache cheapest-variant cost per parent
     // so the per-item pass doesn't re-query for repeated ingredients.
     // Returns both the cost AND the stock unit it's denominated in —
@@ -339,6 +347,14 @@ export class ReportsService {
     }
     const byItem = new Map<string, ItemAgg>();
 
+    // Per-unit COGS depends only on the menu item's recipe + current
+    // ingredient costs — never on which specific order it came from — so
+    // it's identical for every order-item row sharing the same menuItemId.
+    // Caching it here turns the recipe-cost pass from O(order items) into
+    // O(distinct menu items sold), which for a wide date range is the
+    // difference between a handful of iterations and hundreds of thousands.
+    const unitCostCache = new Map<string, number>();
+
     for (const oi of orderItems) {
       const mi = oi.menuItem;
       const cat = mi.category;
@@ -365,22 +381,26 @@ export class ReportsService {
       // real COGS for that line. Custom-menu items make this especially
       // common — cashier types whatever unit feels natural.
       if (mi.recipe) {
-        let unitCost = 0;
-        for (const ri of mi.recipe.items) {
-          const ing = ri.ingredient;
-          const ingStockUnit = (ing.unit as unknown as string) ?? '';
-          const { cost, unit: stockUnit } = await resolveCostAndUnit(
-            ing.id,
-            ing.costPerUnit.toNumber(),
-            ingStockUnit,
-            ing.hasVariants ?? false,
-          );
-          if (cost === 0) continue;
-          const recipeUnit = (ri.unit as unknown as string) ?? stockUnit;
-          const qtyInStockUnit = recipeUnit === stockUnit
-            ? ri.quantity.toNumber()
-            : await this.unitConversion.convert(branchId, ri.quantity.toNumber(), recipeUnit, stockUnit);
-          unitCost += qtyInStockUnit * cost;
+        let unitCost = unitCostCache.get(mi.id);
+        if (unitCost === undefined) {
+          unitCost = 0;
+          for (const ri of mi.recipe.items) {
+            const ing = ri.ingredient;
+            const ingStockUnit = (ing.unit as unknown as string) ?? '';
+            const { cost, unit: stockUnit } = await resolveCostAndUnit(
+              ing.id,
+              ing.costPerUnit.toNumber(),
+              ingStockUnit,
+              ing.hasVariants ?? false,
+            );
+            if (cost === 0) continue;
+            const recipeUnit = (ri.unit as unknown as string) ?? stockUnit;
+            const qtyInStockUnit = recipeUnit === stockUnit
+              ? ri.quantity.toNumber()
+              : convertUnit(ri.quantity.toNumber(), recipeUnit, stockUnit);
+            unitCost += qtyInStockUnit * cost;
+          }
+          unitCostCache.set(mi.id, unitCost);
         }
         agg.cogs += unitCost * oi.quantity;
       }
