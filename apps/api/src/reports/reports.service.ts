@@ -284,20 +284,35 @@ export class ReportsService {
       dateTo.setHours(23, 59, 59, 999);
     }
 
-    const orderItems = await this.prisma.orderItem.findMany({
+    // Sum quantity/revenue per menu item in Postgres via GROUP BY instead
+    // of pulling every historical order-item row into Node just to add
+    // them up. A wide date range can have orders of magnitude more
+    // order-item rows than distinct menu items in the catalog — fetching
+    // and hydrating every row (previously also dragging along each row's
+    // full recipe → ingredient tree) was itself slow enough to blow the
+    // request timeout, independent of the per-row unit-conversion N+1
+    // fixed alongside this. GROUP BY keeps the query's cost proportional
+    // to catalog size, not to how much order history has accumulated.
+    const grouped = await this.prisma.orderItem.groupBy({
+      by: ['menuItemId'],
       where: {
         order: { branchId, status: 'PAID', paidAt: { gte: dateFrom, lte: dateTo }, deletedAt: null },
         voidedAt: null,
       },
-      include: {
-        menuItem: {
-          include: {
-            category: true,
-            recipe: { include: { items: { include: { ingredient: true } } } },
-          },
-        },
+      _sum: { quantity: true, totalPrice: true },
+    });
+
+    const menuItemIds = grouped.map((g) => g.menuItemId);
+    const menuItems = await this.prisma.menuItem.findMany({
+      where: { id: { in: menuItemIds } },
+      select: {
+        id: true,
+        name: true,
+        category: { select: { id: true, name: true } },
+        recipe: { select: { items: { include: { ingredient: true } } } },
       },
     });
+    const menuItemById = new Map(menuItems.map((mi) => [mi.id, mi]));
 
     // Prefetch this branch's unit conversions once instead of hitting the
     // DB per (order-item × recipe-ingredient) pair. Over a wide date range
@@ -347,32 +362,12 @@ export class ReportsService {
     }
     const byItem = new Map<string, ItemAgg>();
 
-    // Per-unit COGS depends only on the menu item's recipe + current
-    // ingredient costs — never on which specific order it came from — so
-    // it's identical for every order-item row sharing the same menuItemId.
-    // Caching it here turns the recipe-cost pass from O(order items) into
-    // O(distinct menu items sold), which for a wide date range is the
-    // difference between a handful of iterations and hundreds of thousands.
-    const unitCostCache = new Map<string, number>();
-
-    for (const oi of orderItems) {
-      const mi = oi.menuItem;
+    for (const g of grouped) {
+      const mi = menuItemById.get(g.menuItemId);
+      if (!mi) continue; // menu item row is gone (hard-deleted) — nothing to report against
       const cat = mi.category;
-      let agg = byItem.get(mi.id);
-      if (!agg) {
-        agg = {
-          menuItemId: mi.id,
-          name: mi.name,
-          categoryId: cat.id,
-          categoryName: cat.name,
-          quantity: 0,
-          revenue: 0,
-          cogs: 0,
-        };
-        byItem.set(mi.id, agg);
-      }
-      agg.quantity += oi.quantity;
-      agg.revenue += oi.totalPrice.toNumber();
+      const quantity = g._sum.quantity ?? 0;
+      const revenue = g._sum.totalPrice?.toNumber() ?? 0;
 
       // Per-unit recipe cost — sum(recipeItem.qty × ingredient.costPerUnit),
       // with unit conversion. RecipeItem.unit may differ from
@@ -380,30 +375,37 @@ export class ReportsService {
       // stocked in KG); without conversion we'd report 1/1000th of the
       // real COGS for that line. Custom-menu items make this especially
       // common — cashier types whatever unit feels natural.
+      let cogs = 0;
       if (mi.recipe) {
-        let unitCost = unitCostCache.get(mi.id);
-        if (unitCost === undefined) {
-          unitCost = 0;
-          for (const ri of mi.recipe.items) {
-            const ing = ri.ingredient;
-            const ingStockUnit = (ing.unit as unknown as string) ?? '';
-            const { cost, unit: stockUnit } = await resolveCostAndUnit(
-              ing.id,
-              ing.costPerUnit.toNumber(),
-              ingStockUnit,
-              ing.hasVariants ?? false,
-            );
-            if (cost === 0) continue;
-            const recipeUnit = (ri.unit as unknown as string) ?? stockUnit;
-            const qtyInStockUnit = recipeUnit === stockUnit
-              ? ri.quantity.toNumber()
-              : convertUnit(ri.quantity.toNumber(), recipeUnit, stockUnit);
-            unitCost += qtyInStockUnit * cost;
-          }
-          unitCostCache.set(mi.id, unitCost);
+        let unitCost = 0;
+        for (const ri of mi.recipe.items) {
+          const ing = ri.ingredient;
+          const ingStockUnit = (ing.unit as unknown as string) ?? '';
+          const { cost, unit: stockUnit } = await resolveCostAndUnit(
+            ing.id,
+            ing.costPerUnit.toNumber(),
+            ingStockUnit,
+            ing.hasVariants ?? false,
+          );
+          if (cost === 0) continue;
+          const recipeUnit = (ri.unit as unknown as string) ?? stockUnit;
+          const qtyInStockUnit = recipeUnit === stockUnit
+            ? ri.quantity.toNumber()
+            : convertUnit(ri.quantity.toNumber(), recipeUnit, stockUnit);
+          unitCost += qtyInStockUnit * cost;
         }
-        agg.cogs += unitCost * oi.quantity;
+        cogs = unitCost * quantity;
       }
+
+      byItem.set(g.menuItemId, {
+        menuItemId: mi.id,
+        name: mi.name,
+        categoryId: cat.id,
+        categoryName: cat.name,
+        quantity,
+        revenue,
+        cogs,
+      });
     }
 
     const items = [...byItem.values()].map((a) => {
