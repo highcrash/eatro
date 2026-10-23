@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -8,6 +8,24 @@ import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { ExternalApiModule } from './external-api/external-api.module';
+
+// Safety net, not a substitute for fixing call sites. Node's default
+// behaviour is to crash the whole process on an unhandled promise
+// rejection — and this codebase has many `void this.someService.method(...)`
+// fire-and-forget calls (stock deduction, account postings, SMS, etc.)
+// with no `.catch()`. A single bad write in any one of them (an invalid
+// enum value, a transient DB hiccup, a null-pointer bug) takes down every
+// till, kitchen screen, and QR order in the branch until the platform
+// restarts the container. Logging and staying up turns that into a
+// recoverable, visible bug instead of a full outage. Each call site
+// should still get its own `.catch()` as those bugs are found — this is
+// the backstop for the ones that haven't been found yet.
+process.on('unhandledRejection', (reason) => {
+  new Logger('UnhandledRejection').error(
+    'Unhandled promise rejection (likely a fire-and-forget call missing .catch) — process staying up. Fix the underlying call site.',
+    reason instanceof Error ? reason.stack : String(reason),
+  );
+});
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
