@@ -10,7 +10,7 @@
       "@restora/utils": ["../../packages/utils/dist"],
       "@restora/utils/*": ["../../packages/utils/dist/*"]
     },
-    "types": ["node", "bcryptjs"],
+    "types": ["node", "bcryptjs", "jest"],
     "incremental": false
   },
   "include": ["src/**/*"],
