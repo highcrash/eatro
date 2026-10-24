@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 
 import type { Prisma } from '@prisma/client';
 import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason, CorrectPaymentDto, AddonSelectionInput, OrderItemAddonSnapshot, RecordKitchenPrintStatusDto, JwtPayload } from '@restora/types';
@@ -59,6 +59,8 @@ function computeTotals(branch: TaxableBranch, subtotal: number, discountAmount =
 
 @Injectable()
 export class OrderService {
+  private readonly logger = new Logger(OrderService.name);
+
   /**
    * Multi-device QR-share workflow: in-memory map of pending share
    * requests keyed by `${orderId}::${requestingDeviceId}`. Value
@@ -2528,26 +2530,44 @@ export class OrderService {
 
     // Reverse account balances proportionally across the order's payments
     // (best-effort, non-blocking — same pattern as processPayment).
+    //
+    // Uses reverseSalePosting (the same helper correctOrderPayment uses to
+    // undo a prior SALE posting), NOT updateAccountForPayment with a
+    // 'REFUND' type — TransactionType has no REFUND member, so that create()
+    // always threw, and because this call had no .catch the rejection was
+    // unhandled and crashed the whole process. reverseSalePosting records
+    // the reversal as ADJUSTMENT instead (see its doc comment) and expects
+    // a POSITIVE amount, which it subtracts — pass `share` as-is, not `-share`
+    // (the old code's negative amount combined with updateAccountForPayment's
+    // non-SALE `delta = -amount` would have *increased* the balance instead
+    // of decreasing it, on top of never actually committing either way).
     const paymentTotal = order.payments.reduce((s, p) => s + p.amount.toNumber(), 0) || 1;
     for (const p of order.payments) {
       const share = Math.round((p.amount.toNumber() / paymentTotal) * refundTotal * 100) / 100;
       if (share > 0) {
-        void this.accountService.updateAccountForPayment(
+        void this.accountService.reverseSalePosting(
           branchId,
           p.method,
-          -share,
-          'REFUND' as never,
+          share,
           `Refund for order #${order.orderNumber} (${result.note.serial})`,
-        );
+        ).catch((err) => this.logger.error(
+          `Failed to reverse account posting for refund of order #${order.orderNumber} (method ${p.method}, share ${share})`,
+          err instanceof Error ? err.stack : String(err),
+        ));
       }
     }
 
-    // Restore stock for the refunded items.
+    // Restore stock for the refunded items. Best-effort, same reasoning —
+    // a failure here must not crash the process (the refund itself already
+    // committed above), but it must not vanish silently either.
     void this.recipeService.restoreStockForItems(
       branchId,
       id,
       refundTargets.map((i) => ({ menuItemId: i.menuItemId, quantity: Number(i.quantity) })),
-    );
+    ).catch((err) => this.logger.error(
+      `Failed to restore stock for refund of order #${order.orderNumber}`,
+      err instanceof Error ? err.stack : String(err),
+    ));
 
     this.ws.emitToBranch(branchId, 'order:updated' as never, { orderId: id, noteId: result.note.id, status: result.order.status });
 
