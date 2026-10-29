@@ -79,6 +79,9 @@ Each route requires one or more scopes. Scopes are AND-combined per route. Pick 
 | `finance:read`      | Expenses and derived P&L                                            |
 | `inventory:read`    | Stock levels, daily consumption                                     |
 | `menu:read`         | Menu items, categories, prices                                      |
+| `menu:write`        | Create, edit, re-price and delete menu items (write scope)          |
+| `recipes:read`      | Recipes, recipe ingredients, cost per serving                       |
+| `recipes:write`     | Replace or delete recipes — changes stock deduction (write scope)   |
 | `customers:read`    | Customer aggregates and segment counts                              |
 | `loyalty:read`      | Loyalty balances and program settings                               |
 | `marketing:read`    | Campaign list                                                       |
@@ -122,8 +125,30 @@ Authoritative list lives in Swagger at `/api/docs/external` once the separate do
 | `GET /business/reviews`                  | `reviews:read`    | shipped    |
 | `POST /business/sms/send`                | `marketing:write` | shipped    |
 | `POST /business/sms/blast`               | `marketing:write` | shipped    |
+| `GET /business/menu/categories`          | `menu:read`       | shipped    |
+| `GET /business/menu/items/:id`           | `menu:read`       | shipped    |
+| `POST /business/menu/items`              | `menu:write`      | shipped    |
+| `PATCH /business/menu/items/:id`         | `menu:write`      | shipped    |
+| `DELETE /business/menu/items/:id`        | `menu:write`      | shipped    |
+| `GET /business/ingredients?search=`      | `recipes:read`    | shipped    |
+| `GET /business/recipes/:menuItemId`      | `recipes:read`    | shipped    |
+| `PUT /business/recipes/:menuItemId`      | `recipes:write`   | shipped    |
+| `DELETE /business/recipes/:menuItemId`   | `recipes:write`   | shipped    |
 | `POST /business/marketing/campaigns`     | `marketing:write` | deferred   |
 | `GET /business/finance/pnl`              | `finance:read`    | deferred   |
+
+**Menu and recipe writes.** Menu item create/update take `priceTaka` (whole taka, up to 2 decimals); the server stores paisa. Reads still return paisa. `PUT /recipes/:menuItemId` replaces the whole recipe (`{ notes?, items: [{ ingredientId, quantity, unit? }] }`, quantity per one serving, `unit` defaults to the ingredient's stock unit). Recipe delete is permanent; menu item delete is a soft delete. Every write returns `before` (and `after` where relevant) and is written to the Activity Log as the key's creator, tagged `(via API key "<key name>")`.
+
+### Claude MCP connector
+
+`tools/eatro-mcp/` is a local MCP server that exposes these routes to Claude Code / Claude Desktop. It is outside the pnpm workspace on purpose, so it never affects production installs.
+
+1. In Admin → Integrations create a key named e.g. `Claude MCP` with `menu:read`, `menu:write`, `recipes:read`, `recipes:write` and an expiry. Copy the secret.
+2. Build once: `cd tools/eatro-mcp && npm install && npm run build`.
+3. Register with Claude Code:
+   `claude mcp add eatro -e EATRO_API_URL=https://api.eatrobd.com/api/v1 -e EATRO_API_KEY=rk_... -- node "D:/RESTURANT SOFTWARE/restora-pos/tools/eatro-mcp/dist/index.js"`
+
+Delete tools only preview unless called with `confirm: true`. The server refuses plain-HTTP URLs other than localhost. Revoke the key in Admin → Integrations to cut access immediately.
 
 **Deferred routes** are listed because the contract is reserved — they will be added without a `/v2` bump. `POST /campaigns` is held until the audit-actor model for API-key-initiated writes is settled. `GET /finance/pnl` is held until P&L semantics (treatment of COGS, payroll, depreciation) are explicit.
 
