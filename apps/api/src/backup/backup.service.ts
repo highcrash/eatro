@@ -1,16 +1,29 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
+import { once } from 'events';
 import { promises as fs } from 'fs';
 import { Readable } from 'stream';
 import { join } from 'path';
-import { gzip as gzipCb, gunzip as gunzipCb } from 'zlib';
+import { createGzip, gunzip as gunzipCb } from 'zlib';
 import { promisify } from 'util';
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { BACKUP_MODELS, BACKUP_FILE_VERSION } from './backup.constants';
 
-const gzip = promisify(gzipCb);
 const gunzip = promisify(gunzipCb);
+
+// Rows per query when dumping a table. Keeps peak memory to one batch
+// instead of the whole database (the API runs on a 512 MB instance).
+const DUMP_BATCH_ROWS = 1000;
+
+/** Accessors of models with a single `id` primary key — these are read in
+ *  id-ordered cursor pages; anything else is small config and read whole. */
+const ID_PAGED_ACCESSORS = new Set(
+  Prisma.dmmf.datamodel.models
+    .filter((m) => m.fields.some((f) => f.name === 'id' && f.isId))
+    .map((m) => m.name.charAt(0).toLowerCase() + m.name.slice(1)),
+);
 
 // Best-effort local disk cache. Container filesystems on hosts like
 // DigitalOcean App Platform are ephemeral, so the DB column on
@@ -177,33 +190,24 @@ export class BackupService {
 
   /* ── CREATE BACKUP ────────────────────────────────────────────── */
   async createBackup(type: 'MANUAL' | 'AUTO', createdById?: string) {
-    await this.ensureDir();
-
-    const data: Record<string, unknown[]> = {};
-    for (const m of BACKUP_MODELS) {
-      // The generated Prisma client might be older than the BACKUP_MODELS
-      // list (e.g. after a schema add without re-running `prisma generate`
-      // on the deployed server). Skip missing accessors with a warning
-      // rather than crashing the entire backup — the other models still
-      // get saved. On the next server redeploy + client regen the missing
-      // model joins the backup automatically.
-      const delegate = (this.prisma as any)[m.accessor];
-      if (!delegate || typeof delegate.findMany !== 'function') {
-        this.logger.warn(`Skipping ${m.accessor} — accessor not on this Prisma client. Run \`prisma generate\` to include it in future backups.`);
-        data[m.accessor] = [];
-        continue;
-      }
-      data[m.accessor] = await delegate.findMany();
+    // One dump at a time — two concurrent dumps (double-click, or a click
+    // during the nightly auto-backup) would double peak memory.
+    if (this.backupRunning) {
+      throw new ConflictException('A backup is already running. Try again in a minute.');
     }
+    this.backupRunning = true;
+    try {
+      return await this.createBackupUnlocked(type, createdById);
+    } finally {
+      this.backupRunning = false;
+    }
+  }
 
-    const payload = {
-      version: BACKUP_FILE_VERSION,
-      createdAt: new Date().toISOString(),
-      type,
-      data,
-    };
-    const json = JSON.stringify(payload);
-    const compressed = await gzip(Buffer.from(json, 'utf8'));
+  private backupRunning = false;
+
+  private async createBackupUnlocked(type: 'MANUAL' | 'AUTO', createdById?: string) {
+    await this.ensureDir();
+    const compressed = await this.dumpDatabase(type);
 
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `backup-${type.toLowerCase()}-${ts}.json.gz`;
@@ -231,6 +235,75 @@ export class BackupService {
     if (type === 'AUTO') await this.pruneAutoBackups();
     this.logger.log(`Backup created: ${filename} (${(compressed.length / 1024).toFixed(1)} KB)`);
     return record;
+  }
+
+  /** Gzipped JSON of every BACKUP_MODELS table, byte-for-byte the same
+   *  shape as JSON.stringify({ version, createdAt, type, data }), but
+   *  streamed table-by-table in batches so the whole database is never
+   *  held in memory at once. */
+  private async dumpDatabase(type: 'MANUAL' | 'AUTO'): Promise<Buffer> {
+    const gz = createGzip();
+    const out: Buffer[] = [];
+    gz.on('data', (chunk: Buffer) => out.push(chunk));
+    const ended = once(gz, 'end');
+    ended.catch(() => undefined);
+    const write = async (s: string) => {
+      if (!gz.write(s)) await once(gz, 'drain');
+    };
+
+    try {
+      await write(
+        `{"version":${BACKUP_FILE_VERSION},"createdAt":${JSON.stringify(new Date().toISOString())},"type":${JSON.stringify(type)},"data":{`,
+      );
+      for (const [i, m] of BACKUP_MODELS.entries()) {
+        await write(`${i === 0 ? '' : ','}${JSON.stringify(m.accessor)}:[`);
+        // The generated Prisma client might be older than the BACKUP_MODELS
+        // list (e.g. after a schema add without re-running `prisma generate`
+        // on the deployed server). Skip missing accessors with a warning
+        // rather than crashing the entire backup — the other models still
+        // get saved. On the next server redeploy + client regen the missing
+        // model joins the backup automatically.
+        const delegate = (this.prisma as any)[m.accessor];
+        if (!delegate || typeof delegate.findMany !== 'function') {
+          this.logger.warn(`Skipping ${m.accessor} — accessor not on this Prisma client. Run \`prisma generate\` to include it in future backups.`);
+        } else {
+          let first = true;
+          for await (const rows of this.readTable(delegate, ID_PAGED_ACCESSORS.has(m.accessor))) {
+            const chunk = rows.map((r) => JSON.stringify(r)).join(',');
+            await write(first ? chunk : `,${chunk}`);
+            first = false;
+          }
+        }
+        await write(']');
+      }
+      await write('}}');
+      gz.end();
+      await ended;
+    } catch (e) {
+      gz.destroy();
+      throw e;
+    }
+    return Buffer.concat(out);
+  }
+
+  private async *readTable(delegate: any, idPaged: boolean): AsyncGenerator<Array<Record<string, unknown>>> {
+    if (!idPaged) {
+      const rows = await delegate.findMany();
+      if (rows.length > 0) yield rows;
+      return;
+    }
+    let cursor: string | undefined;
+    for (;;) {
+      const rows = await delegate.findMany({
+        take: DUMP_BATCH_ROWS,
+        orderBy: { id: 'asc' },
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (rows.length === 0) return;
+      yield rows;
+      if (rows.length < DUMP_BATCH_ROWS) return;
+      cursor = rows[rows.length - 1].id as string;
+    }
   }
 
   /** Persist an uploaded .json.gz file as a BackupRecord (type UPLOAD).
