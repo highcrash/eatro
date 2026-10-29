@@ -1,14 +1,21 @@
+import { ConflictException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { gunzipSync } from 'zlib';
 
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
+import { BACKUP_FILE_VERSION, BACKUP_MODELS } from './backup.constants';
 import { BackupService } from './backup.service';
 
 /**
- * Regression test for GET /backup timing out (504, surfaced in the browser
- * as a CORS error): list() and the create responses used to include the
- * `data` column — the full gzipped database dump — for every record.
+ * Regression tests for the backup feature on a 512 MB instance:
+ * - GET /backup timed out because list() and create responses included the
+ *   `data` column (the full gzipped dump) for every record.
+ * - createBackup ran out of memory because it loaded every table at once;
+ *   it now streams, and only one backup may run at a time.
  */
+jest.setTimeout(120_000); // each backup dumps the whole local dev database
+
 describe('BackupService — responses never carry the dump payload', () => {
   let svc: BackupService;
   let prisma: PrismaService;
@@ -48,6 +55,28 @@ describe('BackupService — responses never carry the dump payload', () => {
     expect(rows.every((r) => !('data' in r))).toBe(true);
     // ~200 bytes of metadata per row, regardless of how big each dump is.
     expect(JSON.stringify(rows).length).toBeLessThan(rows.length * 600);
+  });
+
+  it('refuses a second backup while one is running', async () => {
+    const first = svc.createBackup('MANUAL');
+    await expect(svc.createBackup('MANUAL')).rejects.toThrow(ConflictException);
+    createdIds.push((await first).id);
+  });
+
+  it('writes the original file shape with every table and the right row counts', async () => {
+    const rec = await svc.createBackup('MANUAL');
+    createdIds.push(rec.id);
+    const stored = await prisma.backupRecord.findUniqueOrThrow({ where: { id: rec.id }, select: { data: true } });
+    const parsed = JSON.parse(gunzipSync(stored.data!).toString('utf8'));
+
+    expect(Object.keys(parsed)).toEqual(['version', 'createdAt', 'type', 'data']);
+    expect(parsed).toMatchObject({ version: BACKUP_FILE_VERSION, type: 'MANUAL' });
+    expect(Object.keys(parsed.data)).toEqual(BACKUP_MODELS.map((m) => m.accessor));
+    // Tables no other spec writes to — specs run in parallel.
+    for (const accessor of ['branch', 'staff', 'customer', 'diningTable', 'unitConversion']) {
+      const count = await (prisma as any)[accessor].count();
+      expect({ accessor, rows: parsed.data[accessor].length }).toEqual({ accessor, rows: count });
+    }
   });
 
   it('download still streams the stored dump', async () => {
