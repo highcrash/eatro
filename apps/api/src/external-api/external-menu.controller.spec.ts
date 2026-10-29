@@ -173,6 +173,13 @@ describe('ExternalMenuController (API-key menu + recipe writes)', () => {
     expect((await call('PATCH', `/menu/items/${menuItemId}`, writeKey, {})).status).toBe(400);
   });
 
+  it('updates the display order', async () => {
+    expect((await call('PATCH', `/menu/items/${menuItemId}`, writeKey, { sortOrder: 2.5 })).status).toBe(400);
+    expect((await call('PATCH', `/menu/items/${menuItemId}`, writeKey, { sortOrder: 7 })).status).toBe(200);
+    const row = await prisma.menuItem.findUniqueOrThrow({ where: { id: menuItemId } });
+    expect(row.sortOrder).toBe(7);
+  });
+
   it('creates a menu item in a known category only', async () => {
     const bad = await call('POST', '/menu/items', writeKey, { categoryId: 'nope', name: 'X', type: 'FOOD', priceTaka: 10 });
     expect(bad.status).toBe(400);

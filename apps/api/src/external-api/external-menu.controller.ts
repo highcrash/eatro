@@ -20,6 +20,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -159,6 +160,13 @@ class UpdateMenuItemBody {
   @IsOptional()
   @IsBoolean()
   websiteVisible?: boolean;
+
+  /** Position within its category / among sibling variants (ascending). */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000)
+  sortOrder?: number;
 }
 
 type RecipeWithItems = {

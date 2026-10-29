@@ -278,7 +278,8 @@ server.registerTool(
   'update_menu_item',
   {
     title: 'Update menu item',
-    description: 'Change name, description, price, category, type, tags, availability or website visibility of a menu item. Only send fields that change.',
+    description:
+      'Change name, description, price, category, type, tags, availability, website visibility or display order of a menu item. Only send fields that change.',
     inputSchema: {
       id: z.string().min(1).max(64),
       name: z.string().min(1).max(120).optional(),
@@ -289,6 +290,13 @@ server.registerTool(
       tags: z.string().max(300).optional(),
       available: z.boolean().optional(),
       website_visible: z.boolean().optional(),
+      sort_order: z
+        .number()
+        .int()
+        .min(0)
+        .max(100_000)
+        .optional()
+        .describe('Position among items in the same category / sibling variants; lower shows first'),
     },
     annotations: WRITE,
   },
@@ -304,6 +312,7 @@ server.registerTool(
           tags: a.tags,
           isAvailable: a.available,
           websiteVisible: a.website_visible,
+          sortOrder: a.sort_order,
         }).filter(([, v]) => v !== undefined),
       );
       const res = await api<{ before: MenuItem; after: MenuItem }>('PATCH', `/business/menu/items/${enc(id)}`, body);
