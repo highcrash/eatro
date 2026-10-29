@@ -41,6 +41,20 @@ const spacesClient: S3Client | null = spacesEnabled
     })
   : null;
 
+// Every column except `data` (the full gzipped dump). Listing or returning
+// rows with `data` serialises whole database dumps into the response and
+// times the request out once a few backups exist.
+const RECORD_META = {
+  id: true,
+  filename: true,
+  fileUrl: true,
+  sizeBytes: true,
+  type: true,
+  spacesKey: true,
+  createdAt: true,
+  createdById: true,
+} as const;
+
 async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) {
@@ -124,6 +138,7 @@ export class BackupService {
   /* ── LIST ─────────────────────────────────────────────────────── */
   async list() {
     return this.prisma.backupRecord.findMany({
+      select: RECORD_META,
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
@@ -210,6 +225,7 @@ export class BackupService {
         spacesKey: spacesKey ?? null,
         createdById: createdById ?? null,
       },
+      select: RECORD_META,
     });
 
     if (type === 'AUTO') await this.pruneAutoBackups();
@@ -249,6 +265,7 @@ export class BackupService {
         spacesKey: spacesKey ?? null,
         createdById: createdById ?? null,
       },
+      select: RECORD_META,
     });
     this.logger.log(`Uploaded backup stored: ${filename} (${(file.buffer.length / 1024).toFixed(1)} KB)`);
     return record;
@@ -259,6 +276,7 @@ export class BackupService {
     const keep = schedule.retention;
     const autos = await this.prisma.backupRecord.findMany({
       where: { type: 'AUTO' },
+      select: { id: true },
       orderBy: { createdAt: 'desc' },
     });
     const toDelete = autos.slice(keep);
@@ -269,13 +287,13 @@ export class BackupService {
 
   /* ── DELETE ───────────────────────────────────────────────────── */
   async deleteBackup(id: string) {
-    const rec = await this.prisma.backupRecord.findUnique({ where: { id } });
+    const rec = await this.prisma.backupRecord.findUnique({ where: { id }, select: { filename: true, spacesKey: true } });
     if (!rec) throw new NotFoundException('Backup not found');
     // Best-effort cleanup of disk + Spaces; failures don't block the
     // DB row removal so a stale key doesn't strand the record.
     const fullPath = join(BACKUP_DIR, rec.filename);
     await fs.unlink(fullPath).catch(() => { /* file already gone */ });
-    await this.tryDeleteSpaces((rec as { spacesKey?: string | null }).spacesKey ?? null);
+    await this.tryDeleteSpaces(rec.spacesKey);
     await this.prisma.backupRecord.delete({ where: { id } });
     return { success: true };
   }
