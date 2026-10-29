@@ -33,6 +33,7 @@ import {
 import type { JwtPayload } from '@restora/types';
 
 import { ActivityLogService } from '../activity-log/activity-log.service';
+import { CategoryService } from '../menu/category.service';
 import { MenuService } from '../menu/menu.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecipeService } from '../recipe/recipe.service';
@@ -169,6 +170,24 @@ class UpdateMenuItemBody {
   sortOrder?: number;
 }
 
+class UpdateCategoryBody {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  name?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000)
+  sortOrder?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
 type RecipeWithItems = {
   notes: string | null;
   items: Array<{ quantity: { toNumber(): number }; unit: string; ingredient: { id: string; name: string } }>;
@@ -186,6 +205,7 @@ export class ExternalMenuController {
   constructor(
     private readonly external: ExternalService,
     private readonly menu: MenuService,
+    private readonly categories: CategoryService,
     private readonly recipes: RecipeService,
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
@@ -204,6 +224,39 @@ export class ExternalMenuController {
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
     return this.envelope(client.branchId, { categories });
+  }
+
+  @Patch('business/menu/categories/:id')
+  @Scopes('menu:write')
+  @ApiOperation({ summary: 'Rename, reorder or (de)activate a menu category. Returns before + after.' })
+  async updateCategory(
+    @CurrentApiClient() client: ApiClient,
+    @Param('id') id: string,
+    @Body() body: UpdateCategoryBody,
+  ) {
+    const sent = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as UpdateCategoryBody;
+    const changed = Object.keys(sent);
+    if (changed.length === 0) throw new BadRequestException('Nothing to update');
+    if (sent.name !== undefined) sent.name = sent.name.trim();
+    const before = await this.categories.findOne(id, client.branchId);
+    const { actor, via } = await this.actorFor(client);
+    const after = await this.categories.update(id, client.branchId, sent);
+    void this.activityLog.log({
+      branchId: client.branchId,
+      actor,
+      category: 'MENU',
+      action: 'UPDATE',
+      entityType: 'menuCategory',
+      entityId: after.id,
+      entityName: after.name,
+      before: before as never,
+      after: after as never,
+      summary:
+        sent.name !== undefined && sent.name !== before.name
+          ? `Renamed menu category "${before.name}" → "${after.name}" ${via}`
+          : `Updated menu category "${after.name}" (${changed.join(', ')}) ${via}`,
+    });
+    return this.envelope(client.branchId, { before, after });
   }
 
   @Get('business/menu/items/:id')

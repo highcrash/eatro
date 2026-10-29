@@ -88,7 +88,7 @@ describe('ExternalMenuController (API-key menu + recipe writes)', () => {
 
   afterAll(async () => {
     const itemIds = [menuItemId, createdMenuItemId].filter(Boolean) as string[];
-    await prisma.activityLog.deleteMany({ where: { entityId: { in: itemIds } } });
+    await prisma.activityLog.deleteMany({ where: { entityId: { in: [...itemIds, categoryId] } } });
     await prisma.recipe.deleteMany({ where: { menuItemId: { in: itemIds } } });
     await prisma.menuItem.deleteMany({ where: { id: { in: itemIds } } });
     await prisma.ingredient.deleteMany({ where: { id: { in: [gramIngredientId, pcsIngredientId] } } });
@@ -171,6 +171,23 @@ describe('ExternalMenuController (API-key menu + recipe writes)', () => {
 
   it('rejects an empty menu item update', async () => {
     expect((await call('PATCH', `/menu/items/${menuItemId}`, writeKey, {})).status).toBe(400);
+  });
+
+  it('renames a category only with menu:write, keeping its slug', async () => {
+    const before = await prisma.menuCategory.findUniqueOrThrow({ where: { id: categoryId } });
+    expect((await call('PATCH', `/menu/categories/${categoryId}`, readKey, { name: 'Nope' })).status).toBe(403);
+    expect((await call('PATCH', `/menu/categories/${categoryId}`, writeKey, {})).status).toBe(400);
+    const res = await call('PATCH', `/menu/categories/${categoryId}`, writeKey, { name: `  Renamed Cat ${runId} ` });
+    expect(res.status).toBe(200);
+    expect(res.body.data.before.name).toBe(`Test MCP Cat ${runId}`);
+    const row = await prisma.menuCategory.findUniqueOrThrow({ where: { id: categoryId } });
+    expect(row.name).toBe(`Renamed Cat ${runId}`);
+    expect(row.slug).toBe(before.slug);
+    const log = await waitFor(
+      () => prisma.activityLog.findFirst({ where: { entityId: categoryId, entityType: 'menuCategory' } }),
+      (r) => r !== null,
+    );
+    expect(log?.summary).toContain(`"Test MCP Cat ${runId}" → "Renamed Cat ${runId}"`);
   });
 
   it('updates the display order', async () => {

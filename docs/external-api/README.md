@@ -126,6 +126,7 @@ Authoritative list lives in Swagger at `/api/docs/external` once the separate do
 | `POST /business/sms/send`                | `marketing:write` | shipped    |
 | `POST /business/sms/blast`               | `marketing:write` | shipped    |
 | `GET /business/menu/categories`          | `menu:read`       | shipped    |
+| `PATCH /business/menu/categories/:id`    | `menu:write`      | shipped    |
 | `GET /business/menu/items/:id`           | `menu:read`       | shipped    |
 | `POST /business/menu/items`              | `menu:write`      | shipped    |
 | `PATCH /business/menu/items/:id`         | `menu:write`      | shipped    |

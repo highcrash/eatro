@@ -152,6 +152,29 @@ server.registerTool(
 );
 
 server.registerTool(
+  'update_category',
+  {
+    title: 'Update menu category',
+    description: 'Rename, reorder or activate/deactivate a menu category. Get ids from list_categories. Only send fields that change.',
+    inputSchema: {
+      id: z.string().min(1).max(64),
+      name: z.string().min(1).max(80).optional(),
+      sort_order: z.number().int().min(0).max(100_000).optional(),
+      active: z.boolean().optional(),
+    },
+    annotations: WRITE,
+  },
+  ({ id, name, sort_order, active }) =>
+    run(async () => {
+      const body = Object.fromEntries(
+        Object.entries({ name, sortOrder: sort_order, isActive: active }).filter(([, v]) => v !== undefined),
+      );
+      const res = await api<{ before: { name: string }; after: { name: string } }>('PATCH', `/business/menu/categories/${enc(id)}`, body);
+      return { before: res.before, after: res.after };
+    }),
+);
+
+server.registerTool(
   'get_menu_item',
   {
     title: 'Get menu item',

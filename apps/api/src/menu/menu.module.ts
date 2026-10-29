@@ -10,6 +10,6 @@ import { ActivityLogModule } from '../activity-log/activity-log.module';
   imports: [UnitConversionModule, ActivityLogModule],
   controllers: [CategoryController, MenuController],
   providers: [MenuService, CategoryService],
-  exports: [MenuService],
+  exports: [MenuService, CategoryService],
 })
 export class MenuModule {}
