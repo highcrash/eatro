@@ -186,6 +186,12 @@ class UpdateCategoryBody {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  /** Top-level category to nest under, or null to make this top-level. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  parentId?: string | null;
 }
 
 type RecipeWithItems = {
@@ -220,7 +226,7 @@ export class ExternalMenuController {
   async listCategories(@CurrentApiClient() client: ApiClient) {
     const categories = await this.prisma.menuCategory.findMany({
       where: { branchId: client.branchId, deletedAt: null },
-      select: { id: true, name: true, parentId: true, isActive: true },
+      select: { id: true, name: true, parentId: true, isActive: true, sortOrder: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
     return this.envelope(client.branchId, { categories });
@@ -239,6 +245,7 @@ export class ExternalMenuController {
     if (changed.length === 0) throw new BadRequestException('Nothing to update');
     if (sent.name !== undefined) sent.name = sent.name.trim();
     const before = await this.categories.findOne(id, client.branchId);
+    if (sent.parentId) await this.assertParentCategory(client.branchId, id, sent.parentId);
     const { actor, via } = await this.actorFor(client);
     const after = await this.categories.update(id, client.branchId, sent);
     void this.activityLog.log({
@@ -474,6 +481,19 @@ export class ExternalMenuController {
       select: { id: true },
     });
     if (!found) throw new BadRequestException(`Unknown category id: ${categoryId}`);
+  }
+
+  /** Menus are two levels deep: a sub-category's parent must be top-level. */
+  private async assertParentCategory(branchId: string, categoryId: string, parentId: string) {
+    if (parentId === categoryId) throw new BadRequestException('A category cannot be its own parent');
+    const parent = await this.prisma.menuCategory.findFirst({
+      where: { id: parentId, branchId, deletedAt: null },
+      select: { parentId: true },
+    });
+    if (!parent) throw new BadRequestException(`Unknown category id: ${parentId}`);
+    if (parent.parentId) throw new BadRequestException('Parent must be a top-level category');
+    const children = await this.prisma.menuCategory.count({ where: { parentId: categoryId, deletedAt: null } });
+    if (children > 0) throw new BadRequestException(`Category has ${children} sub-categories; it cannot become a sub-category itself`);
   }
 
   private async envelope<T>(branchId: string, data: T) {

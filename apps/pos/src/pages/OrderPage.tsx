@@ -281,6 +281,12 @@ function VoidItemDialog({ item, orderId, isCashier, onClose, onConfirm, isPendin
 
 // ─── Add Items Overlay (with category + search) ─────────────────────────────
 
+type MenuCategoryRow = { id: string; name: string; parentId: string | null; sortOrder?: number; isActive?: boolean };
+
+// Categories follow the order admin sets (same as the website), then name.
+const byMenuOrder = (a: MenuCategoryRow, b: MenuCategoryRow) =>
+  (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name);
+
 function AddItemsOverlay({
   menuItems,
   newItemCart,
@@ -322,17 +328,17 @@ function AddItemsOverlay({
   })();
 
   // Fetch categories from API for proper hierarchy (includes parents with 0 direct items)
-  const { data: apiCategories = [] } = useQuery<{ id: string; name: string; parentId: string | null; children?: { id: string; name: string }[] }[]>({
+  const { data: apiCategories = [] } = useQuery<MenuCategoryRow[]>({
     queryKey: ['menu-categories'],
     queryFn: () => api.get('/menu/categories'),
   });
 
   const parentCats = apiCategories
-    .filter((c) => !c.parentId)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter((c) => !c.parentId && c.isActive !== false)
+    .sort(byMenuOrder);
   const getChildren = (pid: string) => apiCategories
-    .filter((c) => c.parentId === pid)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter((c) => c.parentId === pid && c.isActive !== false)
+    .sort(byMenuOrder);
 
   // Filter items — same logic as the new-order grid: hide variant
   // children + custom one-offs.
@@ -2306,12 +2312,12 @@ function NewOrderView({
   });
 
   // Fetch categories for proper hierarchy
-  const { data: apiCats = [] } = useQuery<{ id: string; name: string; parentId: string | null }[]>({
+  const { data: apiCats = [] } = useQuery<MenuCategoryRow[]>({
     queryKey: ['menu-categories'],
     queryFn: () => api.get('/menu/categories'),
   });
-  const topCats = apiCats.filter((c) => !c.parentId).sort((a, b) => a.name.localeCompare(b.name));
-  const getSubCats = (pid: string) => apiCats.filter((c) => c.parentId === pid).sort((a, b) => a.name.localeCompare(b.name));
+  const topCats = apiCats.filter((c) => !c.parentId && c.isActive !== false).sort(byMenuOrder);
+  const getSubCats = (pid: string) => apiCats.filter((c) => c.parentId === pid && c.isActive !== false).sort(byMenuOrder);
 
   const searchTrimmed = search.trim().toLowerCase();
   const childIdsOfActive = activeCategory ? getSubCats(activeCategory).map((c) => c.id) : [];

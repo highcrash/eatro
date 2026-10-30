@@ -155,19 +155,21 @@ server.registerTool(
   'update_category',
   {
     title: 'Update menu category',
-    description: 'Rename, reorder or activate/deactivate a menu category. Get ids from list_categories. Only send fields that change.',
+    description:
+      'Rename, reorder, activate/deactivate or move a menu category. Get ids from list_categories. Only send fields that change. parent_id must be a top-level category; null makes it top-level.',
     inputSchema: {
       id: z.string().min(1).max(64),
       name: z.string().min(1).max(80).optional(),
       sort_order: z.number().int().min(0).max(100_000).optional(),
       active: z.boolean().optional(),
+      parent_id: z.string().min(1).max(64).nullable().optional(),
     },
     annotations: WRITE,
   },
-  ({ id, name, sort_order, active }) =>
+  ({ id, name, sort_order, active, parent_id }) =>
     run(async () => {
       const body = Object.fromEntries(
-        Object.entries({ name, sortOrder: sort_order, isActive: active }).filter(([, v]) => v !== undefined),
+        Object.entries({ name, sortOrder: sort_order, isActive: active, parentId: parent_id }).filter(([, v]) => v !== undefined),
       );
       const res = await api<{ before: { name: string }; after: { name: string } }>('PATCH', `/business/menu/categories/${enc(id)}`, body);
       return { before: res.before, after: res.after };

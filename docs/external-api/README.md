@@ -138,7 +138,7 @@ Authoritative list lives in Swagger at `/api/docs/external` once the separate do
 | `POST /business/marketing/campaigns`     | `marketing:write` | deferred   |
 | `GET /business/finance/pnl`              | `finance:read`    | deferred   |
 
-**Menu and recipe writes.** Menu item create/update take `priceTaka` (whole taka, up to 2 decimals); the server stores paisa. Reads still return paisa. `PUT /recipes/:menuItemId` replaces the whole recipe (`{ notes?, items: [{ ingredientId, quantity, unit? }] }`, quantity per one serving, `unit` defaults to the ingredient's stock unit). Recipe delete is permanent; menu item delete is a soft delete. Every write returns `before` (and `after` where relevant) and is written to the Activity Log as the key's creator, tagged `(via API key "<key name>")`.
+**Menu and recipe writes.** Menu item create/update take `priceTaka` (whole taka, up to 2 decimals); the server stores paisa. Reads still return paisa. `PUT /recipes/:menuItemId` replaces the whole recipe (`{ notes?, items: [{ ingredientId, quantity, unit? }] }`, quantity per one serving, `unit` defaults to the ingredient's stock unit). Recipe delete is permanent; menu item delete is a soft delete. `PATCH /menu/categories/:id` takes `name`, `sortOrder`, `isActive` and `parentId` (a top-level category id, or `null` to make it top-level; menus stay two levels deep). Every write returns `before` (and `after` where relevant) and is written to the Activity Log as the key's creator, tagged `(via API key "<key name>")`.
 
 ### Claude MCP connector
 

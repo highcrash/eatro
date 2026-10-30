@@ -190,6 +190,31 @@ describe('ExternalMenuController (API-key menu + recipe writes)', () => {
     expect(log?.summary).toContain(`"Test MCP Cat ${runId}" → "Renamed Cat ${runId}"`);
   });
 
+  it('moves a category between parents, keeping menus two levels deep', async () => {
+    const top = (await prisma.menuCategory.create({ data: { branchId, name: `Test MCP Top ${runId}` } })).id;
+    const sub = (await prisma.menuCategory.create({ data: { branchId, name: `Test MCP Sub ${runId}`, parentId: top } })).id;
+    try {
+      const move = (id: string, parentId: unknown) => call('PATCH', `/menu/categories/${id}`, writeKey, { parentId });
+      expect((await move(categoryId, categoryId)).status).toBe(400);
+      expect((await move(categoryId, 'does-not-exist')).status).toBe(400);
+      expect((await move(categoryId, sub)).status).toBe(400); // parent must be top-level
+      expect((await move(top, categoryId)).status).toBe(400); // top has children
+      expect((await prisma.menuCategory.findUniqueOrThrow({ where: { id: categoryId } })).parentId).toBeNull();
+
+      expect((await move(categoryId, top)).status).toBe(200);
+      expect((await prisma.menuCategory.findUniqueOrThrow({ where: { id: categoryId } })).parentId).toBe(top);
+      expect((await move(categoryId, null)).status).toBe(200);
+      expect((await prisma.menuCategory.findUniqueOrThrow({ where: { id: categoryId } })).parentId).toBeNull();
+
+      const list = await call('GET', '/menu/categories', readKey);
+      expect(list.body.data.categories.find((c: { id: string }) => c.id === categoryId)).toHaveProperty('sortOrder');
+    } finally {
+      await prisma.activityLog.deleteMany({ where: { entityId: { in: [top, sub] } } });
+      await prisma.menuCategory.updateMany({ where: { parentId: top }, data: { parentId: null } });
+      await prisma.menuCategory.deleteMany({ where: { id: { in: [sub, top] } } });
+    }
+  });
+
   it('updates the display order', async () => {
     expect((await call('PATCH', `/menu/items/${menuItemId}`, writeKey, { sortOrder: 2.5 })).status).toBe(400);
     expect((await call('PATCH', `/menu/items/${menuItemId}`, writeKey, { sortOrder: 7 })).status).toBe(200);
