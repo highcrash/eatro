@@ -270,7 +270,8 @@ server.registerTool(
   'create_menu_item',
   {
     title: 'Create menu item',
-    description: 'Add a new item to the live menu. Get category_id from list_categories.',
+    description:
+      'Add a new item to the live menu. Get category_id from list_categories. For size/flavour options create a parent with is_variant_parent=true (price 0), then each option with variant_parent_id. Copy cooking_station_id from a similar item so its ticket prints at the right station.',
     inputSchema: {
       category_id: z.string().min(1).max(64),
       name: z.string().min(1).max(120),
@@ -280,6 +281,11 @@ server.registerTool(
       tags: z.string().max(300).optional().describe('Comma-separated, e.g. "spicy,chicken"'),
       available: z.boolean().optional(),
       website_visible: z.boolean().optional(),
+      is_variant_parent: z.boolean().optional(),
+      variant_parent_id: z.string().min(1).max(64).optional(),
+      cooking_station_id: z.string().min(1).max(64).optional(),
+      image_url: z.string().url().max(500).optional(),
+      prep_time: z.string().max(10).optional().describe('Minutes, e.g. "10"'),
     },
     annotations: WRITE,
   },
@@ -294,8 +300,56 @@ server.registerTool(
         tags: a.tags,
         isAvailable: a.available,
         websiteVisible: a.website_visible,
+        isVariantParent: a.is_variant_parent,
+        variantParentId: a.variant_parent_id,
+        cookingStationId: a.cooking_station_id,
+        imageUrl: a.image_url,
+        prepTime: a.prep_time,
       });
       return { created: menuItemView(after) };
+    }),
+);
+
+server.registerTool(
+  'create_category',
+  {
+    title: 'Create menu category',
+    description: 'Add a menu category. parent_id (a top-level category from list_categories) makes it a sub-category.',
+    inputSchema: {
+      name: z.string().min(1).max(80),
+      parent_id: z.string().min(1).max(64).optional(),
+      sort_order: z.number().int().min(0).max(100_000).optional(),
+    },
+    annotations: WRITE,
+  },
+  ({ name, parent_id, sort_order }) =>
+    run(async () => {
+      const { after } = await api<{ after: unknown }>('POST', '/business/menu/categories', { name, parentId: parent_id, sortOrder: sort_order });
+      return { created: after };
+    }),
+);
+
+server.registerTool(
+  'remove_addon_groups',
+  {
+    title: 'Remove add-on groups',
+    description:
+      'Remove every add-on group (e.g. flavour or extra picks) from a menu item. Without confirm=true this only lists what would be removed.',
+    inputSchema: { id: z.string().min(1).max(64), confirm: z.boolean().optional() },
+    annotations: DESTRUCTIVE,
+  },
+  ({ id, confirm }) =>
+    run(async () => {
+      if (confirm !== true) {
+        const { item } = await api<{ item: MenuItem & { addonGroups?: unknown[] } }>('GET', `/business/menu/items/${enc(id)}`);
+        return {
+          preview: 'NOT removed. These add-on groups would be removed. Ask the user, then call again with confirm=true.',
+          item: menuItemView(item),
+          addonGroups: item.addonGroups ?? [],
+        };
+      }
+      const { removed } = await api<{ removed: unknown[] }>('DELETE', `/business/menu/items/${enc(id)}/addon-groups`);
+      return { removed };
     }),
 );
 

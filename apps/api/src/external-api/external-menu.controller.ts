@@ -24,6 +24,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   Max,
   MaxLength,
   Min,
@@ -119,6 +120,53 @@ class CreateMenuItemBody {
   @IsOptional()
   @IsBoolean()
   websiteVisible?: boolean;
+
+  /** Picker shell for size/flavour options (price is ignored by the POS). */
+  @IsOptional()
+  @IsBoolean()
+  isVariantParent?: boolean;
+
+  /** Make this item an option of an existing variant parent. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  variantParentId?: string;
+
+  /** Kitchen / bar station its ticket prints to. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  cookingStationId?: string;
+
+  @IsOptional()
+  @IsUrl({ protocols: ['https'], require_protocol: true })
+  @MaxLength(500)
+  imageUrl?: string;
+
+  /** Minutes, as the admin form stores it (e.g. "10"). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  prepTime?: string;
+}
+
+class CreateCategoryBody {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  name!: string;
+
+  /** Top-level category to nest under; omit for a top-level category. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  parentId?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000)
+  sortOrder?: number;
 }
 
 class UpdateMenuItemBody {
@@ -232,6 +280,27 @@ export class ExternalMenuController {
     return this.envelope(client.branchId, { categories });
   }
 
+  @Post('business/menu/categories')
+  @Scopes('menu:write')
+  @ApiOperation({ summary: 'Create a menu category, optionally under a top-level parent' })
+  async createCategory(@CurrentApiClient() client: ApiClient, @Body() body: CreateCategoryBody) {
+    if (body.parentId) await this.assertParentCategory(client.branchId, null, body.parentId);
+    const { actor, via } = await this.actorFor(client);
+    const created = await this.categories.create(client.branchId, body.name.trim(), body.sortOrder, body.parentId);
+    void this.activityLog.log({
+      branchId: client.branchId,
+      actor,
+      category: 'MENU',
+      action: 'CREATE',
+      entityType: 'menuCategory',
+      entityId: created.id,
+      entityName: created.name,
+      after: created as never,
+      summary: `Created menu category "${created.name}" ${via}`,
+    });
+    return this.envelope(client.branchId, { after: created });
+  }
+
   @Patch('business/menu/categories/:id')
   @Scopes('menu:write')
   @ApiOperation({ summary: 'Rename, reorder or (de)activate a menu category. Returns before + after.' })
@@ -279,8 +348,10 @@ export class ExternalMenuController {
   @ApiOperation({ summary: 'Create a menu item (price in taka)' })
   async createMenuItem(@CurrentApiClient() client: ApiClient, @Body() body: CreateMenuItemBody) {
     await this.assertCategory(client.branchId, body.categoryId);
+    if (body.cookingStationId) await this.assertCookingStation(client.branchId, body.cookingStationId);
     const { actor, via } = await this.actorFor(client);
-    const { priceTaka, ...rest } = body;
+    // Drop keys the caller didn't send so service defaults still apply.
+    const { priceTaka, ...rest } = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as CreateMenuItemBody;
     const created = await this.menu.create(client.branchId, { ...rest, price: toPaisa(priceTaka) } as never);
     void this.activityLog.log({
       branchId: client.branchId,
@@ -349,6 +420,29 @@ export class ExternalMenuController {
       summary: `Deleted menu item "${before.name}" ${via}`,
     });
     return this.envelope(client.branchId, { deleted: true, before });
+  }
+
+  @Delete('business/menu/items/:id/addon-groups')
+  @Scopes('menu:write')
+  @ApiOperation({ summary: 'Remove every add-on group from a menu item. Returns the removed groups.' })
+  async removeAddonGroups(@CurrentApiClient() client: ApiClient, @Param('id') id: string) {
+    const item = await this.menu.findOne(id, client.branchId);
+    const groups = await this.menu.listAddonGroups(id, client.branchId);
+    if (groups.length === 0) throw new NotFoundException('This menu item has no add-on groups');
+    const { actor, via } = await this.actorFor(client);
+    for (const g of groups) await this.menu.removeAddonGroup(g.id, client.branchId);
+    void this.activityLog.log({
+      branchId: client.branchId,
+      actor,
+      category: 'MENU',
+      action: 'UPDATE',
+      entityType: 'menuItem',
+      entityId: item.id,
+      entityName: item.name,
+      before: groups as never,
+      summary: `Removed ${groups.length} add-on group(s) from "${item.name}" ${via}`,
+    });
+    return this.envelope(client.branchId, { removed: groups });
   }
 
   // ─── Ingredients + recipes ────────────────────────────────────────────
@@ -483,8 +577,13 @@ export class ExternalMenuController {
     if (!found) throw new BadRequestException(`Unknown category id: ${categoryId}`);
   }
 
+  private async assertCookingStation(branchId: string, stationId: string) {
+    const found = await this.prisma.cookingStation.findFirst({ where: { id: stationId, branchId }, select: { id: true } });
+    if (!found) throw new BadRequestException(`Unknown cooking station id: ${stationId}`);
+  }
+
   /** Menus are two levels deep: a sub-category's parent must be top-level. */
-  private async assertParentCategory(branchId: string, categoryId: string, parentId: string) {
+  private async assertParentCategory(branchId: string, categoryId: string | null, parentId: string) {
     if (parentId === categoryId) throw new BadRequestException('A category cannot be its own parent');
     const parent = await this.prisma.menuCategory.findFirst({
       where: { id: parentId, branchId, deletedAt: null },
@@ -492,6 +591,7 @@ export class ExternalMenuController {
     });
     if (!parent) throw new BadRequestException(`Unknown category id: ${parentId}`);
     if (parent.parentId) throw new BadRequestException('Parent must be a top-level category');
+    if (!categoryId) return; // a new category has no children yet
     const children = await this.prisma.menuCategory.count({ where: { parentId: categoryId, deletedAt: null } });
     if (children > 0) throw new BadRequestException(`Category has ${children} sub-categories; it cannot become a sub-category itself`);
   }

@@ -237,6 +237,71 @@ describe('ExternalMenuController (API-key menu + recipe writes)', () => {
     expect(row.price.toNumber()).toBe(12_000);
   });
 
+  it('creates a sub-category under a top-level parent only', async () => {
+    const created: string[] = [];
+    try {
+      expect((await call('POST', '/menu/categories', readKey, { name: 'Nope' })).status).toBe(403);
+      expect((await call('POST', '/menu/categories', writeKey, {})).status).toBe(400);
+      const sub = await call('POST', '/menu/categories', writeKey, { name: ` Test MCP NewSub ${runId} `, parentId: categoryId, sortOrder: 3 });
+      expect(sub.status).toBe(201);
+      created.push(sub.body.data.after.id);
+      expect(sub.body.data.after).toMatchObject({ name: `Test MCP NewSub ${runId}`, parentId: categoryId, sortOrder: 3 });
+      // A sub-category cannot itself be a parent.
+      expect((await call('POST', '/menu/categories', writeKey, { name: 'Too deep', parentId: sub.body.data.after.id })).status).toBe(400);
+    } finally {
+      await prisma.activityLog.deleteMany({ where: { entityId: { in: created } } });
+      await prisma.menuCategory.deleteMany({ where: { id: { in: created } } });
+    }
+  });
+
+  it('creates a variant parent and an option on a cooking station', async () => {
+    const station = await prisma.cookingStation.create({ data: { branchId, name: `Test MCP Bar ${runId}` } });
+    const ids: string[] = [];
+    try {
+      const bad = await call('POST', '/menu/items', writeKey, { categoryId, name: 'X', type: 'FOOD', priceTaka: 0, cookingStationId: 'nope' });
+      expect(bad.status).toBe(400);
+      const parent = await call('POST', '/menu/items', writeKey, {
+        categoryId, name: `Test MCP Flavour ${runId}`, type: 'FOOD', priceTaka: 0, isVariantParent: true,
+        cookingStationId: station.id, imageUrl: 'https://example.com/latte.jpg', prepTime: '10',
+      });
+      expect(parent.status).toBe(201);
+      ids.push(parent.body.data.after.id);
+      const child = await call('POST', '/menu/items', writeKey, {
+        categoryId, name: `Test MCP Flavour ${runId} - Large`, type: 'FOOD', priceTaka: 470,
+        variantParentId: parent.body.data.after.id, cookingStationId: station.id,
+      });
+      expect(child.status).toBe(201);
+      ids.push(child.body.data.after.id);
+      const row = await prisma.menuItem.findUniqueOrThrow({ where: { id: child.body.data.after.id } });
+      expect(row).toMatchObject({ variantParentId: parent.body.data.after.id, cookingStationId: station.id, isVariantParent: false });
+      expect(row.price.toNumber()).toBe(47_000);
+      const shell = await prisma.menuItem.findUniqueOrThrow({ where: { id: parent.body.data.after.id } });
+      expect(shell).toMatchObject({ isVariantParent: true, imageUrl: 'https://example.com/latte.jpg', prepTime: '10' });
+    } finally {
+      await prisma.activityLog.deleteMany({ where: { entityId: { in: ids } } });
+      await prisma.menuItem.deleteMany({ where: { id: { in: [...ids].reverse() } } });
+      await prisma.cookingStation.delete({ where: { id: station.id } });
+    }
+  });
+
+  it('removes every add-on group from an item', async () => {
+    const addon = await prisma.menuItem.create({ data: { branchId, categoryId, name: `Test MCP Syrup ${runId}`, type: 'FOOD', price: 7_000, isAddon: true } });
+    const group = await prisma.menuItemAddonGroup.create({
+      data: { branchId, menuItemId, name: 'Special', options: { create: [{ addonItemId: addon.id }] } },
+    });
+    try {
+      expect((await call('DELETE', `/menu/items/${menuItemId}/addon-groups`, readKey)).status).toBe(403);
+      const res = await call('DELETE', `/menu/items/${menuItemId}/addon-groups`, writeKey);
+      expect(res.status).toBe(200);
+      expect(res.body.data.removed).toHaveLength(1);
+      expect((await prisma.menuItemAddonGroup.findUniqueOrThrow({ where: { id: group.id } })).deletedAt).not.toBeNull();
+      expect((await call('DELETE', `/menu/items/${menuItemId}/addon-groups`, writeKey)).status).toBe(404);
+    } finally {
+      await prisma.menuItemAddonGroup.delete({ where: { id: group.id } });
+      await prisma.menuItem.delete({ where: { id: addon.id } });
+    }
+  });
+
   it('deletes a recipe, returning it for undo; a second delete is 404', async () => {
     const res = await call('DELETE', `/recipes/${menuItemId}`, writeKey);
     expect(res.status).toBe(200);

@@ -126,11 +126,13 @@ Authoritative list lives in Swagger at `/api/docs/external` once the separate do
 | `POST /business/sms/send`                | `marketing:write` | shipped    |
 | `POST /business/sms/blast`               | `marketing:write` | shipped    |
 | `GET /business/menu/categories`          | `menu:read`       | shipped    |
+| `POST /business/menu/categories`         | `menu:write`      | shipped    |
 | `PATCH /business/menu/categories/:id`    | `menu:write`      | shipped    |
 | `GET /business/menu/items/:id`           | `menu:read`       | shipped    |
 | `POST /business/menu/items`              | `menu:write`      | shipped    |
 | `PATCH /business/menu/items/:id`         | `menu:write`      | shipped    |
 | `DELETE /business/menu/items/:id`        | `menu:write`      | shipped    |
+| `DELETE /business/menu/items/:id/addon-groups` | `menu:write` | shipped    |
 | `GET /business/ingredients?search=`      | `recipes:read`    | shipped    |
 | `GET /business/recipes/:menuItemId`      | `recipes:read`    | shipped    |
 | `PUT /business/recipes/:menuItemId`      | `recipes:write`   | shipped    |
@@ -138,7 +140,7 @@ Authoritative list lives in Swagger at `/api/docs/external` once the separate do
 | `POST /business/marketing/campaigns`     | `marketing:write` | deferred   |
 | `GET /business/finance/pnl`              | `finance:read`    | deferred   |
 
-**Menu and recipe writes.** Menu item create/update take `priceTaka` (whole taka, up to 2 decimals); the server stores paisa. Reads still return paisa. `PUT /recipes/:menuItemId` replaces the whole recipe (`{ notes?, items: [{ ingredientId, quantity, unit? }] }`, quantity per one serving, `unit` defaults to the ingredient's stock unit). Recipe delete is permanent; menu item delete is a soft delete. `PATCH /menu/categories/:id` takes `name`, `sortOrder`, `isActive` and `parentId` (a top-level category id, or `null` to make it top-level; menus stay two levels deep). Every write returns `before` (and `after` where relevant) and is written to the Activity Log as the key's creator, tagged `(via API key "<key name>")`.
+**Menu and recipe writes.** Menu item create/update take `priceTaka` (whole taka, up to 2 decimals); the server stores paisa. Reads still return paisa. `PUT /recipes/:menuItemId` replaces the whole recipe (`{ notes?, items: [{ ingredientId, quantity, unit? }] }`, quantity per one serving, `unit` defaults to the ingredient's stock unit). Recipe delete is permanent; menu item delete is a soft delete. `PATCH /menu/categories/:id` takes `name`, `sortOrder`, `isActive` and `parentId` (a top-level category id, or `null` to make it top-level; menus stay two levels deep). Item create also takes `isVariantParent`, `variantParentId`, `cookingStationId`, `imageUrl` and `prepTime`, so size/flavour options can be built without the admin UI. Every write returns `before` (and `after` where relevant) and is written to the Activity Log as the key's creator, tagged `(via API key "<key name>")`.
 
 ### Claude MCP connector
 
