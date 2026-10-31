@@ -6,7 +6,8 @@ import { Plus, Minus, ArrowLeft, ShoppingBag, X, Printer, Search } from 'lucide-
 import type { MenuItem, Order, OrderItem, CreateOrderDto, VoidOrderItemDto, WasteReason } from '@restora/types';
 import { formatCurrency, printKitchenTicket as printKitchenTicketUtil } from '@restora/utils';
 import { useBranchSettings } from '../hooks/useBranchSettings';
-import { useKtRecipes, attachRecipesToTicket } from '../lib/kt-recipes';
+import { useKtRecipes, attachRecipesToTicket, expandComboLines } from '../lib/kt-recipes';
+import { comboChoiceGroups, comboPartsFor, describePicks, type ComboPick } from '../lib/combo';
 import { useBranding } from '../lib/branding';
 import { isPlainCharKey } from '../lib/keyboard';
 import { useIsOnline } from '../lib/online';
@@ -21,6 +22,7 @@ import CustomMenuDialog from '../components/CustomMenuDialog';
 import VariantPickerDialog from '../components/VariantPickerDialog';
 import CustomiseLineDialog from '../components/CustomiseLineDialog';
 import AddonPickerDialog from '../components/AddonPickerDialog';
+import ComboChoiceDialog from '../components/ComboChoiceDialog';
 import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
 import { useCashierPermissions } from '../lib/permissions';
 
@@ -46,12 +48,15 @@ interface CartItem {
    *  deduction. cartLineKey hashes the tuples so 2× burger + extra
    *  cheese stays separate from 2× plain burger. */
   addedIngredients?: { ingredientId: string; ingredientName: string; quantity: number; unit: string; surcharge: number }[];
+  /** Combo choice-slot picks per one combo (e.g. 2 Fizz + 2 Fizz White);
+   *  part of the cart key so different splits stay separate rows. */
+  comboChoices?: ComboPick[];
 }
 
 /** Stable key for matching cart lines (variant + same removed-ID set
  *  + same addon picks + same added-ingredient picks + same notes
  *  = same cart row). */
-function cartLineKey(item: { menuItem: { id: string }; removedIngredientIds?: string[]; notes?: string; addons?: { groupId: string; addonItemId: string }[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[] }): string {
+function cartLineKey(item: { menuItem: { id: string }; removedIngredientIds?: string[]; notes?: string; addons?: { groupId: string; addonItemId: string }[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[]; comboChoices?: { includedItemId: string; quantity: number }[] }): string {
   const ids = [...(item.removedIngredientIds ?? [])].sort().join(',');
   const addonsKey = [...(item.addons ?? [])]
     .map((a) => `${a.groupId}:${a.addonItemId}`)
@@ -61,7 +66,30 @@ function cartLineKey(item: { menuItem: { id: string }; removedIngredientIds?: st
     .map((a) => `${a.ingredientId}:${a.quantity}:${a.unit}:${a.surcharge}`)
     .sort()
     .join(',');
-  return `${item.menuItem.id}::${ids}::${addonsKey}::${addedKey}::${item.notes ?? ''}`;
+  const comboKey = [...(item.comboChoices ?? [])]
+    .map((c) => `${c.includedItemId}:${c.quantity}`)
+    .sort()
+    .join(',');
+  return `${item.menuItem.id}::${ids}::${addonsKey}::${addedKey}::${comboKey}::${item.notes ?? ''}`;
+}
+
+/** Add one combo with the cashier's picks, stacking onto an identical line. */
+function addComboLine(prev: CartItem[], item: MenuItem, picks: ComboPick[]): CartItem[] {
+  const key = cartLineKey({ menuItem: { id: item.id }, comboChoices: picks });
+  const existing = prev.find((c) => cartLineKey(c) === key);
+  if (existing) return prev.map((c) => (cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c));
+  return [...prev, { menuItem: item, quantity: 1, comboChoices: picks }];
+}
+
+/**
+ * Categories hidden in admin (and everything under them) — their items
+ * stay off the grid and search, e.g. "Combo Only" parts that are sold
+ * only inside a combo.
+ */
+function hiddenCategoryIds(cats: { id: string; parentId: string | null; isActive?: boolean }[]): Set<string> {
+  const hidden = new Set(cats.filter((c) => c.isActive === false).map((c) => c.id));
+  for (const c of cats) if (c.parentId && hidden.has(c.parentId)) hidden.add(c.id);
+  return hidden;
 }
 
 // Honour the discountedPrice the menu fetch stamps when a
@@ -344,9 +372,11 @@ function AddItemsOverlay({
   // children + custom one-offs.
   const searchLower = addSearch.trim().toLowerCase();
   const childIdsOfSelected = addCatId ? getChildren(addCatId).map((c) => c.id) : [];
+  const hiddenCats = hiddenCategoryIds(apiCategories);
   const filteredItems = menuItems
     .filter((m) => m.isAvailable)
     .filter((m) => !m.variantParentId && !m.isCustom && !m.isAddon)
+    .filter((m) => !hiddenCats.has(m.categoryId))
     .filter((m) => {
       if (searchLower) return m.name.toLowerCase().includes(searchLower);
       if (!addCatId) return true;
@@ -357,6 +387,10 @@ function AddItemsOverlay({
   const addToNewCart = (item: MenuItem) => {
     if (item.isVariantParent) {
       setVariantPickerFor(item);
+      return;
+    }
+    if (comboChoiceGroups(item).length > 0) {
+      setComboPickerForNew(item);
       return;
     }
     const groups = (item.addonGroups ?? []).filter((g) => g.options.length > 0);
@@ -374,6 +408,7 @@ function AddItemsOverlay({
 
   const [customizingNewKey, setCustomizingNewKey] = useState<string | null>(null);
   const [addonPickerForNew, setAddonPickerForNew] = useState<MenuItem | null>(null);
+  const [comboPickerForNew, setComboPickerForNew] = useState<MenuItem | null>(null);
 
   // ── Keyboard navigation ──────────────────────────────────────────────────
   const GRID_COLS = 5;
@@ -618,7 +653,7 @@ function AddItemsOverlay({
               <p className="text-center text-theme-text-muted text-xs py-6">Tap items to add</p>
             ) : (
               newItemCart.map((line, idx) => {
-                const { menuItem, quantity, notes, removedNames, addons, addedIngredients } = line;
+                const { menuItem, quantity, notes, removedNames, addons, addedIngredients, comboChoices } = line;
                 const key = cartLineKey(line);
                 const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
                 const addedTotal = (addedIngredients ?? []).reduce((s, a) => s + a.surcharge, 0);
@@ -644,6 +679,9 @@ function AddItemsOverlay({
                       <p className="text-[11px] text-theme-text-muted">
                         {formatCurrency(unitPrice)} each
                       </p>
+                      {describePicks(comboChoices) && (
+                        <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">{describePicks(comboChoices)}</p>
+                      )}
                       {addons && addons.length > 0 && (
                         <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">
                           {addons.map((a) => `+ ${a.addonName}${a.price > 0 ? ` (${formatCurrency(a.price)})` : ''}`).join(' • ')}
@@ -764,6 +802,18 @@ function AddItemsOverlay({
               if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
               return [...prev, { menuItem: variant, quantity: 1 }];
             });
+          }}
+        />
+      )}
+
+      {comboPickerForNew && (
+        <ComboChoiceDialog
+          menuItem={comboPickerForNew}
+          onClose={() => setComboPickerForNew(null)}
+          onSave={(picks) => {
+            const item = comboPickerForNew;
+            setComboPickerForNew(null);
+            setNewItemCart((prev) => addComboLine(prev, item, picks));
           }}
         />
       )}
@@ -1009,7 +1059,7 @@ function ActiveOrderView({
       type: ord.type,
       createdAt: new Date().toISOString(),
       hideRecipe: branchSettings?.kotShowRecipe === false,
-      items: newItems.map((c) => {
+      items: expandComboLines(newItems.map((c) => {
         const r = recipeById.get(c.menuItem.id);
         return {
           quantity: c.quantity,
@@ -1023,8 +1073,9 @@ function ActiveOrderView({
             : undefined,
           recipe: r?.recipe ?? null,
           hideRecipe: r?.kotHideRecipe ?? false,
+          comboItems: comboPartsFor(c.menuItem, c.comboChoices),
         };
-      }),
+      }), recipeById),
     };
 
     const reportStatus = (ok: boolean, error?: string) => {
@@ -1816,6 +1867,7 @@ function ActiveOrderView({
             notes: c.notes || undefined,
             removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined,
             addons: c.addons && c.addons.length > 0 ? c.addons.map((a) => ({ groupId: a.groupId, addonItemId: a.addonItemId })) : undefined,
+            comboChoices: c.comboChoices && c.comboChoices.length > 0 ? c.comboChoices.map((p) => ({ includedItemId: p.includedItemId, quantity: p.quantity })) : undefined,
             addedIngredients: c.addedIngredients && c.addedIngredients.length > 0
               ? c.addedIngredients.map((a) => ({ ingredientId: a.ingredientId, quantity: a.quantity, unit: a.unit, surcharge: a.surcharge }))
               : undefined,
@@ -2278,6 +2330,7 @@ function NewOrderView({
   const [variantPickerFor, setVariantPickerFor] = useState<MenuItem | null>(null);
   const [customizingKey, setCustomizingKey] = useState<string | null>(null);
   const [addonPickerFor, setAddonPickerFor] = useState<MenuItem | null>(null);
+  const [comboPickerFor, setComboPickerFor] = useState<MenuItem | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const { data: cashierPerms } = useCashierPermissions();
@@ -2321,12 +2374,14 @@ function NewOrderView({
 
   const searchTrimmed = search.trim().toLowerCase();
   const childIdsOfActive = activeCategory ? getSubCats(activeCategory).map((c) => c.id) : [];
+  const hiddenCats = hiddenCategoryIds(apiCats);
   const filtered = menuItems
     // Hide variant children — the parent shell card represents them
     // in the grid; clicking the parent opens a chooser. Hide custom
     // one-off menu items too (they live inside their order, not the
-    // standard grid).
+    // standard grid), and items in hidden categories.
     .filter((m) => !m.variantParentId && !m.isCustom && !m.isAddon)
+    .filter((m) => !hiddenCats.has(m.categoryId))
     .filter((m) => {
       if (searchTrimmed) return m.name.toLowerCase().includes(searchTrimmed);
       if (!activeCategory) return true;
@@ -2344,6 +2399,11 @@ function NewOrderView({
     // instead of dropping the shell into the cart.
     if (item.isVariantParent) {
       setVariantPickerFor(item);
+      return;
+    }
+    // Combos with a "guest picks" slot (e.g. Fizz ×4) ask for the split first.
+    if (comboChoiceGroups(item).length > 0) {
+      setComboPickerFor(item);
       return;
     }
     // Items with addon groups go through the addon chooser before
@@ -2490,6 +2550,7 @@ function NewOrderView({
         notes: c.notes || undefined,
         removedIngredientIds: c.removedIngredientIds && c.removedIngredientIds.length > 0 ? c.removedIngredientIds : undefined,
         addons: c.addons && c.addons.length > 0 ? c.addons.map((a) => ({ groupId: a.groupId, addonItemId: a.addonItemId })) : undefined,
+        comboChoices: c.comboChoices && c.comboChoices.length > 0 ? c.comboChoices.map((p) => ({ includedItemId: p.includedItemId, quantity: p.quantity })) : undefined,
         addedIngredients: c.addedIngredients && c.addedIngredients.length > 0
           ? c.addedIngredients.map((a) => ({ ingredientId: a.ingredientId, quantity: a.quantity, unit: a.unit, surcharge: a.surcharge }))
           : undefined,
@@ -2690,7 +2751,7 @@ function NewOrderView({
             </div>
           ) : (
             cart.map((line, idx) => {
-              const { menuItem, quantity, notes, removedNames, addons, addedIngredients } = line;
+              const { menuItem, quantity, notes, removedNames, addons, addedIngredients, comboChoices } = line;
               const key = cartLineKey(line);
               const addonsTotal = (addons ?? []).reduce((s, a) => s + a.price, 0);
               const addedTotal = (addedIngredients ?? []).reduce((s, a) => s + a.surcharge, 0);
@@ -2709,6 +2770,9 @@ function NewOrderView({
                     <p className="text-[11px] text-theme-text-muted">
                       {formatCurrency(unitPrice)} each
                     </p>
+                    {describePicks(comboChoices) && (
+                      <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">{describePicks(comboChoices)}</p>
+                    )}
                     {addons && addons.length > 0 && (
                       <p className="text-[10px] text-theme-accent font-bold mt-0.5 leading-tight">
                         {addons.map((a) => `+ ${a.addonName}${a.price > 0 ? ` (${formatCurrency(a.price)})` : ''}`).join(' • ')}
@@ -2854,6 +2918,18 @@ function NewOrderView({
               if (existing) return prev.map((c) => cartLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
               return [...prev, { menuItem: variant, quantity: 1 }];
             });
+          }}
+        />
+      )}
+
+      {comboPickerFor && (
+        <ComboChoiceDialog
+          menuItem={comboPickerFor}
+          onClose={() => setComboPickerFor(null)}
+          onSave={(picks) => {
+            const item = comboPickerFor;
+            setComboPickerFor(null);
+            setCart((prev) => addComboLine(prev, item, picks));
           }}
         />
       )}

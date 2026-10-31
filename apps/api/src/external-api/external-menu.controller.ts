@@ -19,6 +19,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsIn,
   IsInt,
   IsNumber,
@@ -242,6 +243,47 @@ class UpdateCategoryBody {
   parentId?: string | null;
 }
 
+class ComboItemBody {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  includedItemId!: string;
+
+  /** Fixed part: count per combo. Choice group: how many the guest picks. */
+  @IsInt()
+  @Min(1)
+  @Max(99)
+  quantity!: number;
+
+  /** Same label on several rows = guest picks between them (e.g. "Fizz"). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  choiceGroup?: string;
+}
+
+class SetComboItemsBody {
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => ComboItemBody)
+  items!: ComboItemBody[];
+}
+
+class SetDiscountBody {
+  /** Flat amount off the menu price, in taka. */
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(MAX_PRICE_TAKA)
+  amountTaka!: number;
+
+  @IsDateString()
+  startDate!: string;
+
+  @IsDateString()
+  endDate!: string;
+}
+
 type RecipeWithItems = {
   notes: string | null;
   items: Array<{ quantity: { toNumber(): number }; unit: string; ingredient: { id: string; name: string } }>;
@@ -420,6 +462,63 @@ export class ExternalMenuController {
       summary: `Deleted menu item "${before.name}" ${via}`,
     });
     return this.envelope(client.branchId, { deleted: true, before });
+  }
+
+  @Put('business/menu/items/:id/combo-items')
+  @Scopes('menu:write')
+  @ApiOperation({ summary: 'Replace the contents of a combo (fixed parts + choice groups). Empty list un-marks the combo.' })
+  async setComboItems(@CurrentApiClient() client: ApiClient, @Param('id') id: string, @Body() body: SetComboItemsBody) {
+    const before = await this.menu.findOne(id, client.branchId);
+    const { actor, via } = await this.actorFor(client);
+    const after = await this.menu.setComboItems(id, client.branchId, body.items);
+    void this.activityLog.log({
+      branchId: client.branchId,
+      actor,
+      category: 'MENU',
+      action: 'UPDATE',
+      entityType: 'menuItem',
+      entityId: id,
+      entityName: after.name,
+      before: { comboItems: before.comboItems } as never,
+      after: { comboItems: after.comboItems } as never,
+      summary: `Updated combo items of "${after.name}" (${body.items.length}) ${via}`,
+    });
+    return this.envelope(client.branchId, { before: before.comboItems, after: after.comboItems });
+  }
+
+  /**
+   * Put one flat discount on a menu item, replacing any active one.
+   * Unlike Admin → Discounts this never schedules a Facebook post.
+   */
+  @Put('business/menu/items/:id/discount')
+  @Scopes('menu:write')
+  @ApiOperation({ summary: 'Set a flat menu-item discount (taka) for a date range. No Facebook auto-post.' })
+  async setDiscount(@CurrentApiClient() client: ApiClient, @Param('id') id: string, @Body() body: SetDiscountBody) {
+    const item = await this.menu.findOne(id, client.branchId);
+    const amount = toPaisa(body.amountTaka);
+    if (amount >= Number(item.price)) throw new BadRequestException('Discount must be less than the menu price');
+    const startDate = new Date(body.startDate);
+    const endDate = new Date(body.endDate);
+    if (endDate <= startDate) throw new BadRequestException('endDate must be after startDate');
+    const before = await this.prisma.menuItemDiscount.findMany({ where: { menuItemId: id, isActive: true } });
+    const { actor, via } = await this.actorFor(client);
+    const [, after] = await this.prisma.$transaction([
+      this.prisma.menuItemDiscount.updateMany({ where: { menuItemId: id, isActive: true }, data: { isActive: false } }),
+      this.prisma.menuItemDiscount.create({ data: { menuItemId: id, type: 'FLAT', value: amount, startDate, endDate } }),
+    ]);
+    void this.activityLog.log({
+      branchId: client.branchId,
+      actor,
+      category: 'MENU',
+      action: 'UPDATE',
+      entityType: 'menuItemDiscount',
+      entityId: after.id,
+      entityName: item.name,
+      before: before as never,
+      after: after as never,
+      summary: `Set ৳${body.amountTaka} off "${item.name}" (৳${(Number(item.price) - amount) / 100}) ${via}`,
+    });
+    return this.envelope(client.branchId, { before, after, discountedPriceTaka: (Number(item.price) - amount) / 100 });
   }
 
   @Delete('business/menu/items/:id/addon-groups')

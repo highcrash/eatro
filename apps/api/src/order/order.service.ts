@@ -1,12 +1,13 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 
 import type { Prisma } from '@prisma/client';
-import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason, CorrectPaymentDto, AddonSelectionInput, OrderItemAddonSnapshot, RecordKitchenPrintStatusDto, JwtPayload } from '@restora/types';
+import type { CreateOrderDto, ProcessPaymentDto, VoidOrderDto, VoidOrderItemDto, RefundOrderDto, RefundReason, CorrectPaymentDto, AddonSelectionInput, ComboChoiceInput, OrderItemAddonSnapshot, RecordKitchenPrintStatusDto, JwtPayload } from '@restora/types';
 import { generateOrderNumber, computeMarginBand, type MushakLineItem, type MushakBuyerBlock } from '@restora/utils';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
 import { RecipeService } from '../recipe/recipe.service';
+import type { ComboPart } from '../menu/combo-parts';
 import { AccountService } from '../account/account.service';
 import { BranchSettingsService } from '../branch-settings/branch-settings.service';
 import { SmsService } from '../sms/sms.service';
@@ -406,6 +407,63 @@ export class OrderService {
   }
 
   /**
+   * Freeze what one unit of a combo contains for this order line: its
+   * fixed parts, plus the guest's picks for each choice slot (e.g. Fizz
+   * ×4 → 2 Coke, 1 Sprite, 1 Fanta). A slot the order doesn't mention
+   * gets its first option (QR / website orders); picks must use that
+   * slot's options and add up to its size. Null for non-combo items.
+   */
+  private async resolveComboForLine(
+    branchId: string,
+    menuItemId: string,
+    choices: ComboChoiceInput[] | undefined,
+  ): Promise<ComboPart[] | null> {
+    const rows = await this.prisma.comboItem.findMany({
+      where: { comboMenuId: menuItemId, comboMenu: { isCombo: true, branchId } },
+      orderBy: { sortOrder: 'asc' },
+      select: { includedItemId: true, quantity: true, choiceGroup: true, sortOrder: true, includedItem: { select: { name: true } } },
+    });
+    if (rows.length === 0) {
+      if (choices?.length) throw new BadRequestException('This item is not a combo');
+      return null;
+    }
+    const picks = new Map<string, number>();
+    for (const c of choices ?? []) {
+      const qty = Number(c.quantity);
+      if (!Number.isInteger(qty) || qty < 0) throw new BadRequestException('Combo choice quantities must be whole numbers');
+      if (qty > 0) picks.set(c.includedItemId, (picks.get(c.includedItemId) ?? 0) + qty);
+    }
+    const parts: ComboPart[] = [];
+    const used = new Set<string>();
+    const groups = new Map<string, typeof rows>();
+    for (const r of rows) {
+      if (!r.choiceGroup) {
+        parts.push({ menuItemId: r.includedItemId, name: r.includedItem.name, quantity: r.quantity, choiceGroup: null });
+      } else {
+        groups.set(r.choiceGroup, [...(groups.get(r.choiceGroup) ?? []), r]);
+      }
+    }
+    for (const [group, options] of groups) {
+      const slot = options[0].quantity;
+      const chosen = options.filter((o) => picks.has(o.includedItemId));
+      if (chosen.length === 0) {
+        parts.push({ menuItemId: options[0].includedItemId, name: options[0].includedItem.name, quantity: slot, choiceGroup: group });
+        continue;
+      }
+      const total = chosen.reduce((s, o) => s + picks.get(o.includedItemId)!, 0);
+      if (total !== slot) throw new BadRequestException(`"${group}": pick ${slot} in total (got ${total})`);
+      for (const o of chosen) {
+        parts.push({ menuItemId: o.includedItemId, name: o.includedItem.name, quantity: picks.get(o.includedItemId)!, choiceGroup: group });
+        used.add(o.includedItemId);
+      }
+    }
+    for (const id of picks.keys()) {
+      if (!used.has(id)) throw new BadRequestException('A combo pick is not one of that combo\'s choices');
+    }
+    return parts;
+  }
+
+  /**
    * Resolve the ad-hoc "added ingredients" the cashier attached via
    * the Customise dialog. Mirrors resolveAddonsForLine in shape:
    * returns a snapshot for the OrderItem.modifications JSON, the
@@ -605,6 +663,7 @@ export class OrderService {
       const removedMods = buildModsSnapshot(item.removedIngredientIds);
       const addonRes = await this.resolveAddonsForLine(branchId, item.menuItemId, item.quantity, item.addons ?? []);
       const addedRes = await this.resolveAddedIngredientsForLine(branchId, branchMarginSettings, item.addedIngredients ?? []);
+      const comboParts = await this.resolveComboForLine(branchId, item.menuItemId, item.comboChoices);
       // Merge the two mod snapshots into a single OrderItem.modifications
       // value — null when both branches are empty so we don't write a
       // useless `{}` for plain orders.
@@ -621,6 +680,7 @@ export class OrderService {
         notes: item.notes ?? null,
         modifications: mods as Prisma.InputJsonValue | undefined,
         addons: addonRes.snapshot.length > 0 ? (addonRes.snapshot as unknown as Prisma.InputJsonValue) : undefined,
+        comboItems: comboParts ? (comboParts as unknown as Prisma.InputJsonValue) : undefined,
         // Carry the deduction list on a non-persisted property; we
         // pull it back out below before passing to the recipe engine.
         _addonRecipeItems: addonRes.addonRecipeItems,
@@ -710,10 +770,11 @@ export class OrderService {
     // Each line contributes its own recipe AND every selected addon's
     // recipe (Phase 3) — addons that have no recipe simply don't
     // deduct anything (admin saw a warning at addon-group save time).
-    const baseRecipeItems = dto.items.map((i) => ({
+    const baseRecipeItems = dto.items.map((i, idx) => ({
       menuItemId: i.menuItemId,
       quantity: i.quantity,
       removedIngredientIds: i.removedIngredientIds,
+      comboItems: itemsData[idx].comboItems,
     }));
     const addonRecipeItems = itemsData.flatMap((i) => i._addonRecipeItems ?? []);
     void this.recipeService.deductStockForOrder(
@@ -1332,6 +1393,69 @@ export class OrderService {
     return updated;
   }
 
+  /**
+   * A voided line that was already prepared: stock was deducted as SALE
+   * when ordered, so log it as waste. Per recipe ingredient that's a
+   * WasteLog row plus VOID_RETURN (cancels the SALE) and WASTE movements,
+   * giving the history SALE → VOID_RETURN → WASTE with no net stock
+   * change. Combo lines are expanded into their parts first.
+   */
+  private async logVoidAsWaste(
+    branchId: string,
+    orderId: string,
+    item: { menuItemId: string; menuItemName: string; quantity: number; comboItems: Prisma.JsonValue | null },
+    dto: VoidOrderItemDto,
+  ) {
+    const lines = await this.recipeService.expandCombos([
+      { menuItemId: item.menuItemId, quantity: item.quantity, comboItems: item.comboItems },
+    ]);
+    for (const line of lines) {
+      const recipe = await this.prisma.recipe.findUnique({
+        where: { menuItemId: line.menuItemId },
+        include: { items: { include: { ingredient: true } } },
+      });
+      if (!recipe) continue;
+      for (const ri of recipe.items) {
+        const wasteQty = ri.quantity.toNumber() * line.quantity;
+        const ingCost = ri.ingredient.costPerUnit.toNumber();
+        await this.prisma.wasteLog.create({
+          data: {
+            branchId,
+            ingredientId: ri.ingredientId,
+            quantity: wasteQty,
+            reason: (dto.wasteReason ?? 'PREPARATION_ERROR') as any,
+            notes: `Void waste: ${item.menuItemName} ×${item.quantity} — ${dto.reason}`,
+            recordedById: dto.approverId,
+          },
+        });
+        await this.prisma.stockMovement.create({
+          data: {
+            branchId,
+            ingredientId: ri.ingredientId,
+            type: 'WASTE',
+            quantity: -wasteQty,
+            notes: `Void waste: ${item.menuItemName} ×${item.quantity} — ${dto.reason}`,
+            staffId: dto.approverId,
+            unitCostPaisa: ingCost,
+            orderId,
+          },
+        });
+        await this.prisma.stockMovement.create({
+          data: {
+            branchId,
+            ingredientId: ri.ingredientId,
+            type: 'VOID_RETURN',
+            quantity: wasteQty,
+            notes: `Void return: ${item.menuItemName} ×${item.quantity} (logged as waste)`,
+            staffId: dto.approverId,
+            unitCostPaisa: ingCost,
+            orderId,
+          },
+        });
+      }
+    }
+  }
+
   async voidItem(orderId: string, itemId: string, branchId: string, dto: VoidOrderItemDto) {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID') throw new BadRequestException('Cannot void items on a paid order');
@@ -1383,28 +1507,10 @@ export class OrderService {
 
       // Handle waste logging for this last voided item
       if (dto.logAsWaste) {
-        const recipe = await this.prisma.recipe.findUnique({
-          where: { menuItemId: item.menuItemId },
-          include: { items: { include: { ingredient: true } } },
-        });
-        if (recipe) {
-          for (const ri of recipe.items) {
-            const wasteQty = ri.quantity.toNumber() * item.quantity;
-            const ingCost = ri.ingredient.costPerUnit.toNumber();
-            await this.prisma.wasteLog.create({
-              data: { branchId, ingredientId: ri.ingredientId, quantity: wasteQty, reason: (dto.wasteReason ?? 'PREPARATION_ERROR') as any, notes: `Void waste: ${item.menuItemName} ×${item.quantity} — ${dto.reason}`, recordedById: dto.approverId },
-            });
-            await this.prisma.stockMovement.create({
-              data: { branchId, ingredientId: ri.ingredientId, type: 'WASTE', quantity: -wasteQty, notes: `Void waste: ${item.menuItemName} ×${item.quantity}`, staffId: dto.approverId, unitCostPaisa: ingCost, orderId },
-            });
-            await this.prisma.stockMovement.create({
-              data: { branchId, ingredientId: ri.ingredientId, type: 'VOID_RETURN', quantity: wasteQty, notes: `Void return: ${item.menuItemName} (logged as waste)`, staffId: dto.approverId, unitCostPaisa: ingCost, orderId },
-            });
-          }
-        }
+        await this.logVoidAsWaste(branchId, orderId, item, dto);
       } else {
         void this.recipeService.restoreStockForItems(branchId, orderId, [
-          { menuItemId: item.menuItemId, quantity: item.quantity },
+          { menuItemId: item.menuItemId, quantity: item.quantity, comboItems: item.comboItems },
         ]);
       }
 
@@ -1418,62 +1524,12 @@ export class OrderService {
     });
 
     if (dto.logAsWaste) {
-      // Item was prepared but wasted — stock was already deducted on order creation
-      // Log waste entries + stock movements for tracking
-      const recipe = await this.prisma.recipe.findUnique({
-        where: { menuItemId: item.menuItemId },
-        include: { items: { include: { ingredient: true } } },
-      });
-      if (recipe) {
-        for (const ri of recipe.items) {
-          const wasteQty = ri.quantity.toNumber() * item.quantity;
-          const ingCost = ri.ingredient.costPerUnit.toNumber();
-          // Waste log for waste tracking
-          await this.prisma.wasteLog.create({
-            data: {
-              branchId,
-              ingredientId: ri.ingredientId,
-              quantity: wasteQty,
-              reason: (dto.wasteReason ?? 'PREPARATION_ERROR') as any,
-              notes: `Void waste: ${item.menuItemName} ×${item.quantity} — ${dto.reason}`,
-              recordedById: dto.approverId,
-            },
-          });
-          // Stock movement for movement history (stock already deducted as SALE, now record as WASTE)
-          await this.prisma.stockMovement.create({
-            data: {
-              branchId,
-              ingredientId: ri.ingredientId,
-              type: 'WASTE',
-              quantity: -wasteQty,
-              notes: `Void waste: ${item.menuItemName} ×${item.quantity} — ${dto.reason}`,
-              staffId: dto.approverId,
-              unitCostPaisa: ingCost,
-              orderId,
-            },
-          });
-          // Restore the SALE deduction then re-deduct as WASTE (net zero stock change, but movements are correct)
-          // Actually stock was already deducted on order creation as SALE. We just need to record a WASTE movement.
-          // But we should also create a VOID_RETURN to cancel the SALE, then a WASTE to record the waste.
-          // This gives accurate movement history: SALE → VOID_RETURN → WASTE
-          await this.prisma.stockMovement.create({
-            data: {
-              branchId,
-              ingredientId: ri.ingredientId,
-              type: 'VOID_RETURN',
-              quantity: wasteQty,
-              notes: `Void return: ${item.menuItemName} ×${item.quantity} (logged as waste)`,
-              staffId: dto.approverId,
-              unitCostPaisa: ingCost,
-              orderId,
-            },
-          });
-        }
-      }
+      // Item was prepared but wasted — stock was already deducted on order creation.
+      await this.logVoidAsWaste(branchId, orderId, item, dto);
     } else {
       // Item wasn't prepared — restore stock
       void this.recipeService.restoreStockForItems(branchId, orderId, [
-        { menuItemId: item.menuItemId, quantity: item.quantity },
+        { menuItemId: item.menuItemId, quantity: item.quantity, comboItems: item.comboItems },
       ]);
     }
 
@@ -1676,7 +1732,7 @@ export class OrderService {
     return updated;
   }
 
-  async addItemsToOrder(id: string, branchId: string, items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: AddonSelectionInput[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[] }[], needsApproval = false) {
+  async addItemsToOrder(id: string, branchId: string, items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: AddonSelectionInput[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[]; comboChoices?: ComboChoiceInput[] }[], needsApproval = false) {
     const order = await this.findOne(id, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') {
       throw new BadRequestException('Cannot add items to this order');
@@ -1748,6 +1804,7 @@ export class OrderService {
       const removedMods = buildModsSnapshot(item.removedIngredientIds);
       const addonRes = await this.resolveAddonsForLine(branchId, item.menuItemId, item.quantity, item.addons ?? []);
       const addedRes = await this.resolveAddedIngredientsForLine(branchId, branchMarginSettings, item.addedIngredients ?? []);
+      const comboParts = await this.resolveComboForLine(branchId, item.menuItemId, item.comboChoices);
       const mods = (removedMods || addedRes.snapshot.length > 0)
         ? { ...(removedMods ?? {}), ...(addedRes.snapshot.length > 0 ? { addedIngredients: addedRes.snapshot } : {}) }
         : null;
@@ -1763,6 +1820,7 @@ export class OrderService {
         kitchenStatus: needsApproval ? 'PENDING_APPROVAL' as const : 'NEW' as const,
         modifications: mods as Prisma.InputJsonValue | undefined,
         addons: addonRes.snapshot.length > 0 ? (addonRes.snapshot as unknown as Prisma.InputJsonValue) : undefined,
+        comboItems: comboParts ? (comboParts as unknown as Prisma.InputJsonValue) : undefined,
         _addonRecipeItems: addonRes.addonRecipeItems,
         _addedIngredientDeductions: addedRes.deductions.map((d) => ({ ...d, quantity: d.quantity * item.quantity })),
       };
@@ -1806,10 +1864,11 @@ export class OrderService {
     // Only deduct stock for immediately approved items. Mods + addon
     // recipes flow through.
     if (!needsApproval) {
-      const baseRecipeItems = items.map((i) => ({
+      const baseRecipeItems = items.map((i, idx) => ({
         menuItemId: i.menuItemId,
         quantity: i.quantity,
         removedIngredientIds: i.removedIngredientIds,
+        comboItems: newItems[idx].comboItems,
       }));
       const addonRecipeItems = newItems.flatMap((i) => i._addonRecipeItems ?? []);
       void this.recipeService.deductStockForOrder(
@@ -1852,6 +1911,7 @@ export class OrderService {
       menuItemId: i.menuItemId,
       quantity: i.quantity,
       removedIngredientIds: ((i as { modifications?: { removedIngredientIds?: string[] } | null }).modifications?.removedIngredientIds) ?? undefined,
+      comboItems: i.comboItems,
     }));
     const addonRecipe = pendingItems.flatMap((i) => {
       const addons = (i as { addons?: { addonItemId: string }[] | null }).addons ?? [];
@@ -1924,6 +1984,7 @@ export class OrderService {
           menuItemId: item.menuItemId,
           quantity: item.quantity,
           removedIngredientIds: ((item as { modifications?: { removedIngredientIds?: string[] } | null }).modifications?.removedIngredientIds) ?? undefined,
+          comboItems: item.comboItems,
         },
         ...addons.map((a) => ({ menuItemId: a.addonItemId, quantity: item.quantity })),
       ],
@@ -2007,7 +2068,7 @@ export class OrderService {
 
     // Restore stock
     void this.recipeService.restoreStockForItems(branchId, orderId, [
-      { menuItemId: item.menuItemId, quantity: item.quantity },
+      { menuItemId: item.menuItemId, quantity: item.quantity, comboItems: item.comboItems },
     ]);
 
     return updated;
@@ -2394,7 +2455,7 @@ export class OrderService {
       void this.recipeService.restoreStockForItems(
         branchId,
         id,
-        activeItems.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+        activeItems.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, comboItems: i.comboItems })),
       );
     }
 
@@ -2551,7 +2612,7 @@ export class OrderService {
     void this.recipeService.restoreStockForItems(
       branchId,
       id,
-      refundTargets.map((i) => ({ menuItemId: i.menuItemId, quantity: Number(i.quantity) })),
+      refundTargets.map((i) => ({ menuItemId: i.menuItemId, quantity: Number(i.quantity), comboItems: i.comboItems })),
     ).catch((err) => this.logger.error(
       `Failed to restore stock for refund of order #${order.orderNumber}`,
       err instanceof Error ? err.stack : String(err),

@@ -610,6 +610,59 @@ function ItemDialog({
 
 // ─── Combo Items Dialog ───────────────────────────────────────────────────────
 
+type ComboRow = { includedItemId: string; quantity: number; choiceGroup: string | null };
+
+const comboInputCls =
+  'border border-[#2A2A2A] px-3 py-2 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white placeholder:text-[#666]';
+
+/** Search box + result list for picking sellable menu items. */
+function ComboItemSearch({
+  items,
+  placeholder,
+  onPick,
+}: {
+  items: MenuItem[];
+  placeholder: string;
+  onPick: (item: MenuItem) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const results = q
+    ? items.filter((m) => m.name.toLowerCase().includes(q) || (m.category?.name ?? '').toLowerCase().includes(q)).slice(0, 8)
+    : [];
+  return (
+    <div className="relative">
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={placeholder}
+        className={`w-full ${comboInputCls}`}
+      />
+      {results.length > 0 && (
+        <div className="absolute z-10 left-0 right-0 mt-1 border border-[#2A2A2A] bg-[#0D0D0D] max-h-64 overflow-auto">
+          {results.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => { onPick(m); setQuery(''); }}
+              className="w-full text-left px-3 py-2 text-sm font-body text-white hover:bg-[#1F1F1F] flex justify-between gap-3"
+            >
+              <span>
+                {m.name}
+                <span className="text-[#666] text-xs ml-2">{m.category?.name}</span>
+                {m.category?.isActive === false && <span className="text-[#E99207] text-[10px] ml-2 uppercase tracking-widest">combo-only</span>}
+                {!m.isAvailable && <span className="text-[#666] text-[10px] ml-2 uppercase tracking-widest">unavailable</span>}
+              </span>
+              <span className="text-[#999] whitespace-nowrap">{formatCurrency(Number(m.price))}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {q && results.length === 0 && <p className="text-xs font-body text-[#666] mt-1">No matching items.</p>}
+    </div>
+  );
+}
+
 function ComboDialog({
   item,
   allItems,
@@ -620,21 +673,41 @@ function ComboDialog({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [rows, setRows] = useState<{ includedItemId: string; quantity: number }[]>(
-    (item.comboItems ?? []).map((c) => ({ includedItemId: c.includedItemId, quantity: c.quantity })),
+  const [rows, setRows] = useState<ComboRow[]>(
+    [...(item.comboItems ?? [])]
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+      .map((c) => ({ includedItemId: c.includedItemId, quantity: c.quantity, choiceGroup: c.choiceGroup ?? null })),
   );
+  const [error, setError] = useState<string | null>(null);
 
-  const availableItems = allItems.filter((m) => m.id !== item.id);
+  // Only things that can actually be sold on their own: no option shells,
+  // add-ons, other combos or one-off custom dishes.
+  const pickable = allItems.filter(
+    (m) => m.id !== item.id && !m.isVariantParent && !m.isAddon && !m.isCombo && !m.isCustom && !rows.some((r) => r.includedItemId === m.id),
+  );
+  const byId = new Map(allItems.map((m) => [m.id, m]));
+  const fixed = rows.filter((r) => r.choiceGroup === null);
+  const groups = [...new Set(rows.filter((r) => r.choiceGroup !== null).map((r) => r.choiceGroup as string))];
 
-  const addRow = () => {
-    const first = availableItems.find((m) => !rows.some((r) => r.includedItemId === m.id));
-    if (first) setRows([...rows, { includedItemId: first.id, quantity: 1 }]);
+  const update = (id: string, patch: Partial<ComboRow>) => setRows(rows.map((r) => (r.includedItemId === id ? { ...r, ...patch } : r)));
+  const remove = (id: string) => setRows(rows.filter((r) => r.includedItemId !== id));
+  const setGroup = (group: string, patch: Partial<ComboRow>) => setRows(rows.map((r) => (r.choiceGroup === group ? { ...r, ...patch } : r)));
+  const addGroup = (first: MenuItem) => {
+    let n = groups.length + 1;
+    while (groups.includes(`Choice ${n}`)) n++;
+    setRows([...rows, { includedItemId: first.id, quantity: 1, choiceGroup: `Choice ${n}` }]);
   };
 
-  const removeRow = (idx: number) => setRows(rows.filter((_, i) => i !== idx));
-
-  const updateRow = (idx: number, field: string, value: unknown) =>
-    setRows(rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  // What the contents would cost bought separately (each choice slot at its first option).
+  const price = (id: string) => Number(byId.get(id)?.price ?? 0);
+  const contentsValue =
+    fixed.reduce((s, r) => s + price(r.includedItemId) * r.quantity, 0) +
+    groups.reduce((s, g) => {
+      const first = rows.find((r) => r.choiceGroup === g)!;
+      return s + price(first.includedItemId) * first.quantity;
+    }, 0);
+  const menuPrice = Number(item.price);
+  const sellingPrice = Number((item as { discountedPrice?: number | null }).discountedPrice ?? item.price);
 
   const mutation = useMutation({
     mutationFn: () => api.put(`/menu/${item.id}/combo-items`, { items: rows }),
@@ -642,52 +715,108 @@ function ComboDialog({
       void qc.invalidateQueries({ queryKey: ['menu'] });
       onClose();
     },
+    onError: (e) => setError((e as Error).message),
   });
+
+  const save = () => {
+    setError(null);
+    for (const g of groups) {
+      if (!g.trim()) return setError('Every choice group needs a name.');
+      if (rows.filter((r) => r.choiceGroup === g).length < 2) return setError(`Choice group "${g}" needs at least two options.`);
+    }
+    mutation.mutate();
+  };
+
+  const qtyInput = (value: number, onChange: (n: number) => void) => (
+    <input
+      type="number" min={1} max={99} value={value}
+      onChange={(e) => onChange(Math.max(1, Math.min(99, parseInt(e.target.value, 10) || 1)))}
+      className={`w-16 text-center ${comboInputCls}`}
+    />
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="bg-[#161616] w-[520px] p-6 space-y-4 max-h-[90vh] overflow-auto">
+      <div className="bg-[#161616] text-white w-[620px] p-6 space-y-5 max-h-[90vh] overflow-auto">
         <div className="flex items-center justify-between">
           <h3 className="font-display text-xl tracking-wide">COMBO ITEMS — {item.name}</h3>
           <button onClick={onClose} className="text-[#999] hover:text-white"><X size={16} /></button>
         </div>
 
-        <p className="text-xs font-body text-[#999]">Select menu items included in this combo bundle.</p>
-
-        <div className="space-y-2">
-          {rows.map((row, idx) => (
-            <div key={idx} className="flex gap-2 items-center">
-              <select
-                value={row.includedItemId}
-                onChange={(e) => updateRow(idx, 'includedItemId', e.target.value)}
-                className="flex-1 border border-[#2A2A2A] px-3 py-2 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#161616]"
-              >
-                {availableItems.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name} ({formatCurrency(Number(m.price))})</option>
-                ))}
-              </select>
-              <input
-                type="number" min={1} value={row.quantity}
-                onChange={(e) => updateRow(idx, 'quantity', parseInt(e.target.value) || 1)}
-                className="w-16 border border-[#2A2A2A] px-2 py-2 text-sm font-body text-center outline-none focus:border-[#D62B2B]"
-              />
-              <button onClick={() => removeRow(idx)} className="text-[#999] hover:text-[#D62B2B]"><Trash2 size={14} /></button>
+        <section className="space-y-2">
+          <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Included items</p>
+          {fixed.map((r) => (
+            <div key={r.includedItemId} className="flex gap-2 items-center">
+              <span className="flex-1 text-sm font-body">{byId.get(r.includedItemId)?.name ?? 'Unknown item'}</span>
+              <span className="text-xs font-body text-[#999] w-20 text-right">{formatCurrency(price(r.includedItemId))}</span>
+              {qtyInput(r.quantity, (n) => update(r.includedItemId, { quantity: n }))}
+              <button onClick={() => remove(r.includedItemId)} className="text-[#999] hover:text-[#D62B2B]"><Trash2 size={14} /></button>
             </div>
           ))}
+          <ComboItemSearch items={pickable} placeholder="Search a dish to include…" onPick={(m) => setRows([...rows, { includedItemId: m.id, quantity: 1, choiceGroup: null }])} />
+        </section>
+
+        <section className="space-y-3">
+          <div>
+            <p className="text-xs font-body font-medium tracking-widest uppercase text-[#999]">Guest picks</p>
+            <p className="text-xs font-body text-[#666] mt-1">
+              E.g. &ldquo;Fizz&rdquo;, pick 4: the cashier splits 4 drinks across the options (2 Coke, 1 Sprite, 1 Fanta). The first option is used when no choice is given.
+            </p>
+          </div>
+          {groups.map((g, gi) => {
+            const options = rows.filter((r) => r.choiceGroup === g);
+            return (
+              <div key={gi} className="border border-[#2A2A2A] p-3 space-y-2">
+                <div className="flex gap-2 items-center">
+                  <input
+                    value={g}
+                    onChange={(e) => setGroup(g, { choiceGroup: e.target.value })}
+                    className={`flex-1 ${comboInputCls}`}
+                    placeholder="Group name, e.g. Fizz"
+                  />
+                  <span className="text-xs font-body text-[#999]">Guest picks</span>
+                  {qtyInput(options[0].quantity, (n) => setGroup(g, { quantity: n }))}
+                </div>
+                {options.map((r, i) => (
+                  <div key={r.includedItemId} className="flex gap-2 items-center pl-2">
+                    <span className="flex-1 text-sm font-body">
+                      {byId.get(r.includedItemId)?.name ?? 'Unknown item'}
+                      {i === 0 && <span className="text-[10px] text-[#666] ml-2 uppercase tracking-widest">default</span>}
+                    </span>
+                    <span className="text-xs font-body text-[#999] w-20 text-right">{formatCurrency(price(r.includedItemId))}</span>
+                    <button onClick={() => remove(r.includedItemId)} className="text-[#999] hover:text-[#D62B2B]"><Trash2 size={14} /></button>
+                  </div>
+                ))}
+                <ComboItemSearch
+                  items={pickable}
+                  placeholder={`Add an option to "${g}"…`}
+                  onPick={(m) => setRows([...rows, { includedItemId: m.id, quantity: options[0].quantity, choiceGroup: g }])}
+                />
+              </div>
+            );
+          })}
+          <ComboItemSearch items={pickable} placeholder="Start a new choice group with its first option…" onPick={addGroup} />
+        </section>
+
+        <div className="border-t border-[#2A2A2A] pt-3 text-sm font-body flex flex-wrap gap-x-6 gap-y-1">
+          <span className="text-[#999]">Contents value <span className="text-white">{formatCurrency(contentsValue)}</span></span>
+          <span className="text-[#999]">
+            Combo price <span className="text-white">{formatCurrency(sellingPrice)}</span>
+            {sellingPrice !== menuPrice && <span className="text-[#666] line-through ml-2">{formatCurrency(menuPrice)}</span>}
+          </span>
+          {contentsValue > sellingPrice && (
+            <span className="text-[#999]">Guest saves <span className="text-[#4CAF50]">{formatCurrency(contentsValue - sellingPrice)}</span></span>
+          )}
         </div>
 
-        <button onClick={addRow} className="text-sm font-body text-[#D62B2B] hover:underline flex items-center gap-1">
-          <Plus size={14} /> Add item
-        </button>
-
-        {mutation.isError && <p className="text-xs text-[#D62B2B]">{(mutation.error as Error).message}</p>}
-        <div className="flex gap-3 pt-2">
+        {error && <p className="text-xs text-[#D62B2B]">{error}</p>}
+        <div className="flex gap-3 pt-1">
           <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
           <button
-            onClick={() => mutation.mutate()} disabled={mutation.isPending}
+            onClick={save} disabled={mutation.isPending}
             className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40"
           >
-            {mutation.isPending ? 'Saving...' : 'Save Combo'}
+            {mutation.isPending ? 'Saving...' : rows.length === 0 ? 'Save (not a combo)' : 'Save Combo'}
           </button>
         </div>
       </div>

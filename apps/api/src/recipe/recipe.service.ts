@@ -3,6 +3,15 @@ import type { UpsertRecipeDto } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
 import { IngredientService } from '../ingredient/ingredient.service';
+import { defaultComboParts, readComboParts } from '../menu/combo-parts';
+
+/** One order line for stock deduction / restore. `comboItems` is the OrderItem's combo snapshot, if any. */
+export interface StockLine {
+  menuItemId: string;
+  quantity: number;
+  removedIngredientIds?: string[];
+  comboItems?: unknown;
+}
 
 @Injectable()
 export class RecipeService {
@@ -286,12 +295,38 @@ export class RecipeService {
   }
 
   /**
+   * Add each combo line's parts to a stock-line list. The combo line
+   * stays (its own recipe still counts if it has one); each part follows
+   * with quantity = combo qty × part qty. Uses the snapshot frozen on the
+   * OrderItem (the guest's actual picks) when given, else the combo's
+   * current contents with every choice slot on its first option.
+   */
+  async expandCombos(lines: StockLine[]): Promise<StockLine[]> {
+    const withoutSnapshot = [...new Set(lines.filter((l) => !readComboParts(l.comboItems)).map((l) => l.menuItemId))];
+    const rows = withoutSnapshot.length
+      ? await this.prisma.comboItem.findMany({
+          where: { comboMenuId: { in: withoutSnapshot }, comboMenu: { isCombo: true } },
+          select: { comboMenuId: true, includedItemId: true, quantity: true, choiceGroup: true, sortOrder: true },
+        })
+      : [];
+    const out: StockLine[] = [];
+    for (const line of lines) {
+      out.push(line);
+      const parts = readComboParts(line.comboItems) ?? defaultComboParts(rows.filter((r) => r.comboMenuId === line.menuItemId));
+      for (const p of parts) out.push({ menuItemId: p.menuItemId, quantity: line.quantity * p.quantity });
+    }
+    return out;
+  }
+
+  /**
    * Used by OrderService to deduct stock on order creation. Each
    * `items[]` entry may carry `removedIngredientIds` — recipe lines
    * referencing one of those IDs are skipped, so a "no garlic" mod
-   * doesn't pull garlic stock for that line.
+   * doesn't pull garlic stock for that line. Combo lines are expanded
+   * into their parts first (see expandCombos).
    */
-  async deductStockForOrder(branchId: string, orderId: string, items: { menuItemId: string; quantity: number; removedIngredientIds?: string[] }[]) {
+  async deductStockForOrder(branchId: string, orderId: string, lines: StockLine[]) {
+    const items = await this.expandCombos(lines);
     const menuItemIds = items.map((i) => i.menuItemId);
     const recipes = await this.prisma.recipe.findMany({
       where: { menuItemId: { in: menuItemIds } },
@@ -548,7 +583,8 @@ export class RecipeService {
   }
 
   // Used by OrderService to restore stock on item void / order void
-  async restoreStockForItems(branchId: string, orderId: string, items: { menuItemId: string; quantity: number }[]) {
+  async restoreStockForItems(branchId: string, orderId: string, lines: StockLine[]) {
+    const items = await this.expandCombos(lines);
     const menuItemIds = items.map((i) => i.menuItemId);
     const recipes = await this.prisma.recipe.findMany({
       where: { menuItemId: { in: menuItemIds } },

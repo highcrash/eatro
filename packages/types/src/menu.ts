@@ -114,8 +114,19 @@ export interface ComboItem {
   id: string;
   comboMenuId: string;
   includedItemId: string;
+  /** Fixed part: how many come in one combo. Choice group: the slot size. */
   quantity: number;
+  /** Rows sharing a label are alternatives for one slot (e.g. "Fizz"). */
+  choiceGroup?: string | null;
+  sortOrder?: number;
   includedItem?: MenuItem;
+}
+
+/** What admin sends to replace a combo's contents. */
+export interface ComboItemInput {
+  includedItemId: string;
+  quantity: number;
+  choiceGroup?: string | null;
 }
 
 // ─── Linked Items (Free / Complementary) ─────────────────────────────────────

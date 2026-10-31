@@ -198,13 +198,20 @@ function KdsDisplay() {
     const decorated: KitchenTicketInput = {
       ...(ticket as unknown as KitchenTicketInput),
       hideRecipe: !kotShowRecipe,
-      items: (ticket.items ?? []).map((it) => {
-        const r = byId.get(it.menuItemId);
-        return {
-          ...(it as unknown as KitchenTicketInput['items'][number]),
-          recipe: r?.recipe ?? null,
-          hideRecipe: r?.kotHideRecipe ?? false,
-        };
+      // A combo prints one line per part ("Pasta Basta — Lovers Combo") with
+      // that part's recipe, matching the POS kitchen ticket.
+      items: (ticket.items ?? []).flatMap((it) => {
+        const lines = it.comboItems?.length
+          ? it.comboItems.map((p) => ({ ...it, menuItemId: p.menuItemId, menuItemName: `${p.name} — ${it.menuItemName}`, quantity: it.quantity * p.quantity, addons: null, modifications: null }))
+          : [it];
+        return lines.map((line) => {
+          const r = byId.get(line.menuItemId);
+          return {
+            ...(line as unknown as KitchenTicketInput['items'][number]),
+            recipe: r?.recipe ?? null,
+            hideRecipe: r?.kotHideRecipe ?? false,
+          };
+        });
       }),
     };
     printKitchenTicket(decorated);
@@ -316,6 +323,11 @@ function KdsDisplay() {
                         <span className="text-white text-sm font-body leading-tight">
                           {item.menuItemName}
                         </span>
+                        {item.comboItems?.map((p) => (
+                          <p key={p.menuItemId} className="text-[#999] text-xs font-body mt-0.5">
+                            {item.quantity * p.quantity}× {p.name}
+                          </p>
+                        ))}
                         {item.notes && (
                           <p className="text-[#666] text-xs font-body mt-0.5">{item.notes}</p>
                         )}

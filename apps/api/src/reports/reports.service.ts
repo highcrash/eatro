@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
+import { defaultComboParts, readComboParts } from '../menu/combo-parts';
 
 export interface DateRange {
   from: Date;
@@ -310,6 +311,16 @@ export class ReportsService {
         name: true,
         category: { select: { id: true, name: true } },
         recipe: { select: { items: { include: { ingredient: true } } } },
+        // Combos have no recipe of their own; their cost is their parts'.
+        comboItems: {
+          select: {
+            includedItemId: true,
+            quantity: true,
+            choiceGroup: true,
+            sortOrder: true,
+            includedItem: { select: { recipe: { select: { items: { include: { ingredient: true } } } } } },
+          },
+        },
       },
     });
     const menuItemById = new Map(menuItems.map((mi) => [mi.id, mi]));
@@ -351,6 +362,29 @@ export class ReportsService {
       return picked;
     };
 
+    type RecipeLine = { quantity: { toNumber(): number }; unit: unknown; ingredient: { id: string; unit: unknown; costPerUnit: { toNumber(): number }; hasVariants: boolean | null } };
+    // Per-serving cost of a recipe — sum(recipeItem.qty × ingredient.costPerUnit),
+    // with unit conversion. RecipeItem.unit may differ from
+    // Ingredient.unit (e.g. recipe specifies "6 G" of an ingredient
+    // stocked in KG); without conversion we'd report 1/1000th of the
+    // real COGS for that line. Custom-menu items make this especially
+    // common — cashier types whatever unit feels natural.
+    const recipeUnitCost = async (lines: RecipeLine[]): Promise<number> => {
+      let unitCost = 0;
+      for (const ri of lines) {
+        const ing = ri.ingredient;
+        const ingStockUnit = (ing.unit as string) ?? '';
+        const { cost, unit: stockUnit } = await resolveCostAndUnit(ing.id, ing.costPerUnit.toNumber(), ingStockUnit, ing.hasVariants ?? false);
+        if (cost === 0) continue;
+        const recipeUnit = (ri.unit as string) ?? stockUnit;
+        const qtyInStockUnit = recipeUnit === stockUnit
+          ? ri.quantity.toNumber()
+          : convertUnit(ri.quantity.toNumber(), recipeUnit, stockUnit);
+        unitCost += qtyInStockUnit * cost;
+      }
+      return unitCost;
+    };
+
     interface ItemAgg {
       menuItemId: string;
       name: string;
@@ -369,33 +403,14 @@ export class ReportsService {
       const quantity = g._sum.quantity ?? 0;
       const revenue = g._sum.totalPrice?.toNumber() ?? 0;
 
-      // Per-unit recipe cost — sum(recipeItem.qty × ingredient.costPerUnit),
-      // with unit conversion. RecipeItem.unit may differ from
-      // Ingredient.unit (e.g. recipe specifies "6 G" of an ingredient
-      // stocked in KG); without conversion we'd report 1/1000th of the
-      // real COGS for that line. Custom-menu items make this especially
-      // common — cashier types whatever unit feels natural.
-      let cogs = 0;
-      if (mi.recipe) {
-        let unitCost = 0;
-        for (const ri of mi.recipe.items) {
-          const ing = ri.ingredient;
-          const ingStockUnit = (ing.unit as unknown as string) ?? '';
-          const { cost, unit: stockUnit } = await resolveCostAndUnit(
-            ing.id,
-            ing.costPerUnit.toNumber(),
-            ingStockUnit,
-            ing.hasVariants ?? false,
-          );
-          if (cost === 0) continue;
-          const recipeUnit = (ri.unit as unknown as string) ?? stockUnit;
-          const qtyInStockUnit = recipeUnit === stockUnit
-            ? ri.quantity.toNumber()
-            : convertUnit(ri.quantity.toNumber(), recipeUnit, stockUnit);
-          unitCost += qtyInStockUnit * cost;
-        }
-        cogs = unitCost * quantity;
+      // Per-unit recipe cost (see recipeUnitCost). A combo adds its parts' recipes (each choice slot costed at its
+      // default option, the same thing stock deduction assumes).
+      let unitCost = await recipeUnitCost(mi.recipe?.items ?? []);
+      for (const part of defaultComboParts(mi.comboItems)) {
+        const row = mi.comboItems.find((c) => c.includedItemId === part.menuItemId);
+        unitCost += (await recipeUnitCost(row?.includedItem.recipe?.items ?? [])) * part.quantity;
       }
+      const cogs = unitCost * quantity;
 
       byItem.set(g.menuItemId, {
         menuItemId: mi.id,
@@ -893,7 +908,19 @@ export class ReportsService {
 
     const orders = await this.prisma.order.findMany({
       where: { branchId, status: 'PAID', paidAt: { gte: fromDate, lte: toDate }, deletedAt: null },
-      include: { items: { where: { voidedAt: null }, include: { menuItem: { include: { recipe: { include: { items: { include: { ingredient: true } } } } } } } } },
+      include: {
+        items: {
+          where: { voidedAt: null },
+          include: {
+            menuItem: {
+              include: {
+                recipe: { include: { items: { include: { ingredient: true } } } },
+                comboItems: { include: { includedItem: { include: { recipe: { include: { items: { include: { ingredient: true } } } } } } } },
+              },
+            },
+          },
+        },
+      },
     });
 
     let totalSales = 0;
@@ -902,11 +929,16 @@ export class ReportsService {
     for (const order of orders) {
       totalSales += order.totalAmount.toNumber();
       for (const item of order.items) {
-        if (item.menuItem.recipe) {
-          for (const ri of item.menuItem.recipe.items) {
-            totalFoodCost += ri.ingredient.costPerUnit.toNumber() * ri.quantity.toNumber() * item.quantity;
-          }
+        const flatCost = (lines: { quantity: { toNumber(): number }; ingredient: { costPerUnit: { toNumber(): number } } }[]) =>
+          lines.reduce((sum, ri) => sum + ri.ingredient.costPerUnit.toNumber() * ri.quantity.toNumber(), 0);
+        let unitCost = flatCost(item.menuItem.recipe?.items ?? []);
+        // Combos: the parts the guest actually got (order snapshot), else the default contents.
+        const parts = readComboParts(item.comboItems) ?? defaultComboParts(item.menuItem.comboItems);
+        for (const part of parts) {
+          const row = item.menuItem.comboItems.find((c) => c.includedItemId === part.menuItemId);
+          unitCost += flatCost(row?.includedItem.recipe?.items ?? []) * part.quantity;
         }
+        totalFoodCost += unitCost * item.quantity;
       }
     }
 

@@ -71,6 +71,8 @@ export interface OrderItem {
   modifications?: OrderItemModifications | null;
   /** Per-line addon selections captured at order time. */
   addons?: OrderItemAddonSnapshot[] | null;
+  /** What one unit of a combo contained when ordered (null for non-combos). */
+  comboItems?: OrderItemComboPart[] | null;
   /** Set when this OrderItem was auto-inserted by a FREE_ITEM coupon
    *  at apply time (price 0). Lets the POS detect newcomer freebies
    *  on coupon-apply and fire a kitchen ticket; lets removeDiscount
@@ -168,6 +170,27 @@ export interface CreateOrderItemDto {
    * additions arbitrarily.
    */
   addedIngredients?: AddedIngredientInput[];
+  /** Picks for a combo's choice groups, per ONE combo (see ComboChoiceInput). */
+  comboChoices?: ComboChoiceInput[];
+}
+
+/**
+ * How many of an option the guest picked for a combo choice slot, per
+ * one combo — e.g. Buddy Combo "Fizz ×4" → [{Fizz, 2}, {Fizz White, 1},
+ * {Fizz Orange, 1}]. Counts per group must add up to the slot size;
+ * omitted groups default to their first option.
+ */
+export interface ComboChoiceInput {
+  includedItemId: string;
+  quantity: number;
+}
+
+/** One part of an ordered combo, per unit of the combo line. */
+export interface OrderItemComboPart {
+  menuItemId: string;
+  name: string;
+  quantity: number;
+  choiceGroup?: string | null;
 }
 
 export interface AddedIngredientInput {
@@ -198,6 +221,8 @@ export interface AddOrderItemDto {
   addons?: AddonSelectionInput[];
   /** Ad-hoc additions on top of the recipe — see CreateOrderItemDto. */
   addedIngredients?: AddedIngredientInput[];
+  /** Combo choice-slot picks — see CreateOrderItemDto. */
+  comboChoices?: ComboChoiceInput[];
 }
 
 export interface ProcessPaymentDto {

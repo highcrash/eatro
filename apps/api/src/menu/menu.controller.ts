@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Put, Delete, Param, Body, Query, UseGuards, ValidationPipe } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 
-import type { CreateMenuItemDto, UpdateMenuItemDto, UpsertAddonGroupDto, JwtPayload } from '@restora/types';
+import type { ComboItemInput, CreateMenuItemDto, UpdateMenuItemDto, UpsertAddonGroupDto, JwtPayload } from '@restora/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -174,7 +174,7 @@ export class MenuController {
   async setComboItems(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-    @Body() dto: { items: { includedItemId: string; quantity: number }[] },
+    @Body() dto: { items: ComboItemInput[] },
   ) {
     const updated = await this.menuService.setComboItems(id, user.branchId, dto.items);
     void this.activityLog.log({

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 
-import type { CreateMenuItemDto, UpdateMenuItemDto, CreateCustomMenuDto, UpsertAddonGroupDto } from '@restora/types';
+import type { ComboItemInput, CreateMenuItemDto, UpdateMenuItemDto, CreateCustomMenuDto, UpsertAddonGroupDto } from '@restora/types';
 import { computeMarginBand } from '@restora/utils';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitConversionService } from '../unit-conversion/unit-conversion.service';
@@ -8,7 +8,10 @@ import { UnitConversionService } from '../unit-conversion/unit-conversion.servic
 const comboAndLinkedInclude = {
   category: true,
   cookingStation: { select: { id: true, name: true } },
-  comboItems: { include: { includedItem: { select: { id: true, name: true, price: true } } } },
+  comboItems: {
+    orderBy: { sortOrder: 'asc' as const },
+    include: { includedItem: { select: { id: true, name: true, price: true } } },
+  },
   linkedItems: { include: { linkedMenu: { select: { id: true, name: true, price: true } } } },
   variants: {
     where: { deletedAt: null },
@@ -392,33 +395,61 @@ export class MenuService {
 
   // ─── Combo Items ───────────────────────────────────────────────────────────
 
+  /**
+   * Replace a combo's contents. Fixed parts have no choiceGroup; rows
+   * sharing a choiceGroup are the options for one slot and must share
+   * its size (`quantity`). Row order is kept as sortOrder, so the first
+   * option of a slot is its default. An empty list un-marks the combo.
+   */
   async setComboItems(
     menuItemId: string,
     branchId: string,
-    items: { includedItemId: string; quantity: number }[],
+    items: ComboItemInput[],
   ) {
     const menuItem = await this.prisma.menuItem.findFirst({
       where: { id: menuItemId, branchId, deletedAt: null },
     });
     if (!menuItem) throw new NotFoundException();
+    if (!Array.isArray(items)) throw new BadRequestException('items must be a list');
 
-    // Mark as combo
-    await this.prisma.menuItem.update({
-      where: { id: menuItemId },
-      data: { isCombo: true },
-    });
-
-    // Replace all combo items
-    await this.prisma.comboItem.deleteMany({ where: { comboMenuId: menuItemId } });
-    if (items.length > 0) {
-      await this.prisma.comboItem.createMany({
-        data: items.map((i) => ({
-          comboMenuId: menuItemId,
-          includedItemId: i.includedItemId,
-          quantity: i.quantity,
-        })),
-      });
+    const rows = items.map((i) => ({
+      includedItemId: String(i.includedItemId ?? ''),
+      quantity: Number(i.quantity),
+      choiceGroup: typeof i.choiceGroup === 'string' && i.choiceGroup.trim() ? i.choiceGroup.trim().slice(0, 60) : null,
+    }));
+    const ids = rows.map((r) => r.includedItemId);
+    if (new Set(ids).size !== ids.length) throw new BadRequestException('An item can only appear once in a combo');
+    if (ids.includes(menuItemId)) throw new BadRequestException('A combo cannot contain itself');
+    for (const r of rows) {
+      if (!Number.isInteger(r.quantity) || r.quantity < 1 || r.quantity > 99) {
+        throw new BadRequestException('Each combo quantity must be a whole number from 1 to 99');
+      }
     }
+    const groups = new Map<string, number[]>();
+    for (const r of rows) if (r.choiceGroup) groups.set(r.choiceGroup, [...(groups.get(r.choiceGroup) ?? []), r.quantity]);
+    for (const [name, qtys] of groups) {
+      if (qtys.length < 2) throw new BadRequestException(`Choice group "${name}" needs at least two options`);
+      if (new Set(qtys).size > 1) throw new BadRequestException(`All options in "${name}" must share the same quantity (the number the guest picks)`);
+    }
+    const found = await this.prisma.menuItem.findMany({
+      where: { id: { in: ids }, branchId, deletedAt: null },
+      select: { id: true, name: true, isVariantParent: true, isAddon: true, isCombo: true },
+    });
+    for (const id of ids) {
+      const it = found.find((f) => f.id === id);
+      if (!it) throw new BadRequestException(`Unknown menu item: ${id}`);
+      if (it.isVariantParent) throw new BadRequestException(`"${it.name}" is an option group — pick one of its sizes/options instead`);
+      if (it.isAddon) throw new BadRequestException(`"${it.name}" is an add-on and can't be part of a combo`);
+      if (it.isCombo) throw new BadRequestException(`"${it.name}" is itself a combo`);
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.comboItem.deleteMany({ where: { comboMenuId: menuItemId } }),
+      this.prisma.comboItem.createMany({
+        data: rows.map((r, idx) => ({ comboMenuId: menuItemId, ...r, sortOrder: idx })),
+      }),
+      this.prisma.menuItem.update({ where: { id: menuItemId }, data: { isCombo: rows.length > 0 } }),
+    ]);
 
     return this.findOne(menuItemId, branchId);
   }

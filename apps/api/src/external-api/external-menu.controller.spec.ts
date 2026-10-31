@@ -89,6 +89,8 @@ describe('ExternalMenuController (API-key menu + recipe writes)', () => {
   afterAll(async () => {
     const itemIds = [menuItemId, createdMenuItemId].filter(Boolean) as string[];
     await prisma.activityLog.deleteMany({ where: { entityId: { in: [...itemIds, categoryId] } } });
+    await prisma.comboItem.deleteMany({ where: { comboMenuId: { in: itemIds } } });
+    await prisma.menuItemDiscount.deleteMany({ where: { menuItemId: { in: itemIds } } });
     await prisma.recipe.deleteMany({ where: { menuItemId: { in: itemIds } } });
     await prisma.menuItem.deleteMany({ where: { id: { in: itemIds } } });
     await prisma.ingredient.deleteMany({ where: { id: { in: [gramIngredientId, pcsIngredientId] } } });
@@ -300,6 +302,31 @@ describe('ExternalMenuController (API-key menu + recipe writes)', () => {
       await prisma.menuItemAddonGroup.delete({ where: { id: group.id } });
       await prisma.menuItem.delete({ where: { id: addon.id } });
     }
+  });
+
+  it('sets combo contents and a flat discount (no Facebook post) only with menu:write', async () => {
+    const contents = { items: [{ includedItemId: createdMenuItemId, quantity: 2 }] };
+    expect((await call('PUT', `/menu/items/${menuItemId}/combo-items`, readKey, contents)).status).toBe(403);
+    expect((await call('PUT', `/menu/items/${menuItemId}/combo-items`, writeKey, { items: [{ includedItemId: createdMenuItemId, quantity: 0 }] })).status).toBe(400);
+    const combo = await call('PUT', `/menu/items/${menuItemId}/combo-items`, writeKey, contents);
+    expect(combo.status).toBe(200);
+    expect(combo.body.data.after).toEqual([expect.objectContaining({ includedItemId: createdMenuItemId, quantity: 2, choiceGroup: null })]);
+
+    const window = { startDate: '2026-01-01T00:00:00Z', endDate: '2030-01-01T00:00:00Z' };
+    // Menu price is ৳280.50 here (set by the price test above).
+    expect((await call('PUT', `/menu/items/${menuItemId}/discount`, writeKey, { amountTaka: 280.5, ...window })).status).toBe(400);
+    expect((await call('PUT', `/menu/items/${menuItemId}/discount`, writeKey, { amountTaka: 50, startDate: window.endDate, endDate: window.startDate })).status).toBe(400);
+    const first = await call('PUT', `/menu/items/${menuItemId}/discount`, writeKey, { amountTaka: 50, ...window });
+    expect(first.status).toBe(200);
+    const second = await call('PUT', `/menu/items/${menuItemId}/discount`, writeKey, { amountTaka: 80.5, ...window });
+    expect(second.body.data.discountedPriceTaka).toBe(200);
+    const active = await prisma.menuItemDiscount.findMany({ where: { menuItemId, isActive: true } });
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({ type: 'FLAT' });
+    expect(active[0].value.toNumber()).toBe(8_050);
+    expect(await prisma.scheduledFbPost.count({ where: { menuDiscountId: { in: [first.body.data.after.id, second.body.data.after.id] } } })).toBe(0);
+
+    expect((await call('PUT', `/menu/items/${menuItemId}/combo-items`, writeKey, { items: [] })).status).toBe(200);
   });
 
   it('deletes a recipe, returning it for undo; a second delete is 404', async () => {

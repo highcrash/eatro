@@ -889,6 +889,13 @@ model ComboItem {
   comboMenuId    String
   includedItemId String
   quantity       Int    @default(1)
+  /// Rows on one combo sharing a label are alternatives for a single
+  /// slot (e.g. "Fizz" ×4 split across Coke / Sprite / Fanta at order
+  /// time); `quantity` is the slot size. Null = fixed part.
+  choiceGroup    String?
+  /// Display + default order; the first option of a choice group is
+  /// used when the order doesn't say (QR, website).
+  sortOrder      Int    @default(0)
 
   // Relations
   comboMenu    MenuItem @relation("ComboMenu", fields: [comboMenuId], references: [id], onDelete: Cascade)
@@ -1156,6 +1163,11 @@ model OrderItem {
   /// Cart key includes an addons hash so different selections become
   /// separate OrderItem rows.
   addons        Json?
+  /// Per-unit snapshot of a combo's parts at order time. Shape:
+  ///   [{ menuItemId, name, quantity, choiceGroup? }]
+  /// Stock deduction, KT and voids expand the combo from this, so the
+  /// guest's picks (e.g. 2 Coke + 2 Sprite) survive later combo edits.
+  comboItems    Json?
   /// Set when this OrderItem was auto-inserted by a FREE_ITEM coupon
   /// at apply time (price 0). Lets removeDiscount void exactly the
   /// lines the coupon added when the customer/cashier detaches it.

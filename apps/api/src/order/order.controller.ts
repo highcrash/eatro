@@ -69,7 +69,7 @@ export class OrderController {
   @Post(':id/items')
   addItems(
     @Param('id') id: string,
-    @Body() items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: { groupId: string; addonItemId: string }[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[] }[],
+    @Body() items: { menuItemId: string; quantity: number; notes?: string; removedIngredientIds?: string[]; addons?: { groupId: string; addonItemId: string }[]; addedIngredients?: { ingredientId: string; quantity: number; unit: string; surcharge: number }[]; comboChoices?: { includedItemId: string; quantity: number }[] }[],
     @CurrentUser() user: JwtPayload,
   ) {
     return this.orderService.addItemsToOrder(id, user.branchId, items);
@@ -579,7 +579,7 @@ export class QrOrderController {
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
     @Headers('x-qr-device-id') deviceId: string | undefined,
-    @Body() body: { items: { menuItemId: string; quantity: number; notes?: string; addons?: { groupId: string; addonItemId: string }[]; removedIngredientIds?: string[] }[]; customerId?: string },
+    @Body() body: { items: { menuItemId: string; quantity: number; notes?: string; addons?: { groupId: string; addonItemId: string }[]; removedIngredientIds?: string[]; comboChoices?: { includedItemId: string; quantity: number }[] }[]; customerId?: string },
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');

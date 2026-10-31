@@ -330,6 +330,59 @@ server.registerTool(
 );
 
 server.registerTool(
+  'set_combo_items',
+  {
+    title: 'Set combo contents',
+    description:
+      'Replace what a combo contains. Fixed parts: {included_item_id, quantity}. Choice slot: give several rows the same choice_group label and the same quantity (how many the guest picks in total, e.g. Fizz ×4 across Coke/Sprite/Fanta); the first is the default. Use sellable items (not option shells, add-ons or combos). An empty list un-marks the combo.',
+    inputSchema: {
+      id: z.string().min(1).max(64),
+      items: z
+        .array(
+          z.object({
+            included_item_id: z.string().min(1).max(64),
+            quantity: z.number().int().min(1).max(99),
+            choice_group: z.string().min(1).max(60).optional(),
+          }),
+        )
+        .max(50),
+    },
+    annotations: WRITE,
+  },
+  ({ id, items }) =>
+    run(async () => {
+      const res = await api<{ before: unknown; after: unknown }>('PUT', `/business/menu/items/${enc(id)}/combo-items`, {
+        items: items.map((i) => ({ includedItemId: i.included_item_id, quantity: i.quantity, choiceGroup: i.choice_group })),
+      });
+      return res;
+    }),
+);
+
+server.registerTool(
+  'set_discount',
+  {
+    title: 'Set menu item discount',
+    description:
+      'Put a flat discount (in taka) on a menu item for a date range, replacing any active one. The guest pays menu price minus this. Does not schedule a Facebook post.',
+    inputSchema: {
+      id: z.string().min(1).max(64),
+      amount_taka: z.number().positive().max(1_000_000),
+      start_date: z.string().describe('ISO date, e.g. 2026-11-01'),
+      end_date: z.string().describe('ISO date, e.g. 2027-11-01'),
+    },
+    annotations: WRITE,
+  },
+  ({ id, amount_taka, start_date, end_date }) =>
+    run(async () =>
+      api<{ before: unknown; after: unknown; discountedPriceTaka: number }>('PUT', `/business/menu/items/${enc(id)}/discount`, {
+        amountTaka: amount_taka,
+        startDate: start_date,
+        endDate: end_date,
+      }),
+    ),
+);
+
+server.registerTool(
   'remove_addon_groups',
   {
     title: 'Remove add-on groups',
