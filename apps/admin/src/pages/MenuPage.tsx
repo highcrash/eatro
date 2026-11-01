@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, X, Package, Link2, Image, Upload } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Package, Link2, Image, Upload, Eye, EyeOff } from 'lucide-react';
 
 import type { MenuItem, MenuCategory, CreateMenuItemDto, LinkedItemType } from '@restora/types';
 import { formatCurrency } from '@restora/utils';
@@ -946,6 +946,15 @@ export default function MenuPage() {
   const [activeParent, setActiveParent] = useState<string | null>(null);
   const [activeSub, setActiveSub] = useState<string | null>(null);
   const [menuSearch, setMenuSearch] = useState('');
+  // Unavailable items are hidden by default; the choice sticks per browser.
+  const [hideUnavailable, setHideUnavailable] = useState(() => {
+    try { return window.localStorage.getItem('menu:hideUnavailable') !== 'false'; } catch { return true; }
+  });
+  const toggleHideUnavailable = () => {
+    const next = !hideUnavailable;
+    setHideUnavailable(next);
+    try { window.localStorage.setItem('menu:hideUnavailable', String(next)); } catch { /* storage blocked */ }
+  };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkSectionId, setBulkSectionId] = useState<string>('');
   const [bulkCategoryId, setBulkCategoryId] = useState<string>('');
@@ -1012,9 +1021,29 @@ export default function MenuPage() {
   const selectedParent = topCategories.find((c) => c.id === activeParent);
   const subCategories = selectedParent?.children ?? [];
 
+  const shownItems = hideUnavailable ? menuItems.filter((m) => m.isAvailable) : menuItems;
+
+  // Menu order: top category, subcategory, then the item's sort order
+  // (the printed menu number), then name — same order as the POS.
+  const catById = new Map<string, MenuCategory>();
+  for (const c of categories) {
+    catById.set(c.id, c);
+    for (const sub of c.children ?? []) catById.set(sub.id, sub);
+  }
+  const menuRank = (m: MenuItem): number[] => {
+    const cat = catById.get(m.categoryId);
+    const top = cat?.parentId ? catById.get(cat.parentId) : cat;
+    return [top?.sortOrder ?? 0, cat?.parentId ? cat.sortOrder : -1, m.sortOrder ?? 0];
+  };
+  const byMenuOrder = (a: MenuItem, b: MenuItem) => {
+    const ra = menuRank(a);
+    const rb = menuRank(b);
+    return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] || a.name.localeCompare(b.name);
+  };
+
   // Filter items based on category selection + search
   const filtered = (() => {
-    let items = menuItems;
+    let items = shownItems;
     if (activeSub) items = items.filter((m) => m.categoryId === activeSub);
     else if (activeParent) {
       const childIds = (selectedParent?.children ?? []).map((c) => c.id);
@@ -1053,13 +1082,13 @@ export default function MenuPage() {
     const orphans = variants.filter((v) => !v.variantParentId || !parents.some((p) => p.id === v.variantParentId));
 
     const ordered: typeof items = [];
-    for (const m of standalone) ordered.push(m);
-    for (const p of parents) {
-      ordered.push(p);
-      const kids = (variantsByParent.get(p.id) ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    for (const m of [...standalone, ...parents].sort(byMenuOrder)) {
+      ordered.push(m);
+      if (!m.isVariantParent) continue;
+      const kids = (variantsByParent.get(m.id) ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
       for (const k of kids) ordered.push(k);
     }
-    for (const o of orphans) ordered.push(o);
+    for (const o of orphans.sort(byMenuOrder)) ordered.push(o);
     return ordered;
   })();
 
@@ -1194,6 +1223,14 @@ export default function MenuPage() {
             placeholder="Search menu..."
             className="border border-[#2A2A2A] bg-[#0D0D0D] text-white px-3 py-2 text-sm font-body placeholder:text-[#555] focus:outline-none focus:border-[#D62B2B] w-48 transition-colors"
           />
+          <button onClick={toggleHideUnavailable}
+            title={hideUnavailable ? 'Unavailable items are hidden — click to show them' : 'Showing unavailable items — click to hide them'}
+            className={`flex items-center gap-1.5 border px-4 py-2 text-sm font-body transition-colors ${
+              hideUnavailable ? 'border-[#2A2A2A] text-[#999] hover:border-[#555]' : 'border-[#D62B2B] text-[#D62B2B]'
+            }`}>
+            {hideUnavailable ? <EyeOff size={14} /> : <Eye size={14} />}
+            {hideUnavailable ? 'Unavailable hidden' : 'Unavailable shown'}
+          </button>
           <button onClick={() => { setCsvOpen(true); setCsvRows([]); setCsvResult(null); }}
             className="flex items-center gap-1.5 border border-[#2A2A2A] px-4 py-2 text-sm font-body text-[#999] hover:border-[#555] transition-colors">
             <Upload size={14} /> CSV Import
@@ -1218,11 +1255,11 @@ export default function MenuPage() {
               !activeParent ? 'border-[#D62B2B] text-[#D62B2B] bg-[#D62B2B]/5' : 'border-transparent text-[#999] hover:text-white'
             }`}
           >
-            All ({menuItems.length})
+            All ({shownItems.length})
           </button>
           {topCategories.map((cat) => {
             const childIds = (cat.children ?? []).map((c) => c.id);
-            const count = menuItems.filter((m) => m.categoryId === cat.id || childIds.includes(m.categoryId)).length;
+            const count = shownItems.filter((m) => m.categoryId === cat.id || childIds.includes(m.categoryId)).length;
             const isActive = activeParent === cat.id;
             return (
               <div key={cat.id} className="flex items-center group">
@@ -1257,7 +1294,7 @@ export default function MenuPage() {
               All {selectedParent?.name}
             </button>
             {subCategories.map((sub) => {
-              const subCount = menuItems.filter((m) => m.categoryId === sub.id).length;
+              const subCount = shownItems.filter((m) => m.categoryId === sub.id).length;
               const isActive = activeSub === sub.id;
               return (
                 <div key={sub.id} className="flex items-center group">
@@ -1415,6 +1452,9 @@ export default function MenuPage() {
                   </td>
                   <td className="px-5 py-3 font-medium text-white">
                     {item.variantParentId && <span className="text-[#666] mr-1">└</span>}
+                    {!item.variantParentId && item.sortOrder > 0 && item.sortOrder < 1000 && (
+                      <span className="text-[#666] mr-2 tabular-nums" title="Menu number (sort order)">{item.sortOrder}</span>
+                    )}
                     {item.name}
                     {item.isCombo && <span className="ml-2 text-[10px] font-medium tracking-widest uppercase text-[#D62B2B] border border-[#D62B2B] px-1.5 py-0.5">COMBO</span>}
                     {item.isVariantParent && <span className="ml-2 text-[10px] font-medium tracking-widest uppercase text-[#FFA726] border border-[#FFA726] px-1.5 py-0.5">PARENT • {item.variants?.length ?? 0}</span>}
