@@ -23,6 +23,7 @@ import VariantPickerDialog from '../components/VariantPickerDialog';
 import CustomiseLineDialog from '../components/CustomiseLineDialog';
 import AddonPickerDialog from '../components/AddonPickerDialog';
 import ComboChoiceDialog from '../components/ComboChoiceDialog';
+import { byMenuPosition, menuNumber, searchMenu } from '../lib/menu-search';
 import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
 import { useCashierPermissions } from '../lib/permissions';
 
@@ -373,16 +374,18 @@ function AddItemsOverlay({
   const searchLower = addSearch.trim().toLowerCase();
   const childIdsOfSelected = addCatId ? getChildren(addCatId).map((c) => c.id) : [];
   const hiddenCats = hiddenCategoryIds(apiCategories);
-  const filteredItems = menuItems
+  const sellable = menuItems
     .filter((m) => m.isAvailable)
-    .filter((m) => !m.variantParentId && !m.isCustom && !m.isAddon)
-    .filter((m) => !hiddenCats.has(m.categoryId))
-    .filter((m) => {
-      if (searchLower) return m.name.toLowerCase().includes(searchLower);
-      if (!addCatId) return true;
-      // Direct match on selected category, OR item is in a child of the selected parent
-      return m.categoryId === addCatId || childIdsOfSelected.includes(m.categoryId);
-    });
+    .filter((m) => !m.isCustom && !m.isAddon)
+    .filter((m) => !hiddenCats.has(m.categoryId));
+  const filteredItems = (
+    searchLower
+      ? searchMenu(sellable, searchLower)
+      : sellable
+          .filter((m) => !m.variantParentId)
+          // Direct match on selected category, OR item is in a child of the selected parent
+          .filter((m) => !addCatId || m.categoryId === addCatId || childIdsOfSelected.includes(m.categoryId))
+  ).sort(byMenuPosition(apiCategories));
 
   const addToNewCart = (item: MenuItem) => {
     if (item.isVariantParent) {
@@ -528,7 +531,7 @@ function AddItemsOverlay({
                 type="text"
                 value={addSearch}
                 onChange={(e) => { setAddSearch(e.target.value); if (e.target.value) setAddCatId(null); }}
-                placeholder="Search products… (start typing anywhere)"
+                placeholder="Search name or menu number… (start typing anywhere)"
                 className="w-full bg-theme-surface rounded-full pl-11 pr-10 py-2.5 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent"
               />
               {addSearch && (
@@ -617,7 +620,10 @@ function AddItemsOverlay({
                       <span className="text-base">🍽️</span>
                     )}
                   </div>
-                  <p className="text-[10px] font-semibold text-theme-text leading-tight truncate">{item.name}</p>
+                  <p className="text-[10px] font-semibold text-theme-text leading-tight truncate">
+                    {menuNumber(item) != null && <span className="text-theme-text-muted font-bold mr-1">{menuNumber(item)}</span>}
+                    {item.name}
+                  </p>
                   {(() => {
                     if (item.isVariantParent) return <p className="text-[11px] font-bold text-theme-text"><span className="text-theme-text-muted text-[9px]">Pick variant</span></p>;
                     const dp = (item as { discountedPrice?: number | null }).discountedPrice;
@@ -2375,18 +2381,20 @@ function NewOrderView({
   const searchTrimmed = search.trim().toLowerCase();
   const childIdsOfActive = activeCategory ? getSubCats(activeCategory).map((c) => c.id) : [];
   const hiddenCats = hiddenCategoryIds(apiCats);
-  const filtered = menuItems
-    // Hide variant children — the parent shell card represents them
-    // in the grid; clicking the parent opens a chooser. Hide custom
-    // one-off menu items too (they live inside their order, not the
-    // standard grid), and items in hidden categories.
-    .filter((m) => !m.variantParentId && !m.isCustom && !m.isAddon)
-    .filter((m) => !hiddenCats.has(m.categoryId))
-    .filter((m) => {
-      if (searchTrimmed) return m.name.toLowerCase().includes(searchTrimmed);
-      if (!activeCategory) return true;
-      return m.categoryId === activeCategory || childIdsOfActive.includes(m.categoryId);
-    });
+  // Hide custom one-off menu items (they live inside their order, not
+  // the standard grid) and items in hidden categories. Variant children
+  // stay out of the grid too — the parent shell card represents them and
+  // opens a chooser — but a menu number can find them (fried rice).
+  const sellable = menuItems
+    .filter((m) => !m.isCustom && !m.isAddon)
+    .filter((m) => !hiddenCats.has(m.categoryId));
+  const filtered = (
+    searchTrimmed
+      ? searchMenu(sellable, searchTrimmed)
+      : sellable
+          .filter((m) => !m.variantParentId)
+          .filter((m) => !activeCategory || m.categoryId === activeCategory || childIdsOfActive.includes(m.categoryId))
+  ).sort(byMenuPosition(apiCats));
 
   const subtotal = cart.reduce((s, c) => {
     const addonsTotal = (c.addons ?? []).reduce((a, b) => a + b.price, 0);
@@ -2593,7 +2601,7 @@ function NewOrderView({
               type="text"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setActiveCategory(null); }}
-              placeholder="Search products… (start typing anywhere)"
+              placeholder="Search name or menu number… (start typing anywhere)"
               className="w-full bg-theme-surface rounded-full pl-11 pr-10 py-2.5 text-sm text-theme-text outline-none border border-theme-border focus:border-theme-accent"
             />
             {search && (
@@ -2713,7 +2721,10 @@ function NewOrderView({
                     <span className="text-xl">🍽️</span>
                   )}
                 </div>
-                <p className="text-[11px] font-semibold text-theme-text leading-tight truncate">{item.name}</p>
+                <p className="text-[11px] font-semibold text-theme-text leading-tight truncate">
+                  {menuNumber(item) != null && <span className="text-theme-text-muted font-bold mr-1">{menuNumber(item)}</span>}
+                  {item.name}
+                </p>
                 {(() => {
                   if (item.isVariantParent) return <p className="text-xs font-bold text-theme-text"><span className="text-theme-text-muted text-[10px]">Pick a variant</span></p>;
                   const dp = (item as { discountedPrice?: number | null }).discountedPrice;

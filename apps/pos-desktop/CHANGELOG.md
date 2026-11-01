@@ -3,6 +3,25 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.30 — Menu numbers, combo choices, menu order (2026-11-01)
+
+POS bundle only; no native / IPC / printing changes.
+
+- **Find by menu number.** Typing a number in the menu search finds the
+  dish with that number on the printed menu (`15` → Crispy Samurai
+  Prawns, Enter adds it). Fried rice 1:1 and 1:3 share a number, so
+  both sizes show. Each card shows its number before the name; the
+  number is the item's Sort Order (1–999), 1000+ means not on the
+  printed menu. Name search works as before.
+- **Menu order.** The grid follows category, subcategory and item sort
+  order (the printed menu order); inactive categories and their items
+  stay hidden.
+- **Combos.** Combos with a guest choice (e.g. Fizz ×4) open a picker
+  for the split (2 Fizz · 1 Orange · 1 White); the choice shows on the
+  cart line, is sent with the order, and the +ADD kitchen ticket lists
+  each combo part under its own station.
+- **Move after bill print** needs manager approval (from b9b1b46).
+
 ## 2.0.29 — +ADD KT print now records status (Reprint button reflects add-items failures) (2026-06-01)
 
 Follow-up to 2.0.28. The +ADD Kitchen Ticket fired by "Add Items"

@@ -573,6 +573,7 @@ function ItemDialog({
               />
               <p className="text-[10px] text-[#666] font-body">
                 Lower number sorts higher inside the category on the printable menu (and the website / QR grid). Tie → alphabetical.
+                1–999 is also the item's menu number: POS search finds it by typing the number. 1000+ = not on the printed menu.
               </p>
             </div>
             <div className="border-t border-[#2A2A2A] pt-2 mt-2 space-y-2">
