@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { ExpenseModule } from '../expense/expense.module';
+import { IngredientModule } from '../ingredient/ingredient.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { MarketingModule } from '../marketing/marketing.module';
 import { MenuModule } from '../menu/menu.module';
@@ -18,7 +19,7 @@ import { ApiKeyGuard } from './guards/api-key.guard';
 import { ScopesGuard } from './guards/scopes.guard';
 
 @Module({
-  imports: [ReportsModule, MenuModule, RecipeModule, ActivityLogModule, MarketingModule, LoyaltyModule, ExpenseModule, SmsModule],
+  imports: [ReportsModule, MenuModule, RecipeModule, IngredientModule, ActivityLogModule, MarketingModule, LoyaltyModule, ExpenseModule, SmsModule],
   controllers: [ApiKeysController, ExternalController, ExternalMenuController],
   providers: [ApiKeysService, ExternalService, ApiKeyGuard, ScopesGuard, ActorSynthesisService],
   exports: [ApiKeysService],

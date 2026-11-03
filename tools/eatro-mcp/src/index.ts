@@ -217,6 +217,30 @@ server.registerTool(
 );
 
 server.registerTool(
+  'set_ingredient_price',
+  {
+    title: 'Set ingredient price',
+    description:
+      "Set an ingredient's purchase price, e.g. 1 KG = 1000 G for 150 taka. Cost per stock unit (used by every recipe cost) is derived from it. Ingredients with brand variants are priced on the variant.",
+    inputSchema: {
+      id: z.string().min(1).max(64),
+      purchase_unit: z.string().max(20).optional().describe('How it is bought, e.g. KG, L, PACK'),
+      purchase_unit_qty: z.number().positive().max(1_000_000).describe('Stock units in one purchase unit, e.g. 1000 (G per KG)'),
+      price_taka: z.number().min(0).max(1_000_000).describe('Price of one purchase unit in taka'),
+    },
+    annotations: WRITE,
+  },
+  ({ id, purchase_unit, purchase_unit_qty, price_taka }) =>
+    run(async () =>
+      api<{ before: unknown; after: unknown }>('PATCH', `/business/ingredients/${enc(id)}`, {
+        ...(purchase_unit !== undefined ? { purchaseUnit: purchase_unit } : {}),
+        purchaseUnitQty: purchase_unit_qty,
+        costPerPurchaseUnitTaka: price_taka,
+      }),
+    ),
+);
+
+server.registerTool(
   'get_recipe',
   {
     title: 'Get recipe',

@@ -35,6 +35,7 @@ import {
 import type { JwtPayload } from '@restora/types';
 
 import { ActivityLogService } from '../activity-log/activity-log.service';
+import { IngredientService } from '../ingredient/ingredient.service';
 import { CategoryService } from '../menu/category.service';
 import { MenuService } from '../menu/menu.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -270,6 +271,27 @@ class SetComboItemsBody {
   items!: ComboItemBody[];
 }
 
+/**
+ * An ingredient's price as bought: "1 KG (purchaseUnit) = 1000 G
+ * (purchaseUnitQty) for ৳150". Cost per stock unit is derived from it.
+ */
+class UpdateIngredientCostBody {
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  purchaseUnit?: string;
+
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0.0001)
+  @Max(1_000_000)
+  purchaseUnitQty!: number;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(MAX_PRICE_TAKA)
+  costPerPurchaseUnitTaka!: number;
+}
+
 class SetDiscountBody {
   /** Flat amount off the menu price, in taka. */
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -306,6 +328,7 @@ export class ExternalMenuController {
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
     private readonly actorSynth: ActorSynthesisService,
+    private readonly ingredients: IngredientService,
   ) {}
 
   // ─── Menu ─────────────────────────────────────────────────────────────
@@ -567,6 +590,50 @@ export class ExternalMenuController {
     return this.envelope(client.branchId, {
       ingredients: ingredients.map((i) => ({ ...i, costPerUnit: i.costPerUnit.toNumber() })),
     });
+  }
+
+  @Patch('business/ingredients/:id')
+  @Scopes('recipes:write')
+  @ApiOperation({
+    summary: "Set an ingredient's purchase price. Returns before + after (cost in paisa per stock unit).",
+    description: 'e.g. { purchaseUnit: "KG", purchaseUnitQty: 1000, costPerPurchaseUnitTaka: 150 } on a G ingredient → ৳0.15/g. Ingredients with variants take their cost from the variants, so set the variant instead.',
+  })
+  async updateIngredientCost(
+    @CurrentApiClient() client: ApiClient,
+    @Param('id') id: string,
+    @Body() body: UpdateIngredientCostBody,
+  ) {
+    const before = await this.ingredients.findOne(id, client.branchId);
+    if (before.hasVariants) {
+      throw new BadRequestException(`"${before.name}" takes its cost from its variants; set the variant's price instead`);
+    }
+    const { actor, via } = await this.actorFor(client);
+    const after = await this.ingredients.update(id, client.branchId, {
+      ...(body.purchaseUnit !== undefined ? { purchaseUnit: body.purchaseUnit.trim().toUpperCase() } : {}),
+      purchaseUnitQty: body.purchaseUnitQty,
+      costPerPurchaseUnit: toPaisa(body.costPerPurchaseUnitTaka),
+    });
+    const snap = (i: typeof before) => ({
+      name: i.name,
+      unit: i.unit,
+      purchaseUnit: i.purchaseUnit,
+      purchaseUnitQty: Number(i.purchaseUnitQty),
+      costPerPurchaseUnit: Number(i.costPerPurchaseUnit),
+      costPerUnit: Number(i.costPerUnit),
+    });
+    void this.activityLog.log({
+      branchId: client.branchId,
+      actor,
+      category: 'INGREDIENT',
+      action: 'UPDATE',
+      entityType: 'ingredient',
+      entityId: id,
+      entityName: after.name,
+      before: snap(before) as never,
+      after: snap(after) as never,
+      summary: `Set "${after.name}" price to ৳${body.costPerPurchaseUnitTaka} per ${body.purchaseUnitQty} ${after.unit} ${via}`,
+    });
+    return this.envelope(client.branchId, { before: snap(before), after: snap(after) });
   }
 
   @Get('business/recipes/:menuItemId')

@@ -88,7 +88,7 @@ describe('ExternalMenuController (API-key menu + recipe writes)', () => {
 
   afterAll(async () => {
     const itemIds = [menuItemId, createdMenuItemId].filter(Boolean) as string[];
-    await prisma.activityLog.deleteMany({ where: { entityId: { in: [...itemIds, categoryId] } } });
+    await prisma.activityLog.deleteMany({ where: { entityId: { in: [...itemIds, categoryId, gramIngredientId] } } });
     await prisma.comboItem.deleteMany({ where: { comboMenuId: { in: itemIds } } });
     await prisma.menuItemDiscount.deleteMany({ where: { menuItemId: { in: itemIds } } });
     await prisma.recipe.deleteMany({ where: { menuItemId: { in: itemIds } } });
@@ -327,6 +327,18 @@ describe('ExternalMenuController (API-key menu + recipe writes)', () => {
     expect(await prisma.scheduledFbPost.count({ where: { menuDiscountId: { in: [first.body.data.after.id, second.body.data.after.id] } } })).toBe(0);
 
     expect((await call('PUT', `/menu/items/${menuItemId}/combo-items`, writeKey, { items: [] })).status).toBe(200);
+  });
+
+  it('sets an ingredient purchase price and derives cost per stock unit', async () => {
+    const body = { purchaseUnit: 'kg', purchaseUnitQty: 1000, costPerPurchaseUnitTaka: 150 };
+    expect((await call('PATCH', `/ingredients/${gramIngredientId}`, readKey, body)).status).toBe(403);
+    const res = await call('PATCH', `/ingredients/${gramIngredientId}`, writeKey, body);
+    expect(res.status).toBe(200);
+    expect(res.body.data.before.costPerUnit).toBe(2);
+    expect(res.body.data.after).toMatchObject({ purchaseUnit: 'KG', purchaseUnitQty: 1000, costPerPurchaseUnit: 15_000, costPerUnit: 15 });
+    const row = await prisma.ingredient.findUniqueOrThrow({ where: { id: gramIngredientId } });
+    expect(row.costPerUnit.toNumber()).toBe(15);
+    expect((await call('PATCH', `/ingredients/${gramIngredientId}`, writeKey, { purchaseUnitQty: 0, costPerPurchaseUnitTaka: 150 })).status).toBe(400);
   });
 
   it('deletes a recipe, returning it for undo; a second delete is 404', async () => {
