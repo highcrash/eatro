@@ -6,6 +6,7 @@ import type { Order, MushakInvoice, CorrectPaymentDto } from '@restora/types';
 import { formatCurrency, formatDateTime, renderMushakSlipHtml, type MushakSnapshot } from '@restora/utils';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/auth.store';
+import { amountPaidVia, matchesPayment, paymentFilterGroups, paymentFilterLabel, paymentLabel, usePaymentOptions } from '../lib/payment-filter';
 
 /**
  * Renders the Mushak-6.3 column cell. Fetches-on-demand (enabled only for
@@ -48,6 +49,7 @@ const TYPE_OPTIONS = ['ALL', 'DINE_IN', 'TAKEAWAY', 'DELIVERY'] as const;
 
 function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => void }) {
   const activeItems = order.items.filter((i) => !i.voidedAt);
+  const payment = paymentLabel(order, usePaymentOptions());
   const voidedItems = order.items.filter((i) => i.voidedAt);
   const subtotal = Number(order.subtotal);
   const tax = Number(order.taxAmount);
@@ -82,7 +84,7 @@ function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => voi
           ${discount > 0 ? `<div class="total-row"><span>${(order as any).discountName || 'Discount'}${(order as any).couponCode ? ' (' + (order as any).couponCode + ')' : ''}</span><span style="color:#2e7d32">-${formatCurrency(discount)}</span></div>` : ''}
           <div class="total-row grand"><span>Grand Total</span><span>${formatCurrency(total)}</span></div>
         </div>
-        <div class="meta" style="margin-top:16px">Payment: ${order.paymentMethod || '—'}${order.paidAt ? ' | Paid: ' + formatDateTime(order.paidAt) : ''}</div>
+        <div class="meta" style="margin-top:16px">Payment: ${payment}${order.paidAt ? ' | Paid: ' + formatDateTime(order.paidAt) : ''}</div>
         <script>window.onload=function(){window.print();}<\/script>
       </body></html>`);
     win.document.close();
@@ -103,7 +105,7 @@ function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => voi
         </div>
         <div className="px-6 py-3 border-b border-[#2A2A2A]">
           <span className={`text-xs font-body font-medium tracking-widest uppercase px-2 py-1 ${order.status === 'PAID' ? 'bg-green-600/20 text-green-500' : order.status === 'VOID' ? 'bg-[#D62B2B]/20 text-[#D62B2B]' : 'bg-[#2A2A2A] text-[#999]'}`}>{order.status}</span>
-          {order.paymentMethod && <span className="ml-3 text-xs font-body text-[#666]">Payment: {order.paymentMethod}</span>}
+          {payment !== '—' && <span className="ml-3 text-xs font-body text-[#666]">Payment: {payment}</span>}
           {order.paidAt && <span className="ml-3 text-xs font-body text-[#666]">Paid: {formatDateTime(order.paidAt)}</span>}
         </div>
         <div className="px-6 py-4">
@@ -211,9 +213,7 @@ function CorrectPaymentDialog({ order, onClose }: { order: Order; onClose: () =>
     }
   };
 
-  const oldSummary = order.payments && order.payments.length > 0
-    ? order.payments.map((p) => `${p.method} ${formatCurrency(Number(p.amount))}`).join(' + ')
-    : (order.paymentMethod ?? '—');
+  const oldSummary = paymentLabel(order, paymentOpts);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
@@ -340,25 +340,27 @@ export default function SalesReportPage() {
     },
   });
 
-  const paymentMethods = useMemo(() => {
-    const set = new Set<string>();
-    orders.forEach((o) => { if (o.paymentMethod) set.add(o.paymentMethod); });
-    return [...set].sort();
-  }, [orders]);
+  const paymentOptions = usePaymentOptions();
+  const paymentGroups = useMemo(() => paymentFilterGroups(orders, paymentOptions), [orders, paymentOptions]);
 
   const filtered = useMemo(() => {
     let result = orders;
     if (statusFilter !== 'ALL') result = result.filter((o) => o.status === statusFilter);
     if (typeFilter !== 'ALL') result = result.filter((o) => o.type === typeFilter);
-    if (paymentFilter) result = result.filter((o) => o.paymentMethod === paymentFilter);
+    if (paymentFilter) result = result.filter((o) => matchesPayment(o, paymentFilter, paymentOptions));
     if (itemSearch.trim()) { const q = itemSearch.toLowerCase(); result = result.filter((o) => o.items.some((i) => i.menuItemName.toLowerCase().includes(q))); }
     return result;
-  }, [orders, statusFilter, typeFilter, paymentFilter, dateFrom, dateTo, itemSearch]);
+  }, [orders, statusFilter, typeFilter, paymentFilter, paymentOptions, itemSearch]);
 
   const grandSubtotal = filtered.reduce((s, o) => s + Number(o.subtotal), 0);
   const grandDiscount = filtered.reduce((s, o) => s + Number(o.discountAmount), 0);
   const grandTax = filtered.reduce((s, o) => s + Number(o.taxAmount), 0);
   const grandTotal = filtered.reduce((s, o) => s + Number(o.totalAmount), 0);
+
+  // For one account / category, what actually went through it — a split
+  // order counts only its matching part.
+  const paidVia = paymentFilter && paymentFilter !== 'SPLIT' ? amountPaidVia(filtered, paymentFilter, paymentOptions) : null;
+  const paymentFilterName = paymentFilter ? paymentFilterLabel(paymentFilter, paymentGroups) : '';
 
   const handlePrint = () => {
     const rows = filtered.map((o, idx) => `<tr>
@@ -369,7 +371,7 @@ export default function SalesReportPage() {
       <td class="r" style="color:${Number(o.discountAmount) > 0 ? '#2e7d32' : '#666'}">${Number(o.discountAmount) > 0 ? '-' + formatCurrency(Number(o.discountAmount)) : '—'}</td>
       <td class="r">${formatCurrency(Number(o.taxAmount))}</td>
       <td class="r" style="font-weight:500">${formatCurrency(Number(o.totalAmount))}</td>
-      <td>${o.paymentMethod || '—'}</td><td>${o.status}</td>
+      <td>${paymentLabel(o, paymentOptions)}</td><td>${o.status}</td>
     </tr>`).join('');
     const win = window.open('', '_blank', 'width=1100,height=700');
     if (!win) return;
@@ -380,7 +382,7 @@ export default function SalesReportPage() {
       td{padding:4px;border-bottom:1px solid #F2F1EE;font-size:9px}.r{text-align:right}.t td{border-top:2px solid #111;font-weight:700;font-size:10px;padding-top:8px}
       @media print{body{padding:8mm}}
     </style></head><body>
-    <h1>SALES REPORT</h1><div class="meta">${filtered.length} orders${dateFrom ? ' | From: ' + dateFrom : ''}${dateTo ? ' To: ' + dateTo : ''}</div>
+    <h1>SALES REPORT</h1><div class="meta">${filtered.length} orders${dateFrom ? ' | From: ' + dateFrom : ''}${dateTo ? ' To: ' + dateTo : ''}${paymentFilterName ? ' | Payment: ' + paymentFilterName : ''}${paidVia != null ? ' | Received via ' + paymentFilterName + ': ' + formatCurrency(paidVia) : ''}</div>
     <table><thead><tr><th>#</th><th>Order</th><th>Date</th><th>Type</th><th>Table</th><th>Items</th><th class="r">Subtotal</th><th class="r">Discount</th><th class="r">VAT</th><th class="r">Total</th><th>Payment</th><th>Status</th></tr></thead>
     <tbody>${rows}<tr class="t"><td colspan="6">GRAND TOTAL</td><td class="r">${formatCurrency(grandSubtotal)}</td><td class="r" style="color:#2e7d32">${grandDiscount > 0 ? '-' + formatCurrency(grandDiscount) : '—'}</td><td class="r">${formatCurrency(grandTax)}</td><td class="r">${formatCurrency(grandTotal)}</td><td colspan="2"></td></tr></tbody></table>
     <script>window.onload=function(){window.print();}<\/script></body></html>`);
@@ -395,6 +397,11 @@ export default function SalesReportPage() {
           <h1 className="font-display text-4xl text-white tracking-wide">SALES REPORT</h1>
         </div>
         <div className="flex items-center gap-3">
+          {paidVia != null && (
+            <span className="text-xs font-body text-[#999]">
+              Received via {paymentFilterName}: <span className="text-white font-medium">{formatCurrency(paidVia)}</span>
+            </span>
+          )}
           <span className="text-xs font-body text-[#999]">{filtered.length} orders</span>
           <button onClick={handlePrint} className="flex items-center gap-1.5 border border-[#2A2A2A] px-3 py-1.5 text-xs font-body text-[#999] hover:border-[#D62B2B] hover:text-[#D62B2B] transition-colors">
             <Printer size={12} /> Print / PDF
@@ -425,7 +432,13 @@ export default function SalesReportPage() {
           </select>
           <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} className="bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B]">
             <option value="">All Payments</option>
-            {paymentMethods.map((m) => <option key={m} value={m}>{m}</option>)}
+            {paymentGroups.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.all && <option value={g.all.value}>{g.all.label}</option>}
+                {g.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </optgroup>
+            ))}
+            {orders.some((o) => matchesPayment(o, 'SPLIT', paymentOptions)) && <option value="SPLIT">Split payments</option>}
           </select>
           <div className="relative flex-1 min-w-[200px]">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#555]" />
@@ -473,7 +486,7 @@ export default function SalesReportPage() {
                     <td className="px-4 py-2.5 text-right text-xs">{Number(o.discountAmount) > 0 ? <span className="text-green-600">-{formatCurrency(Number(o.discountAmount))}</span> : <span className="text-[#555]">—</span>}</td>
                     <td className="px-4 py-2.5 text-right text-[#999] text-xs">{formatCurrency(Number(o.taxAmount))}</td>
                     <td className="px-4 py-2.5 text-right text-white font-medium text-xs">{formatCurrency(Number(o.totalAmount))}</td>
-                    <td className="px-4 py-2.5 text-[#999] text-xs uppercase">{o.paymentMethod ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-[#999] text-xs">{paymentLabel(o, paymentOptions)}</td>
                     <td className="px-4 py-2.5"><span className={`text-[10px] font-medium tracking-widest uppercase ${o.status === 'PAID' ? 'text-green-600' : o.status === 'VOID' ? 'text-[#D62B2B]' : 'text-[#999]'}`}>{o.status}</span></td>
                     <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                       <MushakPrintCell orderId={o.id} status={o.status} />

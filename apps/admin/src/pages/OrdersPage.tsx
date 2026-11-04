@@ -5,6 +5,7 @@ import { X, Printer, Search } from 'lucide-react';
 import type { Order } from '@restora/types';
 import { formatCurrency, formatDateTime } from '@restora/utils';
 import { api } from '../lib/api';
+import { amountPaidVia, matchesPayment, paymentFilterGroups, paymentFilterLabel, paymentLabel, usePaymentOptions } from '../lib/payment-filter';
 
 const STATUS_OPTIONS = ['ALL', 'PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'SERVED', 'PAID', 'VOID'] as const;
 const TYPE_OPTIONS = ['ALL', 'DINE_IN', 'TAKEAWAY', 'DELIVERY'] as const;
@@ -13,6 +14,7 @@ const TYPE_OPTIONS = ['ALL', 'DINE_IN', 'TAKEAWAY', 'DELIVERY'] as const;
 
 function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => void }) {
   const activeItems = order.items.filter((i) => !i.voidedAt);
+  const payment = paymentLabel(order, usePaymentOptions());
   const voidedItems = order.items.filter((i) => i.voidedAt);
   const subtotal = Number(order.subtotal);
   const tax = Number(order.taxAmount);
@@ -71,7 +73,7 @@ function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => voi
           <div class="total-row grand"><span>Grand Total</span><span>${formatCurrency(total)}</span></div>
         </div>
         <div class="meta" style="margin-top:16px">
-          Payment: ${order.paymentMethod || '—'}
+          Payment: ${payment}
           ${order.paidAt ? ' | Paid: ' + formatDateTime(order.paidAt) : ''}
         </div>
         <script>window.onload=function(){window.print();}<\/script>
@@ -105,8 +107,8 @@ function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => voi
           }`}>
             {order.status}
           </span>
-          {order.paymentMethod && (
-            <span className="ml-3 text-xs font-body text-[#666]">Payment: {order.paymentMethod}</span>
+          {payment !== '—' && (
+            <span className="ml-3 text-xs font-body text-[#666]">Payment: {payment}</span>
           )}
           {order.paidAt && (
             <span className="ml-3 text-xs font-body text-[#666]">Paid: {formatDateTime(order.paidAt)}</span>
@@ -205,12 +207,9 @@ export default function OrdersPage() {
     },
   });
 
-  // Get unique payment methods for filter dropdown
-  const paymentMethods = useMemo(() => {
-    const set = new Set<string>();
-    orders.forEach((o) => { if (o.paymentMethod) set.add(o.paymentMethod); });
-    return [...set].sort();
-  }, [orders]);
+  // Payment filter: the accounts these orders were paid with, by name
+  const paymentOptions = usePaymentOptions();
+  const paymentGroups = useMemo(() => paymentFilterGroups(orders, paymentOptions), [orders, paymentOptions]);
 
   // Apply filters
   const filtered = useMemo(() => {
@@ -218,7 +217,7 @@ export default function OrdersPage() {
 
     if (statusFilter !== 'ALL') result = result.filter((o) => o.status === statusFilter);
     if (typeFilter !== 'ALL') result = result.filter((o) => o.type === typeFilter);
-    if (paymentFilter) result = result.filter((o) => o.paymentMethod === paymentFilter);
+    if (paymentFilter) result = result.filter((o) => matchesPayment(o, paymentFilter, paymentOptions));
 
     if (itemSearch.trim()) {
       const q = itemSearch.toLowerCase();
@@ -226,12 +225,17 @@ export default function OrdersPage() {
     }
 
     return result;
-  }, [orders, statusFilter, typeFilter, paymentFilter, dateFrom, dateTo, itemSearch]);
+  }, [orders, statusFilter, typeFilter, paymentFilter, paymentOptions, itemSearch]);
 
   const grandSubtotal = filtered.reduce((s, o) => s + Number(o.subtotal), 0);
   const grandDiscount = filtered.reduce((s, o) => s + Number(o.discountAmount), 0);
   const grandTax = filtered.reduce((s, o) => s + Number(o.taxAmount), 0);
   const grandTotal = filtered.reduce((s, o) => s + Number(o.totalAmount), 0);
+
+  // For one account / category, what actually went through it — a split
+  // order counts only its matching part.
+  const paidVia = paymentFilter && paymentFilter !== 'SPLIT' ? amountPaidVia(filtered, paymentFilter, paymentOptions) : null;
+  const paymentFilterName = paymentFilter ? paymentFilterLabel(paymentFilter, paymentGroups) : '';
 
   const handlePrintReport = () => {
     const rows = filtered.map((o, idx) => `<tr>
@@ -245,7 +249,7 @@ export default function OrdersPage() {
       <td class="text-right" style="color:${Number(o.discountAmount) > 0 ? '#2e7d32' : '#666'}">${Number(o.discountAmount) > 0 ? '-' + formatCurrency(Number(o.discountAmount)) : '—'}</td>
       <td class="text-right">${formatCurrency(Number(o.taxAmount))}</td>
       <td class="text-right" style="font-weight:500">${formatCurrency(Number(o.totalAmount))}</td>
-      <td>${o.paymentMethod || '—'}</td>
+      <td>${paymentLabel(o, paymentOptions)}</td>
       <td>${o.status}</td>
     </tr>`).join('');
 
@@ -265,7 +269,7 @@ export default function OrdersPage() {
         @media print { body { padding:8mm; } }
       </style></head><body>
       <h1>ORDERS REPORT</h1>
-      <div class="meta">${filtered.length} orders${dateFrom ? ' | From: ' + dateFrom : ''}${dateTo ? ' To: ' + dateTo : ''}</div>
+      <div class="meta">${filtered.length} orders${dateFrom ? ' | From: ' + dateFrom : ''}${dateTo ? ' To: ' + dateTo : ''}${paymentFilterName ? ' | Payment: ' + paymentFilterName : ''}${paidVia != null ? ' | Received via ' + paymentFilterName + ': ' + formatCurrency(paidVia) : ''}</div>
       <table>
         <thead><tr><th>#</th><th>Order</th><th>Date</th><th>Type</th><th>Table</th><th>Items</th><th class="text-right">Subtotal</th><th class="text-right">Discount</th><th class="text-right">VAT</th><th class="text-right">Total</th><th>Payment</th><th>Status</th></tr></thead>
         <tbody>${rows}
@@ -286,6 +290,11 @@ export default function OrdersPage() {
           <h1 className="font-display text-4xl text-white tracking-wide">ORDERS</h1>
         </div>
         <div className="flex items-center gap-3">
+          {paidVia != null && (
+            <span className="text-xs font-body text-[#999]">
+              Received via {paymentFilterName}: <span className="text-white font-medium">{formatCurrency(paidVia)}</span>
+            </span>
+          )}
           <span className="text-xs font-body text-[#999]">{filtered.length} orders</span>
           <button onClick={handlePrintReport} className="flex items-center gap-1.5 border border-[#2A2A2A] px-3 py-1.5 text-xs font-body text-[#999] hover:border-[#D62B2B] hover:text-[#D62B2B] transition-colors">
             <Printer size={12} /> Print
@@ -328,7 +337,13 @@ export default function OrdersPage() {
           <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}
             className="bg-[#0D0D0D] border border-[#2A2A2A] px-2 py-1.5 text-xs font-body text-white outline-none focus:border-[#D62B2B]">
             <option value="">All Payments</option>
-            {paymentMethods.map((m) => <option key={m} value={m}>{m}</option>)}
+            {paymentGroups.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.all && <option value={g.all.value}>{g.all.label}</option>}
+                {g.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </optgroup>
+            ))}
+            {orders.some((o) => matchesPayment(o, 'SPLIT', paymentOptions)) && <option value="SPLIT">Split payments</option>}
           </select>
 
           {/* Item search */}
@@ -391,7 +406,7 @@ export default function OrdersPage() {
                     <td className="px-4 py-2.5 text-right text-xs">{Number(o.discountAmount) > 0 ? <span className="text-green-600">-{formatCurrency(Number(o.discountAmount))}</span> : <span className="text-[#555]">—</span>}</td>
                     <td className="px-4 py-2.5 text-right text-[#999] text-xs">{formatCurrency(Number(o.taxAmount))}</td>
                     <td className="px-4 py-2.5 text-right text-white font-medium text-xs">{formatCurrency(Number(o.totalAmount))}</td>
-                    <td className="px-4 py-2.5 text-[#999] text-xs uppercase">{o.paymentMethod ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-[#999] text-xs">{paymentLabel(o, paymentOptions)}</td>
                     <td className="px-4 py-2.5">
                       <span className={`text-[10px] font-medium tracking-widest uppercase ${
                         o.status === 'PAID' ? 'text-green-600' :
