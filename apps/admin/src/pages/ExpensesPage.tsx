@@ -77,6 +77,15 @@ export default function ExpensesPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['expenses'] }),
   });
 
+  const listedTotal = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const listedByCategory = Object.entries(
+    expenses.reduce<Record<string, number>>((acc, e) => {
+      acc[e.category] = (acc[e.category] ?? 0) + Number(e.amount);
+      return acc;
+    }, {}),
+  ).sort(([, a], [, b]) => b - a);
+  const fmtDay = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/expenses/${id}`),
     onSuccess: () => {
@@ -86,16 +95,53 @@ export default function ExpensesPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 expenses-page">
+      {/* Print isolation, same as Finance & Reports: only this page's
+          content prints, in black on white, without the admin chrome.
+          Ctrl+P → "Save as PDF" gives a PDF of the whole range. */}
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 12mm; }
+          html, body { background: #fff !important; }
+          body * { visibility: hidden !important; }
+          .expenses-page, .expenses-page * { visibility: visible !important; }
+          .expenses-page {
+            position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important;
+            padding: 0 !important; background: #fff !important; color: #000 !important;
+            font-family: Arial, sans-serif !important;
+          }
+          .expenses-page * { color: #000 !important; background: transparent !important; border-color: #999 !important; }
+          .no-print { display: none !important; }
+          .print-only { display: block !important; }
+          .expenses-page table th, .expenses-page table td { border: 1px solid #ccc !important; padding: 4px 8px !important; }
+          .expenses-page tr { page-break-inside: avoid; }
+          .expenses-page thead { display: table-header-group; }
+        }
+      `}</style>
+
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl text-white tracking-widest">EXPENSES</h1>
-        <button onClick={() => setShowDialog(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">
-          + ADD EXPENSE
-        </button>
+        <div>
+          <h1 className="font-display text-3xl text-white tracking-widest">EXPENSES</h1>
+          <p className="print-only text-xs mt-1" style={{ display: 'none' }}>
+            {fmtDay(from)} → {fmtDay(to)} · Category: {CATEGORIES.find((c) => c.value === catFilter)?.label ?? 'All'} · {expenses.length} entries
+          </p>
+        </div>
+        <div className="flex gap-3 no-print">
+          <button
+            onClick={() => window.print()}
+            title="Print or save as PDF (Ctrl+P / ⌘+P also works)"
+            className="px-4 py-2 bg-[#2A2A2A] hover:bg-[#D62B2B] text-white font-body text-xs tracking-widest uppercase transition-colors"
+          >
+            🖨 Print / PDF
+          </button>
+          <button onClick={() => setShowDialog(true)} className="bg-[#D62B2B] hover:bg-[#F03535] text-white font-body text-sm px-4 py-2 transition-colors">
+            + ADD EXPENSE
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-4 items-end">
+      <div className="flex gap-4 items-end no-print">
         <div className="flex flex-col gap-1">
           <label className="text-[#666] text-xs font-body font-medium tracking-widest uppercase">From</label>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="bg-[#161616] border border-[#2A2A2A] text-white px-3 py-2 text-sm font-body focus:outline-none focus:border-[#D62B2B]" />
@@ -137,7 +183,7 @@ export default function ExpensesPage() {
             <thead>
               <tr className="border-b border-[#2A2A2A]">
                 {['Date', 'Category', 'Description', 'Amount', 'Method', 'Recorded By', 'Status', 'Actions'].map((h) => (
-                  <th key={h} className="text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase">{h}</th>
+                  <th key={h} className={`text-left px-4 py-3 text-[#666] font-body text-xs tracking-widest uppercase ${h === 'Actions' ? 'no-print' : ''}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -161,7 +207,7 @@ export default function ExpensesPage() {
                       <span className="text-[#FFA726] font-body text-xs">Pending</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 flex gap-2">
+                  <td className="px-4 py-3 flex gap-2 no-print">
                     {!e.approvedAt && canApproveOrDelete && (
                       <button onClick={() => approveMutation.mutate(e.id)} className="text-[#4CAF50] hover:text-white font-body text-xs tracking-widest uppercase transition-colors">Approve</button>
                     )}
@@ -175,6 +221,37 @@ export default function ExpensesPage() {
               {expenses.length === 0 && (
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-[#666] font-body text-sm">No expenses recorded for this period.</td></tr>
               )}
+            </tbody>
+            {expenses.length > 0 && (
+              <tfoot>
+                <tr className="border-t border-[#2A2A2A]">
+                  <td colSpan={3} className="px-4 py-3 text-[#999] font-body text-xs tracking-widest uppercase">
+                    Total · {expenses.length} entries
+                  </td>
+                  <td className="px-4 py-3 text-[#D62B2B] font-body font-bold text-sm">{formatCurrency(listedTotal)}</td>
+                  <td colSpan={3} />
+                  <td className="no-print" />
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+
+      {/* Category breakdown of the listed expenses — printout only, so
+          the hardcopy shows where the money went, not just the top 3. */}
+      {listedByCategory.length > 0 && (
+        <div className="print-only" style={{ display: 'none' }}>
+          <h2 className="font-body text-sm font-bold uppercase tracking-widest mb-2">By category</h2>
+          <table className="w-full text-sm">
+            <tbody>
+              {listedByCategory.map(([cat, amt]) => (
+                <tr key={cat}>
+                  <td>{CATEGORIES.find((c) => c.value === cat)?.label ?? cat}</td>
+                  <td>{formatCurrency(amt)}</td>
+                  <td>{listedTotal > 0 ? ((amt / listedTotal) * 100).toFixed(1) : '0.0'}%</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

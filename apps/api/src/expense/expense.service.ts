@@ -13,11 +13,13 @@ export class ExpenseService {
   ) {}
 
   findAll(branchId: string, filters?: { from?: string; to?: string; category?: string }) {
+    const { from, to } = filters ?? {};
+    const ranged = !!(from && to);
     return this.prisma.expense.findMany({
       where: {
         branchId,
         deletedAt: null,
-        ...(filters?.from && filters?.to ? { date: { gte: new Date(filters.from), lte: new Date(filters.to) } } : {}),
+        ...(from && to ? { date: { gte: new Date(from), lte: new Date(to) } } : {}),
         ...(filters?.category ? { category: filters.category as any } : {}),
       },
       include: {
@@ -25,7 +27,10 @@ export class ExpenseService {
         approvedBy: { select: { id: true, name: true } },
       },
       orderBy: { date: 'desc' },
-      take: 200,
+      // A date range returns every expense in it (the report and its
+      // printout need the whole period); only the open-ended list is
+      // capped to the latest 200.
+      ...(ranged ? {} : { take: 200 }),
     });
   }
 
