@@ -594,6 +594,11 @@ model Staff {
   /// attendanceHalfDayAfterMinutes.
   lateGraceMinutes    Int?
   halfDayAfterMinutes Int?
+  /// Job title printed on the staff ID card (e.g. "Head Chef"). Free
+  /// text, separate from `role`, which controls access.
+  designation         String?
+  /// Staff photo for the ID card (uploaded via /upload/image).
+  photoUrl            String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   deletedAt           DateTime?

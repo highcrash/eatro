@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Camera } from 'lucide-react';
 
 import { api } from '../lib/api';
+import { resizeImage } from '../lib/image-resize';
 
 interface Staff {
   id: string;
@@ -26,6 +27,9 @@ interface Staff {
   // approval skips balance tracking.
   salaryStructureId?: string | null;
   leaveRuleId?: string | null;
+  // ID card: job title (separate from the access `role`) and photo.
+  designation?: string | null;
+  photoUrl?: string | null;
 }
 
 interface CustomRoleLite {
@@ -67,7 +71,12 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
     // Salary structure + leave rule assignment.
     salaryStructureId: initial?.salaryStructureId ?? '',
     leaveRuleId: initial?.leaveRuleId ?? '',
+    // ID card
+    designation: initial?.designation ?? '',
+    photoUrl: initial?.photoUrl ?? '',
   });
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   // "Use custom shift" toggle — collapsed by default. Auto-expands when
   // ANY shift override field is already set on the existing staff row.
   const [showShift, setShowShift] = useState(
@@ -75,6 +84,21 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
        initial?.lateGraceMinutes != null || initial?.halfDayAfterMinutes != null),
   );
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
+
+  const uploadPhoto = async (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const resized = await resizeImage(file, 'staffPhoto');
+      const result = await api.upload<{ url: string }>('/upload/image', resized);
+      set('photoUrl', result.url);
+    } catch (err) {
+      setUploadError((err as Error).message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   // Custom roles the admin may assign. Filter to ones whose baseRole
   // matches the selected role — a "Head Chef" (base=KITCHEN) shouldn't
@@ -104,6 +128,9 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
         customRoleId: form.customRoleId || null,
         // Tipsoi person identifier — empty string clears it.
         tipsoiPersonId: form.tipsoiPersonId.trim() || null,
+        // ID card — empty clears.
+        designation: form.designation.trim() || null,
+        photoUrl: form.photoUrl || null,
       };
       // Per-staff shift override fields. Sent only when the toggle is
       // on; sending them as null (when toggle is off) clears any
@@ -147,6 +174,26 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
         </div>
 
         <div className="space-y-3">
+          {/* ID card photo — portrait, resized before upload. */}
+          <div className="flex items-center gap-4">
+            <label className="relative w-20 h-24 shrink-0 border border-dashed border-[#2A2A2A] bg-[#0D0D0D] flex items-center justify-center overflow-hidden cursor-pointer hover:border-[#D62B2B]"
+              title="Upload ID card photo">
+              {form.photoUrl
+                ? <img src={form.photoUrl} alt="Staff photo" className="w-full h-full object-cover" />
+                : <Camera size={20} className="text-[#555]" />}
+              {uploading && <span className="absolute inset-0 bg-black/60 flex items-center justify-center text-[10px] text-white">Uploading…</span>}
+              <input type="file" accept="image/*" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadPhoto(f); e.target.value = ''; }} />
+            </label>
+            <div className="text-[10px] text-[#666] font-body space-y-1">
+              <p className="text-xs font-medium tracking-widest uppercase text-[#999]">Photo (ID card)</p>
+              <p>Click the box to upload. A clear, front-facing portrait works best.</p>
+              {form.photoUrl && (
+                <button type="button" onClick={() => set('photoUrl', '')} className="text-[#D62B2B] hover:underline">Remove photo</button>
+              )}
+              {uploadError && <p className="text-[#D62B2B]">{uploadError}</p>}
+            </div>
+          </div>
           <div>
             <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">Name *</label>
             <input value={form.name} onChange={(e) => set('name', e.target.value)}
@@ -170,6 +217,16 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
                 {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
+          </div>
+          <div>
+            <label className="text-xs font-body font-medium tracking-widest uppercase text-[#999] block mb-1">
+              Designation <span className="text-[#555] normal-case tracking-normal">(job title on the ID card)</span>
+            </label>
+            <input value={form.designation} onChange={(e) => set('designation', e.target.value)}
+              placeholder="e.g. Head Chef, Senior Waiter, Barista"
+              maxLength={60}
+              className="w-full border border-[#2A2A2A] px-3 py-2.5 text-sm font-body outline-none focus:border-[#D62B2B] bg-[#0D0D0D] text-white" />
+            <p className="text-[10px] text-[#555] mt-1">Shown on the ID card only. Role above still decides what they can access.</p>
           </div>
           {/* Custom role overlay — optional. Only custom roles whose
               baseRole matches the selected security role appear here. */}
@@ -308,7 +365,7 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
         <div className="flex gap-3 pt-2">
           <button onClick={onClose} className="flex-1 border border-[#2A2A2A] py-2.5 text-sm font-body text-[#999]">Cancel</button>
           <button onClick={() => mutation.mutate()}
-            disabled={!form.name.trim() || !form.email.trim() || mutation.isPending}
+            disabled={!form.name.trim() || !form.email.trim() || uploading || mutation.isPending}
             className="flex-1 bg-[#D62B2B] text-white py-2.5 text-sm font-body font-medium disabled:opacity-40">
             {mutation.isPending ? 'Saving…' : 'Save'}
           </button>
@@ -360,7 +417,17 @@ export default function StaffPage() {
           <tbody>
             {staff.map((s) => (
               <tr key={s.id} className="border-b border-[#2A2A2A] last:border-0">
-                <td className="px-5 py-3 font-medium text-white">{s.name}</td>
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-10 shrink-0 bg-[#0D0D0D] border border-[#2A2A2A] overflow-hidden flex items-center justify-center">
+                      {s.photoUrl ? <img src={s.photoUrl} alt="" className="w-full h-full object-cover" /> : <Camera size={12} className="text-[#444]" />}
+                    </div>
+                    <div>
+                      <p className="font-medium text-white">{s.name}</p>
+                      {s.designation && <p className="text-[11px] text-[#999]">{s.designation}</p>}
+                    </div>
+                  </div>
+                </td>
                 <td className="px-5 py-3 text-[#999]">{s.email}</td>
                 <td className="px-5 py-3 text-[#999]">{s.phone || '—'}</td>
                 <td className="px-5 py-3">

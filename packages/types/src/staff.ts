@@ -36,6 +36,10 @@ export interface StaffMember extends AuditFields {
    *  credits this staff's LeaveBalance per the rule, and leave
    *  approval soft-warns when the request exceeds the balance. */
   leaveRuleId?: string | null;
+  /** Job title for the ID card ("Head Chef"); `role` stays the access level. */
+  designation?: string | null;
+  /** ID card photo URL. */
+  photoUrl?: string | null;
 }
 
 export interface CreateStaffDto {
@@ -54,6 +58,8 @@ export interface CreateStaffDto {
   halfDayAfterMinutes?: number | null;
   salaryStructureId?: string | null;
   leaveRuleId?: string | null;
+  designation?: string | null;
+  photoUrl?: string | null;
 }
 
 export interface UpdateStaffDto extends Partial<Omit<CreateStaffDto, 'password'>> {

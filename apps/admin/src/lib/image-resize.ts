@@ -25,6 +25,8 @@ export const IMAGE_PRESETS = {
   favicon: { maxWidth: 192, maxHeight: 192, quality: 0.9 },
   /** Ingredient image — small square */
   ingredient: { maxWidth: 300, maxHeight: 300, quality: 0.85 },
+  /** Staff ID card photo — portrait */
+  staffPhoto: { maxWidth: 600, maxHeight: 800, quality: 0.88 },
   /** About section image */
   about: { maxWidth: 1200, maxHeight: 900, quality: 0.85 },
 } as const;

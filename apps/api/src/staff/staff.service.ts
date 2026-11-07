@@ -24,6 +24,8 @@ export class StaffService {
         // Salary structure + leave rule assignments — null when
         // unassigned (legacy / no rule yet defined).
         salaryStructureId: true, leaveRuleId: true,
+        // ID card fields.
+        designation: true, photoUrl: true,
       },
       orderBy: { name: 'asc' },
     });
@@ -54,8 +56,10 @@ export class StaffService {
         branchId,
         hireDate: dto.hireDate ? new Date(dto.hireDate) : new Date(),
         canAccessPos: dto.canAccessPos ?? true,
+        designation: dto.designation?.trim() || null,
+        photoUrl: dto.photoUrl || null,
       },
-      select: { id: true, name: true, email: true, role: true, customRoleId: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, customRoleId: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, designation: true, photoUrl: true, createdAt: true },
     });
   }
 
@@ -69,10 +73,11 @@ export class StaffService {
     if (typeof password === 'string' && password.length > 0) {
       data.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     }
+    if (typeof data.designation === 'string') data.designation = data.designation.trim() || null;
     return this.prisma.staff.update({
       where: { id },
       data,
-      select: { id: true, name: true, email: true, role: true, customRoleId: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, updatedAt: true },
+      select: { id: true, name: true, email: true, role: true, customRoleId: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, designation: true, photoUrl: true, updatedAt: true },
     });
   }
 
