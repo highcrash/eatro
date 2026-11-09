@@ -3,6 +3,20 @@
 All notable changes to the desktop cashier app are documented here.
 Versioning follows SemVer. Tags are `pos-desktop-v{version}`.
 
+## 2.0.31 — Membership cards (2026-11-09)
+
+POS bundle only; no native / IPC / printing changes.
+
+- **+ Member Card** on the order screen, next to + Discount and + Coupon.
+  Type the 16-digit number or scan the card's QR (a USB scanner types
+  into the same box). The card's member is attached to the order, the
+  plan's discount applied, and the member's name, masked phone and
+  expiry shown so the cashier can check it is the guest's own card.
+- A card still in stock opens a short hand-over form (phone + name)
+  before the discount applies.
+- Needs internet, like coupons. The receipt's discount line names the
+  plan and the card's last 4 digits.
+
 ## 2.0.30 — Menu numbers, combo choices, menu order (2026-11-01)
 
 POS bundle only; no native / IPC / printing changes.

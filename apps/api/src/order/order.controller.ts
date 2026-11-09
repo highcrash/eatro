@@ -186,6 +186,12 @@ export class OrderController {
     return this.orderService.applyCoupon(id, user.branchId, dto.code);
   }
 
+  @Post(':id/apply-membership')
+  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  applyMembership(@Param('id') id: string, @Body() dto: { number: string }, @CurrentUser() user: JwtPayload) {
+    return this.orderService.applyMembership(id, user.branchId, dto.number);
+  }
+
   @Post(':id/items/:itemId/approve')
   @Roles('OWNER', 'MANAGER', 'CASHIER', 'ADVISOR', 'WAITER')
   approveItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: JwtPayload) {

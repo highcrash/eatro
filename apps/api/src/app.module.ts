@@ -48,6 +48,7 @@ import { SmsModule } from './sms/sms.module';
 import { MushakModule } from './mushak/mushak.module';
 import { CustomRoleModule } from './custom-role/custom-role.module';
 import { CustomerModule } from './customer/customer.module';
+import { MembershipModule } from './membership/membership.module';
 import { BrandingModule } from './branding/branding.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { CashierOpsModule } from './cashier-ops/cashier-ops.module';
@@ -156,6 +157,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     // Customer Management
     CustomerModule,
+    MembershipModule,
 
     // Branding & Theming
     BrandingModule,

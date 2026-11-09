@@ -23,6 +23,7 @@ import VariantPickerDialog from '../components/VariantPickerDialog';
 import CustomiseLineDialog from '../components/CustomiseLineDialog';
 import AddonPickerDialog from '../components/AddonPickerDialog';
 import ComboChoiceDialog from '../components/ComboChoiceDialog';
+import MemberCardDialog from '../components/MemberCardDialog';
 import { byMenuPosition, menuNumber, searchMenu } from '../lib/menu-search';
 import ApprovalOtpDialog from '../components/ApprovalOtpDialog';
 import { useCashierPermissions } from '../lib/permissions';
@@ -1203,6 +1204,7 @@ function ActiveOrderView({
 
   const [showDiscountPicker, setShowDiscountPicker] = useState(false);
   const [showCouponInput, setShowCouponInput] = useState(false);
+  const [showMemberCard, setShowMemberCard] = useState(false);
   const [posCouponCode, setPosCouponCode] = useState('');
   const [custSearch, setCustSearch] = useState('');
   const [showCustForm, setShowCustForm] = useState(false);
@@ -1761,10 +1763,18 @@ function ActiveOrderView({
               >
                 + Coupon
               </button>
+              <button
+                onClick={() => { if (online) setShowMemberCard(true); }}
+                disabled={!online}
+                title={online ? 'Type or scan a membership card' : 'Member cards need internet to check'}
+                className="flex-1 bg-theme-bg hover:bg-theme-surface-alt disabled:opacity-40 disabled:cursor-not-allowed text-theme-text font-semibold py-2 rounded-theme text-xs transition-colors"
+              >
+                + Member Card
+              </button>
             </div>
             {!online && (
               <div className="flex justify-end pr-1">
-                <OfflineInlineHint label="Coupon needs internet" />
+                <OfflineInlineHint label="Coupon and member card need internet" />
               </div>
             )}
           </div>
@@ -2083,6 +2093,17 @@ function ActiveOrderView({
             </div>
           </div>
         </div>
+      )}
+
+      {showMemberCard && (
+        <MemberCardDialog
+          orderId={order.id}
+          onClose={() => setShowMemberCard(false)}
+          onApplied={(updated) => {
+            setOrder(updated);
+            void queryClient.invalidateQueries({ queryKey: ['orders', 'table', order.tableId] });
+          }}
+        />
       )}
 
       {/* Discount picker modal */}

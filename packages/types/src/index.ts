@@ -13,6 +13,7 @@ export * from './expense';
 export * from './account';
 export * from './pre-ready';
 export * from './permissions';
+export * from './membership';
 export * from './reservation';
 export * from './liabilities';
 export * from './shopping-request';

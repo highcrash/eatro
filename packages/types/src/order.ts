@@ -100,6 +100,9 @@ export interface Order extends AuditFields {
   status: OrderStatus;
   items: OrderItem[];
   payments?: OrderPayment[];
+  /** Applied membership card, when the discount came from one. */
+  membershipCardId?: string | null;
+  membershipCardCode?: string | null;
   subtotal: MoneyAmount;
   taxAmount: MoneyAmount;
   discountAmount: MoneyAmount;

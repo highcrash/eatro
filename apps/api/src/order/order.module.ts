@@ -12,12 +12,13 @@ import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { MarketingModule } from '../marketing/marketing.module';
 import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { PermissionsModule } from '../permissions/permissions.module';
+import { MembershipModule } from '../membership/membership.module';
 
 @Module({
   imports: [
     WsGatewayModule, RecipeModule, AccountModule, BranchSettingsModule,
     QrGateModule, SmsModule, MushakModule, LoyaltyModule, MarketingModule,
-    ActivityLogModule, PermissionsModule,
+    ActivityLogModule, PermissionsModule, MembershipModule,
   ],
   controllers: [OrderController, QrOrderController],
   providers: [OrderService],

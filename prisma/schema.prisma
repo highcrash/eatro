@@ -263,6 +263,8 @@ model Branch {
   purchaseReturns     PurchaseReturn[]
   discounts           Discount[]
   coupons             Coupon[]
+  membershipPlans     MembershipPlan[]
+  membershipCards     MembershipCard[]
   customers           Customer[]
   reviews             Review[]
   reservations        Reservation[]
@@ -639,6 +641,7 @@ model Staff {
   externalApiKeysCreated    ExternalApiKey[]     @relation("ExternalApiKeyCreator")
   shoppingRequestsRequested ShoppingRequest[]    @relation("ShoppingRequestRequester")
   shoppingRequestsApproved  ShoppingRequest[]    @relation("ShoppingRequestApprover")
+  membershipCardsActivated  MembershipCard[]     @relation("MembershipCardActivator")
 
   @@index([branchId, isActive])
   @@index([email])
@@ -740,6 +743,7 @@ model MenuCategory {
   parent    MenuCategory?  @relation("CategoryParent", fields: [parentId], references: [id])
   children  MenuCategory[] @relation("CategoryParent")
   menuItems MenuItem[]
+  membershipRules MembershipPlanRule[]
 
   @@index([branchId, sortOrder])
   @@map("menu_categories")
@@ -834,6 +838,7 @@ model MenuItem {
   /// Inverse for Coupon.freeMenuItem. Mostly informational; lets the
   /// admin spot which coupons would break if this item is deleted.
   freeItemCoupons  Coupon[]              @relation("CouponFreeItem")
+  membershipRules  MembershipPlanRule[]
 
   @@index([branchId, categoryId, isAvailable])
   @@index([branchId, sortOrder])
@@ -963,6 +968,7 @@ model Customer {
   reservations        Reservation[]
   coupons             Coupon[]
   loyaltyTransactions LoyaltyTransaction[]
+  membershipCards     MembershipCard[]
 
   @@unique([branchId, phone])
   @@index([branchId, phone])
@@ -1056,6 +1062,8 @@ model Order {
   discountName        String? // denormalized discount/coupon display name
   couponId            String? // applied Coupon ID
   couponCode          String? // denormalized coupon code
+  membershipCardId    String? // applied membership card
+  membershipCardCode  String? // denormalized card number, "3287 0001 4829 1736"
   totalAmount         Decimal     @db.Decimal(14, 2)
   // Auto rounding to the nearest taka (100 paisa). Signed delta in paisa;
   // positive when the bill was rounded UP, negative when rounded DOWN.
@@ -1290,6 +1298,96 @@ model Coupon {
   @@index([campaignTag])
   @@index([freeMenuItemId])
   @@map("coupons")
+}
+
+enum MembershipCardStatus {
+  IN_STOCK
+  ACTIVE
+  BLOCKED
+}
+
+enum MembershipRuleKind {
+  EXCLUDE
+  SPECIAL
+}
+
+/// What a membership card gives: a default percent off, with per-item /
+/// per-category exclusions and member-only rates (MembershipPlanRule).
+model MembershipPlan {
+  id              String   @id @default(cuid())
+  branchId        String
+  name            String
+  discountPercent Decimal  @db.Decimal(5, 2)
+  /// Months a card stays valid from the day it is handed over.
+  validityMonths  Int      @default(12)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  branch Branch               @relation(fields: [branchId], references: [id])
+  rules  MembershipPlanRule[]
+  cards  MembershipCard[]
+
+  @@index([branchId])
+  @@map("membership_plans")
+}
+
+/// Targets exactly one of menuItemId / categoryId. EXCLUDE = no member
+/// discount; SPECIAL = this rule's type + value instead of the default.
+model MembershipPlanRule {
+  id         String             @id @default(cuid())
+  planId     String
+  menuItemId String?
+  categoryId String?
+  kind       MembershipRuleKind
+  type       DiscountType?
+  /// paisa per unit for FLAT, percentage for PERCENTAGE.
+  value      Decimal?           @db.Decimal(14, 2)
+  createdAt  DateTime           @default(now())
+
+  plan     MembershipPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  menuItem MenuItem?      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  category MenuCategory?  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, menuItemId])
+  @@unique([planId, categoryId])
+  @@index([planId])
+  @@map("membership_plan_rules")
+}
+
+/// A pre-printed card. Generated IN_STOCK with no owner; handing it over
+/// links a customer and starts the validity clock. "Expired" is ACTIVE
+/// with expiresAt in the past.
+model MembershipCard {
+  id            String               @id @default(cuid())
+  branchId      String
+  planId        String
+  serial        Int
+  /// 16 digits, no spaces: prefix + serial + random + Luhn check digit.
+  number        String               @unique
+  status        MembershipCardStatus @default(IN_STOCK)
+  batchLabel    String?
+  customerId    String?
+  activatedAt   DateTime?
+  activatedById String?
+  expiresAt     DateTime?
+  blockedReason String?
+  /// Set on a lost card when its member moves to a new one.
+  replacedById  String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  branch      Branch           @relation(fields: [branchId], references: [id])
+  plan        MembershipPlan   @relation(fields: [planId], references: [id])
+  customer    Customer?        @relation(fields: [customerId], references: [id])
+  activatedBy Staff?           @relation("MembershipCardActivator", fields: [activatedById], references: [id])
+  replacedBy  MembershipCard?  @relation("MembershipCardReplacement", fields: [replacedById], references: [id])
+  replaces    MembershipCard[] @relation("MembershipCardReplacement")
+
+  @@unique([branchId, serial])
+  @@index([branchId, status])
+  @@index([customerId])
+  @@map("membership_cards")
 }
 
 model MenuItemDiscount {

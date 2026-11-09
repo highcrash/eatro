@@ -16,6 +16,8 @@ import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MarketingService } from '../marketing/marketing.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { PermissionsService } from '../permissions/permissions.service';
+import { MembershipService } from '../membership/membership.service';
+import { maskCardNumber, formatCardNumber } from '../membership/membership-number';
 
 /**
  * Service charge + VAT calculator used by every place that recomputes an
@@ -113,6 +115,7 @@ export class OrderService {
     private readonly marketing: MarketingService,
     private readonly activityLog: ActivityLogService,
     private readonly permissions: PermissionsService,
+    private readonly membership: MembershipService,
   ) {}
 
   /**
@@ -140,7 +143,7 @@ export class OrderService {
    */
   private async recomputeDiscountAmount(
     branchId: string,
-    items: { menuItemId: string; totalPrice: number }[],
+    items: { menuItemId: string; quantity: number; totalPrice: number }[],
     discountId: string | null,
     couponId: string | null,
     orderId?: string,
@@ -161,6 +164,15 @@ export class OrderService {
         couponDiscount = config.type === 'FLAT'
           ? Math.min(config.value.toNumber(), applicableForCoupon)
           : Math.round(applicableForCoupon * (config.value.toNumber() / 100));
+      }
+    }
+
+    // A member card on the order takes the place of the coupon/discount
+    // slice and rescales the same way.
+    if (orderId) {
+      const onOrder = await this.prisma.order.findUnique({ where: { id: orderId }, select: { membershipCardId: true } });
+      if (onOrder?.membershipCardId) {
+        couponDiscount += await this.membership.discountForCard(branchId, onOrder.membershipCardId, items);
       }
     }
 
@@ -1138,6 +1150,7 @@ export class OrderService {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') throw new BadRequestException('Cannot modify this order');
     if (order.couponId) throw new BadRequestException('Remove coupon before applying a discount');
+    if (order.membershipCardId) throw new BadRequestException('Remove the member card before applying a discount');
     // Discounts must be tied to a customer so loyalty + usage-audit makes
     // sense. POS shows a "pick a customer first" popup and retries; QR
     // shows a login link. Returning 400 lets the client show that.
@@ -1182,6 +1195,50 @@ export class OrderService {
     return updated;
   }
 
+  /**
+   * Member card shown at the till: attaches the card's customer to the
+   * order and applies the plan's discount. Clients detect the CARD_*
+   * prefix in the error message (an unissued card opens the hand-over form).
+   */
+  async applyMembership(orderId: string, branchId: string, number: string) {
+    const order = await this.findOne(orderId, branchId);
+    if (order.status === 'PAID' || order.status === 'VOID') throw new BadRequestException('Cannot modify this order');
+    if (order.discountId || order.couponId) throw new BadRequestException('Remove the discount or coupon before applying a member card');
+
+    const card = await this.membership.resolveForOrder(branchId, number);
+    const activeItems = order.items.filter((i) => !i.voidedAt);
+    const subtotal = activeItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
+    const memberSlice = await this.membership.discountForCard(
+      branchId,
+      card.id,
+      activeItems.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, totalPrice: i.totalPrice.toNumber() })),
+    );
+    const loyaltySlice = await this.loyalty.getOrderLoyaltyDiscountPaisa(orderId);
+    const discountAmount = Math.min(memberSlice + loyaltySlice, subtotal);
+    const branch = await this.prisma.branch.findFirstOrThrow({ where: { id: branchId } });
+    const { serviceChargeAmount, taxAmount, totalAmount, roundAdjustment } = computeTotals(branch, subtotal, discountAmount);
+
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        discountAmount,
+        discountName: `${card.planName} (${maskCardNumber(card.number)})`,
+        membershipCardId: card.id,
+        membershipCardCode: formatCardNumber(card.number),
+        customerId: card.customer.id,
+        customerName: card.customer.name,
+        customerPhone: card.customer.phone,
+        totalAmount,
+        taxAmount,
+        serviceChargeAmount,
+        roundAdjustment,
+      },
+      include: { items: true, payments: true },
+    });
+    this.ws.emitOrderUpdate(orderId, branchId, 'order:updated', updated);
+    return { order: updated, member: card.member };
+  }
+
   async removeDiscount(orderId: string, branchId: string) {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') throw new BadRequestException('Cannot modify this order');
@@ -1218,7 +1275,7 @@ export class OrderService {
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal, discountAmount, discountId: null, discountName: null, couponId: null, couponCode: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
+      data: { subtotal, discountAmount, discountId: null, discountName: null, couponId: null, couponCode: null, membershipCardId: null, membershipCardCode: null, totalAmount, taxAmount, serviceChargeAmount, roundAdjustment },
       include: { items: true, payments: true },
     });
 
@@ -1241,6 +1298,7 @@ export class OrderService {
     const order = await this.findOne(orderId, branchId);
     if (order.status === 'PAID' || order.status === 'VOID') throw new BadRequestException('Cannot modify this order');
     if (order.discountId) throw new BadRequestException('Remove discount before applying a coupon');
+    if (order.membershipCardId) throw new BadRequestException('Remove the member card before applying a coupon');
     // Coupons are tied to a customer account for usage tracking and to
     // block coupon-sharing. Clients detect CUSTOMER_REQUIRED in the
     // error message and show a customer picker (POS) or login link (QR).
@@ -1478,7 +1536,7 @@ export class OrderService {
     const subtotal = remaining.reduce((s, i) => s + Number(i.totalPrice), 0);
     const discountAmount = await this.recomputeDiscountAmount(
       branchId,
-      remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: Number(i.totalPrice) })),
+      remaining.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, totalPrice: Number(i.totalPrice) })),
       order.discountId ?? null,
       order.couponId ?? null,
       orderId,
@@ -1841,7 +1899,7 @@ export class OrderService {
     const subtotal = allItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     const discountAmount = await this.recomputeDiscountAmount(
       branchId,
-      allItems.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      allItems.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, totalPrice: i.totalPrice.toNumber() })),
       order.discountId ?? null,
       order.couponId ?? null,
       id,
@@ -1938,7 +1996,7 @@ export class OrderService {
     const subtotal = remaining.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     const discountAmount = await this.recomputeDiscountAmount(
       branchId,
-      remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      remaining.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, totalPrice: i.totalPrice.toNumber() })),
       order.discountId ?? null,
       order.couponId ?? null,
       id,
@@ -2010,7 +2068,7 @@ export class OrderService {
     const subtotal = remaining.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     const discountAmount = await this.recomputeDiscountAmount(
       branchId,
-      remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      remaining.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, totalPrice: i.totalPrice.toNumber() })),
       order.discountId ?? null,
       order.couponId ?? null,
       orderId,
@@ -2051,7 +2109,7 @@ export class OrderService {
     const subtotal = remaining.reduce((s, i) => s + Number(i.totalPrice), 0);
     const discountAmount = await this.recomputeDiscountAmount(
       branchId,
-      remaining.map((i) => ({ menuItemId: i.menuItemId, totalPrice: Number(i.totalPrice) })),
+      remaining.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, totalPrice: Number(i.totalPrice) })),
       order.discountId ?? null,
       order.couponId ?? null,
       orderId,
@@ -2244,7 +2302,7 @@ export class OrderService {
     const tSubtotal = targetItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     const tDiscount = await this.recomputeDiscountAmount(
       branchId,
-      targetItems.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      targetItems.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, totalPrice: i.totalPrice.toNumber() })),
       targetOrder.discountId ?? null,
       targetOrder.couponId ?? null,
       targetOrderId,
@@ -2272,7 +2330,7 @@ export class OrderService {
     const sSubtotal = srcItems.reduce((s, i) => s + i.totalPrice.toNumber(), 0);
     const sDiscount = await this.recomputeDiscountAmount(
       branchId,
-      srcItems.map((i) => ({ menuItemId: i.menuItemId, totalPrice: i.totalPrice.toNumber() })),
+      srcItems.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, totalPrice: i.totalPrice.toNumber() })),
       order.discountId ?? null,
       order.couponId ?? null,
       orderId,

@@ -39,6 +39,7 @@ import {
   Star,
   Send,
   Gift,
+  CreditCard,
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -130,6 +131,7 @@ const NAV_GROUPS: Array<{
       { to: '/discounts', icon: BarChart2, label: 'Discounts & Coupons', allowedRoles: OPERATIONAL_ROLES },
       { to: '/marketing/campaigns', icon: Send, label: 'Coupon Campaigns', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/marketing/loyalty', icon: Gift, label: 'Loyalty', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/membership', icon: CreditCard, label: 'Membership Cards', allowedRoles: ['OWNER', 'MANAGER'] },
     ],
   },
   {
