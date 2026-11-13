@@ -113,7 +113,7 @@ function TestBot() {
   const [text, setText] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
-  useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [lines.length]);
+  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [lines.length]);
 
   const send = useMutation({
     mutationFn: (body: { text: string; image?: string }) =>

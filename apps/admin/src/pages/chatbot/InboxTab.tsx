@@ -87,7 +87,8 @@ function Thread({ id, onChange }: { id: string; onChange: () => void }) {
   const bottom = useRef<HTMLDivElement>(null);
   const { data: conv } = useQuery<ConversationDetail>({ queryKey: ['chat-conversation', id], queryFn: () => api.get(`/chatbot/conversations/${id}`), refetchInterval: 6_000 });
   const count = conv?.messages.length ?? 0;
-  useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [count]);
+  // Braces matter: newer browsers return a promise from scrollIntoView, and React would call it as a clean-up.
+  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [count]);
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['chat-conversation', id] });

@@ -86,7 +86,8 @@ export default function ChatWidget() {
     const t = setInterval(() => void load().catch(() => undefined), 6_000);
     return () => clearInterval(t);
   }, [open, load]);
-  useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [messages.length, busy, open]);
+  // Braces matter: newer browsers return a promise from scrollIntoView, and React would call it as a clean-up.
+  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [messages.length, busy, open]);
 
   const send = async (body: { text?: string; image?: string }, shown: string) => {
     if (busy) return;
