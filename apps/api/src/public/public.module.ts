@@ -7,5 +7,6 @@ import { OrderModule } from '../order/order.module';
   imports: [OrderModule],
   controllers: [PublicController],
   providers: [PublicService],
+  exports: [PublicService],
 })
 export class PublicModule {}

@@ -12,6 +12,8 @@ import ReservationPage from './pages/ReservationPage';
 import ChefsSpecialPage from './pages/ChefsSpecialPage';
 import DiscountsPage from './pages/DiscountsPage';
 import NotFoundPage from './pages/NotFoundPage';
+import PrivacyPage from './pages/PrivacyPage';
+import DataDeletionPage from './pages/DataDeletionPage';
 import MaintenancePage from './pages/MaintenancePage';
 import { useWebsiteContent } from './lib/cms';
 
@@ -47,6 +49,8 @@ export default function WebApp() {
         <Route path="/about" element={<AboutPage />} />
         <Route path="/contact" element={<ContactPage />} />
         <Route path="/reservation" element={<ReservationPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/data-deletion" element={<DataDeletionPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

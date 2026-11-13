@@ -25,6 +25,9 @@ const SENSITIVE_FIELDS = new Set(
     'hmacSecretB64u',
     'jwtSecret',
     'webhookSecret',
+    'apiKey',
+    'apiKeyEnc',
+    'appSecret',
   ].map((s) => s.toLowerCase()),
 );
 

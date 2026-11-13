@@ -3187,3 +3187,292 @@ model ShoppingRequestLine {
   @@index([ingredientId])
   @@map("shopping_request_lines")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHAT ASSISTANT (website / Messenger / Instagram / WhatsApp)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ChatChannel {
+  WEB
+  MESSENGER
+  INSTAGRAM
+  WHATSAPP
+}
+
+enum ChatConversationStatus {
+  BOT
+  HUMAN
+  CLOSED
+}
+
+enum ChatSender {
+  CUSTOMER
+  BOT
+  STAFF
+}
+
+/// SENT reached the customer. DRAFT waits for staff (Suggest mode).
+/// SHADOW is a trial model's reply that only the owner sees.
+enum ChatMessageStatus {
+  SENT
+  DRAFT
+  DISCARDED
+  SHADOW
+}
+
+enum ChatMode {
+  OFF
+  SUGGEST
+  AUTO
+}
+
+enum ChatLeadStatus {
+  NEW
+  CONTACTED
+  BOOKED
+  LOST
+}
+
+enum AiProviderType {
+  OPENAI_COMPATIBLE
+  ANTHROPIC
+}
+
+enum AiJob {
+  CHAT
+  VISION
+  COMMENT
+}
+
+model ChatConversation {
+  id                    String                 @id @default(cuid())
+  branchId              String
+  channel               ChatChannel
+  /// Website session id, Messenger PSID, Instagram user id or WhatsApp number.
+  externalUserId        String
+  customerName          String?
+  /// Pulled out of the customer's own messages by the server. Never sent to the AI.
+  customerPhone         String?
+  customerId            String?
+  status                ChatConversationStatus @default(BOT)
+  needsStaff            Boolean                @default(false)
+  needsStaffReason      String?
+  /// While set and in the future, the bot stays quiet (staff are handling it).
+  humanUntil            DateTime?
+  /// Admin "Test bot" chats: no bookings, kept out of the inbox and reports.
+  isTest                Boolean                @default(false)
+  staffUnread           Int                    @default(0)
+  lastMessageAt         DateTime               @default(now())
+  lastCustomerMessageAt DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  messages ChatMessage[]
+  leads    ChatLead[]
+
+  @@unique([branchId, channel, externalUserId])
+  @@index([branchId, lastMessageAt])
+  @@index([branchId, needsStaff])
+  @@map("chat_conversations")
+}
+
+model ChatMessage {
+  id             String            @id @default(cuid())
+  conversationId String
+  sender         ChatSender
+  /// QUICK_REPLY | AI | FALLBACK | SYSTEM | STAFF
+  source         String?
+  status         ChatMessageStatus @default(SENT)
+  text           String            @db.Text
+  /// Dish cards shown with the message: [{ name, price, wasPrice, imageUrl, url }]
+  cards          Json?
+  /// True when the customer sent a photo. The photo itself is not stored.
+  hasImage       Boolean           @default(false)
+  /// The channel's own message id, so a webhook retry is not answered twice.
+  externalId     String?           @unique
+  aiConnectionId String?
+  staffId        String?
+  createdAt      DateTime          @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("chat_messages")
+}
+
+model ChatQuickReply {
+  id        String   @id @default(cuid())
+  branchId  String
+  title     String
+  /// One keyword or phrase per line, any language.
+  keywords  String   @db.Text
+  /// May use {openingHours} {address} {phone} {menuUrl} {reservationUrl}.
+  answer    String   @db.Text
+  isActive  Boolean  @default(true)
+  priority  Int      @default(0)
+  hits      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([branchId, isActive])
+  @@map("chat_quick_replies")
+}
+
+/// "Teach the bot" rules. Every save is a new row; the newest is current,
+/// older rows are the undo history.
+model ChatRuleVersion {
+  id            String   @id @default(cuid())
+  branchId      String
+  /// JSON array of plain-language rules.
+  rules         Json
+  createdByName String?
+  createdAt     DateTime @default(now())
+
+  @@index([branchId, createdAt])
+  @@map("chat_rule_versions")
+}
+
+model ChatUnanswered {
+  id             String   @id @default(cuid())
+  branchId       String
+  conversationId String?
+  question       String   @db.Text
+  reason         String
+  resolved       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([branchId, resolved, createdAt])
+  @@map("chat_unanswered")
+}
+
+/// A party enquiry raised in chat.
+model ChatLead {
+  id             String         @id @default(cuid())
+  branchId       String
+  conversationId String
+  name           String?
+  phone          String?
+  guests         Int
+  date           String?
+  time           String?
+  occasion       String?
+  /// Priced options as quoted: [{ label, perHead, total, lines: [{ name, qty, lineTotal }] }]
+  quote          Json?
+  status         ChatLeadStatus @default(NEW)
+  notes          String?        @db.Text
+  reservationId  String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([branchId, status, createdAt])
+  @@map("chat_leads")
+}
+
+model ChatbotSetting {
+  id               String   @id @default(cuid())
+  branchId         String   @unique
+  webMode          ChatMode @default(OFF)
+  messengerMode    ChatMode @default(OFF)
+  instagramMode    ChatMode @default(OFF)
+  whatsappMode     ChatMode @default(OFF)
+  assistantName    String   @default("EATRO Assistant")
+  greeting         String   @default("Hi! I'm the EATRO Assistant. Ask me about our menu, offers, or booking a table.") @db.Text
+  fallbackText     String   @default("Thanks for your message. A team member will reply shortly.") @db.Text
+  /// Plain-language guidance for party quotes (portions, advance, limits).
+  partyRules       String?  @db.Text
+  /// Customer photos go to the AI only when this is on.
+  visionEnabled    Boolean  @default(false)
+  imageDailyLimit  Int      @default(5)
+  /// Hours the bot stays quiet after staff take over a chat.
+  humanPauseHours  Int      @default(12)
+  retentionDays    Int      @default(90)
+  /// Taka per US dollar, used to show AI cost and enforce budgets in taka.
+  usdRate          Decimal  @default(122) @db.Decimal(8, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("chatbot_settings")
+}
+
+/// One AI account + model the bot can use. Swappable from admin.
+model AiConnection {
+  id                String         @id @default(cuid())
+  branchId          String
+  name              String
+  provider          AiProviderType
+  /// OpenAI-compatible only, e.g. https://openrouter.ai/api/v1
+  baseUrl           String?
+  /// AES-256-GCM, see chatbot/secrets.ts. Never returned by the API.
+  apiKeyEnc         String         @db.Text
+  model             String
+  supportsVision    Boolean        @default(false)
+  isActive          Boolean        @default(true)
+  /// Taka per calendar month. Null = no limit.
+  monthlyBudget     Decimal?       @db.Decimal(12, 2)
+  /// Requests per day (e.g. 1000 on OpenRouter free). Null = no limit.
+  dailyRequestLimit Int?
+  /// US dollars per million tokens, as the provider publishes them.
+  inputPricePerM    Decimal        @default(0) @db.Decimal(10, 4)
+  outputPricePerM   Decimal        @default(0) @db.Decimal(10, 4)
+  selfTestScore     Int?
+  selfTestAt        DateTime?
+  selfTestDetail    Json?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  deletedAt         DateTime?
+
+  @@index([branchId])
+  @@map("ai_connections")
+}
+
+/// Which connections do a job, in backup order.
+model AiRoute {
+  id                 String   @id @default(cuid())
+  branchId           String
+  job                AiJob
+  /// JSON array of AiConnection ids, first = primary.
+  connectionIds      Json
+  /// Trial: this share of chats goes to splitConnectionId first.
+  splitConnectionId  String?
+  splitPercent       Int      @default(0)
+  /// Trial: drafts a reply only the owner sees.
+  shadowConnectionId String?
+  updatedAt          DateTime @updatedAt
+
+  @@unique([branchId, job])
+  @@map("ai_routes")
+}
+
+model AiUsage {
+  id             String   @id @default(cuid())
+  branchId       String
+  connectionId   String
+  job            AiJob
+  conversationId String?
+  inputTokens    Int      @default(0)
+  outputTokens   Int      @default(0)
+  costUsd        Decimal  @default(0) @db.Decimal(12, 6)
+  latencyMs      Int      @default(0)
+  /// OK | ERROR | BLOCKED | SHADOW | TEST
+  outcome        String
+  createdAt      DateTime @default(now())
+
+  @@index([branchId, createdAt])
+  @@index([connectionId, createdAt])
+  @@map("ai_usage")
+}
+
+/// Snapshot of the routes before each change, for one-click "Switch back".
+model AiConfigHistory {
+  id            String   @id @default(cuid())
+  branchId      String
+  snapshot      Json
+  note          String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+
+  @@index([branchId, createdAt])
+  @@map("ai_config_history")
+}

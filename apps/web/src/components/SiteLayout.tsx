@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useBranding, useWebsiteContent } from '../lib/cms';
 import BranchSelector from './BranchSelector';
+import ChatWidget from './ChatWidget';
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -383,8 +384,13 @@ export default function SiteLayout() {
 
         <div className="border-t border-border px-6 py-5 text-center text-xs text-muted">
           &copy; {new Date().getFullYear()} {brandName}. All rights reserved.
+          <span className="mx-2">·</span>
+          <Link to="/privacy" className="hover:text-accent transition-colors">Privacy</Link>
+          <span className="mx-2">·</span>
+          <Link to="/data-deletion" className="hover:text-accent transition-colors">Delete your data</Link>
         </div>
       </footer>
+      <ChatWidget />
     </div>
   );
 }

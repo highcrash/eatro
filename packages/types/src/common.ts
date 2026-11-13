@@ -69,4 +69,6 @@ export type WsEvent =
   | 'bill:requested'
   | 'reservation:created'
   | 'reservation:updated'
-  | 'reservation:cancelled';
+  | 'reservation:cancelled'
+  /** Chat assistant: a conversation got a new message or changed status. Admin inbox refreshes. */
+  | 'chat:updated';

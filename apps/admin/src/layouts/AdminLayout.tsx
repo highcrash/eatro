@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useBranding, resolveLogoUrl } from '../lib/branding';
 import {
+  MessagesSquare,
   LayoutDashboard,
   UtensilsCrossed,
   Grid3X3,
@@ -132,6 +133,7 @@ const NAV_GROUPS: Array<{
       { to: '/marketing/campaigns', icon: Send, label: 'Coupon Campaigns', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/marketing/loyalty', icon: Gift, label: 'Loyalty', allowedRoles: ['OWNER', 'MANAGER'] },
       { to: '/membership', icon: CreditCard, label: 'Membership Cards', allowedRoles: ['OWNER', 'MANAGER'] },
+      { to: '/chatbot', icon: MessagesSquare, label: 'Chat Assistant', allowedRoles: ['OWNER', 'MANAGER'] },
     ],
   },
   {

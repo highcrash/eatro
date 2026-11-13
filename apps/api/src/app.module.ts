@@ -60,6 +60,7 @@ import { BranchSettingsModule } from './branch-settings/branch-settings.module';
 import { DeviceModule } from './device-registration/device.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
 import { ExternalApiModule } from './external-api/external-api.module';
+import { ChatbotModule } from './chatbot/chatbot.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -210,6 +211,10 @@ import { ScheduleModule } from '@nestjs/schedule';
     // tab + queue panel + per-minute cron worker. Default off
     // per branch.
     SocialModule,
+
+    // Chat assistant: website chat now; Messenger, Instagram and WhatsApp
+    // later. Live menu, bookings, party quotes, swappable AI models.
+    ChatbotModule,
 
     // Generic admin-config audit trail. Other modules call
     // ActivityLogService.log(...) fire-and-forget after mutations;
