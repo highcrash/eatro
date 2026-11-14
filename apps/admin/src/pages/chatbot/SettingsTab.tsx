@@ -33,6 +33,7 @@ function SettingsForm() {
       autoHideSpam: f!.autoHideSpam, complaintMode: f!.complaintMode, complaintReminderMins: f!.complaintReminderMins,
       managerPhone: f!.managerPhone ?? '', complaintSmsEnabled: f!.complaintSmsEnabled, commentHourlyCap: f!.commentHourlyCap,
       verifyPhoneEnabled: f!.verifyPhoneEnabled, welcomeCouponEnabled: f!.welcomeCouponEnabled, welcomeCouponPercent: f!.welcomeCouponPercent, welcomeCouponDays: f!.welcomeCouponDays,
+      bookingAutoConfirm: f!.bookingAutoConfirm, bookingAutoConfirmMaxGuests: f!.bookingAutoConfirmMaxGuests,
     }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['chat-settings'] }),
   });
@@ -118,6 +119,19 @@ function SettingsForm() {
           </div>
         </div>
         <p className={HINT}>Needs SMS set up in Settings → Notifications. Without it, the bot doesn't ask for numbers and the website card stays hidden.</p>
+      </section>
+
+      <section className={`${CARD} p-4 space-y-3`}>
+        <h2 className="font-display text-xl text-white tracking-wide">TABLE BOOKINGS</h2>
+        <label className="flex items-start gap-2 text-sm font-body text-[#ccc]">
+          <input type="checkbox" checked={f.bookingAutoConfirm} onChange={(e) => set({ bookingAutoConfirm: e.target.checked })} className="mt-1" />
+          <span>Confirm chat bookings automatically<br /><span className={HINT}>Only for a verified mobile number and a time with free capacity on the Reservations page. The customer gets the usual confirmation SMS; staff choose the table later with "Table" on the Reservations page. Bigger groups, and numbers that couldn't be verified, stay Pending for staff.</span></span>
+        </label>
+        <div className={`max-w-xs ${f.bookingAutoConfirm ? '' : 'opacity-50'}`}>
+          <label className={LABEL}>Confirm automatically up to (guests)</label>
+          <input type="number" min={1} max={100} disabled={!f.bookingAutoConfirm} value={f.bookingAutoConfirmMaxGuests} onChange={(e) => set({ bookingAutoConfirmMaxGuests: Number(e.target.value) })} className={`w-full ${INPUT}`} />
+        </div>
+        <p className={HINT}>Before booking, the bot asks a new number for its SMS code (when number checks are on above). Party and set-menu enquiries always go to staff.</p>
       </section>
 
       <section className={`${CARD} p-4 space-y-3`}>

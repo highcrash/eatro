@@ -447,6 +447,12 @@ export default function ReservationsPage() {
                         {r.status === 'CONFIRMED' && (
                           <>
                             <button
+                              onClick={() => openConfirm(r)}
+                              className={`px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors ${r.tableId ? 'bg-[#2A2A2A] text-[#999] hover:text-white' : 'bg-[#00243a] text-[#29B6F6] hover:bg-[#003355]'}`}
+                            >
+                              Table
+                            </button>
+                            <button
                               onClick={() => arrivedMut.mutate(r.id)}
                               className="px-2 py-0.5 text-[10px] uppercase tracking-wider bg-[#1a3a1a] text-[#4CAF50] hover:bg-[#255025] transition-colors"
                             >
@@ -494,7 +500,7 @@ export default function ReservationsPage() {
       {confirming && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setConfirming(null)}>
           <div className="bg-[#161616] border border-[#2A2A2A] w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="font-display text-lg tracking-widest text-white mb-4">CONFIRM BOOKING</h2>
+            <h2 className="font-display text-lg tracking-widest text-white mb-4">{confirming.status === 'CONFIRMED' ? 'ASSIGN TABLE' : 'CONFIRM BOOKING'}</h2>
 
             <p className="text-sm font-body text-[#999] mb-4">
               {confirming.customerName} — Party of {confirming.partySize} — {confirming.timeSlot}
@@ -526,7 +532,8 @@ export default function ReservationsPage() {
               </p>
             )}
 
-            {/* Time slot change */}
+            {/* Time slot change (a confirmed booking changes time through Edit) */}
+            {confirming.status !== 'CONFIRMED' && (<>
             <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1">
               Change Time Slot (optional)
             </label>
@@ -542,6 +549,7 @@ export default function ReservationsPage() {
                 </option>
               ))}
             </select>
+            </>)}
 
             {/* Notes */}
             <label className="block text-[10px] font-body uppercase tracking-wider text-[#666] mb-1">
@@ -567,7 +575,7 @@ export default function ReservationsPage() {
                 disabled={confirmMut.isPending}
                 className="px-4 py-1.5 text-xs font-body uppercase tracking-wider bg-[#D62B2B] text-white hover:bg-[#B71C1C] transition-colors disabled:opacity-50"
               >
-                {confirmMut.isPending ? 'Confirming...' : 'Confirm Booking'}
+                {confirmMut.isPending ? 'Saving...' : confirming.status === 'CONFIRMED' ? 'Save Table' : 'Confirm Booking'}
               </button>
             </div>
           </div>

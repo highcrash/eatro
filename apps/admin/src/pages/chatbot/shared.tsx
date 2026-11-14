@@ -102,6 +102,8 @@ export interface ChatbotSettings {
   welcomeCouponEnabled: boolean;
   welcomeCouponPercent: number;
   welcomeCouponDays: number;
+  bookingAutoConfirm: boolean;
+  bookingAutoConfirmMaxGuests: number;
   pageConnected?: boolean;
   instagramConnected?: boolean;
   whatsappConnected?: boolean;

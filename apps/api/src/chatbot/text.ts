@@ -23,6 +23,23 @@ const PHONE_RE = /(?<!\d)(?:\+?880[\s-]?|0)1[3-9](?:[\s-]?\d){8}(?!\d)/g;
  * Pull a Bangladeshi mobile number out of a customer's message.
  * `masked` is what the AI sees: the number is kept on our server only.
  */
+const EN_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const BN_DAYS = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+const EN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const BN_MONTHS = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+
+/** "on Friday 15 Nov at 8:00 pm" / "শুক্রবার 15 নভেম্বর, রাত 8:00-এ" from "2026-11-15" and "20:00". */
+export function bookingWhen(date: string, time: string, lang: 'en' | 'bn'): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  const [h, m] = time.split(':').map(Number);
+  const clock = `${h % 12 || 12}:${String(m).padStart(2, '0')}`;
+  if (lang === 'bn') {
+    const part = h < 5 ? 'রাত' : h < 12 ? 'সকাল' : h < 15 ? 'দুপুর' : h < 17 ? 'বিকাল' : h < 19 ? 'সন্ধ্যা' : 'রাত';
+    return `${BN_DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${BN_MONTHS[d.getUTCMonth()]}, ${part} ${clock}-এ`;
+  }
+  return `on ${EN_DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${EN_MONTHS[d.getUTCMonth()]} at ${clock} ${h < 12 ? 'am' : 'pm'}`;
+}
+
 export function extractPhone(text: string): { phone: string | null; masked: string } {
   const ascii = toAsciiDigits(text);
   let phone: string | null = null;
@@ -92,6 +109,14 @@ const PHRASES = {
   bookingReceived: {
     en: 'Booking request received: {guests} guests, {date} at {time}. We will confirm shortly.',
     bn: 'বুকিং অনুরোধ পেয়েছি: {guests} জন, {date}, {time}। আমরা শীঘ্রই নিশ্চিত করব।',
+  },
+  bookingConfirmed: {
+    en: 'Your table is confirmed: {guests} guests, {when}, under the name {name}. If your plans change, just message us here.',
+    bn: 'আপনার টেবিল কনফার্ম হয়েছে: {guests} জন, {when}, {name} নামে। পরিকল্পনা বদলালে এখানে জানিয়ে দিন।',
+  },
+  bookingAfterCode: {
+    en: "A table for {guests} is free {when}. We've texted a 6-digit code to your number: type it here and I'll book the table right away.",
+    bn: '{when} {guests} জনের টেবিল খালি আছে। আপনার নম্বরে SMS-এ একটি 6 সংখ্যার কোড পাঠিয়েছি, কোডটি এখানে লিখলেই টেবিল বুক করে দেব।',
   },
   slotChoices: {
     en: 'That time is not available. Open times on {date}: {slots}. Which one suits you?',

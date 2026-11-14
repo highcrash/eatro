@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { ChatChannel, ChatConversation, ChatbotSetting, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { ChatChannel, ChatConversation, ChatbotSetting } from '@prisma/client';
 
 import { CustomerService } from '../customer/customer.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -18,8 +19,8 @@ import { PushService } from './push/push.service';
 import { formatPartyQuote, priceParty } from './party-planner';
 import { buildSystemPrompt, buildVisionPrompt, contextLine } from './prompt';
 import { AiReply, checkReply, detectLang, ownerAmounts, parseAiReply } from './reply';
-import { extractPhone, fillPlaceholders, greetingOnly, matchQuickReply, phrase, ReplyLang } from './text';
-import { ChatVerificationService, CheckResult, codeIn, Verified } from './verification.service';
+import { bookingWhen, extractPhone, fillPlaceholders, greetingOnly, matchQuickReply, phrase, ReplyLang } from './text';
+import { ChatVerificationService, CheckResult, codeIn, MAX_TRIES, Verified } from './verification.service';
 
 export interface IncomingMessage {
   branchId: string;
@@ -49,7 +50,22 @@ export interface BotOutput {
   source: 'QUICK_REPLY' | 'AI' | 'FALLBACK' | 'SYSTEM';
   /** The language the AI answered in, when it did. */
   lang?: ReplyLang;
+  /** The reply already dealt with the customer's number (a booking asked for the code). */
+  phoneHandled?: boolean;
 }
+
+/** A table request waiting for the customer to type their code. */
+interface PendingBooking {
+  date: string;
+  time: string;
+  guests: number;
+  name: string;
+  occasion: string | null;
+  savedAt: string;
+}
+
+/** A held booking is dropped after a day: the customer has moved on. */
+const PENDING_BOOKING_MS = 24 * 3600_000;
 
 export interface HandleResult {
   conversationId: string;
@@ -326,7 +342,12 @@ export class ChatbotService {
       if (result.status !== 'NONE') {
         await this.hideCodes(answering.ids);
         const lang = await this.chatLang(conv.id);
-        return this.deliverBotReply(conv, settings, { text: this.checkLine(result, lang), cards: [], source: 'SYSTEM' }, false);
+        const lines = [this.checkLine(result, lang)];
+        if (result.status === 'OK') {
+          const booked = await this.finishPendingBooking(conv, settings, lang);
+          if (booked) lines.push(booked);
+        }
+        return this.deliverBotReply(conv, settings, { text: lines.join('\n\n'), cards: [], source: 'SYSTEM' }, false);
       }
     }
 
@@ -361,7 +382,7 @@ export class ChatbotService {
   private async verificationNotes(conv: ChatConversation, settings: ChatbotSetting, msg: IncomingMessage, text: string, output: BotOutput): Promise<string[]> {
     if (!settings.verifyPhoneEnabled || msg.channel === 'WHATSAPP') return [];
     const lang = output.lang ?? detectLang(text);
-    const phone = extractPhone(text).phone;
+    const phone = output.phoneHandled ? null : extractPhone(text).phone;
     if (phone && phone !== conv.verifiedPhone) {
       if (!(await this.verify.smsReady(conv.branchId))) return [];
       const started = await this.verify.start(conv, phone, conv.customerName);
@@ -373,6 +394,7 @@ export class ChatbotService {
       (msg.channel === 'MESSENGER' || msg.channel === 'INSTAGRAM') &&
       settings.welcomeCouponEnabled &&
       output.source === 'AI' &&
+      !output.phoneHandled &&
       !conv.verifiedPhone &&
       !conv.customerPhone &&
       !conv.customerId &&
@@ -443,7 +465,9 @@ export class ChatbotService {
       const result = await this.verify.check(conv, settings, code);
       if (result.status === 'OK') {
         const lang = await this.chatLang(conv.id);
-        await this.prisma.chatMessage.create({ data: { conversationId: conv.id, sender: 'BOT', source: 'SYSTEM', text: this.verifiedLine(result.verified, lang) } });
+        const booked = await this.finishPendingBooking(conv, settings, lang);
+        const text = [this.verifiedLine(result.verified, lang), booked].filter(Boolean).join('\n\n');
+        await this.prisma.chatMessage.create({ data: { conversationId: conv.id, sender: 'BOT', source: 'SYSTEM', text } });
         await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { lastMessageAt: new Date() } });
         this.notify(branchId, conv.id);
         const v = result.verified;
@@ -528,8 +552,8 @@ export class ChatbotService {
     if (!isTest) void this.runShadow(conv, request, menu, allowedAmounts, text);
     const reply = outcome.value;
     const cards = reply.items.map((ref) => menu.byRef.get(ref)).filter((u): u is NonNullable<typeof u> => !!u).map(toCard);
-    const extra = await this.applyAction(conv, reply, menu, facts, isTest, text);
-    return { text: [reply.reply, extra].filter(Boolean).join('\n\n'), cards, source: 'AI', lang: reply.lang };
+    const extra = await this.applyAction(conv, settings, reply, menu, facts, isTest, text);
+    return { text: [reply.reply, extra.text].filter(Boolean).join('\n\n'), cards, source: 'AI', lang: reply.lang, phoneHandled: extra.phoneHandled };
   }
 
   private async chatRequest(
@@ -629,20 +653,21 @@ export class ChatbotService {
 
   private async applyAction(
     conv: ChatConversation,
+    settings: ChatbotSetting,
     reply: AiReply,
     menu: MenuSnapshot,
     facts: Awaited<ReturnType<ChatbotService['branchFacts']>>,
     isTest: boolean,
     customerText: string,
-  ): Promise<string | null> {
+  ): Promise<{ text: string | null; phoneHandled?: boolean }> {
     const action = reply.action;
-    if (!action) return null;
+    if (!action) return { text: null };
     const lang = reply.lang;
 
     if (action.type === 'handoff') {
       await this.flagStaff(conv, action.reason, isTest);
       if (!isTest) await this.prisma.chatUnanswered.create({ data: { branchId: conv.branchId, conversationId: conv.id, question: customerText, reason: `Handed to staff: ${action.reason}` } });
-      return null;
+      return { text: null };
     }
 
     if (action.type === 'party_quote') {
@@ -651,7 +676,7 @@ export class ChatbotService {
       if (priced.length > 0) parts.push(formatPartyQuote(action.guests, priced), phrase('estimate', lang));
       if (isTest) {
         parts.push(phrase('testMode', lang));
-        return parts.join('\n\n') || null;
+        return { text: parts.join('\n\n') || null };
       }
       const lead = await this.prisma.chatLead.create({
         data: {
@@ -668,32 +693,85 @@ export class ChatbotService {
       });
       await this.flagStaff(conv, priced.length > 0 ? `Party enquiry: ${action.guests} guests` : `Party enquiry (${action.guests} guests) could not be priced`, false);
       if (action.date && action.time && conv.customerPhone && conv.customerName) {
-        const booked = await this.book(conv, { date: action.date, time: action.time, guests: action.guests, name: conv.customerName, occasion: action.occasion }, lang, facts.timezone);
+        // Parties are arranged by staff, so this booking always waits for them.
+        const booked = await this.book(conv, settings, { date: action.date, time: action.time, guests: action.guests, name: conv.customerName, occasion: action.occasion }, lang, facts.timezone, { auto: false });
         if (booked.reservationId) await this.prisma.chatLead.update({ where: { id: lead.id }, data: { reservationId: booked.reservationId } });
         parts.push(booked.text);
       }
-      return parts.join('\n\n') || null;
+      return { text: parts.join('\n\n') || null };
     }
 
     // booking_request
     const name = action.name ?? conv.customerName;
-    if (!action.date || !action.time || !action.guests || !name || !conv.customerPhone) return null;
+    if (!action.date || !action.time || !action.guests || !name || !conv.customerPhone) return { text: null };
     if (!conv.customerName && action.name) {
       await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { customerName: action.name } });
       conv.customerName = action.name;
     }
-    if (isTest) return `${phrase('bookingReceived', lang, { guests: action.guests, date: action.date, time: action.time })}\n${phrase('testMode', lang)}`;
-    const booked = await this.book(conv, { date: action.date, time: action.time, guests: action.guests, name, occasion: action.occasion }, lang, facts.timezone);
+    if (isTest) return { text: `${phrase('bookingReceived', lang, { guests: action.guests, date: action.date, time: action.time })}\n${phrase('testMode', lang)}` };
+    const req = { date: action.date, time: action.time, guests: action.guests, name, occasion: action.occasion };
+
+    // A new number is checked by SMS code first; the booking waits for the code.
+    if (!this.phoneVerified(conv) && (await this.canVerify(conv, settings))) {
+      const check = await this.book(conv, settings, req, lang, facts.timezone, { dryRun: true });
+      if (!check.ready) return { text: check.text };
+      if (await this.askForCode(conv, name)) {
+        const pending: PendingBooking = { ...req, time: req.time.padStart(5, '0'), savedAt: new Date().toISOString() };
+        await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { pendingBooking: pending as unknown as Prisma.InputJsonValue } });
+        conv.pendingBooking = pending as unknown as Prisma.JsonValue;
+        return { text: phrase('bookingAfterCode', lang, { guests: req.guests, when: bookingWhen(req.date, pending.time, lang) }), phoneHandled: true };
+      }
+      // No code could be sent today: the request waits for staff, as before verification existed.
+      const booked = await this.book(conv, settings, req, lang, facts.timezone);
+      return { text: booked.text, phoneHandled: true };
+    }
+    const booked = await this.book(conv, settings, req, lang, facts.timezone);
+    return { text: booked.text };
+  }
+
+  /** The number on file is the one the customer verified. */
+  private phoneVerified(conv: ChatConversation): boolean {
+    return !!conv.verifiedPhone && conv.verifiedPhone === conv.customerPhone;
+  }
+
+  /** WhatsApp numbers are verified by WhatsApp itself; elsewhere a code needs SMS. */
+  private async canVerify(conv: ChatConversation, settings: ChatbotSetting): Promise<boolean> {
+    return settings.verifyPhoneEnabled && conv.channel !== 'WHATSAPP' && (await this.verify.smsReady(conv.branchId));
+  }
+
+  /** A code for the number on file: the one already on its way, or a new one. False when none can be sent. */
+  private async askForCode(conv: ChatConversation, name: string): Promise<boolean> {
+    const open = await this.verify.open(conv.id);
+    if (open && open.phone === conv.customerPhone && open.expiresAt > new Date() && open.attempts < MAX_TRIES) return true;
+    const started = await this.verify.start(conv, conv.customerPhone!, name);
+    return started === 'SENT' || started === 'RECENT';
+  }
+
+  /** Right after a correct code: book the table the customer asked for while unverified. */
+  private async finishPendingBooking(conv: ChatConversation, settings: ChatbotSetting, lang: ReplyLang): Promise<string | null> {
+    const pending = conv.pendingBooking as unknown as PendingBooking | null;
+    if (!pending) return null;
+    await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { pendingBooking: Prisma.DbNull } });
+    conv.pendingBooking = null;
+    if (!this.phoneVerified(conv) || Date.now() - Date.parse(pending.savedAt) > PENDING_BOOKING_MS) return null;
+    const facts = await this.branchFacts(conv.branchId);
+    const booked = await this.book(conv, settings, pending, lang, facts.timezone);
     return booked.text;
   }
 
-  /** Turns a complete booking request into a PENDING reservation, or a staff task when it can't be. */
+  /**
+   * Turns a complete booking request into a reservation, after a live slot
+   * check. A verified number gets it CONFIRMED straight away up to the guest
+   * limit; anything else is PENDING for staff. `dryRun` only checks the slot.
+   */
   private async book(
     conv: ChatConversation,
+    chat: ChatbotSetting,
     req: { date: string; time: string; guests: number; name: string; occasion: string | null },
     lang: ReplyLang,
     timezone: string,
-  ): Promise<{ text: string; reservationId?: string }> {
+    opts: { dryRun?: boolean; auto?: boolean } = {},
+  ): Promise<{ text: string; reservationId?: string; ready?: boolean }> {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date) || req.date < today || !/^\d{1,2}:\d{2}$/.test(req.time)) {
       await this.flagStaff(conv, 'Booking request with an unclear date or time', false);
@@ -702,9 +780,9 @@ export class ChatbotService {
     const time = req.time.padStart(5, '0');
     const settings = await this.reservations.getSettings(conv.branchId);
 
-    const lead = () =>
+    const lead = (reservationId?: string) =>
       this.prisma.chatLead.create({
-        data: { branchId: conv.branchId, conversationId: conv.id, name: req.name, phone: conv.customerPhone, guests: req.guests, date: req.date, time, occasion: req.occasion },
+        data: { branchId: conv.branchId, conversationId: conv.id, name: req.name, phone: conv.customerPhone, guests: req.guests, date: req.date, time, occasion: req.occasion, reservationId: reservationId ?? null },
       });
 
     if (req.guests > settings.reservationMaxPersonsPerSlot) {
@@ -731,21 +809,43 @@ export class ChatbotService {
       }
       return { text: phrase('slotChoices', lang, { date: req.date, slots: choices.join(', ') }) };
     }
+    if (opts.dryRun) return { text: '', ready: true };
 
+    const autoOn = opts.auto !== false && chat.bookingAutoConfirm && this.phoneVerified(conv);
+    const confirmed = autoOn && req.guests <= chat.bookingAutoConfirmMaxGuests;
     try {
       const customer = await this.customers.createFromPos(conv.branchId, { phone: conv.customerPhone!, name: req.name });
-      if (!conv.customerId) await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { customerId: customer.id } });
-      const reservation = await this.reservations.create(conv.branchId, {
-        customerName: req.name,
-        customerPhone: conv.customerPhone!,
-        customerId: customer.id,
-        date: req.date,
-        timeSlot: time,
-        partySize: req.guests,
-        notes: [`Booked through the chat assistant (${conv.channel.toLowerCase()})`, req.occasion ? `Occasion: ${req.occasion}` : null].filter(Boolean).join('. '),
-        // The customer has not seen the terms in chat; when the branch has terms, staff take it from here.
-        agreedTerms: !settings.reservationTermsOfService,
-      });
+      if (!conv.customerId) {
+        await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { customerId: customer.id } });
+        conv.customerId = customer.id;
+      }
+      const reservation = await this.reservations.create(
+        conv.branchId,
+        {
+          customerName: req.name,
+          customerPhone: conv.customerPhone!,
+          customerId: customer.id,
+          date: req.date,
+          timeSlot: time,
+          partySize: req.guests,
+          notes: [
+            `Booked through the chat assistant (${conv.channel.toLowerCase()})`,
+            confirmed ? 'Confirmed automatically: verified number. Assign a table' : null,
+            req.occasion ? `Occasion: ${req.occasion}` : null,
+          ].filter(Boolean).join('. '),
+          // The customer has not seen the terms in chat; when the branch has terms, staff take it from here.
+          agreedTerms: !settings.reservationTermsOfService,
+        },
+        { confirmed },
+      );
+      if (confirmed) {
+        return { text: phrase('bookingConfirmed', lang, { guests: req.guests, when: bookingWhen(req.date, time, lang), name: req.name }), reservationId: reservation.id };
+      }
+      if (autoOn) {
+        // Verified, but too many guests to confirm without a person: staff decide.
+        await lead(reservation.id);
+        await this.flagStaff(conv, `Booking for ${req.guests} guests to confirm (${req.date} ${time})`, false);
+      }
       return { text: phrase('bookingReceived', lang, { guests: req.guests, date: req.date, time }), reservationId: reservation.id };
     } catch (err) {
       if (err instanceof ConflictException) {

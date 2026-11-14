@@ -92,7 +92,11 @@ export class ReservationService {
 
   // ── CRUD ───────────────────────────────────────────────────────────────────
 
-  async create(branchId: string, dto: CreateReservationDto) {
+  /**
+   * `confirmed` books it as CONFIRMED in the same transaction as the capacity
+   * check (chat bookings from a verified number). Staff add the table later.
+   */
+  async create(branchId: string, dto: CreateReservationDto, opts: { confirmed?: boolean } = {}) {
     if (dto.partySize < 1) throw new BadRequestException('Party size must be at least 1');
 
     const settings = await this.getSettings(branchId);
@@ -131,6 +135,7 @@ export class ReservationService {
           partySize: dto.partySize,
           notes: dto.notes ?? null,
           agreedTerms: dto.agreedTerms,
+          ...(opts.confirmed ? { status: 'CONFIRMED' as const, confirmedAt: new Date() } : {}),
         },
         include: RESERVATION_INCLUDE,
       });
@@ -140,7 +145,9 @@ export class ReservationService {
 
     // Send booking received SMS
     const branch = await this.prisma.branch.findUnique({ where: { id: branchId } });
-    if (settings.reservationSmsEnabled) {
+    if (settings.reservationSmsEnabled && opts.confirmed) {
+      this.sendConfirmedSms(branchId, branch?.name ?? '', settings, reservation, '');
+    } else if (settings.reservationSmsEnabled) {
       void this.sms.sendSms(branchId, dto.customerPhone,
         `Your reservation at ${branch?.name ?? 'our restaurant'} on ${dto.date} at ${dto.timeSlot} for ${dto.partySize} guest(s) has been received. We will confirm shortly.`,
       );
@@ -276,11 +283,14 @@ export class ReservationService {
 
   async confirm(id: string, branchId: string, staffId: string, dto: ConfirmReservationDto) {
     const r = await this.findOne(id, branchId);
-    if (r.status !== 'PENDING') throw new BadRequestException('Only PENDING reservations can be confirmed');
+    if (r.status !== 'PENDING' && r.status !== 'CONFIRMED') throw new BadRequestException('Only PENDING reservations can be confirmed');
 
     // Support multiple tables
     const allTableIds = dto.tableIds && dto.tableIds.length > 0 ? dto.tableIds : (dto.tableId ? [dto.tableId] : []);
     const primaryTableId = allTableIds[0] ?? null;
+
+    // Already confirmed (for example by the chat assistant): staff are only choosing tables.
+    if (r.status === 'CONFIRMED') return this.assignTables(r, branchId, staffId, allTableIds, dto.notes);
 
     const updated = await this.prisma.reservation.update({
       where: { id },
@@ -308,13 +318,54 @@ export class ReservationService {
         const tables = await this.prisma.diningTable.findMany({ where: { id: { in: allTableIds } }, select: { tableNumber: true } });
         tableName = 'Table ' + tables.map((t) => t.tableNumber).join(', ');
       }
-      const template = settings.reservationSmsConfirmTemplate
-        || 'Your reservation at {branch} on {date} at {time} for {partySize} guest(s) is confirmed. {table}';
-      const msg = this.interpolate(template, { branch: branch?.name ?? '', date: r.date.toISOString().slice(0, 10), time: updated.timeSlot, partySize: String(r.partySize), table: tableName, name: r.customerName });
-      void this.sms.sendSms(branchId, r.customerPhone, msg);
+      this.sendConfirmedSms(branchId, branch?.name ?? '', settings, updated, tableName);
     }
 
     return updated;
+  }
+
+  /** Tables for a booking that is already confirmed. No new SMS: the customer already has the confirmation. */
+  private async assignTables(
+    r: Awaited<ReturnType<ReservationService['findOne']>>,
+    branchId: string,
+    staffId: string,
+    tableIds: string[],
+    notes?: string,
+  ) {
+    const before: string[] = r.tableIds ? JSON.parse(r.tableIds as string) : (r.tableId ? [r.tableId] : []);
+    const updated = await this.prisma.reservation.update({
+      where: { id: r.id },
+      data: {
+        tableId: tableIds[0] ?? null,
+        tableIds: tableIds.length > 0 ? JSON.stringify(tableIds) : null,
+        notes: notes ?? r.notes,
+        ...(r.confirmedById ? {} : { confirmedById: staffId }),
+      },
+      include: RESERVATION_INCLUDE,
+    });
+    // Tables taken off the booking are freed if they were already held for it.
+    for (const tid of before.filter((t) => !tableIds.includes(t))) {
+      const table = await this.prisma.diningTable.findUnique({ where: { id: tid } });
+      if (table?.status === 'RESERVED') {
+        await this.prisma.diningTable.update({ where: { id: tid }, data: { status: 'AVAILABLE' } });
+        this.ws.emitToBranch(branchId, 'table:updated', { tableId: tid, status: 'AVAILABLE' });
+      }
+    }
+    this.ws.emitToBranch(branchId, 'reservation:updated', updated);
+    return updated;
+  }
+
+  private sendConfirmedSms(
+    branchId: string,
+    branchName: string,
+    settings: ReservationSettings,
+    r: { date: Date; timeSlot: string; partySize: number; customerName: string; customerPhone: string },
+    tableName: string,
+  ) {
+    const template = settings.reservationSmsConfirmTemplate
+      || 'Your reservation at {branch} on {date} at {time} for {partySize} guest(s) is confirmed. {table}';
+    const msg = this.interpolate(template, { branch: branchName, date: r.date.toISOString().slice(0, 10), time: r.timeSlot, partySize: String(r.partySize), table: tableName, name: r.customerName });
+    void Promise.resolve(this.sms.sendSms(branchId, r.customerPhone, msg.trim())).catch(() => undefined);
   }
 
   async reject(id: string, branchId: string, reason?: string) {

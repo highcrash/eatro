@@ -3273,6 +3273,8 @@ model ChatConversation {
   /// Times the bot offered the welcome coupon for a name and number (at most 2).
   numberInvites         Int                    @default(0)
   numberInviteAt        DateTime?
+  /// A table request held until the customer's number is verified.
+  pendingBooking        Json?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 
@@ -3421,6 +3423,9 @@ model ChatbotSetting {
   welcomeCouponEnabled  Boolean               @default(true)
   welcomeCouponPercent  Int                   @default(5)
   welcomeCouponDays     Int                   @default(30)
+  /// Chat bookings from a verified number are confirmed straight away, up to this many guests.
+  bookingAutoConfirm    Boolean               @default(true)
+  bookingAutoConfirmMaxGuests Int             @default(10)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

@@ -42,6 +42,8 @@ export interface SettingsInput {
   welcomeCouponEnabled?: boolean;
   welcomeCouponPercent?: number;
   welcomeCouponDays?: number;
+  bookingAutoConfirm?: boolean;
+  bookingAutoConfirmMaxGuests?: number;
 }
 
 @Injectable()
@@ -104,6 +106,7 @@ export class ChatbotAdminService {
     if (input.complaintSmsEnabled !== undefined) data.complaintSmsEnabled = !!input.complaintSmsEnabled;
     if (input.verifyPhoneEnabled !== undefined) data.verifyPhoneEnabled = !!input.verifyPhoneEnabled;
     if (input.welcomeCouponEnabled !== undefined) data.welcomeCouponEnabled = !!input.welcomeCouponEnabled;
+    if (input.bookingAutoConfirm !== undefined) data.bookingAutoConfirm = !!input.bookingAutoConfirm;
     if (input.complaintMode !== undefined) {
       if (!['DRAFT', 'HOLDING', 'STAFF_ONLY'].includes(input.complaintMode)) throw new BadRequestException('Unknown complaint setting');
       data.complaintMode = input.complaintMode;
@@ -112,6 +115,7 @@ export class ChatbotAdminService {
     if (input.whatsappMonthlyCap !== undefined) data.whatsappMonthlyCap = ranged(input.whatsappMonthlyCap, 0, 100_000, 'WhatsApp replies per month');
     if (input.welcomeCouponPercent !== undefined) data.welcomeCouponPercent = ranged(input.welcomeCouponPercent, 1, 50, 'Welcome coupon percent');
     if (input.welcomeCouponDays !== undefined) data.welcomeCouponDays = ranged(input.welcomeCouponDays, 1, 365, 'Welcome coupon days');
+    if (input.bookingAutoConfirmMaxGuests !== undefined) data.bookingAutoConfirmMaxGuests = ranged(input.bookingAutoConfirmMaxGuests, 1, 100, 'Auto-confirm guest limit');
     if (input.commentHourlyCap !== undefined) data.commentHourlyCap = ranged(input.commentHourlyCap, 1, 500, 'Comment replies per hour');
     if (input.managerPhone !== undefined) {
       const phone = input.managerPhone?.trim() ? normalizePhone(input.managerPhone) : null;
