@@ -16,6 +16,7 @@ interface Report {
   byChannel: Partial<Record<ChatChannel, number>>;
   perDay: { day: string; messages: number }[];
   recentUnanswered: { question: string; reason: string; createdAt: string }[];
+  complaints: { total: number; open: number; serious: number; byTopic: Record<string, number>; avgFirstResponseMins: number | null };
 }
 
 function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
@@ -58,6 +59,17 @@ export default function ReportsTab() {
           </div>
         )}
         <p className={`${HINT} mt-2`}>{Object.entries(data.byChannel).map(([c, n]) => `${CHANNEL_LABEL[c as ChatChannel]} ${n} chats`).join(' · ')}</p>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Stat label="Complaints" value={data.complaints.total} hint={`${data.complaints.serious} serious`} />
+        <Stat label="Still open" value={data.complaints.open} />
+        <Stat label="Average first response" value={data.complaints.avgFirstResponseMins == null ? '—' : data.complaints.avgFirstResponseMins < 60 ? `${data.complaints.avgFirstResponseMins} min` : `${(data.complaints.avgFirstResponseMins / 60).toFixed(1)} h`} />
+        <div className={`${CARD} p-4`}>
+          <p className="text-[#666] text-xs font-body tracking-widest uppercase mb-1">By topic</p>
+          {Object.keys(data.complaints.byTopic).length === 0 ? <p className={HINT}>None</p> : Object.entries(data.complaints.byTopic).sort((a, b) => b[1] - a[1]).map(([t, n]) => (
+            <p key={t} className="text-sm font-body text-[#ccc]">{t.charAt(0) + t.slice(1).toLowerCase()}: {n}</p>
+          ))}
+        </div>
       </div>
       <div className={`${CARD} p-4 space-y-2`}>
         <p className="text-[#666] text-xs font-body tracking-widest uppercase">Recent questions the bot passed on</p>

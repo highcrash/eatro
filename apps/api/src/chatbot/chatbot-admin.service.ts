@@ -3,9 +3,11 @@ import type { ChatChannel, ChatLeadStatus, ChatMode, Prisma } from '@prisma/clie
 import type { JwtPayload } from '@restora/types';
 
 import { ActivityLogService } from '../activity-log/activity-log.service';
+import { normalizePhone } from '../customer/customer.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AiImage } from './ai/ai.types';
 import { ChatbotService } from './chatbot.service';
+import { ComplaintService } from './complaint.service';
 import { MenuContextService } from './menu-context';
 import { fillPlaceholders, matchQuickReply } from './text';
 
@@ -28,6 +30,13 @@ export interface SettingsInput {
   humanPauseHours?: number;
   retentionDays?: number;
   usdRate?: number;
+  commentMode?: ChatMode;
+  autoHideSpam?: boolean;
+  complaintMode?: 'DRAFT' | 'HOLDING' | 'STAFF_ONLY';
+  complaintReminderMins?: number;
+  managerPhone?: string | null;
+  complaintSmsEnabled?: boolean;
+  commentHourlyCap?: number;
 }
 
 @Injectable()
@@ -37,19 +46,25 @@ export class ChatbotAdminService {
     private readonly chatbot: ChatbotService,
     private readonly menus: MenuContextService,
     private readonly activity: ActivityLogService,
+    private readonly complaints: ComplaintService,
   ) {}
 
   // ── Settings ───────────────────────────────────────────────────────────────
 
   async settings(branchId: string) {
     const s = await this.chatbot.getSettings(branchId);
-    return { ...s, usdRate: Number(s.usdRate) };
+    const [bs, app] = await Promise.all([
+      this.prisma.branchSetting.findUnique({ where: { branchId }, select: { fbPageId: true, fbPageAccessToken: true } }),
+      this.prisma.metaAppSetting.findUnique({ where: { branchId }, select: { igUserId: true } }),
+    ]);
+    const pageConnected = !!bs?.fbPageId && !!bs.fbPageAccessToken;
+    return { ...s, usdRate: Number(s.usdRate), pageConnected, instagramConnected: pageConnected && !!app?.igUserId };
   }
 
   async updateSettings(branchId: string, input: SettingsInput, user: JwtPayload) {
     const before = await this.chatbot.getSettings(branchId);
     const data: Prisma.ChatbotSettingUpdateInput = {};
-    for (const key of ['webMode', 'messengerMode', 'instagramMode', 'whatsappMode'] as const) {
+    for (const key of ['webMode', 'messengerMode', 'instagramMode', 'whatsappMode', 'commentMode'] as const) {
       if (input[key] !== undefined) {
         if (!MODES.includes(input[key]!)) throw new BadRequestException('Mode must be OFF, SUGGEST or AUTO');
         data[key] = input[key];
@@ -72,6 +87,19 @@ export class ChatbotAdminService {
     if (input.imageDailyLimit !== undefined) data.imageDailyLimit = ranged(input.imageDailyLimit, 0, 50, 'Photos per day');
     if (input.humanPauseHours !== undefined) data.humanPauseHours = ranged(input.humanPauseHours, 1, 168, 'Quiet hours after takeover');
     if (input.retentionDays !== undefined) data.retentionDays = ranged(input.retentionDays, 7, 365, 'Days to keep chats');
+    if (input.autoHideSpam !== undefined) data.autoHideSpam = !!input.autoHideSpam;
+    if (input.complaintSmsEnabled !== undefined) data.complaintSmsEnabled = !!input.complaintSmsEnabled;
+    if (input.complaintMode !== undefined) {
+      if (!['DRAFT', 'HOLDING', 'STAFF_ONLY'].includes(input.complaintMode)) throw new BadRequestException('Unknown complaint setting');
+      data.complaintMode = input.complaintMode;
+    }
+    if (input.complaintReminderMins !== undefined) data.complaintReminderMins = ranged(input.complaintReminderMins, 5, 240, 'Reminder minutes');
+    if (input.commentHourlyCap !== undefined) data.commentHourlyCap = ranged(input.commentHourlyCap, 1, 500, 'Comment replies per hour');
+    if (input.managerPhone !== undefined) {
+      const phone = input.managerPhone?.trim() ? normalizePhone(input.managerPhone) : null;
+      if (input.managerPhone?.trim() && !phone) throw new BadRequestException('Enter a valid phone number for the manager');
+      data.managerPhone = phone;
+    }
     if (input.usdRate !== undefined) {
       const n = Number(input.usdRate);
       if (!Number.isFinite(n) || n <= 0 || n > 1000) throw new BadRequestException('Enter a valid taka per dollar rate');
@@ -366,6 +394,7 @@ export class ChatbotAdminService {
       byChannel: Object.fromEntries(conversations.map((c) => [c.channel, c._count])),
       perDay: daily.map((d) => ({ day: d.day.toISOString().slice(0, 10), messages: Number(d.count) })),
       recentUnanswered: unanswered,
+      complaints: await this.complaints.report(branchId, since),
     };
   }
 }

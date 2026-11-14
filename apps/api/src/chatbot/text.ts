@@ -134,6 +134,16 @@ const PHRASES = {
     bn: 'আজ আর ছবি দেখতে পারছি না। প্রশ্নটি লিখে দিন, আমি সাহায্য করব।',
     banglish: 'Aj ar chobi dekhte parchi na. Proshno ta likhe din, ami help korbo.',
   },
+  voice: {
+    en: "Sorry, I can't listen to voice messages. Could you type your question? A team member will also take a look.",
+    bn: 'দুঃখিত, ভয়েস মেসেজ শুনতে পারি না। প্রশ্নটি লিখে দেবেন? আমাদের টিমও দেখে নেবে।',
+    banglish: 'Dukkhito, voice message shunte pari na. Proshno ta likhe diben? Amader team o dekhe nibe.',
+  },
+  sharedPostOne: {
+    en: 'That post is our {name}: ৳{price}.',
+    bn: 'ওই পোস্টটি আমাদের {name}: ৳{price}।',
+    banglish: 'Oi post ta amader {name}: ৳{price}.',
+  },
   testMode: {
     en: '(Test mode: nothing was saved.)',
     bn: '(Test mode: nothing was saved.)',

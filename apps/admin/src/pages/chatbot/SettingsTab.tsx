@@ -27,11 +27,16 @@ function SettingsForm() {
   useEffect(() => { if (data) setF(data); }, [data]);
   const save = useMutation({
     mutationFn: () => api.patch('/chatbot/settings', {
-      webMode: f!.webMode, assistantName: f!.assistantName, greeting: f!.greeting, fallbackText: f!.fallbackText,
+      webMode: f!.webMode, messengerMode: f!.messengerMode, instagramMode: f!.instagramMode, commentMode: f!.commentMode,
+      assistantName: f!.assistantName, greeting: f!.greeting, fallbackText: f!.fallbackText,
       visionEnabled: f!.visionEnabled, imageDailyLimit: f!.imageDailyLimit, humanPauseHours: f!.humanPauseHours, retentionDays: f!.retentionDays, usdRate: f!.usdRate,
+      autoHideSpam: f!.autoHideSpam, complaintMode: f!.complaintMode, complaintReminderMins: f!.complaintReminderMins,
+      managerPhone: f!.managerPhone ?? '', complaintSmsEnabled: f!.complaintSmsEnabled, commentHourlyCap: f!.commentHourlyCap,
     }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['chat-settings'] }),
   });
+  const pageConnected = !!data?.pageConnected;
+  const igConnected = !!data?.instagramConnected;
   if (!f) return null;
   const set = (p: Partial<ChatbotSettings>) => setF({ ...f, ...p });
 
@@ -47,13 +52,58 @@ function SettingsForm() {
             </select>
             <p className={`${HINT} mt-1`}>Off hides the chat bubble on the website.</p>
           </div>
-          {(['Messenger', 'Instagram', 'WhatsApp'] as const).map((n) => (
-            <div key={n}>
-              <label className={LABEL}>{n}</label>
-              <select disabled className={`w-full ${INPUT} opacity-50`}><option>Not connected yet</option></select>
+          {([
+            { key: 'messengerMode', label: 'Facebook Messenger', ok: pageConnected },
+            { key: 'instagramMode', label: 'Instagram DMs', ok: igConnected },
+            { key: 'commentMode', label: 'Facebook and Instagram comments', ok: pageConnected },
+          ] as const).map((c) => (
+            <div key={c.key}>
+              <label className={LABEL}>{c.label}</label>
+              <select value={f[c.key]} disabled={!c.ok && f[c.key] === 'OFF'} onChange={(e) => set({ [c.key]: e.target.value as ChatMode } as Partial<ChatbotSettings>)} className={`w-full ${INPUT} ${!c.ok && f[c.key] === 'OFF' ? 'opacity-50' : ''}`}>
+                {MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              {!c.ok && <p className={`${HINT} mt-1`}>Connect the Facebook Page{c.key === 'instagramMode' ? ' with its Instagram account' : ''} in the Connect tab first.</p>}
             </div>
           ))}
+          <div>
+            <label className={LABEL}>WhatsApp</label>
+            <select disabled className={`w-full ${INPUT} opacity-50`}><option>Not connected yet</option></select>
+          </div>
         </div>
+        <p className={HINT}>Suggested start for social channels: Suggest for the first week, then Auto once the replies look right.</p>
+      </section>
+
+      <section className={`${CARD} p-4 space-y-3`}>
+        <h2 className="font-display text-xl text-white tracking-wide">COMPLAINTS AND COMMENTS</h2>
+        <div>
+          <label className={LABEL}>First response to a complaint in a comment</label>
+          <select value={f.complaintMode} onChange={(e) => set({ complaintMode: e.target.value as ChatbotSettings['complaintMode'] })} className={`w-full ${INPUT}`}>
+            <option value="DRAFT">Draft for approval: nothing is posted until staff send it (recommended)</option>
+            <option value="HOLDING">Holding reply: a short apology goes out at once for ordinary complaints; serious ones still wait for staff</option>
+            <option value="STAFF_ONLY">Staff only: alert, no draft</option>
+          </select>
+        </div>
+        <label className="flex items-start gap-2 text-sm font-body text-[#ccc]">
+          <input type="checkbox" checked={f.autoHideSpam} onChange={(e) => set({ autoHideSpam: e.target.checked })} className="mt-1" />
+          <span>Hide swearing and spam links automatically<br /><span className={HINT}>Real complaints are never hidden. Hidden comments can be shown again from the Comments tab.</span></span>
+        </label>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className={LABEL}>Remind about unopened serious complaints after (minutes)</label>
+            <input type="number" min={5} max={240} value={f.complaintReminderMins} onChange={(e) => set({ complaintReminderMins: Number(e.target.value) })} className={`w-full ${INPUT}`} />
+          </div>
+          <div>
+            <label className={LABEL}>Public comment replies per hour</label>
+            <input type="number" min={1} max={500} value={f.commentHourlyCap} onChange={(e) => set({ commentHourlyCap: Number(e.target.value) })} className={`w-full ${INPUT}`} />
+          </div>
+          <div>
+            <label className={LABEL}>Manager phone for serious complaints</label>
+            <input value={f.managerPhone ?? ''} onChange={(e) => set({ managerPhone: e.target.value })} placeholder="01XXXXXXXXX" className={`w-full ${INPUT}`} />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-sm font-body text-[#ccc]">
+          <input type="checkbox" checked={f.complaintSmsEnabled} onChange={(e) => set({ complaintSmsEnabled: e.target.checked })} /> Send an SMS to the manager for serious complaints (uses your SMS balance)
+        </label>
       </section>
 
       <section className={`${CARD} p-4 space-y-3`}>

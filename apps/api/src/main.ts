@@ -28,7 +28,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody: Meta's webhook signatures are checked against the exact bytes received.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   const config = app.get(ConfigService);
   const port = config.get<number>('PORT', 3001);

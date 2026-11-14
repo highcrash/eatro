@@ -9,6 +9,9 @@ export interface MenuUnit {
   /** Short handle the AI uses, e.g. "#12". Valid for this snapshot only. */
   ref: string;
   itemId: string;
+  /** The dish: the parent for a size or flavour option, else the item itself. */
+  dishId: string;
+  dishName: string;
   name: string;
   category: string;
   /** Taka. The price a customer pays today (offer price when on offer). */
@@ -81,6 +84,8 @@ export function buildMenuSnapshot(
     units.push({
       ref: `#${units.length + 1}`,
       itemId: item.id,
+      dishId: base.id,
+      dishName: base.name,
       name,
       category: categoryName.get(base.categoryId) ?? 'Menu',
       price: offer ?? price,
@@ -179,3 +184,21 @@ export class MenuContextService {
     else this.cache.clear();
   }
 }
+
+/**
+ * Dishes a post caption or title names, longest name first, so
+ * "Chicken Cheese Burger" wins over "Cheese Burger". At most three dishes.
+ */
+export function matchDishes(text: string | null | undefined, menu: MenuSnapshot, max = 3): string[] {
+  if (!text) return [];
+  const hay = ` ${normalize(text)} `;
+  const dishes = new Map<string, string>();
+  for (const u of menu.units) if (!dishes.has(u.dishId)) dishes.set(u.dishId, normalize(u.dishName));
+  const hits = [...dishes.entries()].filter(([, n]) => n.length >= 4 && hay.includes(` ${n} `)).sort((a, b) => b[1].length - a[1].length);
+  const picked: [string, string][] = [];
+  for (const h of hits) if (!picked.some(([, n]) => n.includes(h[1]))) picked.push(h);
+  return picked.slice(0, max).map(([id]) => id);
+}
+
+const normalize = (s: string) =>
+  s.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();

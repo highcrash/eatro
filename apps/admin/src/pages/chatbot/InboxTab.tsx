@@ -15,11 +15,11 @@ const FILTERS = [
 const who = (c: { customerName: string | null; customerPhone: string | null; channel: string }) =>
   c.customerName || c.customerPhone || (c.channel === 'WEB' ? 'Website visitor' : 'Customer');
 
-export default function InboxTab() {
+export default function InboxTab({ initialId = null }: { initialId?: string | null }) {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['key']>('all');
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialId);
 
   const { data: list = [] } = useQuery<ConversationSummary[]>({
     queryKey: ['chat-conversations', filter, search],

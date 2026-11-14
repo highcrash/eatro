@@ -269,10 +269,8 @@ describe('chat assistant: pipeline and admin', () => {
     await prisma.chatQuickReply.deleteMany({ where: { branchId, title: { startsWith: `Test ${runId}` } } });
     await prisma.menuItem.deleteMany({ where: { id: dishId } });
     await prisma.menuCategory.deleteMany({ where: { id: categoryId } });
-    if (original) {
-      const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = original;
-      await prisma.chatbotSetting.update({ where: { branchId }, data: rest });
-    }
+    // Only the fields this file changes: the social spec may be running at the same time.
+    if (original) await prisma.chatbotSetting.update({ where: { branchId }, data: { webMode: original.webMode, visionEnabled: original.visionEnabled, partyRules: original.partyRules } });
     await app.close();
   });
 
@@ -379,11 +377,11 @@ describe('chat assistant: pipeline and admin', () => {
     expect((lead.quote as { subtotal: number }[])[0].subtotal).toBe(10_500);
   });
 
-  it('hands a complaint to staff', async () => {
-    scripts[`fake-primary-${runId}`] = () => json({ reply: "I'm sorry to hear that. I'm passing this to our manager.", action: { type: 'handoff', reason: 'Complaint about cold food' } });
-    const res = await say('complaint', 'the food was cold yesterday');
+  it('hands over to staff when the AI asks for it', async () => {
+    scripts[`fake-primary-${runId}`] = () => json({ reply: "I'm passing this to our manager.", action: { type: 'handoff', reason: 'Question about a past order' } });
+    const res = await say('handoff', 'I need to talk to someone about my order from yesterday');
     const conv = await prisma.chatConversation.findUniqueOrThrow({ where: { id: res.conversationId } });
-    expect(conv).toMatchObject({ needsStaff: true, needsStaffReason: 'Complaint about cold food' });
+    expect(conv).toMatchObject({ needsStaff: true, needsStaffReason: 'Question about a past order' });
   });
 
   it('stays quiet while staff handle the chat, and drafts instead of sending in Suggest mode', async () => {

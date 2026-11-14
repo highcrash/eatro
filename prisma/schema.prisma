@@ -3390,6 +3390,18 @@ model ChatbotSetting {
   retentionDays    Int      @default(90)
   /// Taka per US dollar, used to show AI cost and enforce budgets in taka.
   usdRate          Decimal  @default(122) @db.Decimal(8, 2)
+  /// Facebook and Instagram post comments.
+  commentMode           ChatMode              @default(OFF)
+  /// Hide swearing and spam links automatically. Real complaints are never hidden.
+  autoHideSpam          Boolean               @default(false)
+  complaintMode         ComplaintResponseMode @default(DRAFT)
+  /// Remind staff when a serious complaint is not opened within this many minutes.
+  complaintReminderMins Int                   @default(15)
+  /// SMS to this number for serious complaints, when on.
+  managerPhone          String?
+  complaintSmsEnabled   Boolean               @default(false)
+  /// Public comment replies per hour, across all posts.
+  commentHourlyCap      Int                   @default(30)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -3475,4 +3487,159 @@ model AiConfigHistory {
 
   @@index([branchId, createdAt])
   @@map("ai_config_history")
+}
+
+// ── Chat assistant, phase 2: Meta connection, comments, complaints ─────────
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+}
+
+/// PRICE, BOOKING, INFO, PRAISE: answered from templates. COMPLAINT: staff decide.
+/// SPAM / ABUSE: flagged for hiding. IGNORE: tags and emojis. OTHER: listed for staff.
+enum CommentKind {
+  PRICE
+  BOOKING
+  INFO
+  PRAISE
+  COMPLAINT
+  SPAM
+  ABUSE
+  IGNORE
+  OTHER
+}
+
+enum CommentStatus {
+  NEW
+  DRAFT
+  REPLIED
+  ESCALATED
+  IGNORED
+  HIDDEN
+}
+
+enum ComplaintLevel {
+  SERIOUS
+  ORDINARY
+  MILD
+}
+
+enum ComplaintStatus {
+  NEW
+  CONTACTED
+  RESOLVED
+}
+
+/// DRAFT: nothing is posted until staff approve. HOLDING: a fixed holding
+/// reply goes out at once for ordinary and mild complaints. STAFF_ONLY: alert only.
+enum ComplaintResponseMode {
+  DRAFT
+  HOLDING
+  STAFF_ONLY
+}
+
+/// The branch's Meta app and what the Connect wizard set up.
+model MetaAppSetting {
+  id               String    @id @default(cuid())
+  branchId         String    @unique
+  appId            String?
+  /// AES-256-GCM, see chatbot/secrets.ts. Never returned by the API.
+  appSecretEnc     String?   @db.Text
+  /// Sent by Meta when it verifies the webhook address.
+  verifyToken      String
+  igUserId         String?
+  igUsername       String?
+  grantedScopes    Json?
+  /// Pages offered after Facebook Login, waiting for the owner to pick one. Tokens encrypted.
+  pendingPages     Json?
+  pendingUntil     DateTime?
+  appSubscribedAt  DateTime?
+  pageSubscribedAt DateTime?
+  lastWebhookAt    DateTime?
+  lastError        String?
+  health           Json?
+  healthCheckedAt  DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("meta_app_settings")
+}
+
+model ChatComment {
+  id               String         @id @default(cuid())
+  branchId         String
+  platform         SocialPlatform
+  postId           String
+  commentId        String         @unique
+  parentCommentId  String?
+  authorId         String?
+  authorName       String?
+  text             String         @db.Text
+  kind             CommentKind
+  status           CommentStatus  @default(NEW)
+  /// Reply waiting for staff (Suggest mode, or a complaint draft).
+  draftPublicReply String?        @db.Text
+  draftPrivateReply String?       @db.Text
+  publicReply      String?        @db.Text
+  publicReplyId    String?
+  privateReplySent Boolean        @default(false)
+  liked            Boolean        @default(false)
+  hidden           Boolean        @default(false)
+  handledById      String?
+  lastError        String?
+  commentedAt      DateTime       @default(now())
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([branchId, status, createdAt])
+  @@index([branchId, postId, authorId])
+  @@map("chat_comments")
+}
+
+/// What a post is about, so a comment or a shared post can be priced.
+model ChatPostContext {
+  id          String         @id @default(cuid())
+  branchId    String
+  platform    SocialPlatform
+  postId      String         @unique
+  caption     String?        @db.Text
+  permalink   String?
+  /// Menu item ids the caption mentions, best match first.
+  menuItemIds Json?
+  fetchedAt   DateTime       @default(now())
+
+  @@index([branchId])
+  @@map("chat_post_contexts")
+}
+
+model ChatComplaint {
+  id              String          @id @default(cuid())
+  branchId        String
+  /// COMMENT or CHAT
+  source          String
+  commentId       String?
+  conversationId  String?
+  channel         String?
+  customerName    String?
+  customerPhone   String?
+  text            String          @db.Text
+  level           ComplaintLevel
+  /// FOOD, SERVICE, WAITING, PRICE, HYGIENE, BILLING, OTHER
+  topic           String          @default("OTHER")
+  status          ComplaintStatus @default(NEW)
+  draftReply      String?         @db.Text
+  notes           String?         @db.Text
+  outcome         String?
+  assignedStaffId String?
+  openedAt        DateTime?
+  firstResponseAt DateTime?
+  resolvedAt      DateTime?
+  remindedAt      DateTime?
+  managerSmsAt    DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([branchId, status, createdAt])
+  @@map("chat_complaints")
 }

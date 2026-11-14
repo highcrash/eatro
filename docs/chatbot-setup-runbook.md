@@ -133,13 +133,15 @@ If an address returns "not found", that code phase isn't live yet. Stop and tell
 
 ### B2. Facebook and Instagram (after the coding session says phase 2 is live)
 
-1. In admin, open the **Connect** section.
+1. In admin, open Marketing → **Chat Assistant** → **Connect**. Paste the addresses it shows into the Meta app first (redirect URI under Facebook Login for Business → Settings; privacy and data deletion under App settings → Basic).
 2. Paste the App ID yourself. For the App Secret, open the app's basic settings in the other tab and have the owner reveal and copy it into the admin field. Click Save; the system registers the webhooks on its own.
 3. In the Meta app's Facebook Login settings, add the redirect address from the table to the valid redirect addresses.
-4. Click **Connect with Facebook** in admin. In Facebook's window, the owner chooses the EATRO Page and the linked Instagram account and approves the permissions. Check the Connect section then shows the Page name, the Instagram handle and the granted permissions.
-5. If no Instagram account is found, the Instagram account is probably not a professional account, or not linked to the Page.
+4. Click **Connect with Facebook** in admin. In Facebook's window, the owner chooses the EATRO Page and the linked Instagram account and approves the permissions. Check the Connect tab then shows the Page name, the Instagram handle and the granted permissions.
+5. If the Connect tab shows several Pages, the owner picks the EATRO one.
+6. If no Instagram account is found, the Instagram account is probably not a professional account, or not linked to the Page.
    - Show the owner where that's set in Instagram or Meta Business settings, and wait.
    - Also check that "Allow access to messages" is on in the Instagram account's message settings.
+7. Read out the **Health check** list on the Connect tab. Every row should be green except "Messages arriving", which turns green after the first test message.
 
 ### B3. WhatsApp (after phase 3 is live)
 
@@ -154,7 +156,7 @@ If an address returns "not found", that code phase isn't live yet. Stop and tell
 - **Instagram:** messages, comments
 - **WhatsApp:** messages
 
-**Test with every social channel in Suggest mode** (Settings & Test). Ask the owner to, from their phone:
+**Test with every social channel in Suggest mode.** In Chat Assistant → **Settings & Test**, set Facebook Messenger, Instagram DMs and comments to **Suggest** and save. Ask the owner to, from their phone:
 - send "hi" to the Page on Messenger;
 - send "hi" to the Instagram account;
 - send "hi" to the WhatsApp number;

@@ -7,7 +7,12 @@ import { ReservationService } from '../reservation/reservation.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
 import { AiRouterService, AiRunResult } from './ai/ai-router.service';
 import type { AiImage, AiMessage, AiRequest } from './ai/ai.types';
+import { CHAT_COMPLAINT_LINE, complaintLevel, topicOf } from './classify';
+import { ComplaintService } from './complaint.service';
 import { MenuCard, MenuContextService, MenuSnapshot, toCard } from './menu-context';
+import { MetaAccountService } from './meta/meta-account.service';
+import { MetaClient, MetaError } from './meta/meta.client';
+import { PostContextService, PostRef } from './post-context.service';
 import { formatPartyQuote, priceParty } from './party-planner';
 import { buildSystemPrompt, buildVisionPrompt, contextLine } from './prompt';
 import { AiReply, checkReply, detectLang, ownerAmounts, parseAiReply } from './reply';
@@ -19,6 +24,11 @@ export interface IncomingMessage {
   externalUserId: string;
   text: string;
   image?: AiImage | null;
+  /** A photo arrived but was not downloaded (photo recognition is off). */
+  hasPhoto?: boolean;
+  /** The customer shared a Facebook/Instagram post into the chat. */
+  sharedPost?: PostRef | null;
+  voice?: boolean;
   /** The channel's own message id, for de-duplicating webhook retries. */
   externalId?: string | null;
   customerName?: string | null;
@@ -80,7 +90,18 @@ export class ChatbotService {
     private readonly reservations: ReservationService,
     private readonly customers: CustomerService,
     private readonly ws: RestoraPosGateway,
+    private readonly complaints: ComplaintService,
+    private readonly meta: MetaClient,
+    private readonly metaAccounts: MetaAccountService,
+    private readonly posts: PostContextService,
   ) {}
+
+  /** Live values for {placeholders} in pre-ready answers. */
+  async placeholderValues(branchId: string) {
+    const facts = await this.branchFacts(branchId);
+    const siteUrl = this.menus.siteUrl();
+    return { openingHours: facts.openingHours, address: facts.address, phone: facts.phone, siteUrl, menuUrl: `${siteUrl}/menu`, reservationUrl: `${siteUrl}/reservation` };
+  }
 
   // ── Settings ───────────────────────────────────────────────────────────────
 
@@ -166,8 +187,10 @@ export class ChatbotService {
         ...(conv.status === 'CLOSED' ? { status: 'BOT' } : {}),
       },
     });
+    const hasImage = !!msg.image || !!msg.hasPhoto;
+    const shown = text || (hasImage ? '[photo]' : msg.voice ? '[voice message]' : msg.sharedPost ? `[shared a post${msg.sharedPost.title ? `: ${msg.sharedPost.title}` : ''}]` : '');
     await this.prisma.chatMessage.create({
-      data: { conversationId: conv.id, sender: 'CUSTOMER', text: text || (msg.image ? '[photo]' : ''), hasImage: !!msg.image, externalId: msg.externalId ?? null },
+      data: { conversationId: conv.id, sender: 'CUSTOMER', text: shown, hasImage, externalId: msg.externalId ?? null },
     });
 
     if (!msg.isTest && (conv.status === 'HUMAN' || (conv.humanUntil && conv.humanUntil > now))) {
@@ -176,13 +199,39 @@ export class ChatbotService {
       return { conversationId: conv.id, reply: null, status: 'HUMAN' };
     }
 
-    const output = await this.compose(conv, settings, text, msg.image ?? null, !!msg.isTest);
+    // A complaint in a private chat: one fixed line, then a person takes over.
+    const level = hasImage ? null : complaintLevel(text);
+    if (level === 'SERIOUS' || level === 'ORDINARY') {
+      if (!msg.isTest) await this.complaints.fromChat(conv, text, level, topicOf(text));
+      const result = await this.deliverBotReply(conv, settings, { text: CHAT_COMPLAINT_LINE[detectLang(text)], cards: [], source: 'SYSTEM' }, mode === 'SUGGEST');
+      if (!msg.isTest) {
+        await this.prisma.chatConversation.update({
+          where: { id: conv.id },
+          data: { status: 'HUMAN', humanUntil: new Date(Date.now() + settings.humanPauseHours * 3600_000), needsStaff: true, needsStaffReason: `Complaint (${level.toLowerCase()})` },
+        });
+        this.notify(conv.branchId, conv.id);
+      }
+      return result;
+    }
+
+    const output = await this.compose(conv, settings, msg, text);
     return this.deliverBotReply(conv, settings, output, mode === 'SUGGEST');
   }
 
-  private async compose(conv: ChatConversation, settings: ChatbotSetting, text: string, image: AiImage | null, isTest: boolean): Promise<BotOutput> {
+  private async compose(conv: ChatConversation, settings: ChatbotSetting, msg: IncomingMessage, original: string): Promise<BotOutput> {
+    const isTest = !!msg.isTest;
+    let text = original;
     const lang = detectLang(text);
-    if (image) return this.composeForImage(conv, settings, text, image, lang);
+    if (msg.voice && !text) {
+      await this.flagStaff(conv, 'Customer sent a voice message', isTest);
+      return { text: phrase('voice', lang), cards: [], source: 'SYSTEM' };
+    }
+    if (msg.image || msg.hasPhoto) return this.composeForImage(conv, settings, text, msg.image ?? null, lang);
+    if (msg.sharedPost) {
+      const shared = await this.composeForSharedPost(conv, msg.sharedPost, lang);
+      if (shared) return shared;
+      if (!text) text = `[The customer shared a post${msg.sharedPost.title ? `: "${msg.sharedPost.title}"` : ''} and wants to know about it]`;
+    }
 
     const facts = await this.branchFacts(conv.branchId);
     const siteUrl = this.menus.siteUrl();
@@ -271,8 +320,19 @@ export class ChatbotService {
     return { system, messages };
   }
 
-  private async composeForImage(conv: ChatConversation, settings: ChatbotSetting, text: string, image: AiImage, lang: ReplyLang): Promise<BotOutput> {
-    if (!settings.visionEnabled) {
+  /** A post shared into the chat: our own posts are priced exactly, with no AI. */
+  private async composeForSharedPost(conv: ChatConversation, post: PostRef, lang: ReplyLang): Promise<BotOutput | null> {
+    const resolved = await this.posts.resolve(conv.branchId, conv.channel === 'INSTAGRAM' ? 'INSTAGRAM' : 'FACEBOOK', post).catch(() => null);
+    if (!resolved || resolved.units.length === 0) return null;
+    if (resolved.dishCount === 1) {
+      const cheapest = resolved.units[0];
+      return { text: phrase('sharedPostOne', lang, { name: cheapest.dishName, price: cheapest.price }), cards: resolved.units.slice(0, 3).map(toCard), source: 'SYSTEM' };
+    }
+    return { text: phrase('visionChoices', lang), cards: resolved.units.slice(0, 5).map(toCard), source: 'SYSTEM' };
+  }
+
+  private async composeForImage(conv: ChatConversation, settings: ChatbotSetting, text: string, image: AiImage | null, lang: ReplyLang): Promise<BotOutput> {
+    if (!settings.visionEnabled || !image) {
       await this.flagStaff(conv, 'Customer sent a photo', conv.isTest);
       return { text: phrase('imageOff', lang), cards: [], source: 'SYSTEM' };
     }
@@ -466,17 +526,54 @@ export class ChatbotService {
     });
     this.notify(conv.branchId, conv.id);
     if (suggestOnly) return { conversationId: conv.id, reply: null, status: 'DRAFTED' };
-    if (conv.channel !== 'WEB') await this.sendToChannel(conv, text, output.cards);
+    if (conv.channel !== 'WEB') {
+      try {
+        await this.sendToChannel(conv, text, output.cards);
+      } catch (err) {
+        this.logger.warn(`Reply to ${conv.channel} not delivered: ${(err as Error).message}`);
+        await this.flagStaff(conv, `Reply could not be sent: ${(err as Error).message.replace(/^[A-Z_]+:\s*/, '')}`, false);
+      }
+    }
     return { conversationId: conv.id, reply: { ...output, text }, status: 'REPLIED' };
   }
 
   /**
    * Website messages are fetched by the chat widget, so nothing is pushed.
-   * Messenger, Instagram and WhatsApp delivery is added with those channels.
+   * Messenger and Instagram go through the Page's Send API, only inside
+   * Meta's 24-hour window after the customer's last message.
    */
-  async sendToChannel(conv: ChatConversation, _text: string, _cards: MenuCard[]): Promise<void> {
+  async sendToChannel(conv: ChatConversation, text: string, cards: MenuCard[]): Promise<void> {
     if (conv.channel === 'WEB') return;
-    throw new BadRequestException(`${conv.channel} replies are not connected yet`);
+    if (conv.channel === 'WHATSAPP') throw new BadRequestException('WhatsApp replies are not connected yet');
+    const auth = await this.metaAccounts.auth(conv.branchId);
+    if (!auth) throw new BadRequestException('META_NOT_CONNECTED: connect the Facebook Page in Chat Assistant → Connect first');
+    const last = conv.lastCustomerMessageAt;
+    if (!last || Date.now() - last.getTime() > 24 * 3600_000) {
+      throw new BadRequestException("OUTSIDE_WINDOW: Meta allows replies only within 24 hours of the customer's last message. Ask them to message again, or call them.");
+    }
+    try {
+      await this.meta.sendText(auth, { id: conv.externalUserId }, text);
+    } catch (err) {
+      throw new BadRequestException(err instanceof MetaError && err.needsReconnect ? 'META_RECONNECT: Facebook rejected the Page token. Reconnect in Chat Assistant → Connect.' : `Facebook: ${(err as Error).message}`);
+    }
+    if (cards.length > 0) {
+      await this.meta.sendCards(auth, { id: conv.externalUserId }, cards, `${this.menus.siteUrl()}/reservation`).catch((err: Error) => this.logger.warn(`Dish cards not sent: ${err.message}`));
+    }
+  }
+
+  /** Staff replied from Meta Business Suite or the Page inbox: record it and keep the bot quiet. */
+  async recordStaffEcho(branchId: string, channel: ChatChannel, externalUserId: string, text: string, externalId: string | null) {
+    if (externalId && (await this.prisma.chatMessage.findUnique({ where: { externalId } }))) return;
+    const conv = await this.prisma.chatConversation.findUnique({ where: { branchId_channel_externalUserId: { branchId, channel, externalUserId } } });
+    if (!conv) return;
+    const settings = await this.getSettings(branchId);
+    await this.prisma.chatMessage.create({ data: { conversationId: conv.id, sender: 'STAFF', source: 'STAFF', text: text || '[attachment]', externalId } });
+    await this.prisma.chatConversation.update({
+      where: { id: conv.id },
+      data: { status: 'HUMAN', humanUntil: new Date(Date.now() + settings.humanPauseHours * 3600_000), needsStaff: false, needsStaffReason: null, staffUnread: 0, lastMessageAt: new Date() },
+    });
+    await this.prisma.chatMessage.updateMany({ where: { conversationId: conv.id, status: 'DRAFT' }, data: { status: 'DISCARDED' } });
+    this.notify(branchId, conv.id);
   }
 
   async flagStaff(conv: ChatConversation, reason: string, isTest: boolean) {

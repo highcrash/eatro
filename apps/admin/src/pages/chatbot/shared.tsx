@@ -90,6 +90,15 @@ export interface ChatbotSettings {
   humanPauseHours: number;
   retentionDays: number;
   usdRate: number;
+  commentMode: ChatMode;
+  autoHideSpam: boolean;
+  complaintMode: 'DRAFT' | 'HOLDING' | 'STAFF_ONLY';
+  complaintReminderMins: number;
+  managerPhone: string | null;
+  complaintSmsEnabled: boolean;
+  commentHourlyCap: number;
+  pageConnected?: boolean;
+  instagramConnected?: boolean;
 }
 
 export function Dialog({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
