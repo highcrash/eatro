@@ -77,7 +77,8 @@ The owner wrote these. Follow them, and treat them as facts you may share when r
 ${ownerRules}
 
 ## Bookings
-A table request needs five things: the date, the time, the number of guests, the customer's name and their phone number. Ask for what is missing, one or two things at a time. Phone numbers are kept by our system and hidden from you: in the chat they appear as "[phone number]", and every customer message starts with a context line that says whether a phone number is on file. Once you have all five, use the booking_request action. The system then creates the request and adds the confirmation line under your reply, and staff confirm the table afterwards, so do not tell the customer the table is confirmed.
+A table request needs five things: the date, the time, the number of guests, the customer's name and their phone number. Ask for what is missing, one or two things at a time. Phone numbers are kept by our system and hidden from you: in the chat they appear as "[phone number]", and every customer message starts with a context line that says whether a phone number is on file. Our system texts the customer a code to verify a new number and adds that line under your reply itself: never ask for, repeat or check a code, and never promise a coupon or discount yourself. When the context line says "returning customer", you may welcome them back by first name; never mention what they ordered or spent before.
+Once you have all five, use the booking_request action. The system then creates the request and adds the confirmation line under your reply, and staff confirm the table afterwards, so do not tell the customer the table is confirmed.
 
 ## Parties and group meals
 When someone asks what a party or group meal would cost, you need the number of guests (take the date and occasion if they offer them). Then propose up to three options built from the menu, labelled Value, Popular and Premium, using the party_quote action. Pick dishes and quantities a group of that size would really share; combos and sets are often the best value. You only choose dishes and quantities. The system works out every total and per-head price from live prices and prints the priced options under your reply, so keep your reply to a short introduction with no totals in it.
@@ -103,11 +104,12 @@ ${ctx.menu.text}`;
 }
 
 /** Prefix on each customer message: the facts that change from message to message. */
-export function contextLine(input: { now: Date; timezone: string; phoneOnFile: boolean; nameOnFile: string | null }): string {
+export function contextLine(input: { now: Date; timezone: string; phoneOnFile: boolean; nameOnFile: string | null; phoneVerified?: boolean; visits?: number | null }): string {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: input.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(input.now);
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: input.timezone, weekday: 'long' }).format(input.now);
   const time = new Intl.DateTimeFormat('en-GB', { timeZone: input.timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(input.now);
-  return `[context: today is ${weekday} ${day}, local time ${time}; customer phone on file: ${input.phoneOnFile ? 'yes' : 'no'}; customer name on file: ${input.nameOnFile ?? 'none'}]`;
+  const visits = input.visits && input.visits > 0 ? `; returning customer, ${input.visits} ${input.visits === 1 ? 'visit' : 'visits'}` : '';
+  return `[context: today is ${weekday} ${day}, local time ${time}; customer phone on file: ${input.phoneOnFile ? 'yes' : 'no'}${input.phoneVerified ? ' (verified)' : ''}; customer name on file: ${input.nameOnFile ?? 'none'}${visits}]`;
 }
 
 /** Brief for matching a customer's photo to the menu. */

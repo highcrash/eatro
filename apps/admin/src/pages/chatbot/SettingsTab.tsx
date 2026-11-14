@@ -32,6 +32,7 @@ function SettingsForm() {
       visionEnabled: f!.visionEnabled, imageDailyLimit: f!.imageDailyLimit, humanPauseHours: f!.humanPauseHours, retentionDays: f!.retentionDays, usdRate: f!.usdRate,
       autoHideSpam: f!.autoHideSpam, complaintMode: f!.complaintMode, complaintReminderMins: f!.complaintReminderMins,
       managerPhone: f!.managerPhone ?? '', complaintSmsEnabled: f!.complaintSmsEnabled, commentHourlyCap: f!.commentHourlyCap,
+      verifyPhoneEnabled: f!.verifyPhoneEnabled, welcomeCouponEnabled: f!.welcomeCouponEnabled, welcomeCouponPercent: f!.welcomeCouponPercent, welcomeCouponDays: f!.welcomeCouponDays,
     }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['chat-settings'] }),
   });
@@ -94,6 +95,29 @@ function SettingsForm() {
           </div>
         )}
         <p className={HINT}>Suggested start for social channels: Suggest for the first week, then Auto once the replies look right.</p>
+      </section>
+
+      <section className={`${CARD} p-4 space-y-3`}>
+        <h2 className="font-display text-xl text-white tracking-wide">CUSTOMER NUMBERS AND WELCOME COUPON</h2>
+        <label className="flex items-start gap-2 text-sm font-body text-[#ccc]">
+          <input type="checkbox" checked={f.verifyPhoneEnabled} onChange={(e) => set({ verifyPhoneEnabled: e.target.checked })} className="mt-1" />
+          <span>Verify customers' mobile numbers with an SMS code<br /><span className={HINT}>When a customer gives a number in chat (or on the website card), they get a 6-digit code to type back. The chat is then linked to their customer record, so staff see their visits and bookings. WhatsApp numbers count as verified with no SMS. Each code is one SMS from your balance.</span></span>
+        </label>
+        <label className={`flex items-start gap-2 text-sm font-body text-[#ccc] ${f.verifyPhoneEnabled ? '' : 'opacity-50'}`}>
+          <input type="checkbox" disabled={!f.verifyPhoneEnabled} checked={f.welcomeCouponEnabled} onChange={(e) => set({ welcomeCouponEnabled: e.target.checked })} className="mt-1" />
+          <span>Send new customers a welcome coupon by SMS after they verify<br /><span className={HINT}>One coupon per customer, ever, and only for customers with no paid bills yet. It replaces the First-Visit Welcome Coupon in Settings → Marketing for these customers, so nobody gets both. On Messenger and Instagram the bot offers it at most twice per chat.</span></span>
+        </label>
+        <div className={`grid grid-cols-2 gap-3 ${f.verifyPhoneEnabled && f.welcomeCouponEnabled ? '' : 'opacity-50'}`}>
+          <div>
+            <label className={LABEL}>Discount (%)</label>
+            <input type="number" min={1} max={50} value={f.welcomeCouponPercent} onChange={(e) => set({ welcomeCouponPercent: Number(e.target.value) })} className={`w-full ${INPUT}`} />
+          </div>
+          <div>
+            <label className={LABEL}>Valid for (days)</label>
+            <input type="number" min={1} max={365} value={f.welcomeCouponDays} onChange={(e) => set({ welcomeCouponDays: Number(e.target.value) })} className={`w-full ${INPUT}`} />
+          </div>
+        </div>
+        <p className={HINT}>Needs SMS set up in Settings → Notifications. Without it, the bot doesn't ask for numbers and the website card stays hidden.</p>
       </section>
 
       <section className={`${CARD} p-4 space-y-3`}>

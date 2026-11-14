@@ -38,6 +38,10 @@ export interface SettingsInput {
   complaintSmsEnabled?: boolean;
   commentHourlyCap?: number;
   whatsappMonthlyCap?: number;
+  verifyPhoneEnabled?: boolean;
+  welcomeCouponEnabled?: boolean;
+  welcomeCouponPercent?: number;
+  welcomeCouponDays?: number;
 }
 
 @Injectable()
@@ -98,12 +102,16 @@ export class ChatbotAdminService {
     if (input.retentionDays !== undefined) data.retentionDays = ranged(input.retentionDays, 7, 365, 'Days to keep chats');
     if (input.autoHideSpam !== undefined) data.autoHideSpam = !!input.autoHideSpam;
     if (input.complaintSmsEnabled !== undefined) data.complaintSmsEnabled = !!input.complaintSmsEnabled;
+    if (input.verifyPhoneEnabled !== undefined) data.verifyPhoneEnabled = !!input.verifyPhoneEnabled;
+    if (input.welcomeCouponEnabled !== undefined) data.welcomeCouponEnabled = !!input.welcomeCouponEnabled;
     if (input.complaintMode !== undefined) {
       if (!['DRAFT', 'HOLDING', 'STAFF_ONLY'].includes(input.complaintMode)) throw new BadRequestException('Unknown complaint setting');
       data.complaintMode = input.complaintMode;
     }
     if (input.complaintReminderMins !== undefined) data.complaintReminderMins = ranged(input.complaintReminderMins, 5, 240, 'Reminder minutes');
     if (input.whatsappMonthlyCap !== undefined) data.whatsappMonthlyCap = ranged(input.whatsappMonthlyCap, 0, 100_000, 'WhatsApp replies per month');
+    if (input.welcomeCouponPercent !== undefined) data.welcomeCouponPercent = ranged(input.welcomeCouponPercent, 1, 50, 'Welcome coupon percent');
+    if (input.welcomeCouponDays !== undefined) data.welcomeCouponDays = ranged(input.welcomeCouponDays, 1, 365, 'Welcome coupon days');
     if (input.commentHourlyCap !== undefined) data.commentHourlyCap = ranged(input.commentHourlyCap, 1, 500, 'Comment replies per hour');
     if (input.managerPhone !== undefined) {
       const phone = input.managerPhone?.trim() ? normalizePhone(input.managerPhone) : null;

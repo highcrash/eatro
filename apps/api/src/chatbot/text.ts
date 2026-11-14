@@ -137,7 +137,53 @@ const PHRASES = {
     en: '(Test mode: nothing was saved.)',
     bn: '(Test mode: nothing was saved.)',
   },
+  numberInvite: {
+    en: "If you share your name and mobile number, we'll text you a {percent}% welcome coupon for your first visit.",
+    bn: 'আপনার নাম আর মোবাইল নম্বর দিলে প্রথম ভিজিটের জন্য {percent}% ছাড়ের একটি ওয়েলকাম কুপন SMS-এ পাঠিয়ে দেব।',
+  },
+  codeSent: {
+    en: "We've texted a 6-digit code to your number. Please type it here to verify your number.",
+    bn: 'আপনার নম্বরে SMS-এ একটি 6 সংখ্যার কোড পাঠিয়েছি। নম্বরটি ভেরিফাই করতে কোডটি এখানে লিখে দিন।',
+  },
+  codeLimit: {
+    en: "We can't send another code today. A team member can help you instead.",
+    bn: 'আজ আর কোড পাঠানো যাচ্ছে না। আমাদের টিমের একজন আপনাকে সাহায্য করবেন।',
+  },
+  codeWrong: {
+    en: "That code doesn't match. Please check the SMS and try again ({left} tries left).",
+    bn: 'কোডটি মেলেনি। SMS দেখে আবার লিখুন (আর {left} বার চেষ্টা করা যাবে)।',
+  },
+  codeLocked: {
+    en: "That code was tried too many times. Send your number again and we'll text a new code.",
+    bn: 'অনেকবার ভুল কোড দেওয়া হয়েছে। নম্বরটি আবার দিন, নতুন কোড পাঠিয়ে দেব।',
+  },
+  codeExpired: {
+    en: "That code has expired. Send your number again and we'll text a new one.",
+    bn: 'কোডটির মেয়াদ শেষ হয়ে গেছে। নম্বরটি আবার দিন, নতুন কোড পাঠিয়ে দেব।',
+  },
+  verified: {
+    en: 'Thank you{name}, your number is verified.',
+    bn: 'ধন্যবাদ{name}, আপনার নম্বর ভেরিফাই হয়েছে।',
+  },
+  verifiedReturning: {
+    en: 'Welcome back{name}! Your number is verified.',
+    bn: 'আবার স্বাগতম{name}! আপনার নম্বর ভেরিফাই হয়েছে।',
+  },
+  couponSent: {
+    en: "We've texted you a {percent}% welcome coupon for your first visit, valid until {date}.",
+    bn: 'প্রথম ভিজিটের জন্য {percent}% ছাড়ের ওয়েলকাম কুপন SMS-এ পাঠিয়েছি, {date} পর্যন্ত ব্যবহার করা যাবে।',
+  },
 } as const;
+
+const GREETING_WORDS = new Set(
+  'hi hello hey hlw helo hii salam salaam assalamu assalamualaikum alaikum walaikum asslamualaikum wa alaikumussalam good morning evening afternoon ok okay thanks thank you vai bhai apu ji jee আসসালামু আলাইকুম ওয়ালাইকুম আসসালাম সালাম হাই হ্যালো ভাই আপু জি ধন্যবাদ'.split(' '),
+);
+
+/** "hi", "assalamu alaikum vai", "thanks": nothing asked yet, so no coupon offer. */
+export function greetingOnly(text: string): boolean {
+  const words = normalizeText(text).split(' ').filter(Boolean);
+  return words.length === 0 || words.every((w) => GREETING_WORDS.has(w));
+}
 
 export function phrase(key: keyof typeof PHRASES, lang: ReplyLang, values: Record<string, string | number> = {}): string {
   return PHRASES[key][lang].replace(/\{(\w+)\}/g, (whole, k: string) => (k in values ? String(values[k]) : whole));

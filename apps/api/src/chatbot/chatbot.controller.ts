@@ -16,6 +16,8 @@ import { ChatbotAdminService, SettingsInput } from './chatbot-admin.service';
 import { ChatbotService } from './chatbot.service';
 import { ChatStaff, ChatStaffGuard } from './chat-staff.guard';
 import { PushService } from './push/push.service';
+import { extractPhone } from './text';
+import { ChatVerificationService, codeIn } from './verification.service';
 import { CommentService } from './comment.service';
 import { ComplaintService } from './complaint.service';
 import { ConnectService } from './meta/connect.service';
@@ -43,6 +45,7 @@ export class ChatbotPublicController {
   constructor(
     private readonly chatbot: ChatbotService,
     private readonly prisma: PrismaService,
+    private readonly verification: ChatVerificationService,
   ) {}
 
   private async branch(branchId: unknown) {
@@ -57,7 +60,8 @@ export class ChatbotPublicController {
   async config(@Query('branchId') branchId: string) {
     const id = await this.branch(branchId);
     const s = await this.chatbot.getSettings(id);
-    return { enabled: s.webMode !== 'OFF', assistantName: s.assistantName, greeting: s.greeting, photos: s.visionEnabled, retentionDays: s.retentionDays };
+    const verify = s.verifyPhoneEnabled && (await this.verification.smsReady(id)) ? { coupon: s.welcomeCouponEnabled ? s.welcomeCouponPercent : null } : null;
+    return { enabled: s.webMode !== 'OFF', assistantName: s.assistantName, greeting: s.greeting, photos: s.visionEnabled, retentionDays: s.retentionDays, verify };
   }
 
   @Post('message')
@@ -81,7 +85,7 @@ export class ChatbotPublicController {
     const id = await this.branch(branchId);
     if (!SESSION_RE.test(sessionId ?? '')) throw new BadRequestException('Bad chat session');
     const conv = await this.prisma.chatConversation.findUnique({ where: { branchId_channel_externalUserId: { branchId: id, channel: 'WEB', externalUserId: sessionId } } });
-    if (!conv) return { messages: [], staffActive: false };
+    if (!conv) return { messages: [], staffActive: false, verified: false };
     const since = after && !Number.isNaN(Date.parse(after)) ? new Date(after) : undefined;
     const rows = await this.prisma.chatMessage.findMany({
       where: { conversationId: conv.id, status: 'SENT', ...(since ? { createdAt: { gt: since } } : {}) },
@@ -89,7 +93,30 @@ export class ChatbotPublicController {
       take: 100,
       select: { id: true, sender: true, text: true, cards: true, hasImage: true, createdAt: true },
     });
-    return { messages: rows, staffActive: conv.status === 'HUMAN' };
+    return { messages: rows, staffActive: conv.status === 'HUMAN', verified: !!conv.phoneVerifiedAt };
+  }
+
+  /** Website card: name and number in, 6-digit code out by SMS. */
+  @Post('verify/start')
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
+  async verifyStart(@Body() body: { branchId?: string; sessionId?: string; name?: string; phone?: string }) {
+    const branchId = await this.branch(body?.branchId);
+    if (!SESSION_RE.test(body?.sessionId ?? '')) throw new BadRequestException('Bad chat session');
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (!name || name.length > 60) throw new BadRequestException('Please enter your name');
+    const phone = extractPhone(typeof body.phone === 'string' ? body.phone : '').phone;
+    if (!phone) throw new BadRequestException('Enter a Bangladesh mobile number, like 01712345678');
+    return this.chatbot.webVerifyStart(branchId, body.sessionId!, name, phone);
+  }
+
+  @Post('verify/confirm')
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  async verifyConfirm(@Body() body: { branchId?: string; sessionId?: string; code?: string }) {
+    const branchId = await this.branch(body?.branchId);
+    if (!SESSION_RE.test(body?.sessionId ?? '')) throw new BadRequestException('Bad chat session');
+    const code = codeIn(typeof body.code === 'string' ? body.code : '');
+    if (!code) throw new BadRequestException('Type the 6-digit code from the SMS');
+    return this.chatbot.webVerifyConfirm(branchId, body.sessionId!, code);
   }
 }
 

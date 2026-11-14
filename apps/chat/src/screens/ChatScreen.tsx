@@ -83,7 +83,7 @@ function CustomerPanel({ c }: { c: ConversationDetail }) {
           <>
             <Phone size={14} className="text-beet" />
             <span className="font-semibold">{c.customerPhone}</span>
-            {c.phoneVerifiedAt && <BadgeCheck size={15} className="text-[#1FA855]" aria-label="Verified" />}
+            {c.phoneVerifiedAt && c.verifiedPhone === c.customerPhone && <BadgeCheck size={15} className="text-[#1FA855]" aria-label="Verified" />}
           </>
         ) : (
           <span className="text-ink-soft">No phone number yet</span>

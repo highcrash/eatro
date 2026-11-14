@@ -5,13 +5,34 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { getActiveBranchId } from '../lib/cms';
 
-interface ChatConfig { enabled: boolean; assistantName: string; greeting: string; photos: boolean; retentionDays: number }
+interface ChatConfig { enabled: boolean; assistantName: string; greeting: string; photos: boolean; retentionDays: number; verify: { coupon: number | null } | null }
 interface Card { name: string; price: number; wasPrice: number | null; imageUrl: string | null; url: string }
 interface Msg { id: string; sender: 'CUSTOMER' | 'BOT' | 'STAFF'; text: string; cards: Card[] | null; hasImage?: boolean; createdAt: string; pending?: boolean }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const BASE = ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined) ?? '/api/v1';
 const SESSION_KEY = 'eatro-chat-session';
+const VERIFY_HIDDEN_KEY = 'eatro-chat-verify-hidden';
+const DAY_MS = 24 * 3600_000;
+
+function verifyHidden(): boolean {
+  try {
+    const at = Number(localStorage.getItem(VERIFY_HIDDEN_KEY) ?? 0);
+    return Date.now() - at < DAY_MS;
+  } catch {
+    return false;
+  }
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = (await res.json().catch(() => ({}))) as T & { message?: string | string[] };
+  if (!res.ok) {
+    const msg = Array.isArray(data.message) ? data.message[0] : data.message;
+    throw new Error(res.status === 429 ? 'Please wait a minute and try again.' : (msg ?? 'Something went wrong').replace(/^[A-Z_]+:\s*/, ''));
+  }
+  return data;
+}
 const CHIPS = [
   { label: 'Opening hours', text: 'What are your opening hours?' },
   { label: "Today's offers", text: 'What offers do you have today?' },
@@ -67,17 +88,20 @@ export default function ChatWidget() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [staffActive, setStaffActive] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [hideVerify, setHideVerify] = useState(verifyHidden);
   const session = useRef<string>('');
   const fileRef = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     if (!session.current) session.current = sessionId();
-    const res = await api.getJson<{ messages: Msg[]; staffActive: boolean }>(
+    const res = await api.getJson<{ messages: Msg[]; staffActive: boolean; verified?: boolean }>(
       `/public/chatbot/messages?branchId=${encodeURIComponent(branchId)}&sessionId=${session.current}`,
     );
     setMessages(res.messages);
     setStaffActive(res.staffActive);
+    setVerified(!!res.verified);
   }, [branchId]);
 
   useEffect(() => {
@@ -152,6 +176,18 @@ export default function ChatWidget() {
               <Bubble key={m.id} mine={m.sender === 'CUSTOMER'} staff={m.sender === 'STAFF'} text={m.hasImage && m.text === '[photo]' ? '📷 Photo' : m.text} cards={m.cards} faded={m.pending} />
             ))}
             {busy && <p className="text-xs text-muted">{config.assistantName} is typing…</p>}
+            {config.verify && !verified && !hideVerify && !busy && messages.some((m) => m.sender !== 'CUSTOMER') && (
+              <VerifyCard
+                branchId={branchId}
+                sessionId={() => session.current || (session.current = sessionId())}
+                coupon={config.verify.coupon}
+                onDone={() => { setVerified(true); void load().catch(() => undefined); }}
+                onHide={() => {
+                  setHideVerify(true);
+                  try { localStorage.setItem(VERIFY_HIDDEN_KEY, String(Date.now())); } catch { /* private window */ }
+                }}
+              />
+            )}
             <div ref={bottom} />
           </div>
 
@@ -205,6 +241,66 @@ function Bubble({ mine, staff, text, cards, faded }: { mine: boolean; staff?: bo
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Name and mobile, then the 6-digit code from the SMS. Shown once per chat until done or dismissed. */
+function VerifyCard({ branchId, sessionId, coupon, onDone, onHide }: { branchId: string; sessionId: () => string; coupon: number | null; onDone: () => void; onHide: () => void }) {
+  const [step, setStep] = useState<'details' | 'code'>('details');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try { await fn(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+  const sendCode = () => run(async () => {
+    const r = await postJson<{ status: 'SENT' | 'VERIFIED' }>('/public/chatbot/verify/start', { branchId, sessionId: sessionId(), name: name.trim(), phone: phone.trim() });
+    if (r.status === 'VERIFIED') onDone();
+    else { setCode(''); setStep('code'); }
+  });
+  const confirm = () => run(async () => {
+    await postJson('/public/chatbot/verify/confirm', { branchId, sessionId: sessionId(), code: code.trim() });
+    onDone();
+  });
+
+  const field = 'w-full bg-bg border border-border px-3 py-2 text-sm outline-none focus:border-accent';
+  return (
+    <div className="border border-accent bg-card p-3 space-y-2 text-sm">
+      <div className="flex items-start gap-2">
+        <p className="flex-1 font-semibold">{coupon ? `Get ${coupon}% off your first visit` : 'Share your name and number'}</p>
+        <button onClick={onHide} aria-label="Not now" className="text-muted hover:text-text text-xs">Not now</button>
+      </div>
+      {step === 'details' ? (
+        <>
+          <p className="text-xs text-muted">{coupon ? "We'll text a welcome coupon to your mobile after a quick check." : 'So our team can recognise you and help with bookings faster.'}</p>
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Your name" autoComplete="name" className={field} />
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={20} placeholder="Mobile number (01XXXXXXXXX)" inputMode="tel" autoComplete="tel" className={field} />
+          <button disabled={busy || !name.trim() || phone.replace(/\D/g, '').length < 11} onClick={() => void sendCode()} className="w-full bg-btn text-white py-2 font-bold disabled:opacity-40">
+            {busy ? 'Sending…' : 'Send code'}
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="text-xs text-muted">We sent a 6-digit code to {phone.trim()}. It expires in 10 minutes.</p>
+          <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={8} placeholder="6-digit code" inputMode="numeric" autoComplete="one-time-code"
+            onKeyDown={(e) => { if (e.key === 'Enter' && code.trim()) void confirm(); }} className={`${field} tracking-[0.4em] text-center`} />
+          <button disabled={busy || code.replace(/\D/g, '').length < 4} onClick={() => void confirm()} className="w-full bg-btn text-white py-2 font-bold disabled:opacity-40">
+            {busy ? 'Checking…' : 'Verify'}
+          </button>
+          <div className="flex justify-between text-xs">
+            <button onClick={() => { setStep('details'); setError(null); }} className="text-accent underline">Change number</button>
+            <button disabled={busy} onClick={() => void sendCode()} className="text-accent underline disabled:opacity-40">Send a new code</button>
+          </div>
+        </>
+      )}
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      <p className="text-[10px] text-muted">We use your number only for your bookings and offers from us. <Link to="/privacy" className="underline">Privacy</Link></p>
     </div>
   );
 }

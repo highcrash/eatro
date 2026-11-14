@@ -18,7 +18,8 @@ import { PushService } from './push/push.service';
 import { formatPartyQuote, priceParty } from './party-planner';
 import { buildSystemPrompt, buildVisionPrompt, contextLine } from './prompt';
 import { AiReply, checkReply, detectLang, ownerAmounts, parseAiReply } from './reply';
-import { extractPhone, fillPlaceholders, matchQuickReply, phrase, ReplyLang } from './text';
+import { extractPhone, fillPlaceholders, greetingOnly, matchQuickReply, phrase, ReplyLang } from './text';
+import { ChatVerificationService, CheckResult, codeIn, Verified } from './verification.service';
 
 export interface IncomingMessage {
   branchId: string;
@@ -46,6 +47,8 @@ export interface BotOutput {
   text: string;
   cards: MenuCard[];
   source: 'QUICK_REPLY' | 'AI' | 'FALLBACK' | 'SYSTEM';
+  /** The language the AI answered in, when it did. */
+  lang?: ReplyLang;
 }
 
 export interface HandleResult {
@@ -62,7 +65,12 @@ const HISTORY_LIMIT = 12;
 /** At most this many messages from one burst are answered together. */
 const BURST_MAX = 6;
 /** Rows that stand in for a photo, voice note or shared post; not something to answer as text. */
-const PLACEHOLDER = /^\[(photo|voice message|shared a post[^\]]*)\]$/;
+const PLACEHOLDER = /^\[(photo|voice message|verification code|shared a post[^\]]*)\]$/;
+/** What a verification code is stored as, so the code itself never reaches the AI or the inbox. */
+const CODE_PLACEHOLDER = '[verification code]';
+/** The bot offers the welcome coupon at most this often per chat. */
+const MAX_INVITES = 2;
+const INVITE_GAP_MS = 12 * 3600_000;
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -118,6 +126,7 @@ export class ChatbotService {
     private readonly posts: PostContextService,
     private readonly whatsApp: WhatsAppService,
     private readonly push: PushService,
+    private readonly verify: ChatVerificationService,
   ) {}
 
   /** Live values for {placeholders} in pre-ready answers. */
@@ -300,6 +309,27 @@ export class ChatbotService {
       }
     }
 
+    // WhatsApp: the number is the sender's own, so it counts as verified.
+    const notes: string[] = [];
+    if (msg.channel === 'WHATSAPP' && !msg.isTest && msg.knownPhone && conv.verifiedPhone !== msg.knownPhone) {
+      const verified = await this.verify.markVerified(conv, settings, msg.knownPhone, conv.customerName).catch((err: Error) => {
+        this.logger.warn(`WhatsApp customer not linked: ${err.message}`);
+        return null;
+      });
+      if (verified?.coupon) notes.push(this.couponLine(verified, detectLang(text)));
+    }
+
+    // A verification code typed into the chat is checked here, with no AI.
+    const code = msg.isTest || hasImage || msg.channel === 'WHATSAPP' ? null : codeIn(text);
+    if (code) {
+      const result = await this.verify.check(conv, settings, code);
+      if (result.status !== 'NONE') {
+        await this.hideCodes(answering.ids);
+        const lang = await this.chatLang(conv.id);
+        return this.deliverBotReply(conv, settings, { text: this.checkLine(result, lang), cards: [], source: 'SYSTEM' }, false);
+      }
+    }
+
     // A complaint in a private chat: one fixed line, then a person takes over.
     const level = hasImage ? null : complaintLevel(text);
     if (level === 'SERIOUS' || level === 'ORDINARY') {
@@ -316,7 +346,120 @@ export class ChatbotService {
     }
 
     const output = await this.compose(conv, settings, msg, text, answering);
+    if (!msg.isTest) notes.push(...(await this.verificationNotes(conv, settings, msg, text, output)));
+    if (notes.length > 0) output.text = [output.text, ...notes].join('\n\n');
     return this.deliverBotReply(conv, settings, output, mode === 'SUGGEST');
+  }
+
+  // ── Phone verification ─────────────────────────────────────────────────────
+
+  /**
+   * Lines added under the reply: a code was texted to the number the customer
+   * just gave, or (Messenger and Instagram, at most twice) the welcome coupon
+   * offer for their name and number.
+   */
+  private async verificationNotes(conv: ChatConversation, settings: ChatbotSetting, msg: IncomingMessage, text: string, output: BotOutput): Promise<string[]> {
+    if (!settings.verifyPhoneEnabled || msg.channel === 'WHATSAPP') return [];
+    const lang = output.lang ?? detectLang(text);
+    const phone = extractPhone(text).phone;
+    if (phone && phone !== conv.verifiedPhone) {
+      if (!(await this.verify.smsReady(conv.branchId))) return [];
+      const started = await this.verify.start(conv, phone, conv.customerName);
+      if (started === 'SENT' || started === 'RECENT') return [phrase('codeSent', lang)];
+      if (started === 'LIMIT') return [phrase('codeLimit', lang)];
+      return [];
+    }
+    const invite =
+      (msg.channel === 'MESSENGER' || msg.channel === 'INSTAGRAM') &&
+      settings.welcomeCouponEnabled &&
+      output.source === 'AI' &&
+      !conv.verifiedPhone &&
+      !conv.customerPhone &&
+      !conv.customerId &&
+      !conv.needsStaff &&
+      conv.numberInvites < MAX_INVITES &&
+      (!conv.numberInviteAt || Date.now() - conv.numberInviteAt.getTime() > INVITE_GAP_MS) &&
+      !greetingOnly(text);
+    if (!invite || !(await this.verify.smsReady(conv.branchId))) return [];
+    await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { numberInvites: { increment: 1 }, numberInviteAt: new Date() } });
+    return [phrase('numberInvite', lang, { percent: settings.welcomeCouponPercent })];
+  }
+
+  private checkLine(result: CheckResult, lang: ReplyLang): string {
+    switch (result.status) {
+      case 'OK':
+        return this.verifiedLine(result.verified, lang);
+      case 'WRONG':
+        return phrase('codeWrong', lang, { left: result.triesLeft });
+      case 'LOCKED':
+        return phrase('codeLocked', lang);
+      default:
+        return phrase('codeExpired', lang);
+    }
+  }
+
+  private verifiedLine(v: Verified, lang: ReplyLang): string {
+    const name = v.name ? (lang === 'bn' ? ` ${v.name}` : `, ${v.name}`) : '';
+    const first = phrase(v.returning ? 'verifiedReturning' : 'verified', lang, { name });
+    return v.coupon ? `${first} ${this.couponLine(v, lang)}` : first;
+  }
+
+  private couponLine(v: Verified, lang: ReplyLang): string {
+    const date = v.coupon!.validUntil.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dhaka' });
+    return phrase('couponSent', lang, { percent: v.coupon!.percent, date });
+  }
+
+  /** Customer messages that were only a code are stored as a placeholder. */
+  private async hideCodes(ids: string[]) {
+    const rows = await this.prisma.chatMessage.findMany({ where: { id: { in: ids } }, select: { id: true, text: true } });
+    const codes = rows.filter((r) => codeIn(r.text)).map((r) => r.id);
+    if (codes.length > 0) await this.prisma.chatMessage.updateMany({ where: { id: { in: codes } }, data: { text: CODE_PLACEHOLDER } });
+  }
+
+  /** The language of the customer's latest real message, for replies to a bare code. */
+  private async chatLang(conversationId: string): Promise<ReplyLang> {
+    const rows = await this.prisma.chatMessage.findMany({ where: { conversationId, sender: 'CUSTOMER' }, orderBy: { createdAt: 'desc' }, take: 8, select: { text: true } });
+    const real = rows.find((r) => /\p{L}/u.test(r.text) && !PLACEHOLDER.test(r.text.trim()));
+    return real ? detectLang(real.text) : 'en';
+  }
+
+  /** Website card, step 1: text a code to the number the customer typed. */
+  async webVerifyStart(branchId: string, sessionId: string, name: string, phone: string) {
+    const settings = await this.getSettings(branchId);
+    if (!settings.verifyPhoneEnabled || !(await this.verify.smsReady(branchId))) throw new BadRequestException('Phone verification is not available right now');
+    const conv = await this.webConversation(branchId, sessionId);
+    const started = await this.inTurn(conv.id, () => this.verify.start(conv, phone, name));
+    if (started === 'ALREADY') return { status: 'VERIFIED' as const };
+    if (started === 'LIMIT') throw new BadRequestException('Too many codes for today. Please try again tomorrow.');
+    if (started === 'SMS_FAILED') throw new BadRequestException("We couldn't send the code. Please check the number, or try again later.");
+    return { status: 'SENT' as const };
+  }
+
+  /** Website card, step 2: check the code; the confirmation also appears in the chat. */
+  async webVerifyConfirm(branchId: string, sessionId: string, code: string) {
+    const settings = await this.getSettings(branchId);
+    const conv = await this.webConversation(branchId, sessionId);
+    return this.inTurn(conv.id, async () => {
+      const result = await this.verify.check(conv, settings, code);
+      if (result.status === 'OK') {
+        const lang = await this.chatLang(conv.id);
+        await this.prisma.chatMessage.create({ data: { conversationId: conv.id, sender: 'BOT', source: 'SYSTEM', text: this.verifiedLine(result.verified, lang) } });
+        await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { lastMessageAt: new Date() } });
+        this.notify(branchId, conv.id);
+        const v = result.verified;
+        return { status: 'VERIFIED' as const, name: v.name, returning: v.returning, coupon: v.coupon ? { percent: v.coupon.percent, validUntil: v.coupon.validUntil.toISOString() } : null };
+      }
+      if (result.status === 'WRONG') throw new BadRequestException(`That code doesn't match. ${result.triesLeft} ${result.triesLeft === 1 ? 'try' : 'tries'} left.`);
+      if (result.status === 'LOCKED') throw new BadRequestException('Too many wrong tries. Ask for a new code.');
+      if (result.status === 'EXPIRED') throw new BadRequestException('That code has expired. Ask for a new one.');
+      throw new BadRequestException('Ask for a code first.');
+    });
+  }
+
+  private async webConversation(branchId: string, sessionId: string) {
+    const conv = await this.prisma.chatConversation.findUnique({ where: { branchId_channel_externalUserId: { branchId, channel: 'WEB', externalUserId: sessionId } } });
+    if (!conv) throw new BadRequestException('Send us a message first');
+    return conv;
   }
 
   private async compose(conv: ChatConversation, settings: ChatbotSetting, msg: IncomingMessage, original: string, answering: { ids: string[]; until: Date }): Promise<BotOutput> {
@@ -386,7 +529,7 @@ export class ChatbotService {
     const reply = outcome.value;
     const cards = reply.items.map((ref) => menu.byRef.get(ref)).filter((u): u is NonNullable<typeof u> => !!u).map(toCard);
     const extra = await this.applyAction(conv, reply, menu, facts, isTest, text);
-    return { text: [reply.reply, extra].filter(Boolean).join('\n\n'), cards, source: 'AI' };
+    return { text: [reply.reply, extra].filter(Boolean).join('\n\n'), cards, source: 'AI', lang: reply.lang };
   }
 
   private async chatRequest(
@@ -424,7 +567,15 @@ export class ChatbotService {
       const content = m.sender === 'CUSTOMER' ? `${extractPhone(m.text).masked}${m.hasImage ? ' [sent a photo]' : ''}` : m.text;
       if (content.trim()) messages.push({ role, content });
     }
-    const line = contextLine({ now: new Date(), timezone: facts.timezone, phoneOnFile: !!conv.customerPhone, nameOnFile: conv.customerName });
+    const known = conv.customerId && conv.verifiedPhone ? await this.prisma.customer.findUnique({ where: { id: conv.customerId }, select: { totalOrders: true } }) : null;
+    const line = contextLine({
+      now: new Date(),
+      timezone: facts.timezone,
+      phoneOnFile: !!conv.customerPhone,
+      nameOnFile: conv.customerName,
+      phoneVerified: !!conv.verifiedPhone,
+      visits: known?.totalOrders ?? null,
+    });
     messages.push({ role: 'user', content: `${line}\n${extractPhone(text).masked}` });
     return { system, messages };
   }

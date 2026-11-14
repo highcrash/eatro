@@ -17,6 +17,9 @@ export async function deleteTestBranch(prisma: PrismaService, branchId: string):
   const ids = convs.map((c) => c.id);
   await prisma.chatLead.deleteMany({ where: { conversationId: { in: ids } } });
   await prisma.chatConversation.deleteMany({ where: { branchId } });
+  await prisma.coupon.deleteMany({ where: { branchId } });
+  await prisma.reservation.deleteMany({ where: { branchId } });
+  await prisma.customer.deleteMany({ where: { branchId } });
   await prisma.chatComplaint.deleteMany({ where: { branchId } });
   await prisma.chatComment.deleteMany({ where: { branchId } });
   await prisma.chatPostContext.deleteMany({ where: { branchId } });

@@ -3267,11 +3267,18 @@ model ChatConversation {
   staffUnread           Int                    @default(0)
   lastMessageAt         DateTime               @default(now())
   lastCustomerMessageAt DateTime?
+  /// The number the customer proved is theirs (SMS code, or WhatsApp itself).
+  verifiedPhone         String?
+  phoneVerifiedAt       DateTime?
+  /// Times the bot offered the welcome coupon for a name and number (at most 2).
+  numberInvites         Int                    @default(0)
+  numberInviteAt        DateTime?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 
-  messages ChatMessage[]
-  leads    ChatLead[]
+  messages      ChatMessage[]
+  leads         ChatLead[]
+  verifications ChatPhoneVerification[]
 
   @@unique([branchId, channel, externalUserId])
   @@index([branchId, lastMessageAt])
@@ -3408,6 +3415,12 @@ model ChatbotSetting {
   /// WhatsApp replies the bot sends per calendar month before it stops and leaves
   /// chats to staff. Meta gives 1,000 free service messages a month per number.
   whatsappMonthlyCap    Int                   @default(1000)
+  /// Customers prove their mobile number with a 6-digit SMS code.
+  verifyPhoneEnabled    Boolean               @default(true)
+  /// New customers who verify get one welcome coupon by SMS.
+  welcomeCouponEnabled  Boolean               @default(true)
+  welcomeCouponPercent  Int                   @default(5)
+  welcomeCouponDays     Int                   @default(30)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -3678,4 +3691,23 @@ model StaffPushSubscription {
   @@index([branchId])
   @@index([staffId])
   @@map("staff_push_subscriptions")
+}
+
+/// A 6-digit code texted to a customer from the chat. Only a keyed hash is kept.
+model ChatPhoneVerification {
+  id             String    @id @default(cuid())
+  conversationId String
+  phone          String
+  name           String?
+  codeHash       String
+  expiresAt      DateTime
+  attempts       Int       @default(0)
+  verifiedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([phone, createdAt])
+  @@map("chat_phone_verifications")
 }

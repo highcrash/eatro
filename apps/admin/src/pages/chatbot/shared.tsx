@@ -98,6 +98,10 @@ export interface ChatbotSettings {
   complaintSmsEnabled: boolean;
   commentHourlyCap: number;
   whatsappMonthlyCap: number;
+  verifyPhoneEnabled: boolean;
+  welcomeCouponEnabled: boolean;
+  welcomeCouponPercent: number;
+  welcomeCouponDays: number;
   pageConnected?: boolean;
   instagramConnected?: boolean;
   whatsappConnected?: boolean;

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { CustomerModule } from '../customer/customer.module';
+import { MarketingModule } from '../marketing/marketing.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PublicModule } from '../public/public.module';
 import { ReservationModule } from '../reservation/reservation.module';
@@ -26,9 +27,10 @@ import { ChatbotScheduler } from './chatbot.scheduler';
 import { ChatbotService } from './chatbot.service';
 import { MenuContextService } from './menu-context';
 import { PushService, WebPushSender } from './push/push.service';
+import { ChatVerificationService } from './verification.service';
 
 @Module({
-  imports: [PrismaModule, PublicModule, ReservationModule, CustomerModule, WsGatewayModule, ActivityLogModule, SmsModule, WhatsAppModule],
+  imports: [PrismaModule, PublicModule, ReservationModule, CustomerModule, WsGatewayModule, ActivityLogModule, SmsModule, WhatsAppModule, MarketingModule],
   controllers: [ChatbotPublicController, ChatbotAdminController, AiAdminController, MetaWebhookController, WhatsAppWebhookController, ConnectCallbackController, ConnectController, SocialAdminController, ChatStaffController],
   providers: [
     OpenAiCompatibleProvider,
@@ -49,6 +51,7 @@ import { PushService, WebPushSender } from './push/push.service';
     WhatsAppWebhookService,
     WebPushSender,
     PushService,
+    ChatVerificationService,
   ],
   exports: [ChatbotService],
 })

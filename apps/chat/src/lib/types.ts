@@ -45,6 +45,7 @@ export interface ChatLead { id: string; guests: number; date: string | null; tim
 export interface ConversationDetail extends Omit<ConversationSummary, 'lastMessage' | 'drafts'> {
   humanUntil: string | null;
   phoneVerifiedAt?: string | null;
+  verifiedPhone?: string | null;
   messages: ChatMessage[];
   leads: ChatLead[];
   customer: CustomerCard | null;
