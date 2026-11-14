@@ -129,7 +129,10 @@ export function ComplaintScreen({ id, refreshKey }: { id: string; refreshKey: nu
     setBusy(true);
     setError(null);
     try {
-      setC(await api.patch<ComplaintDetail>(`/chatbot/complaints/${id}`, data));
+      // The update answers with the bare complaint; keep the orders and comment already shown.
+      const saved = await api.patch<Partial<ComplaintDetail>>(`/chatbot/complaints/${id}`, data);
+      setC((prev) => (prev ? { ...prev, ...saved, recentOrders: prev.recentOrders, comment: prev.comment } : prev));
+      if (typeof saved.notes !== 'undefined') setNotes(saved.notes ?? '');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -178,16 +181,16 @@ export function ComplaintScreen({ id, refreshKey }: { id: string; refreshKey: nu
             </Button>
           </div>
 
-          {c.recentOrders.length > 0 && (
+          {(c.recentOrders ?? []).length > 0 && (
             <div className="rounded-xl bg-white border border-ink-line p-3">
               <div className="text-xs font-semibold text-ink-soft mb-2">Their recent orders</div>
-              {c.recentOrders.map((o) => (
+              {(c.recentOrders ?? []).map((o) => (
                 <div key={o.id} className="text-sm py-1 border-b border-ink-line last:border-0">
                   <div className="flex justify-between">
                     <span>#{o.orderNumber} · {new Date(o.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
                     <span className="font-semibold">{taka(Number(o.totalAmount) / 100)}</span>
                   </div>
-                  <div className="text-xs text-ink-soft">{o.items.map((i) => `${i.quantity}× ${i.menuItemName}`).join(', ')}</div>
+                  <div className="text-xs text-ink-soft">{(o.items ?? []).map((i) => `${i.quantity}× ${i.menuItemName}`).join(', ')}</div>
                 </div>
               ))}
             </div>
