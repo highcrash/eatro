@@ -18,6 +18,7 @@ interface ConnectStatus {
   dataDeletionUrl: string;
   page: { id: string; name: string | null; tokenSet: boolean } | null;
   instagram: { id: string; username: string | null } | null;
+  whatsapp: { phoneNumberId: string | null; wabaId: string | null; tokenSet: boolean; subscribedAt: string | null };
   grantedScopes: string[];
   missingScopes: string[];
   appSubscribedAt: string | null;
@@ -54,6 +55,7 @@ export default function ConnectTab({ result }: { result: { fb: string | null; ms
   const login = useMutation({ mutationFn: () => api.post<{ url: string }>('/chatbot/connect/facebook/start', {}), onSuccess: (d) => { window.location.href = d.url; } });
   const pick = useMutation({ mutationFn: (pageId: string) => api.post<ConnectStatus>('/chatbot/connect/page', { pageId }), onSuccess: refresh });
   const check = useMutation({ mutationFn: () => api.post<ConnectStatus>('/chatbot/connect/check', {}), onSuccess: refresh });
+  const whatsapp = useMutation({ mutationFn: () => api.post<ConnectStatus>('/chatbot/connect/whatsapp', {}), onSuccess: refresh });
   if (!s) return null;
 
   return (
@@ -112,6 +114,24 @@ export default function ConnectTab({ result }: { result: { fb: string | null; ms
           {s.grantedScopes.length > 0 && s.missingScopes.length > 0 && (
             <p className="text-[#FFA726] text-xs font-body">Not granted yet: {s.missingScopes.join(', ')}. Until Meta approves the app review, these may stay missing; replies then work only for people with a role on the app or Page.</p>
           )}
+        </section>
+
+        <section className={`${CARD} p-4 space-y-3`}>
+          <h2 className="font-display text-xl text-white tracking-wide">4. WHATSAPP (OPTIONAL)</h2>
+          <p className={HINT}>
+            Uses the WhatsApp Cloud API number saved in Settings → WhatsApp (the one that sends purchase orders to suppliers). That number must belong to the same Meta
+            app. In WhatsApp Manager, add a payment method: Meta gives 1,000 free replies a month and stops delivering after that without one.
+          </p>
+          {s.whatsapp.phoneNumberId && s.whatsapp.tokenSet ? (
+            <p className="text-white text-sm font-body">Number id <b>{s.whatsapp.phoneNumberId}</b>{s.whatsapp.wabaId ? <> · business account <b>{s.whatsapp.wabaId}</b></> : <span className="text-[#FFA726]"> · business account id missing</span>}{s.whatsapp.subscribedAt && <span className="text-[#4CAF50]"> · connected {fmtTime(s.whatsapp.subscribedAt)}</span>}</p>
+          ) : (
+            <p className="text-[#FFA726] text-sm font-body">No WhatsApp number saved yet. Add it in Settings → WhatsApp first.</p>
+          )}
+          <CopyRow label="WhatsApp webhook callback URL" value={s.whatsappWebhookUrl} />
+          {whatsapp.error && <p className="text-[#F03535] text-xs font-body">{friendly(whatsapp.error)}</p>}
+          <button onClick={() => whatsapp.mutate()} disabled={whatsapp.isPending || !s.appSecretSet || !s.whatsapp.phoneNumberId || !s.whatsapp.wabaId || !s.whatsapp.tokenSet} className={PRIMARY}>
+            {whatsapp.isPending ? 'Connecting…' : s.whatsapp.subscribedAt ? 'Reconnect WhatsApp' : 'Connect WhatsApp'}
+          </button>
         </section>
       </div>
 

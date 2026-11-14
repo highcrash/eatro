@@ -126,6 +126,54 @@ export class WhatsAppService {
     };
   }
 
+  // ── Chat assistant (customer service messages) ────────────────────────────
+
+  /** Free-form reply inside the 24-hour customer service window. */
+  async sendText(opts: { phoneNumberId: string; accessToken: string; to: string; body: string }): Promise<{ messageId: string }> {
+    const res = await fetch(`${GRAPH_BASE}/${opts.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: opts.to, type: 'text', text: { body: opts.body.slice(0, 4096), preview_url: true } }),
+    });
+    const json = (await this.parse(res)) as any;
+    return { messageId: String(json?.messages?.[0]?.id ?? '') };
+  }
+
+  /** One photo with a caption (max 1,024 characters). */
+  async sendImage(opts: { phoneNumberId: string; accessToken: string; to: string; link: string; caption: string }): Promise<{ messageId: string }> {
+    const res = await fetch(`${GRAPH_BASE}/${opts.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: opts.to, type: 'image', image: { link: opts.link, caption: opts.caption.slice(0, 1024) } }),
+    });
+    const json = (await this.parse(res)) as any;
+    return { messageId: String(json?.messages?.[0]?.id ?? '') };
+  }
+
+  /** Downloads a photo a customer sent. WhatsApp gives a media id; the file needs the token too. */
+  async downloadMedia(opts: { mediaId: string; accessToken: string; maxBytes: number }): Promise<{ mimeType: string; data: Buffer } | null> {
+    const meta = await fetch(`${GRAPH_BASE}/${opts.mediaId}`, { headers: { Authorization: `Bearer ${opts.accessToken}` } });
+    const info = (await this.parse(meta)) as { url?: string; mime_type?: string; file_size?: number };
+    if (!info?.url || (info.file_size && info.file_size > opts.maxBytes)) return null;
+    const file = await fetch(info.url, { headers: { Authorization: `Bearer ${opts.accessToken}` }, signal: AbortSignal.timeout(20_000) });
+    if (!file.ok) return null;
+    const data = Buffer.from(await file.arrayBuffer());
+    if (data.length > opts.maxBytes) return null;
+    return { mimeType: info.mime_type ?? 'image/jpeg', data };
+  }
+
+  /** Tells the WhatsApp Business Account to send its events to our Meta app. */
+  async subscribeWaba(opts: { wabaId: string; accessToken: string }): Promise<void> {
+    const res = await fetch(`${GRAPH_BASE}/${opts.wabaId}/subscribed_apps`, { method: 'POST', headers: { Authorization: `Bearer ${opts.accessToken}` } });
+    await this.parse(res);
+  }
+
+  async wabaSubscriptions(opts: { wabaId: string; accessToken: string }): Promise<string[]> {
+    const res = await fetch(`${GRAPH_BASE}/${opts.wabaId}/subscribed_apps`, { headers: { Authorization: `Bearer ${opts.accessToken}` } });
+    const json = (await this.parse(res)) as { data?: { whatsapp_business_api_data?: { id?: string; name?: string } }[] };
+    return (json?.data ?? []).map((d) => String(d.whatsapp_business_api_data?.id ?? '')).filter(Boolean);
+  }
+
   private async parse(res: Response): Promise<unknown> {
     const text = await res.text();
     let json: any = null;

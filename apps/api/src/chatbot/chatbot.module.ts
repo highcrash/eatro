@@ -6,13 +6,15 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { PublicModule } from '../public/public.module';
 import { ReservationModule } from '../reservation/reservation.module';
 import { SmsModule } from '../sms/sms.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { WsGatewayModule } from '../ws-gateway/ws-gateway.module';
 import { AiAdminService } from './ai/ai-admin.service';
 import { AiRouterService } from './ai/ai-router.service';
 import { AnthropicProvider } from './ai/anthropic.provider';
 import { OpenAiCompatibleProvider } from './ai/openai-compatible.provider';
 import { ChatbotAdminService } from './chatbot-admin.service';
-import { AiAdminController, ChatbotAdminController, ChatbotPublicController, ConnectCallbackController, ConnectController, MetaWebhookController, SocialAdminController } from './chatbot.controller';
+import { AiAdminController, ChatbotAdminController, ChatbotPublicController, ConnectCallbackController, ConnectController, MetaWebhookController, SocialAdminController, WhatsAppWebhookController } from './chatbot.controller';
+import { WhatsAppWebhookService } from './meta/whatsapp-webhook.service';
 import { CommentService } from './comment.service';
 import { ComplaintService } from './complaint.service';
 import { ConnectService } from './meta/connect.service';
@@ -25,8 +27,8 @@ import { ChatbotService } from './chatbot.service';
 import { MenuContextService } from './menu-context';
 
 @Module({
-  imports: [PrismaModule, PublicModule, ReservationModule, CustomerModule, WsGatewayModule, ActivityLogModule, SmsModule],
-  controllers: [ChatbotPublicController, ChatbotAdminController, AiAdminController, MetaWebhookController, ConnectCallbackController, ConnectController, SocialAdminController],
+  imports: [PrismaModule, PublicModule, ReservationModule, CustomerModule, WsGatewayModule, ActivityLogModule, SmsModule, WhatsAppModule],
+  controllers: [ChatbotPublicController, ChatbotAdminController, AiAdminController, MetaWebhookController, WhatsAppWebhookController, ConnectCallbackController, ConnectController, SocialAdminController],
   providers: [
     OpenAiCompatibleProvider,
     AnthropicProvider,
@@ -43,6 +45,7 @@ import { MenuContextService } from './menu-context';
     CommentService,
     MetaWebhookService,
     ConnectService,
+    WhatsAppWebhookService,
   ],
   exports: [ChatbotService],
 })

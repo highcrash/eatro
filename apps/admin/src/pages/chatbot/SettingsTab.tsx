@@ -27,7 +27,7 @@ function SettingsForm() {
   useEffect(() => { if (data) setF(data); }, [data]);
   const save = useMutation({
     mutationFn: () => api.patch('/chatbot/settings', {
-      webMode: f!.webMode, messengerMode: f!.messengerMode, instagramMode: f!.instagramMode, commentMode: f!.commentMode,
+      webMode: f!.webMode, messengerMode: f!.messengerMode, instagramMode: f!.instagramMode, commentMode: f!.commentMode, whatsappMode: f!.whatsappMode, whatsappMonthlyCap: f!.whatsappMonthlyCap,
       assistantName: f!.assistantName, greeting: f!.greeting, fallbackText: f!.fallbackText,
       visionEnabled: f!.visionEnabled, imageDailyLimit: f!.imageDailyLimit, humanPauseHours: f!.humanPauseHours, retentionDays: f!.retentionDays, usdRate: f!.usdRate,
       autoHideSpam: f!.autoHideSpam, complaintMode: f!.complaintMode, complaintReminderMins: f!.complaintReminderMins,
@@ -67,9 +67,32 @@ function SettingsForm() {
           ))}
           <div>
             <label className={LABEL}>WhatsApp</label>
-            <select disabled className={`w-full ${INPUT} opacity-50`}><option>Not connected yet</option></select>
+            <select value={f.whatsappMode} disabled={!data?.whatsappConnected && f.whatsappMode === 'OFF'} onChange={(e) => set({ whatsappMode: e.target.value as ChatMode })} className={`w-full ${INPUT} ${!data?.whatsappConnected && f.whatsappMode === 'OFF' ? 'opacity-50' : ''}`}>
+              {MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+            {!data?.whatsappConnected && <p className={`${HINT} mt-1`}>Add the WhatsApp number in Settings → WhatsApp, then use Connect WhatsApp in the Connect tab.</p>}
           </div>
         </div>
+        {data?.whatsappConnected && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-[#222] pt-3">
+            <div>
+              <label className={LABEL}>WhatsApp replies per month before the bot stops</label>
+              <input type="number" min={0} value={f.whatsappMonthlyCap} onChange={(e) => set({ whatsappMonthlyCap: Number(e.target.value) })} className={`w-full ${INPUT}`} />
+              <p className={`${HINT} mt-1`}>Meta gives 1,000 free replies a month per number and charges after that. When the limit is reached, chats go to staff instead.</p>
+            </div>
+            <div>
+              <label className={LABEL}>This month</label>
+              {(() => {
+                const used = data.whatsappSentThisMonth ?? 0;
+                const color = used >= f.whatsappMonthlyCap ? 'text-[#F03535]' : used >= 800 ? 'text-[#FFA726]' : 'text-white';
+                return (
+                  <p className={`font-display text-3xl ${color}`}>{used.toLocaleString('en-US')} <span className="text-[#666] text-base font-body">of {f.whatsappMonthlyCap.toLocaleString('en-US')}</span></p>
+                );
+              })()}
+              {(data.whatsappSentThisMonth ?? 0) >= 800 && <p className="text-[#FFA726] text-xs font-body mt-1">Close to Meta's free 1,000. Make sure a payment method is set in WhatsApp Manager if you raise the limit.</p>}
+            </div>
+          </div>
+        )}
         <p className={HINT}>Suggested start for social channels: Suggest for the first week, then Auto once the replies look right.</p>
       </section>
 

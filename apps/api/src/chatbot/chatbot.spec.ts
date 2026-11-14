@@ -269,7 +269,6 @@ describe('chat assistant: pipeline and admin', () => {
     await prisma.chatQuickReply.deleteMany({ where: { branchId, title: { startsWith: `Test ${runId}` } } });
     await prisma.menuItem.deleteMany({ where: { id: dishId } });
     await prisma.menuCategory.deleteMany({ where: { id: categoryId } });
-    // Only the fields this file changes: the social spec may be running at the same time.
     if (original) await prisma.chatbotSetting.update({ where: { branchId }, data: { webMode: original.webMode, visionEnabled: original.visionEnabled, partyRules: original.partyRules } });
     await app.close();
   });

@@ -19,6 +19,7 @@ import { ComplaintService } from './complaint.service';
 import { ConnectService } from './meta/connect.service';
 import { MetaAccountService } from './meta/meta-account.service';
 import { MetaWebhookBody, MetaWebhookService, validSignature } from './meta/meta-webhook.service';
+import { WhatsAppWebhookBody, WhatsAppWebhookService } from './meta/whatsapp-webhook.service';
 
 const SESSION_RE = /^[A-Za-z0-9_-]{16,64}$/;
 /** About 1.5 MB of photo; the widget shrinks photos well below this. */
@@ -335,6 +336,37 @@ export class MetaWebhookController {
   }
 }
 
+// ─── WhatsApp webhook ────────────────────────────────────────────────────────
+
+@Controller('chatbot/webhook/whatsapp')
+export class WhatsAppWebhookController {
+  private readonly logger = new Logger(WhatsAppWebhookController.name);
+
+  constructor(
+    private readonly accounts: MetaAccountService,
+    private readonly webhook: WhatsAppWebhookService,
+  ) {}
+
+  @Get()
+  async verify(@Query('hub.mode') mode: string, @Query('hub.verify_token') token: string, @Query('hub.challenge') challenge: string, @Res() res: Response) {
+    const tokens = await this.accounts.verifyTokens();
+    if (mode === 'subscribe' && token && tokens.includes(token)) {
+      res.type('text/plain').send(challenge ?? '');
+      return;
+    }
+    res.status(403).send('Verification failed');
+  }
+
+  @Post()
+  @HttpCode(200)
+  async receive(@Req() req: RawBodyRequest<Request>, @Headers('x-hub-signature-256') signature: string, @Body() body: WhatsAppWebhookBody) {
+    const secrets = await this.accounts.allAppSecrets();
+    if (!validSignature(req.rawBody, signature, secrets)) throw new ForbiddenException('Bad signature');
+    setImmediate(() => void this.webhook.process(body).catch((err: Error) => this.logger.warn(`WhatsApp webhook failed: ${err.message}`)));
+    return 'EVENT_RECEIVED';
+  }
+}
+
 // ─── Connect wizard ──────────────────────────────────────────────────────────
 
 /** Facebook sends the owner's browser back here after Facebook Login. */
@@ -377,6 +409,11 @@ export class ConnectController {
   @Post('check')
   check(@CurrentUser() u: JwtPayload) {
     return this.connect.check(u.branchId);
+  }
+
+  @Post('whatsapp')
+  whatsapp(@CurrentUser() u: JwtPayload) {
+    return this.connect.subscribeWhatsApp(u.branchId, u);
   }
 }
 

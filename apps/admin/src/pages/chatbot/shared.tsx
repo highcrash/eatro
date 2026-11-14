@@ -97,8 +97,11 @@ export interface ChatbotSettings {
   managerPhone: string | null;
   complaintSmsEnabled: boolean;
   commentHourlyCap: number;
+  whatsappMonthlyCap: number;
   pageConnected?: boolean;
   instagramConnected?: boolean;
+  whatsappConnected?: boolean;
+  whatsappSentThisMonth?: number;
 }
 
 export function Dialog({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {

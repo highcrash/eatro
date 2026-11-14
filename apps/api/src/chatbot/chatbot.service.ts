@@ -4,6 +4,7 @@ import type { ChatChannel, ChatConversation, ChatbotSetting, Prisma } from '@pri
 import { CustomerService } from '../customer/customer.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReservationService } from '../reservation/reservation.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
 import { AiRouterService, AiRunResult } from './ai/ai-router.service';
 import type { AiImage, AiMessage, AiRequest } from './ai/ai.types';
@@ -29,6 +30,10 @@ export interface IncomingMessage {
   /** The customer shared a Facebook/Instagram post into the chat. */
   sharedPost?: PostRef | null;
   voice?: boolean;
+  /** Location, contact card, file or video: passed to staff with a short holding reply. */
+  unsupported?: boolean;
+  /** WhatsApp: the sender's own number, already known. */
+  knownPhone?: string | null;
   /** The channel's own message id, for de-duplicating webhook retries. */
   externalId?: string | null;
   customerName?: string | null;
@@ -45,8 +50,8 @@ export interface BotOutput {
 export interface HandleResult {
   conversationId: string;
   reply: BotOutput | null;
-  /** REPLIED: sent now. DRAFTED: waiting for staff. HUMAN: staff are handling the chat. OFF: channel switched off. */
-  status: 'REPLIED' | 'DRAFTED' | 'HUMAN' | 'OFF' | 'DUPLICATE';
+  /** REPLIED: sent now. DRAFTED: waiting for staff. HUMAN: staff are handling the chat. OFF: channel switched off. CAPPED: WhatsApp monthly limit reached. */
+  status: 'REPLIED' | 'DRAFTED' | 'HUMAN' | 'OFF' | 'DUPLICATE' | 'CAPPED';
 }
 
 const HISTORY_LIMIT = 12;
@@ -94,6 +99,7 @@ export class ChatbotService {
     private readonly meta: MetaClient,
     private readonly metaAccounts: MetaAccountService,
     private readonly posts: PostContextService,
+    private readonly whatsApp: WhatsAppService,
   ) {}
 
   /** Live values for {placeholders} in pre-ready answers. */
@@ -163,7 +169,7 @@ export class ChatbotService {
     if (mode === 'OFF') return { conversationId: '', reply: null, status: 'OFF' };
 
     const text = (msg.text ?? '').trim().slice(0, 2000);
-    const { phone } = extractPhone(text);
+    const phone = msg.knownPhone ?? extractPhone(text).phone;
     let conv = await this.prisma.chatConversation.upsert({
       where: { branchId_channel_externalUserId: { branchId: msg.branchId, channel: msg.channel, externalUserId: msg.externalUserId } },
       create: {
@@ -199,6 +205,15 @@ export class ChatbotService {
       return { conversationId: conv.id, reply: null, status: 'HUMAN' };
     }
 
+    // WhatsApp: stop at the month's limit so replies stay inside Meta's free tier.
+    if (msg.channel === 'WHATSAPP' && !msg.isTest) {
+      const sent = await this.whatsappSentThisMonth(conv.branchId);
+      if (sent >= settings.whatsappMonthlyCap) {
+        await this.flagStaff(conv, `WhatsApp monthly limit reached (${sent} of ${settings.whatsappMonthlyCap}). Reply yourself or raise the limit.`, false);
+        return { conversationId: conv.id, reply: null, status: 'CAPPED' };
+      }
+    }
+
     // A complaint in a private chat: one fixed line, then a person takes over.
     const level = hasImage ? null : complaintLevel(text);
     if (level === 'SERIOUS' || level === 'ORDINARY') {
@@ -225,6 +240,10 @@ export class ChatbotService {
     if (msg.voice && !text) {
       await this.flagStaff(conv, 'Customer sent a voice message', isTest);
       return { text: phrase('voice', lang), cards: [], source: 'SYSTEM' };
+    }
+    if (msg.unsupported && !text) {
+      await this.flagStaff(conv, 'Customer sent a file, location or contact', isTest);
+      return { text: settings.fallbackText, cards: [], source: 'SYSTEM' };
     }
     if (msg.image || msg.hasPhoto) return this.composeForImage(conv, settings, text, msg.image ?? null, lang);
     if (msg.sharedPost) {
@@ -544,13 +563,13 @@ export class ChatbotService {
    */
   async sendToChannel(conv: ChatConversation, text: string, cards: MenuCard[]): Promise<void> {
     if (conv.channel === 'WEB') return;
-    if (conv.channel === 'WHATSAPP') throw new BadRequestException('WhatsApp replies are not connected yet');
-    const auth = await this.metaAccounts.auth(conv.branchId);
-    if (!auth) throw new BadRequestException('META_NOT_CONNECTED: connect the Facebook Page in Chat Assistant → Connect first');
     const last = conv.lastCustomerMessageAt;
     if (!last || Date.now() - last.getTime() > 24 * 3600_000) {
       throw new BadRequestException("OUTSIDE_WINDOW: Meta allows replies only within 24 hours of the customer's last message. Ask them to message again, or call them.");
     }
+    if (conv.channel === 'WHATSAPP') return this.sendWhatsApp(conv, text, cards);
+    const auth = await this.metaAccounts.auth(conv.branchId);
+    if (!auth) throw new BadRequestException('META_NOT_CONNECTED: connect the Facebook Page in Chat Assistant → Connect first');
     try {
       await this.meta.sendText(auth, { id: conv.externalUserId }, text);
     } catch (err) {
@@ -559,6 +578,36 @@ export class ChatbotService {
     if (cards.length > 0) {
       await this.meta.sendCards(auth, { id: conv.externalUserId }, cards, `${this.menus.siteUrl()}/reservation`).catch((err: Error) => this.logger.warn(`Dish cards not sent: ${err.message}`));
     }
+  }
+
+  /**
+   * WhatsApp bills per message beyond the free tier, so each reply is one
+   * message: the dish photo with the text as its caption when it fits,
+   * otherwise text with the dishes listed.
+   */
+  private async sendWhatsApp(conv: ChatConversation, text: string, cards: MenuCard[]) {
+    const bs = await this.prisma.branchSetting.findUnique({ where: { branchId: conv.branchId }, select: { whatsappPhoneNumberId: true, whatsappAccessToken: true } });
+    if (!bs?.whatsappPhoneNumberId || !bs.whatsappAccessToken) {
+      throw new BadRequestException('WHATSAPP_NOT_CONNECTED: add the WhatsApp number in Settings → WhatsApp first');
+    }
+    const auth = { phoneNumberId: bs.whatsappPhoneNumberId, accessToken: bs.whatsappAccessToken.trim(), to: conv.externalUserId };
+    const list = cards.slice(0, 5).map((c) => `• ${c.name}: ৳${c.price.toLocaleString('en-US')}${c.wasPrice != null ? ` (regular ৳${c.wasPrice.toLocaleString('en-US')})` : ''}\n${c.url}`).join('\n');
+    const body = list ? `${text}\n\n${list}` : text;
+    try {
+      const photo = cards[0]?.imageUrl;
+      if (photo && /^https:\/\//.test(photo) && body.length <= 1024) await this.whatsApp.sendImage({ ...auth, link: photo, caption: body });
+      else await this.whatsApp.sendText({ ...auth, body });
+    } catch (err) {
+      throw new BadRequestException(`WhatsApp: ${(err as Error).message.replace(/^WhatsApp API:\s*/, '')}`);
+    }
+  }
+
+  /** Bot and staff replies on WhatsApp this calendar month, in the branch's time zone. */
+  async whatsappSentThisMonth(branchId: string): Promise<number> {
+    const branch = await this.prisma.branch.findUnique({ where: { id: branchId }, select: { timezone: true } });
+    return this.prisma.chatMessage.count({
+      where: { sender: { in: ['BOT', 'STAFF'] }, status: 'SENT', createdAt: { gte: monthStart(branch?.timezone || 'Asia/Dhaka') }, conversation: { branchId, channel: 'WHATSAPP', isTest: false } },
+    });
   }
 
   /** Staff replied from Meta Business Suite or the Page inbox: record it and keep the bot quiet. */
@@ -608,6 +657,18 @@ export class ChatbotService {
       this.logger.debug(`Shadow reply failed: ${(err as Error).message}`);
     }
   }
+}
+
+/** Midnight on the 1st of the current month in a time zone, as a UTC instant. */
+export function monthStart(timezone: string, now = new Date()): Date {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+      .formatToParts(now)
+      .map((p) => [p.type, p.value]),
+  );
+  const localAsUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour) % 24, Number(parts.minute), Number(parts.second));
+  const offset = localAsUtc - Math.floor(now.getTime() / 1000) * 1000;
+  return new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, 1) - offset);
 }
 
 export function parseVisionMatches(raw: string, menu: MenuSnapshot): { ref: string; confidence: number }[] | null {

@@ -37,6 +37,7 @@ export interface SettingsInput {
   managerPhone?: string | null;
   complaintSmsEnabled?: boolean;
   commentHourlyCap?: number;
+  whatsappMonthlyCap?: number;
 }
 
 @Injectable()
@@ -54,11 +55,19 @@ export class ChatbotAdminService {
   async settings(branchId: string) {
     const s = await this.chatbot.getSettings(branchId);
     const [bs, app] = await Promise.all([
-      this.prisma.branchSetting.findUnique({ where: { branchId }, select: { fbPageId: true, fbPageAccessToken: true } }),
+      this.prisma.branchSetting.findUnique({ where: { branchId }, select: { fbPageId: true, fbPageAccessToken: true, whatsappPhoneNumberId: true, whatsappAccessToken: true } }),
       this.prisma.metaAppSetting.findUnique({ where: { branchId }, select: { igUserId: true } }),
     ]);
     const pageConnected = !!bs?.fbPageId && !!bs.fbPageAccessToken;
-    return { ...s, usdRate: Number(s.usdRate), pageConnected, instagramConnected: pageConnected && !!app?.igUserId };
+    const whatsappConnected = !!bs?.whatsappPhoneNumberId && !!bs.whatsappAccessToken;
+    return {
+      ...s,
+      usdRate: Number(s.usdRate),
+      pageConnected,
+      instagramConnected: pageConnected && !!app?.igUserId,
+      whatsappConnected,
+      whatsappSentThisMonth: whatsappConnected ? await this.chatbot.whatsappSentThisMonth(branchId) : 0,
+    };
   }
 
   async updateSettings(branchId: string, input: SettingsInput, user: JwtPayload) {
@@ -94,6 +103,7 @@ export class ChatbotAdminService {
       data.complaintMode = input.complaintMode;
     }
     if (input.complaintReminderMins !== undefined) data.complaintReminderMins = ranged(input.complaintReminderMins, 5, 240, 'Reminder minutes');
+    if (input.whatsappMonthlyCap !== undefined) data.whatsappMonthlyCap = ranged(input.whatsappMonthlyCap, 0, 100_000, 'WhatsApp replies per month');
     if (input.commentHourlyCap !== undefined) data.commentHourlyCap = ranged(input.commentHourlyCap, 1, 500, 'Comment replies per hour');
     if (input.managerPhone !== undefined) {
       const phone = input.managerPhone?.trim() ? normalizePhone(input.managerPhone) : null;

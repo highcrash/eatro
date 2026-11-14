@@ -21,6 +21,7 @@ import { MetaAccountService } from './meta/meta-account.service';
 import { validSignature } from './meta/meta-webhook.service';
 import { cardsTemplate, MetaClient, splitMessage } from './meta/meta.client';
 import { encryptSecret } from './secrets';
+import { createTestBranch, deleteTestBranch } from './test-branch';
 
 jest.setTimeout(60_000);
 
@@ -110,11 +111,8 @@ describe('social: webhooks, comments, complaints', () => {
   let connect: ConnectService;
   let accounts: MetaAccountService;
   let menus: MenuContextService;
-  let original: ChatbotSetting | null;
-  let originalBs: { fbPageId: string | null; fbPageName: string | null; fbPageAccessToken: string | null } | null;
-  let originalApp: unknown;
-
-  const branchId = 'branch-main';
+  let branchId: string;
+  let ownerId: string;
   const runId = `s${Date.now().toString(36)}`;
   const PAGE = `9${Date.now()}`;
   const IG = `17${Date.now()}`;
@@ -194,9 +192,8 @@ describe('social: webhooks, comments, complaints', () => {
     accounts = moduleRef.get(MetaAccountService);
     menus = moduleRef.get(MenuContextService);
 
-    original = await prisma.chatbotSetting.findUnique({ where: { branchId } });
-    originalBs = await prisma.branchSetting.findUnique({ where: { branchId }, select: { fbPageId: true, fbPageName: true, fbPageAccessToken: true } });
-    originalApp = await prisma.metaAppSetting.findUnique({ where: { branchId } });
+    branchId = await createTestBranch(prisma, `social ${runId}`);
+    ownerId = (await prisma.staff.findFirstOrThrow({ where: { role: 'OWNER', isActive: true } })).id;
     await chatbot.getSettings(branchId);
     await setSettings({ messengerMode: 'AUTO', instagramMode: 'AUTO', commentMode: 'AUTO', complaintMode: 'DRAFT', autoHideSpam: false, complaintSmsEnabled: false, managerPhone: null, commentHourlyCap: 30 });
 
@@ -217,25 +214,7 @@ describe('social: webhooks, comments, complaints', () => {
   });
 
   afterAll(async () => {
-    const convs = await prisma.chatConversation.findMany({ where: { branchId, externalUserId: { startsWith: runId } }, select: { id: true } });
-    await prisma.chatComplaint.deleteMany({ where: { branchId, OR: [{ conversationId: { in: convs.map((c) => c.id) } }, { commentId: { startsWith: runId } }] } });
-    await prisma.chatConversation.deleteMany({ where: { id: { in: convs.map((c) => c.id) } } });
-    await prisma.chatComment.deleteMany({ where: { commentId: { startsWith: runId } } });
-    await prisma.chatPostContext.deleteMany({ where: { postId: { startsWith: PAGE } } });
-    await prisma.scheduledFbPost.deleteMany({ where: { menuDiscountId: discountId } });
-    await prisma.menuItemDiscount.deleteMany({ where: { id: discountId } });
-    await prisma.menuItem.deleteMany({ where: { id: dishId } });
-    await prisma.menuCategory.deleteMany({ where: { id: categoryId } });
-    if (originalBs) await prisma.branchSetting.update({ where: { branchId }, data: originalBs });
-    if (originalApp) {
-      const { id: _i, createdAt: _c, updatedAt: _u, ...rest } = originalApp as Record<string, unknown>;
-      await prisma.metaAppSetting.update({ where: { branchId }, data: rest as never });
-    } else await prisma.metaAppSetting.deleteMany({ where: { branchId } });
-    // Only the fields this file changes: the other chat spec may be running at the same time.
-    if (original) {
-      const { messengerMode, instagramMode, commentMode, complaintMode, autoHideSpam, complaintSmsEnabled, managerPhone, commentHourlyCap } = original;
-      await prisma.chatbotSetting.update({ where: { branchId }, data: { messengerMode, instagramMode, commentMode, complaintMode, autoHideSpam, complaintSmsEnabled, managerPhone, commentHourlyCap } });
-    }
+    if (branchId) await deleteTestBranch(prisma, branchId);
     await app.close();
   });
 
@@ -384,8 +363,7 @@ describe('social: webhooks, comments, complaints', () => {
     const row = await comment({ id: 'c12', text: 'birthday party kora jabe?', from: 'u-party' });
     expect(row?.status).toBe('DRAFT');
     expect(meta.replyToComment).not.toHaveBeenCalled();
-    const owner = await prisma.staff.findFirstOrThrow({ where: { branchId, role: 'OWNER', isActive: true } });
-    const sent = await comments.approve(branchId, row!.id, {}, { sub: owner.id, role: 'OWNER', branchId } as never);
+    const sent = await comments.approve(branchId, row!.id, {}, { sub: ownerId, role: 'OWNER', branchId } as never);
     expect(sent.status).toBe('REPLIED');
     expect(meta.replyToComment).toHaveBeenCalledTimes(1);
     expect(meta.sendText.mock.calls[0][2]).toContain('date, time');
@@ -427,8 +405,7 @@ describe('social: webhooks, comments, complaints', () => {
   });
 
   it('connects through Facebook Login and refuses a tampered state', async () => {
-    const owner = await prisma.staff.findFirstOrThrow({ where: { branchId, role: 'OWNER', isActive: true } });
-    const user = { sub: owner.id, role: 'OWNER', branchId } as never;
+    const user = { sub: ownerId, role: 'OWNER', branchId } as never;
     const { url } = await connect.startLogin(branchId, user);
     const state = decodeURIComponent(new URL(url).searchParams.get('state')!);
     expect(await connect.callback('code', state.replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')))).toContain('fb=error');

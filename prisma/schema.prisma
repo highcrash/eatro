@@ -3402,6 +3402,9 @@ model ChatbotSetting {
   complaintSmsEnabled   Boolean               @default(false)
   /// Public comment replies per hour, across all posts.
   commentHourlyCap      Int                   @default(30)
+  /// WhatsApp replies the bot sends per calendar month before it stops and leaves
+  /// chats to staff. Meta gives 1,000 free service messages a month per number.
+  whatsappMonthlyCap    Int                   @default(1000)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -3556,6 +3559,8 @@ model MetaAppSetting {
   pendingUntil     DateTime?
   appSubscribedAt  DateTime?
   pageSubscribedAt DateTime?
+  /// When the WhatsApp Business Account was subscribed to the chat webhook.
+  whatsappSubscribedAt DateTime?
   lastWebhookAt    DateTime?
   lastError        String?
   health           Json?

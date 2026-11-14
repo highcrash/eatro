@@ -145,9 +145,11 @@ If an address returns "not found", that code phase isn't live yet. Stop and tell
 
 ### B3. WhatsApp (after phase 3 is live)
 
-1. Click **Subscribe** for WhatsApp in admin.
-2. In WhatsApp Manager, bring the owner to the payment method screen and explain: since 1 October 2026 only the first 1,000 replies a month are free, and Meta stops delivering after that if no payment method is on file.
-3. The owner adds the payment method.
+1. **Check it is the same Meta app.** The assistant uses the WhatsApp Cloud API number already saved in admin → Settings → WhatsApp (it sends purchase orders to suppliers). In developers.facebook.com, confirm that number's WhatsApp product sits in the same app whose App ID is on the Connect tab. If it is in a different app, stop and tell the owner: messages from it would be rejected, because each app signs its own webhooks.
+2. **Check the saved details.** On the Connect tab, step 4 should show the number id and the business account id. If the business account id is missing, have the owner add it in Settings → WhatsApp (WhatsApp Manager shows it under the account's settings).
+3. Click **Connect WhatsApp** on the Connect tab. The Health check should then show "WhatsApp sends messages to the assistant" in green.
+4. In WhatsApp Manager, bring the owner to the payment method screen and explain: since 1 October 2026 only the first 1,000 replies a month are free, and Meta stops delivering after that if no payment method is on file. The owner adds it.
+5. In Chat Assistant → **Settings & Test**, the monthly limit is 1,000 by default: the bot stops replying on WhatsApp at that point and passes chats to staff, so it stays free. The owner can raise it once a payment method is on file.
 
 ### B4. Check and test
 

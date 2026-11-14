@@ -6,6 +6,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 
 import { ActivityLogService } from '../../activity-log/activity-log.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { decryptSecret, encryptSecret } from '../secrets';
 import { MetaAccountService } from './meta-account.service';
 import { LOGIN_SCOPES, MetaClient, MetaError, PageAccount } from './meta.client';
@@ -29,11 +30,12 @@ export class ConnectService {
     private readonly accounts: MetaAccountService,
     private readonly meta: MetaClient,
     private readonly activity: ActivityLogService,
+    private readonly whatsApp: WhatsAppService,
   ) {}
 
   async status(branchId: string) {
     const app = await this.accounts.app(branchId);
-    const bs = await this.prisma.branchSetting.findUnique({ where: { branchId }, select: { fbPageId: true, fbPageName: true, fbPageAccessToken: true } });
+    const bs = await this.prisma.branchSetting.findUnique({ where: { branchId }, select: { fbPageId: true, fbPageName: true, fbPageAccessToken: true, whatsappPhoneNumberId: true, whatsappWabaId: true, whatsappAccessToken: true } });
     const pending = Array.isArray(app.pendingPages) && app.pendingUntil && app.pendingUntil > new Date() ? (app.pendingPages as { id: string; name: string; igUsername: string | null }[]) : [];
     const granted = (app.grantedScopes as string[] | null) ?? [];
     return {
@@ -48,6 +50,12 @@ export class ConnectService {
       dataDeletionUrl: 'https://eatrobd.com/data-deletion',
       page: bs?.fbPageId ? { id: bs.fbPageId, name: bs.fbPageName, tokenSet: !!bs.fbPageAccessToken } : null,
       instagram: app.igUserId ? { id: app.igUserId, username: app.igUsername } : null,
+      whatsapp: {
+        phoneNumberId: bs?.whatsappPhoneNumberId ?? null,
+        wabaId: bs?.whatsappWabaId ?? null,
+        tokenSet: !!bs?.whatsappAccessToken,
+        subscribedAt: app.whatsappSubscribedAt,
+      },
       grantedScopes: granted,
       missingScopes: LOGIN_SCOPES.filter((s) => !granted.includes(s)),
       appSubscribedAt: app.appSubscribedAt,
@@ -87,6 +95,28 @@ export class ConnectService {
       throw new BadRequestException(`Saved, but Meta did not accept the webhook yet: ${msg}`);
     }
     return this.status(branchId);
+  }
+
+  /** Sends the WhatsApp number's messages to the assistant (uses the number saved in Settings → WhatsApp). */
+  async subscribeWhatsApp(branchId: string, user: JwtPayload) {
+    const app = await this.accounts.app(branchId);
+    const secret = this.accounts.appSecret(app);
+    if (!app.appId || !secret) throw new BadRequestException('Save the Meta App ID and App Secret first');
+    const bs = await this.prisma.branchSetting.findUnique({ where: { branchId }, select: { whatsappPhoneNumberId: true, whatsappWabaId: true, whatsappAccessToken: true } });
+    if (!bs?.whatsappPhoneNumberId || !bs.whatsappWabaId || !bs.whatsappAccessToken) {
+      throw new BadRequestException('Add the WhatsApp phone number id, business account id and token in Settings → WhatsApp first');
+    }
+    try {
+      await this.meta.subscribeApp(app.appId, secret, 'whatsapp_business_account', this.accounts.webhookUrl('whatsapp'), app.verifyToken, ['messages']);
+      await this.whatsApp.subscribeWaba({ wabaId: bs.whatsappWabaId, accessToken: bs.whatsappAccessToken.trim() });
+    } catch (err) {
+      const msg = (err as Error).message;
+      await this.prisma.metaAppSetting.update({ where: { branchId }, data: { lastError: `WhatsApp setup: ${msg}` } });
+      throw new BadRequestException(`Meta did not accept the WhatsApp setup: ${msg}`);
+    }
+    await this.prisma.metaAppSetting.update({ where: { branchId }, data: { whatsappSubscribedAt: new Date(), lastError: null } });
+    void this.activity.log({ branchId, actor: user, category: 'SETTINGS', action: 'UPDATE', entityType: 'MetaAppSetting', entityId: bs.whatsappPhoneNumberId, entityName: 'WhatsApp', summary: 'Connected the WhatsApp number to the chat assistant' });
+    return this.check(branchId);
   }
 
   // ── Facebook Login ────────────────────────────────────────────────────────
@@ -206,6 +236,18 @@ export class ConnectService {
       }
     }
     add('instagram', 'Instagram account linked', !!app.igUserId, app.igUserId ? `@${app.igUsername ?? app.igUserId}` : 'Link a professional Instagram account to the Page, then reconnect');
+    const wa = await this.prisma.branchSetting.findUnique({ where: { branchId }, select: { whatsappPhoneNumberId: true, whatsappWabaId: true, whatsappAccessToken: true } });
+    if (wa?.whatsappPhoneNumberId && wa.whatsappWabaId && wa.whatsappAccessToken) {
+      try {
+        const apps = await this.whatsApp.wabaSubscriptions({ wabaId: wa.whatsappWabaId, accessToken: wa.whatsappAccessToken.trim() });
+        const ok = !!app.appId && apps.includes(app.appId);
+        add('whatsapp', 'WhatsApp sends messages to the assistant', ok, ok ? null : 'Click "Connect WhatsApp" on this page');
+      } catch (err) {
+        add('whatsapp', 'WhatsApp sends messages to the assistant', false, (err as Error).message.replace(/^WhatsApp API:\s*/, ''));
+      }
+    } else {
+      add('whatsapp', 'WhatsApp number saved', false, 'Optional. Add it in Settings → WhatsApp to answer WhatsApp chats');
+    }
     add('received', 'Messages arriving', !!app.lastWebhookAt, app.lastWebhookAt ? `Last event ${app.lastWebhookAt.toISOString().replace('T', ' ').slice(0, 16)} UTC` : 'Nothing received yet. Send a test message to the Page.');
 
     await this.prisma.metaAppSetting.update({ where: { branchId }, data: { health: items as unknown as Prisma.InputJsonValue, healthCheckedAt: new Date() } });
