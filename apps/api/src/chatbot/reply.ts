@@ -68,6 +68,20 @@ export function fixGreeting(text: string): string {
 }
 
 /**
+ * Replies that tell the customer a person will follow up. If the model says
+ * so without asking for a handoff, staff are flagged anyway, so the promise
+ * is kept.
+ */
+const PROMISES_STAFF = [
+  /\b(pass(ing|ed)?|forward(ing|ed)?|hand(ing|ed)?)\b[^.!?\n]{0,25}\b(to|on to|over to)\b[^.!?\n]{0,15}\b(team|manager|staff|colleague)/i,
+  /\b(team|manager|staff|colleague|someone|a person)\b[^.!?\n]{0,40}\b(will|shall|is going to)\b[^.!?\n]{0,15}\b(contact|reach|call|get back|reply|follow up|look into)/i,
+  /(টিম|ম্যানেজার|কর্মী)[^।!?\n]{0,30}(জানাচ্ছি|জানিয়েছি|জানালাম|পাঠাচ্ছি|পাঠিয়েছি|পাঠালাম|যোগাযোগ করবে|যোগাযোগ করবেন|ফোন করবে|ফোন করবেন|রিপ্লাই দেবে|রিপ্লাই দেবেন|দেখবেন|দেখবে)/,
+];
+export function promisesStaff(text: string): boolean {
+  return PROMISES_STAFF.some((re) => re.test(text));
+}
+
+/**
  * Reads the model's answer. The contract is one JSON object, but weaker
  * models wrap it in a code fence or answer in plain sentences; a plain
  * answer is accepted as a reply with no action, and still price-checked.
@@ -86,7 +100,8 @@ export function parseAiReply(raw: string, customerText: string): AiReply | null 
       if (reply) {
         const lang = obj.lang === 'en' ? 'en' : obj.lang === 'bn' || obj.lang === 'banglish' ? 'bn' : detectLang(customerText);
         const items = Array.isArray(obj.items) ? (obj.items as unknown[]).map((i) => String(i).trim()).filter(Boolean).slice(0, 5) : [];
-        return { lang, reply, items, action: parseAction(obj.action) };
+        const action = parseAction(obj.action) ?? (promisesStaff(reply) ? { type: 'handoff' as const, reason: 'The reply told the customer a team member would follow up' } : null);
+        return { lang, reply, items, action };
       }
     } catch {
       /* fall through */
@@ -94,7 +109,8 @@ export function parseAiReply(raw: string, customerText: string): AiReply | null 
     // Looked like JSON but wasn't usable: showing it to a customer would be worse than the fallback.
     return null;
   }
-  return { lang: detectLang(customerText), reply: fixGreeting(text), items: [], action: null };
+  const reply = fixGreeting(text);
+  return { lang: detectLang(customerText), reply, items: [], action: promisesStaff(reply) ? { type: 'handoff', reason: 'The reply told the customer a team member would follow up' } : null };
 }
 
 /** Every amount of money written in a text, in taka. */

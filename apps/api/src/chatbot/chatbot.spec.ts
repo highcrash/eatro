@@ -124,6 +124,15 @@ describe('chat assistant: pure pieces', () => {
     expect(test.judge({ lang: 'bn', reply: 'জি, বার্গার আছে।', items: [], action: null }, menu, charges)).toBeNull();
   });
 
+  it('treats a promise of staff follow-up as a handoff', () => {
+    const complaint = "I'm really sorry to hear that — cold food and poor service isn't the experience we want you to have. I'm passing this to our team so a manager can look into it and reach out to you.";
+    expect(parseAiReply(JSON.stringify({ lang: 'en', reply: complaint, action: null }), 'x')!.action).toMatchObject({ type: 'handoff' });
+    expect(parseAiReply(JSON.stringify({ lang: 'bn', reply: 'দুঃখিত। আমাদের ম্যানেজারকে জানাচ্ছি, উনি শীঘ্রই যোগাযোগ করবেন।' }), 'x')!.action).toMatchObject({ type: 'handoff' });
+    expect(parseAiReply('A manager will call you back shortly.', 'x')!.action).toMatchObject({ type: 'handoff' });
+    expect(parseAiReply(JSON.stringify({ reply: 'We are open from 12pm to 11pm.' }), 'x')!.action).toBeNull();
+    expect(parseAiReply(JSON.stringify({ reply: 'Our pasta is made fresh by the kitchen team every day.' }), 'x')!.action).toBeNull();
+  });
+
   it('prices party options from the live menu with service charge then VAT', () => {
     const priced = priceParty(
       10,
@@ -242,6 +251,7 @@ describe('chat assistant: pipeline and admin', () => {
     aiAdmin = moduleRef.get(AiAdminService);
     reservations = moduleRef.get(ReservationService);
     router = moduleRef.get(AiRouterService);
+    router.retryDelayMs = 0;
     menus = moduleRef.get(MenuContextService);
 
     const owner = await prisma.staff.findFirstOrThrow({ where: { branchId, role: 'OWNER', isActive: true } });
@@ -336,7 +346,28 @@ describe('chat assistant: pipeline and admin', () => {
     const res = await say('backup', 'hello there friend');
     expect(res.reply?.text).toBe('Hello from the backup!');
     const usage = await prisma.aiUsage.findMany({ where: { conversationId: res.conversationId }, orderBy: { createdAt: 'asc' } });
-    expect(usage.map((u) => [u.connectionId, u.outcome])).toEqual([[conn.primary, 'ERROR'], [conn.backup, 'OK']]);
+    // One retry on the primary first, since a free model is often only busy for a moment.
+    expect(usage.map((u) => [u.connectionId, u.outcome])).toEqual([[conn.primary, 'ERROR'], [conn.primary, 'ERROR'], [conn.backup, 'OK']]);
+  });
+
+  it('retries a busy model once before moving on', async () => {
+    let calls = 0;
+    scripts[`fake-primary-${runId}`] = () => {
+      calls += 1;
+      if (calls === 1) throw new AiError('OTHER', 'Provider returned error', 502);
+      return json({ reply: 'Second try worked.' });
+    };
+    scripts[`fake-backup-${runId}`] = () => json({ reply: 'backup' });
+    const res = await say('retry', 'hello once more friend');
+    expect(res.reply?.text).toBe('Second try worked.');
+    expect(calls).toBe(2);
+  });
+
+  it('flags staff when a reply promises a team member will follow up', async () => {
+    scripts[`fake-primary-${runId}`] = () => json({ lang: 'en', reply: "I'm sorry to hear that. I'm passing this to our team so a manager can reach out to you.", action: null });
+    const res = await say('promise', 'can you arrange a cake for my table');
+    const conv = await prisma.chatConversation.findUniqueOrThrow({ where: { id: res.conversationId } });
+    expect(conv.needsStaff).toBe(true);
   });
 
   it('skips a connection over its daily limit or monthly budget', async () => {

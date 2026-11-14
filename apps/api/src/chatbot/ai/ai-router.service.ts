@@ -4,7 +4,7 @@ import type { AiConnection, AiJob, AiRoute } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { decryptSecret, secretsKey } from '../secrets';
-import { AiError, AiProvider, AiRequest, AiResult, AiTarget } from './ai.types';
+import { AiError, AiProvider, AiRequest, AiResult, AiTarget, isTransient } from './ai.types';
 import { AnthropicProvider } from './anthropic.provider';
 import { OpenAiCompatibleProvider } from './openai-compatible.provider';
 
@@ -38,6 +38,8 @@ export function splitBucket(key: string): number {
 @Injectable()
 export class AiRouterService {
   private readonly logger = new Logger(AiRouterService.name);
+  /** Pause before retrying a busy connection; doubles on the second retry. */
+  retryDelayMs = Number(process.env.AI_RETRY_DELAY_MS ?? 2500);
   private config = new Map<string, BranchConfig>();
   private spend = new Map<string, { at: number; monthUsd: number; today: number }>();
 
@@ -154,6 +156,18 @@ export class AiRouterService {
     }
   }
 
+  /** `call`, retried after a short pause when the connection is only busy. */
+  async callWithRetry(connection: AiConnection, job: AiJob, request: AiRequest, meta: Parameters<AiRouterService['call']>[3], retries = 1): Promise<AiRunResult> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.call(connection, job, request, meta);
+      } catch (err) {
+        if (attempt >= retries || !isTransient(err)) throw err;
+        if (this.retryDelayMs > 0) await new Promise((r) => setTimeout(r, this.retryDelayMs * (attempt + 1)));
+      }
+    }
+  }
+
   /**
    * Run a job through the backup list. `accept` lets the caller reject a
    * reply (bad JSON, an invented price) and move on to the next connection.
@@ -168,7 +182,7 @@ export class AiRouterService {
     const list = await this.candidates(branchId, job, opts.conversationKey);
     for (const connection of list.slice(0, opts.maxAttempts ?? 3)) {
       try {
-        const result = await this.call(connection, job, request, { conversationId: opts.conversationId });
+        const result = await this.callWithRetry(connection, job, request, { conversationId: opts.conversationId });
         const value = opts.accept(result);
         if (value != null) return { value, result };
         await this.markBlocked(connection.id, job, opts.conversationId ?? null);

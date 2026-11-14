@@ -45,6 +45,17 @@ export class AiError extends Error {
   }
 }
 
+/**
+ * A failure worth one more try on the same connection: busy or rate-limited
+ * free models ("Provider returned error"), timeouts and empty replies.
+ */
+export function isTransient(err: unknown): boolean {
+  if (!(err instanceof AiError)) return false;
+  if (err.kind === 'RATE_LIMIT' || err.kind === 'NETWORK' || err.kind === 'BAD_RESPONSE') return true;
+  if (err.kind !== 'OTHER') return false;
+  return (err.status != null && (err.status === 408 || err.status === 429 || err.status >= 500)) || /provider returned error|overloaded|temporarily|try again/i.test(err.message);
+}
+
 export interface AiProvider {
   complete(target: AiTarget, request: AiRequest): Promise<AiResult>;
 }

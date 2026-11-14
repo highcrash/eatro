@@ -350,7 +350,8 @@ export class AiAdminService {
     const results: SelfTestCaseResult[] = [];
     for (const test of CHAT_SELF_TEST) {
       try {
-        const res = await this.router.call(c, 'CHAT', { system, messages: [{ role: 'user', content: `${line}\n${test.message}` }] }, { outcome: 'TEST' });
+        // Free models turn away bursts, so each question gets two more tries before it counts as failed.
+        const res = await this.router.callWithRetry(c, 'CHAT', { system, messages: [{ role: 'user', content: `${line}\n${test.message}` }] }, { outcome: 'TEST' }, 2);
         results.push(scoreChatCase(test, res.text, parseAiReply(res.text, test.message), menu, charges, allowed, res.latencyMs));
       } catch (err) {
         results.push(scoreChatCase(test, null, null, menu, charges, allowed, null, (err as Error).message.slice(0, 200)));
