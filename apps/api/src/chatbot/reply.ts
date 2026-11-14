@@ -17,10 +17,11 @@ export interface AiReply {
 
 const MAX_REPLY_CHARS = 1500;
 
+/** The reply language for a customer's text: Bangla script, Banglish and Bangla-English mixes all get Bangla. */
 export function detectLang(text: string): ReplyLang {
   if (/[ঀ-৿]/.test(text)) return 'bn';
-  const banglish = /\b(ache|achhe|koto|kothay|kokhon|kobe|chai|lagbe|korbo|korte|hobe|ki|dam|daam|amar|apnar|apnader|jon|jonno|khola|bondho|vai|bhai|apu|taka)\b/i;
-  return banglish.test(text) ? 'banglish' : 'en';
+  const banglish = /\b(ache|achhe|ase|nai|nei|koto|kothay|kokhon|kobe|chai|lagbe|korbo|korte|hobe|ki|kom|dam|daam|amar|apnar|apnader|jon|jonno|khola|bondho|vai|bhai|apu|taka|valo|bhalo|khabar|khete|dhonnobad)\b/i;
+  return banglish.test(text) ? 'bn' : 'en';
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() && v.trim().toLowerCase() !== 'null' ? v.trim() : null);
@@ -72,7 +73,7 @@ export function parseAiReply(raw: string, customerText: string): AiReply | null 
       const obj = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
       const reply = str(obj.reply);
       if (reply) {
-        const lang = obj.lang === 'en' || obj.lang === 'bn' || obj.lang === 'banglish' ? obj.lang : detectLang(customerText);
+        const lang = obj.lang === 'en' ? 'en' : obj.lang === 'bn' || obj.lang === 'banglish' ? 'bn' : detectLang(customerText);
         const items = Array.isArray(obj.items) ? (obj.items as unknown[]).map((i) => String(i).trim()).filter(Boolean).slice(0, 5) : [];
         return { lang, reply, items, action: parseAction(obj.action) };
       }

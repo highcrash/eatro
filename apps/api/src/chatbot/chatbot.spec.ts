@@ -18,9 +18,10 @@ import { ChatbotModule } from './chatbot.module';
 import { ChatbotService } from './chatbot.service';
 import { buildMenuSnapshot, MenuContextService } from './menu-context';
 import { formatPartyQuote, priceParty } from './party-planner';
-import { amountsIn, checkReply, ownerAmounts, parseAiReply } from './reply';
+import { CHAT_SELF_TEST } from './ai/model-selftest';
+import { amountsIn, checkReply, detectLang, ownerAmounts, parseAiReply } from './reply';
 import { decryptSecret, encryptSecret, secretsKey } from './secrets';
-import { extractPhone, matchQuickReply } from './text';
+import { extractPhone, matchQuickReply, phrase } from './text';
 
 jest.setTimeout(60_000);
 
@@ -102,9 +103,23 @@ describe('chat assistant: pure pieces', () => {
   });
 
   it('accepts a plain-sentence reply but refuses broken JSON', () => {
-    expect(parseAiReply('Sure, we are open till 11pm.', 'kokhon bondho')).toMatchObject({ reply: 'Sure, we are open till 11pm.', lang: 'banglish', action: null });
+    expect(parseAiReply('Sure, we are open till 11pm.', 'kokhon bondho')).toMatchObject({ reply: 'Sure, we are open till 11pm.', lang: 'bn', action: null });
     expect(parseAiReply('{"reply": "half', 'hi')).toBeNull();
     expect(parseAiReply('```json\n{"lang":"bn","reply":"হ্যাঁ","items":[],"action":null}\n```', 'x')).toMatchObject({ lang: 'bn', reply: 'হ্যাঁ' });
+  });
+
+  it('answers Banglish in Bangla script, never in Latin letters', () => {
+    expect(detectLang('biryani ache? kom dam e ki ki ache')).toBe('bn');
+    expect(detectLang('Amar jhal khabar vallage')).toBe('bn');
+    expect(detectLang('বিরিয়ানি আছে?')).toBe('bn');
+    expect(detectLang('Do you have biryani?')).toBe('en');
+    expect(phrase('voice', detectLang('vai voice dilam'))).toMatch(/[ঀ-৿]/);
+    expect(parseAiReply('{"lang":"banglish","reply":"জি, আছে"}', 'ache?')).toMatchObject({ lang: 'bn' });
+    const test = CHAT_SELF_TEST.find((c) => c.name === 'Banglish price question')!;
+    const menu = buildMenuSnapshot({ categories: [], items: [] }, 'https://eatrobd.com');
+    const charges = { vatPercent: 0, servicePercent: 0 };
+    expect(test.judge({ lang: 'bn', reply: 'Ji bhai, burger ache!', items: [], action: null }, menu, charges)).toMatch(/Latin letters/);
+    expect(test.judge({ lang: 'bn', reply: 'জি, বার্গার আছে।', items: [], action: null }, menu, charges)).toBeNull();
   });
 
   it('prices party options from the live menu with service charge then VAT', () => {
@@ -473,7 +488,7 @@ describe('chat assistant: pipeline and admin', () => {
       if (msg.includes('birthday party for 30')) return json({ lang: 'en', reply: 'Some ideas:', action: { type: 'party_quote', guests: 30, options: [{ label: 'Value', lines: [{ ref: dishRef(req).ref, qty: 30 }] }] } });
       if (msg.includes('waiter was rude')) return json({ lang: 'en', reply: 'Sorry, passing to the manager.', action: { type: 'handoff', reason: 'complaint' } });
       if (/[\u0980-\u09FF]/.test(msg.split('\n')[1])) return json({ lang: 'bn', reply: 'আমাদের মেনু দেখুন।' });
-      if (msg.includes('bhai')) return json({ lang: 'banglish', reply: 'Ji bhai, ache!' });
+      if (msg.includes('bhai')) return json({ lang: 'bn', reply: 'জি, আছে!' });
       return json({ lang: 'en', reply: 'Happy to help!' });
     };
     await aiAdmin.startSelfTest(branchId, conn.shadow);

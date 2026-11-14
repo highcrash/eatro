@@ -152,7 +152,7 @@ export class CommentService {
   }
 
   /** Public reply and private message for the answerable kinds. Null when nothing should be said. */
-  async draftReplies(row: ChatComment, kind: CommentKind, lang: 'en' | 'bn' | 'banglish', name: string): Promise<{ public: string | null; private: string | null } | null> {
+  async draftReplies(row: ChatComment, kind: CommentKind, lang: 'en' | 'bn', name: string): Promise<{ public: string | null; private: string | null } | null> {
     if (kind === 'PRICE') {
       const resolved = await this.posts.resolve(row.branchId, row.platform, { postId: row.postId });
       const menuUrl = `${this.menus.siteUrl()}/menu`;

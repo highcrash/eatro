@@ -110,27 +110,22 @@ export const COMMENT_REPLIES = {
   priceOne: {
     en: ['{name} is ৳{price}. Details sent to your inbox 💬', '{name}: ৳{price}. Check your inbox for more 😊', 'It is ৳{price} for {name}. We have sent you the details 📩'],
     bn: ['{name}: ৳{price}। বিস্তারিত ইনবক্সে পাঠিয়েছি 💬', '{name} এর দাম ৳{price}। ইনবক্স চেক করুন 😊'],
-    banglish: ['{name}: ৳{price}. Details inbox e pathiyechi 💬', '{name} er dam ৳{price}. Inbox check korun 😊'],
   },
   priceInbox: {
     en: ['Details sent to your inbox 💬', 'We have sent you the prices in a message 📩', 'Check your inbox, we have sent the details 😊'],
     bn: ['বিস্তারিত ইনবক্সে পাঠিয়েছি 💬', 'দামসহ বিস্তারিত মেসেজে পাঠিয়েছি 📩'],
-    banglish: ['Details inbox e pathiyechi 💬', 'Dam shoho details message e pathiyechi 📩'],
   },
   booking: {
     en: ["We'd love to host you! Check your inbox 📩", 'Happy to help with that. We have messaged you 😊'],
     bn: ['আপনাকে স্বাগত জানাতে পেরে খুশি হব! ইনবক্স চেক করুন 📩', 'অবশ্যই সাহায্য করব। আপনাকে মেসেজ করেছি 😊'],
-    banglish: ['Apnake host korte pele khushi hobo! Inbox check korun 📩', 'Oboshshoi help korbo. Apnake message korechi 😊'],
   },
   praise: {
     en: ['Thank you so much! 🧡', 'Thank you! See you again soon 😊', 'So glad you enjoyed it! 🧡'],
     bn: ['অনেক ধন্যবাদ! 🧡', 'ধন্যবাদ! আবার আসবেন 😊'],
-    banglish: ['Onek dhonnobad! 🧡', 'Dhonnobad! Abar ashben 😊'],
   },
   complaintHolding: {
     en: ["We're sorry to hear this, {name}. Please check your inbox so our manager can look into it today."],
     bn: ['দুঃখিত, {name}। অনুগ্রহ করে ইনবক্স চেক করুন, আমাদের ম্যানেজার আজই বিষয়টি দেখবেন।'],
-    banglish: ['Dukkhito, {name}. Inbox check korben, amader manager aj-i bishoy ta dekhben.'],
   },
 } as const;
 
@@ -138,22 +133,18 @@ export const PRIVATE_REPLIES = {
   price: {
     en: 'Hi {name}! Thanks for asking. {details}\nWould you like to book a table? Just tell me the date, time and number of guests.',
     bn: 'হ্যালো {name}! জানতে চাওয়ার জন্য ধন্যবাদ। {details}\nটেবিল বুক করতে চাইলে তারিখ, সময় আর কতজন জানিয়ে দিন।',
-    banglish: 'Hello {name}! Jante chawar jonno dhonnobad. {details}\nTable book korte chaile date, time ar kotojon janiye din.',
   },
   priceMenu: {
     en: 'Our full menu with prices is here: {menuUrl}',
     bn: 'আমাদের পুরো মেনু ও দাম এখানে: {menuUrl}',
-    banglish: 'Amader puro menu ar dam ekhane: {menuUrl}',
   },
   booking: {
     en: "Hi {name}! Happy to help with your booking. Please tell me the date, time and number of guests, and I'll send the request.",
     bn: 'হ্যালো {name}! বুকিংয়ে সাহায্য করতে পেরে খুশি। তারিখ, সময় আর কতজন জানিয়ে দিন, আমি অনুরোধ পাঠিয়ে দেব।',
-    banglish: 'Hello {name}! Booking e help korte pere khushi. Date, time ar kotojon janiye din, ami request pathiye dibo.',
   },
   complaint: {
     en: "Hi {name}, I'm sorry about your experience. I've passed this to our manager, who will reply here shortly.",
     bn: 'হ্যালো {name}, আপনার অভিজ্ঞতার জন্য দুঃখিত। বিষয়টি আমাদের ম্যানেজারকে জানিয়েছি, তিনি শীঘ্রই এখানে উত্তর দেবেন।',
-    banglish: 'Hello {name}, apnar obhiggotar jonno dukkhito. Bishoy ta amader manager ke janiyechi, uni shighroi ekhane reply diben.',
   },
 } as const;
 
@@ -161,7 +152,6 @@ export const PRIVATE_REPLIES = {
 export const CHAT_COMPLAINT_LINE: Record<ReplyLang, string> = {
   en: "I'm sorry about this. I'm passing it to our manager now, who will reply here shortly.",
   bn: 'এর জন্য দুঃখিত। এখনই আমাদের ম্যানেজারকে জানাচ্ছি, তিনি শীঘ্রই এখানে উত্তর দেবেন।',
-  banglish: 'Er jonno dukkhito. Ekhoni amader manager ke janacchi, uni shighroi ekhane reply diben.',
 };
 
 export const fill = (t: string, v: Record<string, string | number>) => t.replace(/\{(\w+)\}/g, (w, k: string) => (k in v ? String(v[k]) : w));

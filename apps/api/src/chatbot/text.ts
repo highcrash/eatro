@@ -80,74 +80,62 @@ export function fillPlaceholders(answer: string, values: Record<string, string |
   return answer.replace(/\{(\w+)\}/g, (whole, key: string) => values[key] ?? whole);
 }
 
-export type ReplyLang = 'en' | 'bn' | 'banglish';
+/** Replies are in English or Bangla script. Banglish (Bangla in Latin letters) is answered in Bangla script. */
+export type ReplyLang = 'en' | 'bn';
 
 /** Fixed sentences the server adds itself, so they never depend on the AI. */
 const PHRASES = {
   estimate: {
     en: 'These are estimates. Our team will confirm the final price and menu with you.',
     bn: 'এগুলো আনুমানিক হিসাব। আমাদের টিম আপনার সাথে চূড়ান্ত মূল্য ও মেনু নিশ্চিত করবে।',
-    banglish: 'Egulo estimate. Amader team apnar sathe final price ar menu confirm korbe.',
   },
   bookingReceived: {
     en: 'Booking request received: {guests} guests, {date} at {time}. We will confirm shortly.',
     bn: 'বুকিং অনুরোধ পেয়েছি: {guests} জন, {date}, {time}। আমরা শীঘ্রই নিশ্চিত করব।',
-    banglish: 'Booking request peyechi: {guests} jon, {date}, {time}. Amra shighroi confirm korbo.',
   },
   slotChoices: {
     en: 'That time is not available. Open times on {date}: {slots}. Which one suits you?',
     bn: 'ওই সময়টি খালি নেই। {date} তারিখে খালি সময়: {slots}। কোনটি আপনার জন্য সুবিধাজনক?',
-    banglish: 'Oi shomoy ta khali nei. {date} e khali shomoy: {slots}. Konta apnar jonno bhalo?',
   },
   noSlots: {
     en: 'We have no free table for {guests} guests on {date}. Our team will contact you to arrange it.',
     bn: '{date} তারিখে {guests} জনের জন্য খালি টেবিল নেই। আমাদের টিম আপনার সাথে যোগাযোগ করবে।',
-    banglish: '{date} e {guests} joner jonno khali table nei. Amader team apnar sathe jogajog korbe.',
   },
   largeParty: {
     en: 'For {guests} guests our team arranges the booking personally. We have passed your details on and will call you to confirm.',
     bn: '{guests} জনের বুকিং আমাদের টিম সরাসরি ব্যবস্থা করে। আপনার তথ্য পাঠিয়ে দিয়েছি, নিশ্চিত করতে আমরা কল করব।',
-    banglish: '{guests} joner booking amader team nijei arrange kore. Apnar details pathiye diyechi, confirm korte call korbo.',
   },
   visionSure: {
     en: 'This looks like our {name}: ৳{price}.',
     bn: 'এটি আমাদের {name} মনে হচ্ছে: ৳{price}।',
-    banglish: 'Eta amader {name} mone hocche: ৳{price}.',
   },
   visionChoices: {
     en: 'Is it one of these?',
     bn: 'এগুলোর কোনোটি কি?',
-    banglish: 'Egulor kono ekta ki?',
   },
   visionNone: {
     en: "Thanks for the photo. I couldn't match it to a dish on our menu, so I've asked a team member to take a look.",
     bn: 'ছবির জন্য ধন্যবাদ। মেনুর কোনো খাবারের সাথে মেলাতে পারিনি, তাই আমাদের টিমের একজনকে দেখতে বলেছি।',
-    banglish: 'Chobir jonno dhonnobad. Menur kono khabarer sathe melate parini, tai amader team er ekjon ke dekhte bolechi.',
   },
   imageOff: {
     en: 'Thanks for the photo. Could you type the dish name or your question? A team member will also take a look.',
     bn: 'ছবির জন্য ধন্যবাদ। খাবারের নাম বা আপনার প্রশ্নটি লিখে দেবেন? আমাদের টিমও দেখে নেবে।',
-    banglish: 'Chobir jonno dhonnobad. Khabarer nam ba apnar proshno ta likhe diben? Amader team o dekhe nibe.',
   },
   imageLimit: {
     en: "I can't read more photos today. Please type your question and I'll help.",
     bn: 'আজ আর ছবি দেখতে পারছি না। প্রশ্নটি লিখে দিন, আমি সাহায্য করব।',
-    banglish: 'Aj ar chobi dekhte parchi na. Proshno ta likhe din, ami help korbo.',
   },
   voice: {
     en: "Sorry, I can't listen to voice messages. Could you type your question? A team member will also take a look.",
     bn: 'দুঃখিত, ভয়েস মেসেজ শুনতে পারি না। প্রশ্নটি লিখে দেবেন? আমাদের টিমও দেখে নেবে।',
-    banglish: 'Dukkhito, voice message shunte pari na. Proshno ta likhe diben? Amader team o dekhe nibe.',
   },
   sharedPostOne: {
     en: 'That post is our {name}: ৳{price}.',
     bn: 'ওই পোস্টটি আমাদের {name}: ৳{price}।',
-    banglish: 'Oi post ta amader {name}: ৳{price}.',
   },
   testMode: {
     en: '(Test mode: nothing was saved.)',
     bn: '(Test mode: nothing was saved.)',
-    banglish: '(Test mode: nothing was saved.)',
   },
 } as const;
 

@@ -16,7 +16,7 @@ const langIs = (want: AiReply['lang'] | AiReply['lang'][]) => (reply: AiReply) =
 export const CHAT_SELF_TEST: SelfTestCase[] = [
   { name: 'English menu question', message: 'Hi! What kind of food do you serve? Any recommendations?', judge: (r) => langIs('en')(r) },
   { name: 'Bangla price question', message: 'আপনাদের সবচেয়ে জনপ্রিয় খাবার কোনটা? দাম কত?', judge: (r) => langIs('bn')(r) },
-  { name: 'Banglish price question', message: 'bhai apnader ki ki burger ache? dam koto?', judge: (r) => langIs(['banglish', 'bn'])(r) },
+  { name: 'Banglish price question', message: 'bhai apnader ki ki burger ache? dam koto?', judge: (r) => langIs('bn')(r) ?? (/[ঀ-৿]/.test(r.reply) ? null : 'answered Banglish in Latin letters, not Bangla script') },
   {
     name: 'Booking with details missing',
     message: 'I want to book a table for 4 people tomorrow evening.',
