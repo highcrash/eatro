@@ -13,7 +13,7 @@ import { AiRouterService } from './ai/ai-router.service';
 import { AnthropicProvider } from './ai/anthropic.provider';
 import { OpenAiCompatibleProvider } from './ai/openai-compatible.provider';
 import { ChatbotAdminService } from './chatbot-admin.service';
-import { AiAdminController, ChatbotAdminController, ChatbotPublicController, ConnectCallbackController, ConnectController, MetaWebhookController, SocialAdminController, WhatsAppWebhookController } from './chatbot.controller';
+import { AiAdminController, ChatbotAdminController, ChatbotPublicController, ChatStaffController, ConnectCallbackController, ConnectController, MetaWebhookController, SocialAdminController, WhatsAppWebhookController } from './chatbot.controller';
 import { WhatsAppWebhookService } from './meta/whatsapp-webhook.service';
 import { CommentService } from './comment.service';
 import { ComplaintService } from './complaint.service';
@@ -25,10 +25,11 @@ import { PostContextService } from './post-context.service';
 import { ChatbotScheduler } from './chatbot.scheduler';
 import { ChatbotService } from './chatbot.service';
 import { MenuContextService } from './menu-context';
+import { PushService, WebPushSender } from './push/push.service';
 
 @Module({
   imports: [PrismaModule, PublicModule, ReservationModule, CustomerModule, WsGatewayModule, ActivityLogModule, SmsModule, WhatsAppModule],
-  controllers: [ChatbotPublicController, ChatbotAdminController, AiAdminController, MetaWebhookController, WhatsAppWebhookController, ConnectCallbackController, ConnectController, SocialAdminController],
+  controllers: [ChatbotPublicController, ChatbotAdminController, AiAdminController, MetaWebhookController, WhatsAppWebhookController, ConnectCallbackController, ConnectController, SocialAdminController, ChatStaffController],
   providers: [
     OpenAiCompatibleProvider,
     AnthropicProvider,
@@ -46,6 +47,8 @@ import { MenuContextService } from './menu-context';
     MetaWebhookService,
     ConnectService,
     WhatsAppWebhookService,
+    WebPushSender,
+    PushService,
   ],
   exports: [ChatbotService],
 })

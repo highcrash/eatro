@@ -15,6 +15,8 @@ export interface StaffMember extends AuditFields {
   customRole?: CustomRole | null;
   isActive: boolean;
   canAccessPos: boolean;
+  /** Can use the staff chat app and the chat inbox. Owner and Manager always can. */
+  canHandleChats?: boolean;
   hireDate: Date;
   monthlySalary?: number | null;
   /** Tipsoi person_identifier (e.g. "Ahmed-1234"). Optional — staff
@@ -51,6 +53,7 @@ export interface CreateStaffDto {
   customRoleId?: string | null;
   hireDate?: string;
   canAccessPos?: boolean;
+  canHandleChats?: boolean;
   tipsoiPersonId?: string | null;
   shiftStart?: string | null;
   shiftEnd?: string | null;

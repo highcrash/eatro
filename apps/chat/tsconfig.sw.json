@@ -1,0 +1,8 @@
+{
+  "extends": "@restora/config/tsconfig/react",
+  "compilerOptions": {
+    "lib": ["ES2020", "WebWorker"],
+    "types": []
+  },
+  "include": ["src/sw.ts"]
+}

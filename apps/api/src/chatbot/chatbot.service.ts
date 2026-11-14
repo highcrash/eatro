@@ -14,6 +14,7 @@ import { MenuCard, MenuContextService, MenuSnapshot, toCard } from './menu-conte
 import { MetaAccountService } from './meta/meta-account.service';
 import { MetaClient, MetaError } from './meta/meta.client';
 import { PostContextService, PostRef } from './post-context.service';
+import { PushService } from './push/push.service';
 import { formatPartyQuote, priceParty } from './party-planner';
 import { buildSystemPrompt, buildVisionPrompt, contextLine } from './prompt';
 import { AiReply, checkReply, detectLang, ownerAmounts, parseAiReply } from './reply';
@@ -116,6 +117,7 @@ export class ChatbotService {
     private readonly metaAccounts: MetaAccountService,
     private readonly posts: PostContextService,
     private readonly whatsApp: WhatsAppService,
+    private readonly push: PushService,
   ) {}
 
   /** Live values for {placeholders} in pre-ready answers. */
@@ -632,7 +634,10 @@ export class ChatbotService {
       },
     });
     this.notify(conv.branchId, conv.id);
-    if (suggestOnly) return { conversationId: conv.id, reply: null, status: 'DRAFTED' };
+    if (suggestOnly) {
+      if (!conv.isTest) void this.pushStaff(conv, 'reply waiting for approval');
+      return { conversationId: conv.id, reply: null, status: 'DRAFTED' };
+    }
     if (conv.channel !== 'WEB') {
       try {
         await this.sendToChannel(conv, text, output.cards);
@@ -719,6 +724,14 @@ export class ChatbotService {
     conv.needsStaff = true;
     conv.needsStaffReason = reason;
     this.notify(conv.branchId, conv.id);
+    void this.pushStaff(conv, reason);
+  }
+
+  /** Phone notification for the staff chat app: who and why, never what the customer wrote. */
+  pushStaff(conv: ChatConversation, reason: string) {
+    const channel = { WEB: 'website', MESSENGER: 'Messenger', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp' }[conv.channel];
+    const who = conv.customerName?.trim() || 'A customer';
+    return this.push.notifyBranch(conv.branchId, { title: `${who} needs a reply`, body: `${channel}: ${reason}`.slice(0, 160), url: `/chat/${conv.id}`, tag: `chat-${conv.id}` }, conv.id);
   }
 
   notify(branchId: string, conversationId: string) {

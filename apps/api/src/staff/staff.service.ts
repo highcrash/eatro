@@ -15,7 +15,7 @@ export class StaffService {
       where: { branchId, deletedAt: null },
       select: {
         id: true, name: true, email: true, role: true, customRoleId: true, phone: true,
-        isActive: true, canAccessPos: true, hireDate: true, createdAt: true,
+        isActive: true, canAccessPos: true, canHandleChats: true, hireDate: true, createdAt: true,
         // Tipsoi + per-staff shift overrides surfaced for the admin
         // StaffPage / AttendancePage. Optional everywhere — frontend
         // shows them as "(branch default)" placeholders when null.
@@ -56,10 +56,11 @@ export class StaffService {
         branchId,
         hireDate: dto.hireDate ? new Date(dto.hireDate) : new Date(),
         canAccessPos: dto.canAccessPos ?? true,
+        canHandleChats: dto.canHandleChats ?? false,
         designation: dto.designation?.trim() || null,
         photoUrl: dto.photoUrl || null,
       },
-      select: { id: true, name: true, email: true, role: true, customRoleId: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, designation: true, photoUrl: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, customRoleId: true, phone: true, isActive: true, canAccessPos: true, canHandleChats: true, hireDate: true, designation: true, photoUrl: true, createdAt: true },
     });
   }
 
@@ -77,7 +78,7 @@ export class StaffService {
     return this.prisma.staff.update({
       where: { id },
       data,
-      select: { id: true, name: true, email: true, role: true, customRoleId: true, phone: true, isActive: true, canAccessPos: true, hireDate: true, designation: true, photoUrl: true, updatedAt: true },
+      select: { id: true, name: true, email: true, role: true, customRoleId: true, phone: true, isActive: true, canAccessPos: true, canHandleChats: true, hireDate: true, designation: true, photoUrl: true, updatedAt: true },
     });
   }
 

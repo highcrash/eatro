@@ -35,6 +35,8 @@ export async function deleteTestBranch(prisma: PrismaService, branchId: string):
   await prisma.menuItem.deleteMany({ where: { branchId } });
   await prisma.menuCategory.deleteMany({ where: { branchId } });
   await prisma.activityLog.deleteMany({ where: { branchId } });
+  await prisma.staffPushSubscription.deleteMany({ where: { branchId } });
+  await prisma.staff.deleteMany({ where: { branchId } });
   await prisma.branchSetting.deleteMany({ where: { branchId } });
   await prisma.branch.delete({ where: { id: branchId } });
 }

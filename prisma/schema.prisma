@@ -567,6 +567,9 @@ model Staff {
   // be operating a register (e.g. an ADVISOR who only needs admin).
   // OWNER/MANAGER are treated as always-allowed at the gate regardless.
   canAccessPos        Boolean   @default(true)
+  /// Can use the staff chat app (chat.eatrobd.com) and the admin chat inbox.
+  /// OWNER and MANAGER always can, whatever this says.
+  canHandleChats      Boolean   @default(false)
   hireDate            DateTime  @default(now())
   /// Legacy single-value salary. Kept for branches that haven't built
   /// a SalaryStructure yet — payroll generation falls back to this
@@ -3647,4 +3650,32 @@ model ChatComplaint {
 
   @@index([branchId, status, createdAt])
   @@map("chat_complaints")
+}
+
+/// Web push keys for the staff chat app. One row per install, made on first use.
+model PushKeys {
+  id            String   @id @default("default")
+  publicKey     String
+  /// AES-256-GCM, see chatbot/secrets.ts. Never returned by the API.
+  privateKeyEnc String   @db.Text
+  createdAt     DateTime @default(now())
+
+  @@map("push_keys")
+}
+
+/// A staff member's phone or browser that accepts chat notifications.
+model StaffPushSubscription {
+  id        String    @id @default(cuid())
+  staffId   String
+  branchId  String
+  endpoint  String    @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  lastOkAt  DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([branchId])
+  @@index([staffId])
+  @@map("staff_push_subscriptions")
 }

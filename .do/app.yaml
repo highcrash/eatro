@@ -84,7 +84,7 @@ services:
 
       # Allowed CORS origins (comma-separated)
       - key: CORS_ORIGINS
-        value: "https://eatrobd.com,https://www.eatrobd.com,https://admin.eatrobd.com,https://pos.eatrobd.com,https://kds.eatrobd.com,https://qr.eatrobd.com,https://order.eatrobd.com"
+        value: "https://eatrobd.com,https://www.eatrobd.com,https://admin.eatrobd.com,https://pos.eatrobd.com,https://kds.eatrobd.com,https://qr.eatrobd.com,https://order.eatrobd.com,https://chat.eatrobd.com"
         scope: RUN_TIME
 
       # DigitalOcean Spaces (file uploads)
@@ -166,6 +166,22 @@ static_sites:
       - path: /
     domains:
       - { domain: kds.eatrobd.com }
+
+  # Staff chat app: phone-installable inbox for chats, comments and complaints.
+  - name: chat
+    github: { repo: highcrash/eatro, branch: main, deploy_on_push: true }
+    source_dir: /
+    build_command: |
+      pnpm install --frozen-lockfile
+      pnpm exec turbo run build --filter=@restora/chat
+    output_dir: apps/chat/dist
+    catchall_document: index.html
+    envs:
+      - { key: VITE_API_BASE_URL, value: "https://api.eatrobd.com/api/v1", scope: BUILD_TIME }
+    routes:
+      - path: /
+    domains:
+      - { domain: chat.eatrobd.com }
 
   # `apps/qr` is the legacy single-file QR app — superseded by `qr-order`.
   # Kept here with no domain so it doesn't get built and doesn't receive

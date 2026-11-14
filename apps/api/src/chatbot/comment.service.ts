@@ -13,6 +13,7 @@ import { MenuContextService } from './menu-context';
 import { MetaAccountService } from './meta/meta-account.service';
 import { MetaClient } from './meta/meta.client';
 import { PostContextService } from './post-context.service';
+import { PushService } from './push/push.service';
 import { fillPlaceholders, matchQuickReply } from './text';
 
 export interface IncomingComment {
@@ -48,6 +49,7 @@ export class CommentService {
     private readonly posts: PostContextService,
     private readonly meta: MetaClient,
     private readonly accounts: MetaAccountService,
+    private readonly push: PushService,
     private readonly router: AiRouterService,
     private readonly menus: MenuContextService,
   ) {}
@@ -92,6 +94,14 @@ export class CommentService {
       row = await this.prisma.chatComment.update({ where: { id: row.id }, data: { lastError: (err as Error).message.slice(0, 300), status: 'NEW' } });
     }
     this.chatbot.notify(c.branchId, `comment:${row.id}`);
+    if (['NEW', 'DRAFT', 'ESCALATED'].includes(row.status) && !['PRAISE', 'IGNORE', 'SPAM'].includes(row.kind)) {
+      const where = row.platform === 'INSTAGRAM' ? 'Instagram' : 'Facebook';
+      void this.push.notifyBranch(
+        row.branchId,
+        { title: `${row.authorName?.trim() || 'Someone'} commented`, body: `${where} post: ${row.status === 'DRAFT' ? 'reply waiting for approval' : 'needs a person'}`, url: `/comments/${row.id}`, tag: `comment-${row.id}` },
+        `comment:${row.commentId}`,
+      );
+    }
     return row;
   }
 

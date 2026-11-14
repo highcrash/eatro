@@ -14,6 +14,8 @@ import { AiAdminService, ConnectionInput } from './ai/ai-admin.service';
 import type { AiImage, AiImageMediaType } from './ai/ai.types';
 import { ChatbotAdminService, SettingsInput } from './chatbot-admin.service';
 import { ChatbotService } from './chatbot.service';
+import { ChatStaff, ChatStaffGuard } from './chat-staff.guard';
+import { PushService } from './push/push.service';
 import { CommentService } from './comment.service';
 import { ComplaintService } from './complaint.service';
 import { ConnectService } from './meta/connect.service';
@@ -94,7 +96,7 @@ export class ChatbotPublicController {
 // ─── Admin: inbox, knowledge, settings (owner and manager) ───────────────────
 
 @Controller('chatbot')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ChatStaffGuard)
 @Roles('OWNER', 'MANAGER')
 export class ChatbotAdminController {
   constructor(private readonly svc: ChatbotAdminService) {}
@@ -110,49 +112,49 @@ export class ChatbotAdminController {
   }
 
   @Get('conversations')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   conversations(@CurrentUser() u: JwtPayload, @Query('filter') filter?: string, @Query('channel') channel?: string, @Query('search') search?: string) {
     return this.svc.conversations(u.branchId, { filter, channel, search });
   }
 
   @Get('conversations/:id')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   conversation(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
     return this.svc.conversation(u.branchId, id);
   }
 
   @Post('conversations/:id/reply')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   reply(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() body: { text: string }) {
     return this.svc.staffReply(u.branchId, id, body?.text, u);
   }
 
   @Post('conversations/:id/take-over')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   takeOver(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
     return this.svc.takeOver(u.branchId, id);
   }
 
   @Post('conversations/:id/hand-back')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   handBack(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
     return this.svc.handBack(u.branchId, id);
   }
 
   @Post('conversations/:id/resolve')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   resolve(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
     return this.svc.resolve(u.branchId, id);
   }
 
   @Post('messages/:id/send')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   sendDraft(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() body: { text?: string }) {
     return this.svc.sendDraft(u.branchId, id, body?.text, u);
   }
 
   @Post('messages/:id/discard')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   discardDraft(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
     return this.svc.discardDraft(u.branchId, id);
   }
@@ -218,13 +220,13 @@ export class ChatbotAdminController {
   }
 
   @Get('leads')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   leads(@CurrentUser() u: JwtPayload, @Query('status') status?: string) {
     return this.svc.leads(u.branchId, status);
   }
 
   @Patch('leads/:id')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @ChatStaff()
   updateLead(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() body: { status?: ChatLeadStatus; notes?: string | null }) {
     return this.svc.updateLead(u.branchId, id, body ?? {});
   }
@@ -420,8 +422,8 @@ export class ConnectController {
 // ─── Comments and complaints ─────────────────────────────────────────────────
 
 @Controller('chatbot')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('OWNER', 'MANAGER', 'CASHIER')
+@UseGuards(JwtAuthGuard, ChatStaffGuard)
+@ChatStaff()
 export class SocialAdminController {
   constructor(
     private readonly comments: CommentService,
@@ -494,5 +496,55 @@ export class SocialAdminController {
     }
     await this.complaints.markResponded(id, u);
     return this.complaints.open(u.branchId, id);
+  }
+}
+
+// ─── Staff chat app (chat.eatrobd.com) ───────────────────────────────────────
+
+@Controller('chatbot')
+@UseGuards(JwtAuthGuard, ChatStaffGuard)
+@ChatStaff()
+export class ChatStaffController {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly push: PushService,
+  ) {}
+
+  /** Who is signed in to the staff app; the app's gate. */
+  @Get('staff/me')
+  async me(@CurrentUser() u: JwtPayload) {
+    const [staff, branch] = await Promise.all([
+      this.prisma.staff.findUnique({ where: { id: u.sub }, select: { id: true, name: true, role: true } }),
+      this.prisma.branch.findUnique({ where: { id: u.branchId }, select: { id: true, name: true } }),
+    ]);
+    if (!staff) throw new NotFoundException('Staff not found');
+    return { ...staff, branchId: u.branchId, branchName: branch?.name ?? '' };
+  }
+
+  @Get('push/key')
+  async pushKey() {
+    return { publicKey: await this.push.publicKey() };
+  }
+
+  @Post('push/subscribe')
+  subscribe(@CurrentUser() u: JwtPayload, @Body() body: { endpoint?: string; keys?: { p256dh?: string; auth?: string } }, @Headers('user-agent') ua?: string) {
+    const endpoint = body?.endpoint?.trim();
+    const p256dh = body?.keys?.p256dh?.trim();
+    const auth = body?.keys?.auth?.trim();
+    if (!endpoint || !/^https:\/\//.test(endpoint) || endpoint.length > 1000 || !p256dh || !auth || p256dh.length > 200 || auth.length > 100) {
+      throw new BadRequestException('Not a valid notification subscription');
+    }
+    return this.push.subscribe(u, { endpoint, keys: { p256dh, auth } }, ua ?? null);
+  }
+
+  @Post('push/unsubscribe')
+  unsubscribe(@CurrentUser() u: JwtPayload, @Body() body: { endpoint?: string }) {
+    if (!body?.endpoint) throw new BadRequestException('endpoint is required');
+    return this.push.unsubscribe(u, body.endpoint);
+  }
+
+  @Post('push/test')
+  test(@CurrentUser() u: JwtPayload) {
+    return this.push.test(u);
   }
 }

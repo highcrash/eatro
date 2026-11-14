@@ -171,12 +171,43 @@ export class ChatbotAdminService {
     return {
       ...c,
       staffUnread: 0,
+      customer: await this.customerCard(branchId, c.customerId, c.customerPhone),
       messages: messages.map((m) => ({
         ...m,
         staffName: staff.find((s) => s.id === m.staffId)?.name ?? null,
         aiConnectionName: conns.find((x) => x.id === m.aiConnectionId)?.name ?? null,
       })),
       leads,
+    };
+  }
+
+  /** What staff need to know about the customer: visits, spend and upcoming bookings. */
+  private async customerCard(branchId: string, customerId: string | null, phone: string | null) {
+    const customer = customerId
+      ? await this.prisma.customer.findFirst({ where: { id: customerId, branchId } })
+      : phone
+        ? await this.prisma.customer.findFirst({ where: { branchId, phone } })
+        : null;
+    if (!customer) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const upcoming = await this.prisma.reservation.findMany({
+      where: { branchId, customerId: customer.id, date: { gte: today }, status: { in: ['PENDING', 'CONFIRMED'] } },
+      orderBy: [{ date: 'asc' }, { timeSlot: 'asc' }],
+      take: 3,
+      select: { id: true, date: true, timeSlot: true, partySize: true, status: true },
+    });
+    return {
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      totalOrders: customer.totalOrders,
+      /** Taka. */
+      totalSpent: Number(customer.totalSpent) / 100,
+      lastVisit: customer.lastVisit,
+      loyaltyPoints: customer.loyaltyPoints,
+      customerSince: customer.createdAt,
+      upcoming,
     };
   }
 

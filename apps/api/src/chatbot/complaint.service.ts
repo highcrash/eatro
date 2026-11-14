@@ -6,6 +6,7 @@ import type { JwtPayload } from '@restora/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
+import { PushService } from './push/push.service';
 
 const STATUSES: ComplaintStatus[] = ['NEW', 'CONTACTED', 'RESOLVED'];
 const LEVELS: ComplaintLevel[] = ['SERIOUS', 'ORDINARY', 'MILD'];
@@ -23,6 +24,7 @@ export class ComplaintService {
     private readonly prisma: PrismaService,
     private readonly sms: SmsService,
     private readonly ws: RestoraPosGateway,
+    private readonly push: PushService,
   ) {}
 
   private notify(branchId: string, complaintId: string, reminder = false) {
@@ -62,6 +64,17 @@ export class ComplaintService {
       },
     });
     this.notify(input.branchId, row.id);
+    const where = input.source === 'COMMENT' ? 'post comment' : (input.channel ?? 'chat').toLowerCase();
+    void this.push.notifyBranch(
+      input.branchId,
+      {
+        title: `${row.level === 'SERIOUS' ? 'Serious complaint' : 'Complaint'}: ${input.customerName?.trim() || 'a customer'}`,
+        body: `${where}, about ${row.topic.toLowerCase()}`,
+        url: input.conversationId ? `/chat/${input.conversationId}` : `/complaints/${row.id}`,
+        tag: `complaint-${row.id}`,
+      },
+      input.conversationId ?? (input.commentId ? `comment:${input.commentId}` : row.id),
+    );
     if (row.level === 'SERIOUS') await this.smsManager(row.id);
     return row;
   }

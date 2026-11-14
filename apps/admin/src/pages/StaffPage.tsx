@@ -14,6 +14,7 @@ interface Staff {
   customRoleId?: string | null;
   isActive: boolean;
   canAccessPos: boolean;
+  canHandleChats?: boolean;
   hireDate: string;
   // Tipsoi attendance fields. Optional everywhere — empty means "use
   // branch defaults" for shift / grace / half-day cutoff.
@@ -62,6 +63,7 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
     password: '',
     isActive: initial?.isActive ?? true,
     canAccessPos: initial?.canAccessPos ?? true,
+    canHandleChats: initial?.canHandleChats ?? false,
     // Attendance / Tipsoi fields
     tipsoiPersonId: initial?.tipsoiPersonId ?? '',
     shiftStart: initial?.shiftStart ?? '',
@@ -149,6 +151,7 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
       }
       if (form.password) dto.password = form.password;
       dto.canAccessPos = form.canAccessPos;
+      dto.canHandleChats = form.canHandleChats;
       // Salary structure + leave rule — empty string clears.
       dto.salaryStructureId = form.salaryStructureId || null;
       dto.leaveRuleId = form.leaveRuleId || null;
@@ -356,6 +359,20 @@ function StaffDialog({ initial, onClose }: { initial?: Staff; onClose: () => voi
               Can access POS
               <span className="block text-[10px] text-[#666] mt-0.5">
                 Un-check to hide this user from the desktop lock screen + block web POS login. Owner/Manager are always allowed regardless.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 text-sm font-body text-[#999]">
+            <input
+              type="checkbox"
+              checked={form.canHandleChats}
+              onChange={(e) => set('canHandleChats', e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Can handle chats
+              <span className="block text-[10px] text-[#666] mt-0.5">
+                Lets this user answer customer chats, comments and complaints in the staff chat app (chat.eatrobd.com) and get its notifications. Owner/Manager are always allowed.
               </span>
             </span>
           </label>
