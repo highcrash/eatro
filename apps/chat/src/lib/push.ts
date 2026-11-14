@@ -28,9 +28,13 @@ export async function pushState(): Promise<PushState> {
   if (iosNeedsInstall()) return 'needs-install';
   if (!supported()) return 'unsupported';
   if (Notification.permission === 'denied') return 'blocked';
-  const reg = await navigator.serviceWorker.getRegistration('/');
-  const sub = await reg?.pushManager.getSubscription();
-  return sub && Notification.permission === 'granted' ? 'on' : 'off';
+  try {
+    const reg = await navigator.serviceWorker.getRegistration('/');
+    const sub = await reg?.pushManager.getSubscription();
+    return sub && Notification.permission === 'granted' ? 'on' : 'off';
+  } catch {
+    return 'off';
+  }
 }
 
 function keyBytes(base64url: string): ArrayBuffer {

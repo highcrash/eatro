@@ -94,6 +94,62 @@ export default function Settings({ name, branch, onLogout }: { name: string; bra
   );
 }
 
+/**
+ * Shown at the top of the Chats screen until notifications are on, so staff
+ * don't have to find the Settings tab. Says exactly what this phone needs.
+ */
+export function NotifyBanner() {
+  const [state, setState] = useState<PushState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    void pushState().then(setState);
+  }, []);
+  if (!state || state === 'on') return null;
+
+  const enable = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setState(await turnOn());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mx-3 mt-3 rounded-xl border-2 border-beet bg-white p-3 space-y-2">
+      <div className="flex items-center gap-2 font-semibold text-beet">
+        <Bell size={18} /> Get notified when a customer needs you
+      </div>
+      {state === 'off' && (
+        <>
+          <p className="text-sm text-ink-soft">Tap the button, then tap “Allow”.</p>
+          <Button disabled={busy} onClick={() => void enable()} className="w-full">
+            {busy ? 'Turning on…' : 'Turn on notifications'}
+          </Button>
+        </>
+      )}
+      {state === 'needs-install' && (
+        <ol className="text-sm text-ink list-decimal pl-5 space-y-1">
+          <li>Tap the Share button <Share size={14} className="inline -mt-0.5" /> at the bottom of Safari.</li>
+          <li>Choose “Add to Home Screen”, then “Add”.</li>
+          <li>Close Safari and open <b>EATRO Chat</b> from your Home Screen. This button will appear there.</li>
+        </ol>
+      )}
+      {state === 'blocked' && (
+        <p className="text-sm text-ink">
+          Notifications are blocked for this app. Android: tap the lock or ⓘ next to the address (or long-press the app icon → App info) → Notifications → Allow. iPhone: Settings → Notifications → EATRO Chat → Allow. Then reopen the app.
+        </p>
+      )}
+      {state === 'unsupported' && <p className="text-sm text-ink">This browser can't show notifications. On Android use Chrome; on iPhone use Safari and add the app to your Home Screen.</p>}
+      {error && <p className="text-sm text-beet-dark">{error}</p>}
+    </div>
+  );
+}
+
 export function useLogout() {
   const clear = useAuth((s) => s.clear);
   return async () => {

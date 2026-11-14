@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { navigate } from '../lib/router';
 import { ago, CHANNEL_COLOR, CHANNEL_LABEL, type Comment, type Complaint, type ConversationSummary } from '../lib/types';
 import { Empty, ErrorLine, Header, Pill } from '../ui';
+import { NotifyBanner } from './Settings';
 
 /** Loads a list, reloads it on `refreshKey` changes and every 30 seconds. */
 function useList<T>(path: string, refreshKey: number) {
@@ -47,6 +48,7 @@ export function ChatsList({ refreshKey }: { refreshKey: number }) {
   return (
     <>
       <Header title="Chats" subtitle="Website, Messenger, Instagram, WhatsApp" />
+      <NotifyBanner />
       <div className="px-3 pt-3 space-y-2 bg-cream sticky top-14 z-10 pb-2">
         <div className="flex items-center gap-2 rounded-xl bg-white border border-ink-line px-3">
           <Search size={16} className="text-ink-soft" />
