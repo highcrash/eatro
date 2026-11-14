@@ -186,6 +186,7 @@ describe('social: webhooks, comments, complaints', () => {
 
     prisma = moduleRef.get(PrismaService);
     chatbot = moduleRef.get(ChatbotService);
+    chatbot.burstWaitMs = 0;
     comments = moduleRef.get(CommentService);
     complaints = moduleRef.get(ComplaintService);
     connect = moduleRef.get(ConnectService);

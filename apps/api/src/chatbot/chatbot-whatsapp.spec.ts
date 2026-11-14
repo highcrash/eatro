@@ -8,6 +8,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
+import { AiAdminService } from './ai/ai-admin.service';
+import { AiRouterService } from './ai/ai-router.service';
+import type { AiRequest, AiTarget } from './ai/ai.types';
 import { OpenAiCompatibleProvider } from './ai/openai-compatible.provider';
 import { ChatbotModule } from './chatbot.module';
 import { ChatbotService, monthStart } from './chatbot.service';
@@ -35,6 +38,8 @@ describe('whatsapp: webhook and replies', () => {
   let connect: ConnectService;
   let accounts: MetaAccountService;
   let branchId: string;
+  let moduleRefGet: <T>(t: new (...args: never[]) => T) => T;
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const runId = `w${Date.now().toString(36)}`;
   const PHONE_ID = `10${Date.now()}`;
   const SECRET = 'b'.repeat(32);
@@ -48,6 +53,10 @@ describe('whatsapp: webhook and replies', () => {
     wabaSubscriptions: jest.fn().mockResolvedValue(['1234567890123']),
   };
   const meta = { subscribeApp: jest.fn().mockResolvedValue(undefined), debugToken: jest.fn(), pageSubscriptions: jest.fn() };
+  const noAi = async (): Promise<never> => {
+    throw new Error('no AI in this test');
+  };
+  const ai = { complete: jest.fn<Promise<{ text: string; inputTokens: number; outputTokens: number; latencyMs: number }>, [AiTarget, AiRequest]>(noAi), listModels: jest.fn(), openRouterKeyInfo: jest.fn() };
 
   const payload = (messages: object[], name = 'Sadia Rahman', from?: string) => ({
     object: 'whatsapp_business_account',
@@ -83,7 +92,7 @@ describe('whatsapp: webhook and replies', () => {
       .overrideProvider(MetaClient)
       .useValue(meta)
       .overrideProvider(OpenAiCompatibleProvider)
-      .useValue({ complete: jest.fn().mockRejectedValue(new Error('no AI in this test')) })
+      .useValue(ai)
       .compile();
     app = moduleRef.createNestApplication({ rawBody: true });
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
@@ -93,8 +102,10 @@ describe('whatsapp: webhook and replies', () => {
     origin = `http://127.0.0.1:${(app.getHttpServer().address() as { port: number }).port}`;
     prisma = moduleRef.get(PrismaService);
     chatbot = moduleRef.get(ChatbotService);
+    chatbot.burstWaitMs = 0;
     connect = moduleRef.get(ConnectService);
     accounts = moduleRef.get(MetaAccountService);
+    moduleRefGet = (t) => moduleRef.get(t);
 
     branchId = await createTestBranch(prisma, `whatsapp ${runId}`);
     await chatbot.getSettings(branchId);
@@ -189,6 +200,58 @@ describe('whatsapp: webhook and replies', () => {
     expect(wa.sendText).not.toHaveBeenCalled();
     expect((await conv(waNumber(7)))?.needsStaffReason).toMatch(/WhatsApp monthly limit reached/);
     await prisma.chatbotSetting.update({ where: { branchId }, data: { whatsappMonthlyCap: 1000 } });
+  });
+
+  it('answers a burst of messages once, and a message sent mid-reply in its own turn', async () => {
+    const owner = await prisma.staff.findFirstOrThrow({ where: { role: 'OWNER', isActive: true } });
+    const user = { sub: owner.id, role: 'OWNER', branchId } as never;
+    const c = await moduleRefGet(AiAdminService).create(branchId, { name: `Burst ${runId}`, provider: 'OPENAI_COMPATIBLE', apiKey: 'sk-test-burst-1234', model: `fake-burst-${runId}`, inputPricePerM: 0, outputPricePerM: 0 }, user);
+    await prisma.aiConnection.update({ where: { id: c.id }, data: { selfTestScore: 90 } });
+    await prisma.aiRoute.upsert({ where: { branchId_job: { branchId, job: 'CHAT' } }, create: { branchId, job: 'CHAT', connectionIds: [c.id] }, update: { connectionIds: [c.id] } });
+    moduleRefGet(AiRouterService).invalidate(branchId);
+
+    const seen: AiRequest[] = [];
+    let thinkMs = 50;
+    ai.complete.mockImplementation(async (_target, request) => {
+      seen.push(request);
+      const n = seen.length;
+      await pause(thinkMs);
+      return { text: JSON.stringify({ lang: 'banglish', reply: `uttor ${n}`, items: [], action: null }), inputTokens: 10, outputTokens: 5, latencyMs: 5 };
+    });
+    chatbot.burstWaitMs = 300;
+    const from = waNumber(9);
+    const send = (i: number, text: string) => chatbot.handleIncoming({ branchId, channel: 'WHATSAPP', externalUserId: from, text, externalId: `${runId}-b${i}` });
+    try {
+      // Three messages typed quickly: one AI request, one reply.
+      const first = await Promise.all([send(1, 'vai'), pause(40).then(() => send(2, 'jhal kichu ache?')), pause(80).then(() => send(3, 'dam koto'))]);
+      expect(first.map((r) => r.status)).toEqual(['MERGED', 'MERGED', 'REPLIED']);
+      expect(seen).toHaveLength(1);
+      expect(seen[0].messages.filter((m) => m.role === 'user')).toHaveLength(1);
+      expect(seen[0].messages.at(-1)!.content).toMatch(/\nvai\njhal kichu ache\?\ndam koto$/);
+
+      // A message that arrives while a reply is being written waits for it,
+      // and is answered alone, with that reply in the history.
+      thinkMs = 700;
+      const a = send(4, 'ar ki ache');
+      await pause(350);
+      const b = send(5, 'thik ache, ar?');
+      expect((await a).status).toBe('REPLIED');
+      expect((await b).status).toBe('REPLIED');
+      expect(seen).toHaveLength(3);
+      const last = seen[2].messages;
+      expect(last.at(-1)!.content).toMatch(/\nthik ache, ar\?$/);
+      expect(last.at(-1)!.content).not.toContain('ar ki ache');
+      expect(last.at(-2)).toEqual({ role: 'assistant', content: 'uttor 2' });
+
+      // The "automated" note goes on the first reply only.
+      const bodies = wa.sendText.mock.calls.map((call) => (call[0] as { to: string; body: string })).filter((m) => m.to === from).map((m) => m.body);
+      expect(bodies).toHaveLength(3);
+      expect(bodies.filter((t) => t.includes('(automated)'))).toHaveLength(1);
+      expect(bodies[0]).toContain('(automated)');
+    } finally {
+      chatbot.burstWaitMs = 0;
+      ai.complete.mockImplementation(noAi);
+    }
   });
 
   it('connects the WhatsApp number to the assistant from the Connect tab', async () => {

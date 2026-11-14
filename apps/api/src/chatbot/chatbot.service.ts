@@ -50,11 +50,20 @@ export interface BotOutput {
 export interface HandleResult {
   conversationId: string;
   reply: BotOutput | null;
-  /** REPLIED: sent now. DRAFTED: waiting for staff. HUMAN: staff are handling the chat. OFF: channel switched off. CAPPED: WhatsApp monthly limit reached. */
-  status: 'REPLIED' | 'DRAFTED' | 'HUMAN' | 'OFF' | 'DUPLICATE' | 'CAPPED';
+  /**
+   * REPLIED: sent now. DRAFTED: waiting for staff. HUMAN: staff are handling the chat. OFF: channel switched off.
+   * CAPPED: WhatsApp monthly limit reached. MERGED: a newer message from the same customer is answered together with this one.
+   */
+  status: 'REPLIED' | 'DRAFTED' | 'HUMAN' | 'OFF' | 'DUPLICATE' | 'CAPPED' | 'MERGED';
 }
 
 const HISTORY_LIMIT = 12;
+/** At most this many messages from one burst are answered together. */
+const BURST_MAX = 6;
+/** Rows that stand in for a photo, voice note or shared post; not something to answer as text. */
+const PLACEHOLDER = /^\[(photo|voice message|shared a post[^\]]*)\]$/;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const DEFAULT_QUICK_REPLIES: { title: string; keywords: string[]; answer: string }[] = [
   {
@@ -87,6 +96,13 @@ const DEFAULT_QUICK_REPLIES: { title: string; keywords: string[]; answer: string
 @Injectable()
 export class ChatbotService {
   private readonly logger = new Logger(ChatbotService.name);
+  /**
+   * Social chats: how long to wait for more messages before answering, since
+   * people often type in bursts ("vai" / "jhal khabar ache?" / "dam koto?").
+   */
+  burstWaitMs = Number(process.env.CHAT_BURST_WAIT_MS ?? 4000);
+  /** One reply at a time per chat, so each reply sees the one before it. */
+  private readonly turns = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -195,15 +211,83 @@ export class ChatbotService {
     });
     const hasImage = !!msg.image || !!msg.hasPhoto;
     const shown = text || (hasImage ? '[photo]' : msg.voice ? '[voice message]' : msg.sharedPost ? `[shared a post${msg.sharedPost.title ? `: ${msg.sharedPost.title}` : ''}]` : '');
-    await this.prisma.chatMessage.create({
+    const saved = await this.prisma.chatMessage.create({
       data: { conversationId: conv.id, sender: 'CUSTOMER', text: shown, hasImage, externalId: msg.externalId ?? null },
     });
 
-    if (!msg.isTest && (conv.status === 'HUMAN' || (conv.humanUntil && conv.humanUntil > now))) {
+    if (!msg.isTest && this.staffHandling(conv, now)) {
       await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { staffUnread: { increment: 1 } } });
       this.notify(msg.branchId, conv.id);
       return { conversationId: conv.id, reply: null, status: 'HUMAN' };
     }
+
+    // Social chats: wait a moment for the rest of a burst, then answer it once.
+    // Photos, voice notes and shared posts are answered straight away and take
+    // any waiting text with them.
+    const burst = !msg.isTest && msg.channel !== 'WEB';
+    const plainText = !hasImage && !msg.voice && !msg.sharedPost && !msg.unsupported;
+    if (burst && plainText) {
+      if (this.burstWaitMs > 0) await wait(this.burstWaitMs);
+      const newer = await this.prisma.chatMessage.count({ where: { conversationId: conv.id, sender: 'CUSTOMER', createdAt: { gt: saved.createdAt } } });
+      if (newer > 0) return { conversationId: conv.id, reply: null, status: 'MERGED' };
+    }
+
+    return this.inTurn(conv.id, async (): Promise<HandleResult> => {
+      const current = await this.prisma.chatConversation.findUniqueOrThrow({ where: { id: conv.id } });
+      if (!msg.isTest && this.staffHandling(current, new Date())) {
+        await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { staffUnread: { increment: 1 } } });
+        this.notify(msg.branchId, conv.id);
+        return { conversationId: conv.id, reply: null, status: 'HUMAN' };
+      }
+      const answering = burst ? await this.unanswered(conv.id, saved) : { ids: [saved.id], earlier: [] as string[] };
+      const combined = [...answering.earlier, text].filter(Boolean).join('\n');
+      return this.answer(current, settings, mode, msg, combined, { ids: answering.ids, until: saved.createdAt });
+    });
+  }
+
+  private staffHandling(conv: ChatConversation, now: Date): boolean {
+    return conv.status === 'HUMAN' || (!!conv.humanUntil && conv.humanUntil > now);
+  }
+
+  /** Runs `fn` after any reply already being worked on in the same chat. */
+  private async inTurn<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.turns.get(key) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(fn);
+    const tail = run.catch(() => undefined);
+    this.turns.set(key, tail);
+    try {
+      return await run;
+    } finally {
+      if (this.turns.get(key) === tail) this.turns.delete(key);
+    }
+  }
+
+  /** The customer's messages since the last reply (sent or drafted), oldest first, ending with `upTo`. */
+  private async unanswered(conversationId: string, upTo: { id: string; createdAt: Date }): Promise<{ ids: string[]; earlier: string[] }> {
+    const lastReply = await this.prisma.chatMessage.findFirst({
+      where: { conversationId, sender: { in: ['BOT', 'STAFF'] }, status: { in: ['SENT', 'DRAFT'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    const rows = await this.prisma.chatMessage.findMany({
+      where: { conversationId, sender: 'CUSTOMER', id: { not: upTo.id }, createdAt: { lte: upTo.createdAt, ...(lastReply ? { gt: lastReply.createdAt } : {}) } },
+      orderBy: { createdAt: 'desc' },
+      take: BURST_MAX - 1,
+      select: { id: true, text: true },
+    });
+    rows.reverse();
+    return { ids: [...rows.map((r) => r.id), upTo.id], earlier: rows.map((r) => r.text.trim()).filter((t) => t && !PLACEHOLDER.test(t)) };
+  }
+
+  private async answer(
+    conv: ChatConversation,
+    settings: ChatbotSetting,
+    mode: ChatbotSetting['webMode'],
+    msg: IncomingMessage,
+    text: string,
+    answering: { ids: string[]; until: Date },
+  ): Promise<HandleResult> {
+    const hasImage = !!msg.image || !!msg.hasPhoto;
 
     // WhatsApp: stop at the month's limit so replies stay inside Meta's free tier.
     if (msg.channel === 'WHATSAPP' && !msg.isTest) {
@@ -229,11 +313,11 @@ export class ChatbotService {
       return result;
     }
 
-    const output = await this.compose(conv, settings, msg, text);
+    const output = await this.compose(conv, settings, msg, text, answering);
     return this.deliverBotReply(conv, settings, output, mode === 'SUGGEST');
   }
 
-  private async compose(conv: ChatConversation, settings: ChatbotSetting, msg: IncomingMessage, original: string): Promise<BotOutput> {
+  private async compose(conv: ChatConversation, settings: ChatbotSetting, msg: IncomingMessage, original: string, answering: { ids: string[]; until: Date }): Promise<BotOutput> {
     const isTest = !!msg.isTest;
     let text = original;
     const lang = detectLang(text);
@@ -256,7 +340,9 @@ export class ChatbotService {
     const siteUrl = this.menus.siteUrl();
 
     const replies = await this.prisma.chatQuickReply.findMany({ where: { branchId: conv.branchId, isActive: true }, orderBy: { priority: 'desc' } });
-    const quick = matchQuickReply(text, replies);
+    // A burst ("vai, kothay apnara? 40 joner party koto?") can hold more than one
+    // question, so a keyword answer is only used for a single message.
+    const quick = answering.ids.length === 1 ? matchQuickReply(text, replies) : null;
     if (quick) {
       void this.prisma.chatQuickReply.update({ where: { id: quick.id }, data: { hits: { increment: 1 } } }).catch(() => undefined);
       return {
@@ -267,7 +353,7 @@ export class ChatbotService {
     }
 
     const menu = await this.menus.get(conv.branchId);
-    const request = await this.chatRequest(conv, settings, facts, menu, text);
+    const request = await this.chatRequest(conv, settings, facts, menu, text, answering);
     const allowedAmounts = ownerAmounts(...facts.rules, settings.partyRules);
     let lastProblem = 'No AI connection answered';
     const outcome = await this.router.run<AiReply>(conv.branchId, 'CHAT', request, {
@@ -307,6 +393,7 @@ export class ChatbotService {
     facts: Awaited<ReturnType<ChatbotService['branchFacts']>>,
     menu: MenuSnapshot,
     text: string,
+    answering: { ids: string[]; until: Date },
   ): Promise<AiRequest> {
     const system = buildSystemPrompt({
       assistantName: settings.assistantName,
@@ -320,13 +407,14 @@ export class ChatbotService {
       menu,
     });
 
+    // The messages being answered are added below, together, with the context line.
+    // Customer messages that came in after them are answered in their own turn.
     const past = await this.prisma.chatMessage.findMany({
-      where: { conversationId: conv.id, status: 'SENT' },
+      where: { conversationId: conv.id, status: 'SENT', id: { notIn: answering.ids }, OR: [{ sender: { not: 'CUSTOMER' } }, { createdAt: { lte: answering.until } }] },
       orderBy: { createdAt: 'desc' },
-      take: HISTORY_LIMIT + 1,
+      take: HISTORY_LIMIT,
     });
-    // The newest row is the message being answered; it is added below with its context line.
-    const history = past.slice(1).reverse();
+    const history = past.reverse();
     const messages: AiMessage[] = [];
     for (const m of history) {
       const role = m.sender === 'CUSTOMER' ? 'user' : 'assistant';
