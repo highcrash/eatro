@@ -132,7 +132,7 @@ export const COMMENT_REPLIES = {
 export const PRIVATE_REPLIES = {
   price: {
     en: 'Hi {name}! Thanks for asking. {details}\nWould you like to book a table? Just tell me the date, time and number of guests.',
-    bn: 'হ্যালো {name}! জানতে চাওয়ার জন্য ধন্যবাদ। {details}\nটেবিল বুক করতে চাইলে তারিখ, সময় আর কতজন জানিয়ে দিন।',
+    bn: 'আসসালামু আলাইকুম {name}! জানতে চাওয়ার জন্য ধন্যবাদ। {details}\nটেবিল বুক করতে চাইলে তারিখ, সময় আর কতজন জানিয়ে দিন।',
   },
   priceMenu: {
     en: 'Our full menu with prices is here: {menuUrl}',
@@ -140,11 +140,11 @@ export const PRIVATE_REPLIES = {
   },
   booking: {
     en: "Hi {name}! Happy to help with your booking. Please tell me the date, time and number of guests, and I'll send the request.",
-    bn: 'হ্যালো {name}! বুকিংয়ে সাহায্য করতে পেরে খুশি। তারিখ, সময় আর কতজন জানিয়ে দিন, আমি অনুরোধ পাঠিয়ে দেব।',
+    bn: 'আসসালামু আলাইকুম {name}! বুকিংয়ে সাহায্য করতে পেরে খুশি। তারিখ, সময় আর কতজন জানিয়ে দিন, আমি অনুরোধ পাঠিয়ে দেব।',
   },
   complaint: {
     en: "Hi {name}, I'm sorry about your experience. I've passed this to our manager, who will reply here shortly.",
-    bn: 'হ্যালো {name}, আপনার অভিজ্ঞতার জন্য দুঃখিত। বিষয়টি আমাদের ম্যানেজারকে জানিয়েছি, তিনি শীঘ্রই এখানে উত্তর দেবেন।',
+    bn: 'আসসালামু আলাইকুম {name}, আপনার অভিজ্ঞতার জন্য দুঃখিত। বিষয়টি আমাদের ম্যানেজারকে জানিয়েছি, তিনি শীঘ্রই এখানে উত্তর দেবেন।',
   },
 } as const;
 

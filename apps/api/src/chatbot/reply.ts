@@ -58,6 +58,16 @@ function parseAction(raw: unknown): AiAction | null {
 }
 
 /**
+ * EATRO's customers greet with salam. Models trained on Indian Bangla often
+ * open with নমস্কার or Namaste, so that is swapped before anyone sees it.
+ */
+export function fixGreeting(text: string): string {
+  return text
+    .replace(/নমস্কার|নমস্তে|নমষ্কার/g, 'আসসালামু আলাইকুম')
+    .replace(/\b(namaskar|nomoskar|namaste|namastey)\b/gi, 'Assalamu alaikum');
+}
+
+/**
  * Reads the model's answer. The contract is one JSON object, but weaker
  * models wrap it in a code fence or answer in plain sentences; a plain
  * answer is accepted as a reply with no action, and still price-checked.
@@ -71,7 +81,8 @@ export function parseAiReply(raw: string, customerText: string): AiReply | null 
   if (looksLikeJson) {
     try {
       const obj = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
-      const reply = str(obj.reply);
+      const said = str(obj.reply);
+      const reply = said ? fixGreeting(said) : null;
       if (reply) {
         const lang = obj.lang === 'en' ? 'en' : obj.lang === 'bn' || obj.lang === 'banglish' ? 'bn' : detectLang(customerText);
         const items = Array.isArray(obj.items) ? (obj.items as unknown[]).map((i) => String(i).trim()).filter(Boolean).slice(0, 5) : [];
@@ -83,7 +94,7 @@ export function parseAiReply(raw: string, customerText: string): AiReply | null 
     // Looked like JSON but wasn't usable: showing it to a customer would be worse than the fallback.
     return null;
   }
-  return { lang: detectLang(customerText), reply: text, items: [], action: null };
+  return { lang: detectLang(customerText), reply: fixGreeting(text), items: [], action: null };
 }
 
 /** Every amount of money written in a text, in taka. */

@@ -115,6 +115,8 @@ describe('chat assistant: pure pieces', () => {
     expect(detectLang('Do you have biryani?')).toBe('en');
     expect(phrase('voice', detectLang('vai voice dilam'))).toMatch(/[ঀ-৿]/);
     expect(parseAiReply('{"lang":"banglish","reply":"জি, আছে"}', 'ache?')).toMatchObject({ lang: 'bn' });
+    expect(parseAiReply('{"lang":"bn","reply":"নমস্কার! বার্গার আছে।"}', 'burger ache?')!.reply).toBe('আসসালামু আলাইকুম! বার্গার আছে।');
+    expect(parseAiReply('Namaste, yes we do.', 'hi')!.reply).toBe('Assalamu alaikum, yes we do.');
     const test = CHAT_SELF_TEST.find((c) => c.name === 'Banglish price question')!;
     const menu = buildMenuSnapshot({ categories: [], items: [] }, 'https://eatrobd.com');
     const charges = { vatPercent: 0, servicePercent: 0 };
