@@ -263,8 +263,20 @@ export class MetaClient {
     return r.data?.[0]?.subscribed_fields ?? [];
   }
 
-  async debugToken(appId: string, appSecret: string, token: string): Promise<{ valid: boolean; expiresAt: number | null; scopes: string[] }> {
-    const r = await this.call<{ data?: { is_valid?: boolean; expires_at?: number; scopes?: string[] } }>('GET', 'debug_token', `${appId}|${appSecret}`, { input_token: token });
-    return { valid: !!r.data?.is_valid, expiresAt: r.data?.expires_at || null, scopes: r.data?.scopes ?? [] };
+  async debugToken(
+    appId: string,
+    appSecret: string,
+    token: string,
+  ): Promise<{ valid: boolean; expiresAt: number | null; scopes: string[]; appId: string | null; granular: { scope: string; targetIds: string[] }[] }> {
+    const r = await this.call<{
+      data?: { is_valid?: boolean; expires_at?: number; scopes?: string[]; app_id?: string; granular_scopes?: { scope?: string; target_ids?: string[] }[] };
+    }>('GET', 'debug_token', `${appId}|${appSecret}`, { input_token: token });
+    return {
+      valid: !!r.data?.is_valid,
+      expiresAt: r.data?.expires_at || null,
+      scopes: r.data?.scopes ?? [],
+      appId: r.data?.app_id ? String(r.data.app_id) : null,
+      granular: (r.data?.granular_scopes ?? []).map((g) => ({ scope: String(g.scope ?? ''), targetIds: (g.target_ids ?? []).map(String) })),
+    };
   }
 }

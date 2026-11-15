@@ -106,9 +106,22 @@ export class ConnectService {
     if (!bs?.whatsappPhoneNumberId || !bs.whatsappWabaId || !bs.whatsappAccessToken) {
       throw new BadRequestException('Add the WhatsApp phone number id, business account id and token in Settings → WhatsApp first');
     }
+    const token = bs.whatsappAccessToken.trim();
+    let wabaId = bs.whatsappWabaId.trim();
     try {
+      wabaId = await this.checkWhatsAppToken(branchId, app.appId, secret, token, wabaId, bs.whatsappPhoneNumberId.trim());
       await this.meta.subscribeApp(app.appId, secret, 'whatsapp_business_account', this.accounts.webhookUrl('whatsapp'), app.verifyToken, ['messages']);
-      await this.whatsApp.subscribeWaba({ wabaId: bs.whatsappWabaId, accessToken: bs.whatsappAccessToken.trim() });
+      try {
+        await this.whatsApp.subscribeWaba({ wabaId, accessToken: token });
+      } catch (err) {
+        const m = (err as Error).message;
+        if (!/does not exist|missing permissions/i.test(m)) throw err;
+        throw new BadRequestException(
+          wabaId === bs.whatsappPhoneNumberId.trim()
+            ? `The business account id ${wabaId} is the phone number id. In Settings → WhatsApp, put the WhatsApp Business Account ID (shown on the app's WhatsApp → API Setup page, under the phone number) in that box.`
+            : `This token can't reach business account ${wabaId}. Check the WhatsApp Business Account ID in Settings → WhatsApp, and that the token's system user is assigned to that WhatsApp account (Business Settings → System users → Assign assets) with full control.`,
+        );
+      }
     } catch (err) {
       const msg = (err as Error).message;
       await this.prisma.metaAppSetting.update({ where: { branchId }, data: { lastError: `WhatsApp setup: ${msg}` } });
@@ -117,6 +130,43 @@ export class ConnectService {
     await this.prisma.metaAppSetting.update({ where: { branchId }, data: { whatsappSubscribedAt: new Date(), lastError: null } });
     void this.activity.log({ branchId, actor: user, category: 'SETTINGS', action: 'UPDATE', entityType: 'MetaAppSetting', entityId: bs.whatsappPhoneNumberId, entityName: 'WhatsApp', summary: 'Connected the WhatsApp number to the chat assistant' });
     return this.check(branchId);
+  }
+
+  /**
+   * Reads what the saved WhatsApp token may do, so a wrong id or token gets a
+   * clear message. When the token reaches exactly one business account and
+   * the saved id is another one, the right id is saved and returned.
+   */
+  private async checkWhatsAppToken(branchId: string, appId: string, secret: string, token: string, wabaId: string, phoneNumberId: string): Promise<string> {
+    let t: Awaited<ReturnType<MetaClient['debugToken']>> | undefined;
+    try {
+      t = await this.meta.debugToken(appId, secret, token);
+    } catch (err) {
+      const m = (err as Error).message;
+      if (/app_?id/i.test(m) && /match/i.test(m)) {
+        throw new BadRequestException(`The WhatsApp token was made in a different Meta app. Make the system user token in app ${appId}, the one saved on this page, then save it in Settings → WhatsApp.`);
+      }
+      this.logger.debug(`Could not read the WhatsApp token: ${m}`);
+      return wabaId;
+    }
+    if (!t) return wabaId;
+    if (!t.valid) throw new BadRequestException('The WhatsApp token in Settings → WhatsApp has expired or was revoked. Make a new permanent system user token and save it there.');
+    if (t.appId && t.appId !== appId) {
+      throw new BadRequestException(`The WhatsApp token was made in a different Meta app (${t.appId}). Make the system user token in app ${appId}, the one saved on this page, then save it in Settings → WhatsApp.`);
+    }
+    const missing = ['whatsapp_business_management', 'whatsapp_business_messaging'].filter((s) => !t!.scopes.includes(s));
+    if (missing.length) throw new BadRequestException(`The WhatsApp token is missing these permissions: ${missing.join(', ')}. Generate the token again with both ticked.`);
+
+    const reachable = t.granular.find((g) => g.scope === 'whatsapp_business_management')?.targetIds ?? [];
+    if (reachable.length === 0 || reachable.includes(wabaId)) return wabaId;
+    if (reachable.length === 1) {
+      const fixed = reachable[0];
+      await this.prisma.branchSetting.update({ where: { branchId }, data: { whatsappWabaId: fixed } });
+      this.logger.log(`WhatsApp business account id corrected from ${wabaId} to ${fixed} (the only one the token can manage)`);
+      return fixed;
+    }
+    const hint = wabaId === phoneNumberId ? ' The saved id is the phone number id.' : '';
+    throw new BadRequestException(`Business account ${wabaId} is not one this token can manage.${hint} It can manage: ${reachable.join(', ')}. Put the right one in Settings → WhatsApp.`);
   }
 
   // ── Facebook Login ────────────────────────────────────────────────────────

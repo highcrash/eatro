@@ -264,4 +264,29 @@ describe('whatsapp: webhook and replies', () => {
     expect(status.health.find((h) => h.key === 'whatsapp')?.ok).toBe(true);
     expect(JSON.stringify(status)).not.toContain('wa-token');
   });
+
+  it('fixes a wrong business account id from the token, and explains a token or id Meta refuses', async () => {
+    const owner = await prisma.staff.findFirstOrThrow({ where: { role: 'OWNER', isActive: true } });
+    const user = { sub: owner.id, role: 'OWNER', branchId } as never;
+    const scopes = ['whatsapp_business_management', 'whatsapp_business_messaging'];
+
+    // The token manages one account only, and the saved id is another: the right one is saved and used.
+    meta.debugToken.mockResolvedValueOnce({ valid: true, expiresAt: null, appId: '1234567890123', scopes, granular: [{ scope: 'whatsapp_business_management', targetIds: ['waba-2'] }] });
+    wa.subscribeWaba.mockClear();
+    await connect.subscribeWhatsApp(branchId, user);
+    expect(wa.subscribeWaba).toHaveBeenCalledWith({ wabaId: 'waba-2', accessToken: 'wa-token' });
+    expect((await prisma.branchSetting.findUniqueOrThrow({ where: { branchId } })).whatsappWabaId).toBe('waba-2');
+
+    // A token made in another Meta app.
+    meta.debugToken.mockResolvedValueOnce({ valid: true, expiresAt: null, appId: '999', scopes, granular: [] });
+    await expect(connect.subscribeWhatsApp(branchId, user)).rejects.toThrow(/different Meta app \(999\)/);
+
+    // A token without the WhatsApp permissions.
+    meta.debugToken.mockResolvedValueOnce({ valid: true, expiresAt: null, appId: '1234567890123', scopes: ['whatsapp_business_messaging'], granular: [] });
+    await expect(connect.subscribeWhatsApp(branchId, user)).rejects.toThrow(/missing these permissions: whatsapp_business_management/);
+
+    // Meta can't find the account: the message says what to check instead of the raw Graph error.
+    wa.subscribeWaba.mockRejectedValueOnce(new Error("WhatsApp API: Unsupported post request. Object with ID 'waba-2' does not exist, cannot be loaded due to missing permissions"));
+    await expect(connect.subscribeWhatsApp(branchId, user)).rejects.toThrow(/can't reach business account waba-2/);
+  });
 });
