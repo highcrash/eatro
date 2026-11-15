@@ -32,11 +32,15 @@ interface QrFetchInit extends RequestInit {
  */
 export async function qrFetch(path: string, init?: QrFetchInit): Promise<Response> {
   const { idempotencyKey, headers, ...rest } = init ?? {};
-  const deviceId = useSessionStore.getState().deviceId;
+  const { deviceId, customer } = useSessionStore.getState();
   const merged: Record<string, string> = {
     'x-qr-device-id': deviceId,
+    ...(customer?.token ? { 'x-customer-token': customer.token } : {}),
     ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     ...((headers as Record<string, string>) ?? {}),
   };
-  return fetch(apiUrl(path), { ...rest, headers: merged });
+  const res = await fetch(apiUrl(path), { ...rest, headers: merged });
+  // The login expired or was refused: log the customer out so the app asks again.
+  if (res.status === 401 && customer?.token) useSessionStore.getState().setCustomer(null);
+  return res;
 }

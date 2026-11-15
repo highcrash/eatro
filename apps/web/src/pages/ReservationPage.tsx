@@ -41,12 +41,13 @@ async function pubGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function pubPost<T>(path: string, body: unknown, branchId: string): Promise<T> {
+async function pubPost<T>(path: string, body: unknown, branchId: string, customerToken?: string | null): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Branch-Id': branchId,
+      ...(customerToken ? { 'x-customer-token': customerToken } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -107,6 +108,10 @@ export default function ReservationPage() {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [customer, setCustomer] = useState<Customer | null>(null);
+  /** Login token from the SMS code; the booking is linked to this customer. */
+  const [customerToken, setCustomerToken] = useState<string | null>(null);
+  /** For a brand-new customer: proof of the SMS code, swapped for a login at booking time. */
+  const [signupToken, setSignupToken] = useState<string | null>(null);
   const [namePrompt, setNamePrompt] = useState(false);
   const [customerName, setCustomerName] = useState('');
 
@@ -165,9 +170,11 @@ export default function ReservationPage() {
     setError(null);
     setLoading(true);
     try {
-      const res = await pubPost<{ customer: Customer }>('/customers/auth/verify-otp', { phone, otp }, branchId);
+      const res = await pubPost<{ customer: Customer | null; isNew: boolean; token?: string; signupToken?: string }>('/customers/auth/verify-otp', { phone, otp }, branchId);
       setCustomer(res.customer);
-      if (!res.customer.name || res.customer.name === 'Customer') {
+      setCustomerToken(res.token ?? null);
+      setSignupToken(res.signupToken ?? null);
+      if (!res.customer || !res.customer.name || res.customer.name === 'Customer' || res.customer.name === 'Walk-in') {
         setNamePrompt(true);
         setCustomerName('');
       } else {
@@ -192,9 +199,15 @@ export default function ReservationPage() {
     setError(null);
     setLoading(true);
     try {
+      // A new customer's account is created now, from the verified phone.
+      let token = customerToken;
+      if (!token && signupToken) {
+        const created = await pubPost<{ token: string }>('/customers/auth/signup', { phone, name: customerName.trim(), signupToken }, branchId);
+        token = created.token;
+        setCustomerToken(token);
+      }
       const body = {
-        customerId: customer!.id,
-        customerName: customerName || customer!.name,
+        customerName: customerName || customer?.name || '',
         customerPhone: phone,
         date,
         timeSlot: selectedSlot!.time,
@@ -202,7 +215,7 @@ export default function ReservationPage() {
         notes: notes || undefined,
         agreedTerms: termsText ? agreedTerms : true,
       };
-      const res = await pubPost<{ id: string }>('/reservations/public/book', body, branchId);
+      const res = await pubPost<{ id: string }>('/reservations/public/book', body, branchId, token);
       setBookingResult(res);
       setStep('success');
     } catch (e) {
@@ -210,7 +223,7 @@ export default function ReservationPage() {
     } finally {
       setLoading(false);
     }
-  }, [branchId, customer, customerName, phone, date, selectedSlot, partySize, notes, termsText, agreedTerms]);
+  }, [branchId, customer, customerToken, signupToken, customerName, phone, date, selectedSlot, partySize, notes, termsText, agreedTerms]);
 
   /* ---- Navigation ---- */
   const goBack = useCallback((target: Step) => {
@@ -380,7 +393,7 @@ export default function ReservationPage() {
           </button>
           <h2 className="font-display text-3xl tracking-wider mb-6">VERIFY YOUR PHONE</h2>
 
-          {!customer ? (
+          {!customer && !signupToken ? (
             <>
               {/* Phone input */}
               <label className="block text-sm font-semibold text-muted mb-1 uppercase tracking-wider">Phone Number</label>

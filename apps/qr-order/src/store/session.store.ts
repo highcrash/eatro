@@ -6,6 +6,9 @@ export interface QrCustomer {
   name: string;
   phone: string;
   email: string | null;
+  /** Login token from the SMS code. Sent as x-customer-token; the server
+   *  trusts it instead of the customer id. */
+  token: string;
 }
 
 interface SessionStore {
@@ -97,7 +100,7 @@ export const useSessionStore = create<SessionStore>()(
       // Older sessions in the wild don't have a deviceId — bump the
       // store version + migrate so we mint one on first load instead
       // of leaving it undefined (which would 403 every QR mutation).
-      version: 3,
+      version: 4,
       migrate: (persisted, version) => {
         const state = (persisted as Partial<SessionStore>) ?? {};
         if (version < 2 && !state.deviceId) {
@@ -109,6 +112,11 @@ export const useSessionStore = create<SessionStore>()(
         // doesn't crash on `.toLocaleString(..., { timeZone: undefined })`.
         if (version < 3 && !state.branchTimezone) {
           state.branchTimezone = 'Asia/Dhaka';
+        }
+        // v4: customer logins carry a token. Older logins had none, so
+        // the customer logs in again with their SMS code.
+        if (version < 4 && state.customer && !(state.customer as Partial<QrCustomer>).token) {
+          state.customer = null;
         }
         return state as SessionStore;
       },

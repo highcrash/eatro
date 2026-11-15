@@ -172,7 +172,7 @@ export default function AccountPage() {
       return (await res.json()) as { id: string; name: string; phone: string; email: string | null };
     },
     onSuccess: (saved) => {
-      setCustomer({ id: saved.id, name: saved.name, phone: saved.phone, email: saved.email });
+      setCustomer({ id: saved.id, name: saved.name, phone: saved.phone, email: saved.email, token: customer!.token });
       void qc.invalidateQueries({ queryKey: ['account-history', customer?.id] });
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 2500);

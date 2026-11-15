@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Star } from 'lucide-react';
 
 import { useSessionStore } from '../store/session.store';
-import { apiUrl } from '../lib/api';
+import { qrFetch } from '../lib/api';
 
 /**
  * /review/:orderId — post-meal review form.
@@ -100,12 +100,11 @@ export default function ReviewPage() {
       const inheritedService = serviceScore > 0 ? serviceScore : foodScore;
       const inheritedAtmosphere = atmosphereScore > 0 ? atmosphereScore : foodScore;
       const inheritedPrice = priceScore > 0 ? priceScore : foodScore;
-      const res = await fetch(apiUrl('/customers/reviews'), {
+      const res = await qrFetch('/customers/reviews', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId },
         body: JSON.stringify({
           orderId,
-          customerId: customer.id,
           foodScore,
           serviceScore: inheritedService,
           atmosphereScore: inheritedAtmosphere,

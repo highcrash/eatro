@@ -19,6 +19,10 @@ interface VerifyResponse {
   isWalkIn?: boolean;
   isNew: boolean;
   phone?: string;
+  /** Login token, for an existing customer. */
+  token?: string;
+  /** Proof of the SMS code for a brand-new customer's signup. */
+  signupToken?: string;
 }
 
 interface SignupResponse {
@@ -26,6 +30,7 @@ interface SignupResponse {
   name: string;
   phone: string;
   email: string | null;
+  token?: string;
 }
 
 /** Customer login flow for QR-order. Three steps in one screen:
@@ -66,7 +71,8 @@ export default function LoginPage() {
   const [devOtp, setDevOtp] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [pendingCustomer, setPendingCustomer] = useState<VerifyResponse['customer']>(null);
+  const [pendingCustomer, setPendingCustomer] = useState<(NonNullable<VerifyResponse['customer']> & { token: string }) | null>(null);
+  const [signupToken, setSignupToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>('');
 
@@ -123,6 +129,7 @@ export default function LoginPage() {
 
       // Brand-new customer → ask for name + email.
       if (data.isNew) {
+        setSignupToken(data.signupToken ?? null);
         setPendingCustomer(null);
         setName('');
         setEmail('');
@@ -133,7 +140,7 @@ export default function LoginPage() {
       // Existing customer with a Walk-in placeholder → ask for the real
       // name (empty input — don't show "Walk-in" as a default).
       if (data.customer && data.isWalkIn) {
-        setPendingCustomer(data.customer);
+        setPendingCustomer({ ...data.customer, token: data.token ?? '' });
         setName('');
         setEmail(data.customer.email ?? '');
         setStep('profile');
@@ -141,12 +148,13 @@ export default function LoginPage() {
       }
 
       // Existing customer with a proper name → done, log them in.
-      if (data.customer) {
+      if (data.customer && data.token) {
         setCustomer({
           id: data.customer.id,
           name: data.customer.name,
           phone: data.customer.phone,
           email: data.customer.email,
+          token: data.token,
         });
         navigate(next, { replace: true });
       }
@@ -165,15 +173,15 @@ export default function LoginPage() {
       if (pendingCustomer) {
         const res = await fetch(apiUrl('/customers/auth/profile'), {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customerId: pendingCustomer.id, name: name.trim(), email: email.trim() || undefined }),
+          headers: { 'Content-Type': 'application/json', 'x-customer-token': pendingCustomer.token },
+          body: JSON.stringify({ name: name.trim(), email: email.trim() || undefined }),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error((body as { message?: string }).message || 'Could not save profile');
         }
         const updated = (await res.json()) as SignupResponse;
-        setCustomer({ id: updated.id, name: updated.name, phone: updated.phone, email: updated.email });
+        setCustomer({ id: updated.id, name: updated.name, phone: updated.phone, email: updated.email, token: pendingCustomer.token });
         navigate(next, { replace: true });
         return;
       }
@@ -181,14 +189,15 @@ export default function LoginPage() {
       const res = await fetch(apiUrl('/customers/auth/signup'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
-        body: JSON.stringify({ phone: normalizedPhone || phone, name: name.trim(), email: email.trim() || undefined }),
+        body: JSON.stringify({ phone: normalizedPhone || phone, name: name.trim(), email: email.trim() || undefined, signupToken }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { message?: string }).message || 'Could not create account');
       }
       const created = (await res.json()) as SignupResponse;
-      setCustomer({ id: created.id, name: created.name, phone: created.phone, email: created.email });
+      if (!created.token) throw new Error('Could not log you in. Please try again.');
+      setCustomer({ id: created.id, name: created.name, phone: created.phone, email: created.email, token: created.token });
       navigate(next, { replace: true });
     } catch (e) {
       setError((e as Error).message);
