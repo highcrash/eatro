@@ -28,16 +28,26 @@ const BN_DAYS = ['রবিবার', 'সোমবার', 'মঙ্গলব
 const EN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const BN_MONTHS = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
 
-/** "on Friday 15 Nov at 8:00 pm" / "শুক্রবার 15 নভেম্বর, রাত 8:00-এ" from "2026-11-15" and "20:00". */
-export function bookingWhen(date: string, time: string, lang: 'en' | 'bn'): string {
+/** "Friday 15 Nov" / "শুক্রবার 15 নভেম্বর" from "2026-11-15". */
+export function bookingDay(date: string, lang: 'en' | 'bn'): string {
   const d = new Date(`${date}T00:00:00Z`);
+  return lang === 'bn' ? `${BN_DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${BN_MONTHS[d.getUTCMonth()]}` : `${EN_DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${EN_MONTHS[d.getUTCMonth()]}`;
+}
+
+/** "8:00 pm" / "রাত 8:00" from "20:00", the way customers say times. */
+export function slotClock(time: string, lang: 'en' | 'bn'): string {
   const [h, m] = time.split(':').map(Number);
   const clock = `${h % 12 || 12}:${String(m).padStart(2, '0')}`;
   if (lang === 'bn') {
     const part = h < 5 ? 'রাত' : h < 12 ? 'সকাল' : h < 15 ? 'দুপুর' : h < 17 ? 'বিকাল' : h < 19 ? 'সন্ধ্যা' : 'রাত';
-    return `${BN_DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${BN_MONTHS[d.getUTCMonth()]}, ${part} ${clock}-এ`;
+    return `${part} ${clock}`;
   }
-  return `on ${EN_DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${EN_MONTHS[d.getUTCMonth()]} at ${clock} ${h < 12 ? 'am' : 'pm'}`;
+  return `${clock} ${h < 12 ? 'am' : 'pm'}`;
+}
+
+/** "on Friday 15 Nov at 8:00 pm" / "শুক্রবার 15 নভেম্বর, রাত 8:00-এ" from "2026-11-15" and "20:00". */
+export function bookingWhen(date: string, time: string, lang: 'en' | 'bn'): string {
+  return lang === 'bn' ? `${bookingDay(date, lang)}, ${slotClock(time, lang)}-এ` : `on ${bookingDay(date, lang)} at ${slotClock(time, lang)}`;
 }
 
 export function extractPhone(text: string): { phone: string | null; masked: string } {
@@ -119,8 +129,8 @@ const PHRASES = {
     bn: '{when} {guests} জনের টেবিল খালি আছে। আপনার নম্বরে SMS-এ একটি 6 সংখ্যার কোড পাঠিয়েছি, কোডটি এখানে লিখলেই টেবিল বুক করে দেব।',
   },
   slotChoices: {
-    en: 'That time is not available. Open times on {date}: {slots}. Which one suits you?',
-    bn: 'ওই সময়টি খালি নেই। {date} তারিখে খালি সময়: {slots}। কোনটি আপনার জন্য সুবিধাজনক?',
+    en: 'Sorry, {time} is not available. Free times on {date}: {slots}. Which one suits you?',
+    bn: 'দুঃখিত, {time} খালি নেই। {date} খালি সময়: {slots}। কোনটি আপনার জন্য সুবিধাজনক?',
   },
   noSlots: {
     en: 'We have no free table for {guests} guests on {date}. Our team will contact you to arrange it.',

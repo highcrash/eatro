@@ -399,7 +399,9 @@ describe('chat assistant: pipeline and admin', () => {
     const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + 86_400_000));
     scripts[`fake-primary-${runId}`] = () => json({ reply: 'Let me check.', action: { type: 'booking_request', date: tomorrow, time: '03:17', guests: 2, name: 'Rafi Test' } });
     const res = await say('slot', `2 people tomorrow 3:17am, ${phone}`);
-    expect(res.reply?.text).toMatch(/That time is not available\. Open times on .*: \d\d:\d\d/);
+    // 3:17 with no am or pm, before opening, is read as 3:17 pm.
+    expect(res.reply?.text).toMatch(/^Sorry, 3:17 pm is not available\. Free times on \w+day \d+ \w+: \d{1,2}:\d\d [ap]m/);
+    expect(res.reply?.text).not.toContain('Let me check.');
   });
 
   it('turns a party bigger than a slot into an enquiry instead of a failed booking', async () => {

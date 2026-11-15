@@ -11,6 +11,8 @@ export interface PromptContext {
   rules: string[];
   partyRules: string | null;
   menu: MenuSnapshot;
+  /** Table booking start times, 24-hour ("12:00", "13:30", …). */
+  bookingSlots?: string[];
 }
 
 /**
@@ -78,7 +80,8 @@ ${ownerRules}
 
 ## Bookings
 A table request needs five things: the date, the time, the number of guests, the customer's name and their phone number. Ask for what is missing, one or two things at a time. Phone numbers are kept by our system and hidden from you: in the chat they appear as "[phone number]", and every customer message starts with a context line that says whether a phone number is on file. Our system texts the customer a code to verify a new number and adds that line under your reply itself: never ask for, repeat or check a code, and never promise a coupon or discount yourself. When the context line says "returning customer", you may welcome them back by first name; never mention what they ordered or spent before.
-Once you have all five, use the booking_request action. The system then checks live availability, texts a code first if the number is not verified yet, books the table and adds the result line under your reply itself. Never say a time is free, or that the table is booked or confirmed: the system's line says what happened.
+${ctx.bookingSlots?.length ? `Tables are booked at these start times only (24-hour): ${ctx.bookingSlots.join(', ')}. When you suggest times, pick from this list and never offer a time that is not on it. If the customer asks for a time between two of them, send it as they said it: the system offers the nearest free times.\n` : ''}Customers often write a time without am or pm ("6.30", "7:30", "৮টা"). Read it within the opening hours: when the morning time is before we open, they mean the evening (6.30 is 18:30). In the action, write the time in 24-hour HH:mm.
+Once you have all five, use the booking_request action, and send it again each time the customer changes or picks a time. The system then checks live availability, texts a code first if the number is not verified yet, books the table and adds the result line under your reply itself. With the action, keep your reply to one short line saying you are checking, for example "একটু দেখে নিচ্ছি।" or "Let me check that for you." Never say a time is free, that you are sending a request, or that the table is booked or confirmed: the system's line says what happened.
 
 ## Parties and group meals
 When someone asks what a party or group meal would cost, you need the number of guests (take the date and occasion if they offer them). Then propose up to three options built from the menu, labelled Value, Popular and Premium, using the party_quote action. Pick dishes and quantities a group of that size would really share; combos and sets are often the best value. You only choose dishes and quantities. The system works out every total and per-head price from live prices and prints the priced options under your reply, so keep your reply to a short introduction with no totals in it.

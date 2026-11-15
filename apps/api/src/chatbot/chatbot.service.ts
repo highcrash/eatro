@@ -19,7 +19,8 @@ import { PushService } from './push/push.service';
 import { formatPartyQuote, priceParty } from './party-planner';
 import { buildSystemPrompt, buildVisionPrompt, contextLine } from './prompt';
 import { AiReply, checkReply, detectLang, ownerAmounts, parseAiReply } from './reply';
-import { bookingWhen, extractPhone, fillPlaceholders, greetingOnly, matchQuickReply, phrase, ReplyLang } from './text';
+import { inOpeningHours, normalizeTime, timeOnlyMessage } from './booking-time';
+import { bookingDay, bookingWhen, extractPhone, fillPlaceholders, greetingOnly, matchQuickReply, phrase, ReplyLang, slotClock } from './text';
 import { ChatVerificationService, CheckResult, codeIn, MAX_TRIES, Verified } from './verification.service';
 
 export interface IncomingMessage {
@@ -54,7 +55,10 @@ export interface BotOutput {
   phoneHandled?: boolean;
 }
 
-/** A table request waiting for the customer to type their code. */
+/**
+ * A table request waiting for the customer: for their code, or (with
+ * `offered`) for them to pick one of the free times the system offered.
+ */
 interface PendingBooking {
   date: string;
   time: string;
@@ -62,7 +66,22 @@ interface PendingBooking {
   name: string;
   occasion: string | null;
   savedAt: string;
+  offered?: string[];
 }
+
+interface BookResult {
+  text: string;
+  reservationId?: string;
+  ready?: boolean;
+  /** The time that was checked, as 24-hour HH:mm. */
+  time?: string;
+  /** Free times offered instead of the one asked for. */
+  offered?: string[];
+  /** The line says the time is not available: show it instead of the AI's own words. */
+  replace?: boolean;
+}
+
+type BookingRequest = { date: string; time: string; guests: number; name: string; occasion: string | null };
 
 /** A held booking is dropped after a day: the customer has moved on. */
 const PENDING_BOOKING_MS = 24 * 3600_000;
@@ -366,6 +385,10 @@ export class ChatbotService {
       return result;
     }
 
+    // A reply that is just one of the offered booking times: booked with no AI.
+    const picked = hasImage ? null : await this.pickOfferedTime(conv, settings, msg, text);
+    if (picked) return this.deliverBotReply(conv, settings, picked, mode === 'SUGGEST');
+
     const output = await this.compose(conv, settings, msg, text, answering);
     if (!msg.isTest) notes.push(...(await this.verificationNotes(conv, settings, msg, text, output)));
     if (notes.length > 0) output.text = [output.text, ...notes].join('\n\n');
@@ -553,7 +576,10 @@ export class ChatbotService {
     const reply = outcome.value;
     const cards = reply.items.map((ref) => menu.byRef.get(ref)).filter((u): u is NonNullable<typeof u> => !!u).map(toCard);
     const extra = await this.applyAction(conv, settings, reply, menu, facts, isTest, text);
-    return { text: [reply.reply, extra.text].filter(Boolean).join('\n\n'), cards, source: 'AI', lang: reply.lang, phoneHandled: extra.phoneHandled };
+    // When the time asked for is not free, the system's line says so on its own:
+    // the AI's "sending the request for 6:30" next to it would contradict it.
+    const said = extra.replace && extra.text ? extra.text : [reply.reply, extra.text].filter(Boolean).join('\n\n');
+    return { text: said, cards: extra.replace ? [] : cards, source: 'AI', lang: reply.lang, phoneHandled: extra.phoneHandled };
   }
 
   private async chatRequest(
@@ -574,6 +600,7 @@ export class ChatbotService {
       rules: facts.rules,
       partyRules: settings.partyRules,
       menu,
+      bookingSlots: this.reservations.slotTimes(await this.reservations.getSettings(conv.branchId)),
     });
 
     // The messages being answered are added below, together, with the context line.
@@ -659,7 +686,7 @@ export class ChatbotService {
     facts: Awaited<ReturnType<ChatbotService['branchFacts']>>,
     isTest: boolean,
     customerText: string,
-  ): Promise<{ text: string | null; phoneHandled?: boolean }> {
+  ): Promise<{ text: string | null; phoneHandled?: boolean; replace?: boolean }> {
     const action = reply.action;
     if (!action) return { text: null };
     const lang = reply.lang;
@@ -709,24 +736,69 @@ export class ChatbotService {
       conv.customerName = action.name;
     }
     if (isTest) return { text: `${phrase('bookingReceived', lang, { guests: action.guests, date: action.date, time: action.time })}\n${phrase('testMode', lang)}` };
-    const req = { date: action.date, time: action.time, guests: action.guests, name, occasion: action.occasion };
+    return this.requestBooking(conv, settings, { date: action.date, time: action.time, guests: action.guests, name, occasion: action.occasion }, lang, facts.timezone);
+  }
+
+  /**
+   * A complete table request: verify a new number first (the booking waits
+   * for the code), else book it. When the time is not free, the offered
+   * times are remembered so the customer can just reply with one.
+   */
+  private async requestBooking(
+    conv: ChatConversation,
+    settings: ChatbotSetting,
+    req: BookingRequest,
+    lang: ReplyLang,
+    timezone: string,
+  ): Promise<{ text: string | null; phoneHandled?: boolean; replace?: boolean }> {
+    const remember = async (result: BookResult) => {
+      const pending: PendingBooking | null = result.offered ? { ...req, time: result.time ?? req.time, offered: result.offered, savedAt: new Date().toISOString() } : null;
+      const held = conv.pendingBooking as unknown as PendingBooking | null;
+      if (!pending && !held?.offered) return;
+      await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { pendingBooking: pending ? (pending as unknown as Prisma.InputJsonValue) : Prisma.DbNull } });
+      conv.pendingBooking = pending as unknown as Prisma.JsonValue;
+    };
 
     // A new number is checked by SMS code first; the booking waits for the code.
     if (!this.phoneVerified(conv) && (await this.canVerify(conv, settings))) {
-      const check = await this.book(conv, settings, req, lang, facts.timezone, { dryRun: true });
-      if (!check.ready) return { text: check.text };
-      if (await this.askForCode(conv, name)) {
-        const pending: PendingBooking = { ...req, time: req.time.padStart(5, '0'), savedAt: new Date().toISOString() };
+      const check = await this.book(conv, settings, req, lang, timezone, { dryRun: true });
+      if (!check.ready) {
+        await remember(check);
+        return { text: check.text, replace: check.replace };
+      }
+      if (await this.askForCode(conv, req.name)) {
+        const pending: PendingBooking = { ...req, time: check.time ?? req.time, savedAt: new Date().toISOString() };
         await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { pendingBooking: pending as unknown as Prisma.InputJsonValue } });
         conv.pendingBooking = pending as unknown as Prisma.JsonValue;
         return { text: phrase('bookingAfterCode', lang, { guests: req.guests, when: bookingWhen(req.date, pending.time, lang) }), phoneHandled: true };
       }
       // No code could be sent today: the request waits for staff, as before verification existed.
-      const booked = await this.book(conv, settings, req, lang, facts.timezone);
-      return { text: booked.text, phoneHandled: true };
+      const booked = await this.book(conv, settings, req, lang, timezone);
+      await remember(booked);
+      return { text: booked.text, phoneHandled: true, replace: booked.replace };
     }
-    const booked = await this.book(conv, settings, req, lang, facts.timezone);
-    return { text: booked.text };
+    const booked = await this.book(conv, settings, req, lang, timezone);
+    await remember(booked);
+    return { text: booked.text, replace: booked.replace };
+  }
+
+  /**
+   * The customer answers the offered times with just a time ("19.30",
+   * "রাত ৭:৩০"): it is checked and booked straight away, with no AI, so a
+   * model that forgets to send the request again can't lose the booking.
+   */
+  private async pickOfferedTime(conv: ChatConversation, settings: ChatbotSetting, msg: IncomingMessage, text: string): Promise<BotOutput | null> {
+    const held = conv.pendingBooking as unknown as PendingBooking | null;
+    if (!held?.offered || Date.now() - Date.parse(held.savedAt) > PENDING_BOOKING_MS || !conv.customerPhone) return null;
+    const said = timeOnlyMessage(text);
+    if (!said) return null;
+    const time = inOpeningHours(said, held.offered);
+    const lang = await this.chatLang(conv.id);
+    if (msg.isTest) return { text: `${phrase('bookingReceived', lang, { guests: held.guests, date: held.date, time })}\n${phrase('testMode', lang)}`, cards: [], source: 'SYSTEM' };
+    const facts = await this.branchFacts(conv.branchId);
+    const { date, guests, name, occasion } = held;
+    const out = await this.requestBooking(conv, settings, { date, time, guests, name, occasion }, lang, facts.timezone);
+    return out.text ? { text: out.text, cards: [], source: 'SYSTEM', lang, phoneHandled: out.phoneHandled } : null;
   }
 
   /** The number on file is the one the customer verified. */
@@ -750,7 +822,8 @@ export class ChatbotService {
   /** Right after a correct code: book the table the customer asked for while unverified. */
   private async finishPendingBooking(conv: ChatConversation, settings: ChatbotSetting, lang: ReplyLang): Promise<string | null> {
     const pending = conv.pendingBooking as unknown as PendingBooking | null;
-    if (!pending) return null;
+    // Free times on offer are not a booking yet: the customer still has to pick one.
+    if (!pending || pending.offered) return null;
     await this.prisma.chatConversation.update({ where: { id: conv.id }, data: { pendingBooking: Prisma.DbNull } });
     conv.pendingBooking = null;
     if (!this.phoneVerified(conv) || Date.now() - Date.parse(pending.savedAt) > PENDING_BOOKING_MS) return null;
@@ -771,14 +844,16 @@ export class ChatbotService {
     lang: ReplyLang,
     timezone: string,
     opts: { dryRun?: boolean; auto?: boolean } = {},
-  ): Promise<{ text: string; reservationId?: string; ready?: boolean }> {
+  ): Promise<BookResult> {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date) || req.date < today || !/^\d{1,2}:\d{2}$/.test(req.time)) {
+    const asked = normalizeTime(req.time);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date) || req.date < today || !asked) {
       await this.flagStaff(conv, 'Booking request with an unclear date or time', false);
       return { text: phrase('largeParty', lang, { guests: req.guests }) };
     }
-    const time = req.time.padStart(5, '0');
     const settings = await this.reservations.getSettings(conv.branchId);
+    // "6.30" with no am or pm at a restaurant that opens at noon means the evening.
+    const time = inOpeningHours(asked, this.reservations.slotTimes(settings));
 
     const lead = (reservationId?: string) =>
       this.prisma.chatLead.create({
@@ -805,11 +880,11 @@ export class ChatbotService {
       if (choices.length === 0) {
         await lead();
         await this.flagStaff(conv, `No free slot for ${req.guests} guests on ${req.date}`, false);
-        return { text: phrase('noSlots', lang, { guests: req.guests, date: req.date }) };
+        return { text: phrase('noSlots', lang, { guests: req.guests, date: bookingDay(req.date, lang) }), replace: true, time };
       }
-      return { text: phrase('slotChoices', lang, { date: req.date, slots: choices.join(', ') }) };
+      return { text: this.slotChoicesText(req.date, time, choices, lang), replace: true, offered: choices, time };
     }
-    if (opts.dryRun) return { text: '', ready: true };
+    if (opts.dryRun) return { text: '', ready: true, time };
 
     const autoOn = opts.auto !== false && chat.bookingAutoConfirm && this.phoneVerified(conv);
     const confirmed = autoOn && req.guests <= chat.bookingAutoConfirmMaxGuests;
@@ -850,13 +925,18 @@ export class ChatbotService {
     } catch (err) {
       if (err instanceof ConflictException) {
         const choices = offer().filter((t) => t !== time);
-        if (choices.length > 0) return { text: phrase('slotChoices', lang, { date: req.date, slots: choices.join(', ') }) };
+        if (choices.length > 0) return { text: this.slotChoicesText(req.date, time, choices, lang), replace: true, offered: choices, time };
       }
       this.logger.warn(`Chat booking failed: ${(err as Error).message}`);
       await lead();
       await this.flagStaff(conv, err instanceof BadRequestException ? 'Booking needs staff (terms or details)' : 'Booking request could not be saved', false);
       return { text: phrase('largeParty', lang, { guests: req.guests }) };
     }
+  }
+
+  /** "Sorry, 6:30 pm is not available. Free times on Monday 16 Nov: 6:00 pm, 7:30 pm. …" */
+  private slotChoicesText(date: string, time: string, choices: string[], lang: ReplyLang): string {
+    return phrase('slotChoices', lang, { time: slotClock(time, lang), date: bookingDay(date, lang), slots: choices.map((t) => slotClock(t, lang)).join(', ') });
   }
 
   // ── Sending ────────────────────────────────────────────────────────────────

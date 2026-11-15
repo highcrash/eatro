@@ -17,6 +17,7 @@ import { ChatbotService } from './chatbot.service';
 import { MetaClient } from './meta/meta.client';
 import { createTestBranch, deleteTestBranch } from './test-branch';
 import { bookingWhen } from './text';
+import { inOpeningHours, normalizeTime, timeOnlyMessage } from './booking-time';
 
 jest.setTimeout(60_000);
 
@@ -26,6 +27,40 @@ describe('chat bookings: wording', () => {
     expect(bookingWhen('2026-11-20', '12:30', 'en')).toBe('on Friday 20 Nov at 12:30 pm');
     expect(bookingWhen('2026-11-20', '20:00', 'bn')).toBe('শুক্রবার 20 নভেম্বর, রাত 8:00-এ');
     expect(bookingWhen('2026-11-20', '13:00', 'bn')).toBe('শুক্রবার 20 নভেম্বর, দুপুর 1:00-এ');
+  });
+
+  it('reads times the way customers and models write them', () => {
+    expect(normalizeTime('19:30')).toBe('19:30');
+    expect(normalizeTime('19.30')).toBe('19:30');
+    expect(normalizeTime('7:30 PM')).toBe('19:30');
+    expect(normalizeTime('7.30pm')).toBe('19:30');
+    expect(normalizeTime('৭:৩০')).toBe('07:30');
+    expect(normalizeTime('সন্ধ্যা ৭টা')).toBe('19:00');
+    expect(normalizeTime('rat 8')).toBe('20:00');
+    expect(normalizeTime('dupur 2')).toBe('14:00');
+    expect(normalizeTime('12 am')).toBe('00:00');
+    expect(normalizeTime('1930')).toBe('19:30');
+    expect(normalizeTime('soon')).toBeNull();
+    expect(normalizeTime('25:00')).toBeNull();
+
+    const slots = ['12:00', '13:30', '15:00', '16:30', '18:00', '19:30', '21:00'];
+    expect(inOpeningHours('06:30', slots)).toBe('18:30');
+    expect(inOpeningHours('07:30', slots)).toBe('19:30');
+    expect(inOpeningHours('13:30', slots)).toBe('13:30');
+    // Opens at 10: "11:30" is the morning.
+    expect(inOpeningHours('11:30', ['10:00', '11:30', '19:00'])).toBe('11:30');
+
+    expect(timeOnlyMessage('19.30')).toBe('19:30');
+    expect(timeOnlyMessage('6.30')).toBe('06:30');
+    expect(timeOnlyMessage('7.30 pm')).toBe('19:30');
+    expect(timeOnlyMessage('রাত ৮টা')).toBe('20:00');
+    expect(timeOnlyMessage('at 6:30 please')).toBe('06:30');
+    expect(timeOnlyMessage('ji 7:30')).toBe('07:30');
+    // Not a time on its own: guests, a question, a sentence.
+    expect(timeOnlyMessage('4')).toBeNull();
+    expect(timeOnlyMessage('4 jon')).toBeNull();
+    expect(timeOnlyMessage('7.30 or 8?')).toBeNull();
+    expect(timeOnlyMessage('what time do you close?')).toBeNull();
   });
 });
 
@@ -175,17 +210,43 @@ describe('chat bookings: verified numbers, live slots and auto-confirm', () => {
     await prisma.reservation.create({ data: { branchId, customerName: 'Walk-in', customerPhone: '01799999999', date: new Date(`${DATE}T00:00:00.000Z`), timeSlot: '20:30', partySize: 40, agreedTerms: true } });
     nextAction = booking(2, 'Mina', '20:30');
     let res = await messenger('c', `2 people ${DATE} 8:30pm, ${phone(3)}`);
-    expect(res.reply!.text).toMatch(/That time is not available\. Open times on .*: .*19:00/);
+    expect(res.reply!.text).toMatch(/Sorry, 8:30 pm is not available\. Free times on .*: .*7:00 pm/);
     // The number they gave is still checked, so the next booking needs no wait.
     expect(res.reply!.text).toMatch(/texted a 6-digit code/);
-    expect((await convOf('MESSENGER', `${runId}-c`)).pendingBooking).toBeNull();
+    // Only the offer is remembered: nothing is booked or held for the code.
+    expect((await convOf('MESSENGER', `${runId}-c`)).pendingBooking).toMatchObject({ time: '20:30', offered: expect.arrayContaining(['19:00']) });
     expect(await bookingsFor(phone(3))).toHaveLength(0);
 
     nextAction = null;
     await messenger('c', codeSentTo(phone(3))!);
+    expect(await bookingsFor(phone(3))).toHaveLength(0);
     nextAction = booking(2, 'Mina', '19:00');
     res = await messenger('c', '7pm then');
     expect(res.reply!.text).toMatch(/Your table is confirmed: 2 guests/);
+    expect((await convOf('MESSENGER', `${runId}-c`)).pendingBooking).toBeNull();
+  });
+
+  it('reads "6.30" as the evening, shows only the system line, and books an offered time typed back with no AI', async () => {
+    const day = new Date(Date.now() + 4 * 24 * 3600_000).toISOString().slice(0, 10);
+    await messenger('e', `my number is ${phone(6)}`);
+    await messenger('e', codeSentTo(phone(6))!);
+
+    // The AI passes the customer's own words; 18:30 is not a slot (17:30 and 19:00 are).
+    nextAction = { type: 'booking_request', date: day, time: '6.30', guests: 4, name: 'Shahi Uddin', occasion: null };
+    let res = await messenger('e', 'table for 4 tomorrow at 6.30');
+    expect(res.reply!.text).toMatch(/^Sorry, 6:30 pm is not available\. Free times on .*: .*5:30 pm, .*7:00 pm/);
+    expect(res.reply!.text).not.toContain('Thank you.');
+    expect(await bookingsFor(phone(6))).toHaveLength(0);
+
+    // The customer types one of the offered times; even an AI that sends no action can't lose it.
+    const calls = ai.complete.mock.calls.length;
+    nextAction = null;
+    res = await messenger('e', '19.00');
+    expect(ai.complete.mock.calls.length).toBe(calls);
+    expect(res.reply!.text).toMatch(/Your table is confirmed: 4 guests, on .* at 7:00 pm, under the name Shahi Uddin/);
+    const [r] = await bookingsFor(phone(6));
+    expect(r).toMatchObject({ status: 'CONFIRMED', timeSlot: '19:00', partySize: 4 });
+    expect((await convOf('MESSENGER', `${runId}-e`)).pendingBooking).toBeNull();
   });
 
   it('WhatsApp numbers book with no code; with auto-confirm off the booking waits for staff', async () => {

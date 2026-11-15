@@ -50,19 +50,21 @@ export class ReservationService {
 
   // ── Slot Generation ───────────────────────────────────────────────────────
 
-  async getAvailableSlots(branchId: string, date: string): Promise<ReservationSlot[]> {
-    const settings = await this.getSettings(branchId);
-    const { openingTime, closingTime, reservationSlotMinutes, reservationBlockMinutes, reservationMaxBookingsPerSlot, reservationMaxPersonsPerSlot } = settings;
-
-    // Parse times to minutes from midnight
-    const openMin = parseTime(openingTime) + reservationBlockMinutes;
-    const closeMin = parseTime(closingTime) - reservationBlockMinutes;
-
-    // Generate slot start times
+  /** The day's booking start times ("12:00", "13:30", …), from the opening hours and slot length. */
+  slotTimes(settings: Pick<ReservationSettings, 'openingTime' | 'closingTime' | 'reservationSlotMinutes' | 'reservationBlockMinutes'>): string[] {
+    const openMin = parseTime(settings.openingTime) + settings.reservationBlockMinutes;
+    const closeMin = parseTime(settings.closingTime) - settings.reservationBlockMinutes;
     const slots: string[] = [];
-    for (let t = openMin; t < closeMin; t += reservationSlotMinutes) {
+    for (let t = openMin; t < closeMin; t += settings.reservationSlotMinutes) {
       slots.push(formatMinutes(t));
     }
+    return slots;
+  }
+
+  async getAvailableSlots(branchId: string, date: string): Promise<ReservationSlot[]> {
+    const settings = await this.getSettings(branchId);
+    const { reservationMaxBookingsPerSlot, reservationMaxPersonsPerSlot } = settings;
+    const slots = this.slotTimes(settings);
 
     // Get existing reservations for this date (non-cancelled)
     const d = new Date(date + 'T00:00:00.000Z');
