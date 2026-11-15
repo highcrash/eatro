@@ -1,4 +1,6 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { randomInt, timingSafeEqual } from 'crypto';
+
+import { Injectable, BadRequestException, HttpException, HttpStatus, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
 
@@ -46,10 +48,24 @@ export function normalizePhone(raw: string | null | undefined): string | null {
   return digits.length >= 8 ? digits : null;
 }
 
+const OTP_TTL_MS = 5 * 60_000;
+const OTP_MAX_TRIES = 5;
+/** A second request inside this window does not text a new code. */
+const OTP_RESEND_MS = 60_000;
+const OTP_PER_HOUR = 5;
+const HOUR_MS = 3600_000;
+
 @Injectable()
 export class CustomerService {
   // In-memory OTP store for customer auth
-  private otpStore = new Map<string, { otp: string; expiresAt: Date; branchId: string }>();
+  private otpStore = new Map<string, { otp: string; expiresAt: Date; branchId: string; attempts: number; sentAt: number }>();
+  /** When codes were texted to each branch:phone in the last hour. */
+  private otpSends = new Map<string, number[]>();
+  /**
+   * Local development only: hand the code back when no SMS gateway is set
+   * up. Off unless OTP_DEV_ECHO=true, and never in production.
+   */
+  private readonly echoOtp = process.env.NODE_ENV !== 'production' && process.env.OTP_DEV_ECHO === 'true';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -84,14 +100,34 @@ export class CustomerService {
       throw new BadRequestException('Enter a valid Bangladesh mobile number (e.g. 01XXXXXXXXX).');
     }
 
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
     const key = `${branchId}:${normalized}`;
-    this.otpStore.set(key, { otp, expiresAt: new Date(Date.now() + 5 * 60 * 1000), branchId });
+    const now = Date.now();
+    // A code texted under a minute ago is still on its way: don't send another.
+    const current = this.otpStore.get(key);
+    if (current && now - current.sentAt < OTP_RESEND_MS) return { sent: true, phone: normalized };
+    const recent = (this.otpSends.get(key) ?? []).filter((t) => now - t < HOUR_MS);
+    if (recent.length >= OTP_PER_HOUR) {
+      throw new HttpException('Too many codes requested for this number. Please try again in an hour.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    this.pruneOtpSends(now);
+    this.otpSends.set(key, [...recent, now]);
 
-    const sent = await this.smsService.sendSms(branchId, normalized, `Your login OTP: ${otp}. Valid for 5 minutes.`);
+    const otp = String(randomInt(100000, 1_000_000));
+    this.otpStore.set(key, { otp, expiresAt: new Date(now + OTP_TTL_MS), branchId, attempts: 0, sentAt: now });
 
-    // In dev mode, return OTP if SMS not sent
-    return { sent, phone: normalized, ...(sent ? {} : { otp }) };
+    const sent = await Promise.resolve(this.smsService.sendSms(branchId, normalized, `Your login OTP: ${otp}. Valid for 5 minutes.`)).catch(() => false);
+    if (sent) return { sent: true, phone: normalized };
+    if (this.echoOtp) return { sent: false, phone: normalized, otp };
+
+    // The code only ever reaches the customer by SMS. Without SMS there is no login.
+    this.otpStore.delete(key);
+    throw new ServiceUnavailableException('We could not send the SMS code right now. Please try again, or ask our staff for help.');
+  }
+
+  private pruneOtpSends(now: number) {
+    if (this.otpSends.size < 1000) return;
+    for (const [k, times] of this.otpSends) if (times.every((t) => now - t >= HOUR_MS)) this.otpSends.delete(k);
+    for (const [k, v] of this.otpStore) if (v.expiresAt.getTime() < now) this.otpStore.delete(k);
   }
 
   async verifyOtp(branchId: string, phone: string, inputOtp: string) {
@@ -103,7 +139,16 @@ export class CustomerService {
 
     if (!stored) throw new BadRequestException('No OTP found. Please request a new one.');
     if (new Date() > stored.expiresAt) { this.otpStore.delete(key); throw new BadRequestException('OTP expired'); }
-    if (stored.otp !== inputOtp) throw new BadRequestException('Invalid OTP');
+    const given = Buffer.from(String(inputOtp ?? '').trim());
+    const expected = Buffer.from(stored.otp);
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
+      stored.attempts += 1;
+      if (stored.attempts >= OTP_MAX_TRIES) {
+        this.otpStore.delete(key);
+        throw new BadRequestException('Too many wrong codes. Please request a new OTP.');
+      }
+      throw new BadRequestException('Invalid OTP');
+    }
 
     this.otpStore.delete(key);
 
