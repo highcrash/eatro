@@ -1,10 +1,11 @@
+import { randomInt } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class SmsService {
   // In-memory OTP store: key = `${branchId}:${context}:${ref}`, value = { otp, expiresAt }
-  private otpStore = new Map<string, { otp: string; expiresAt: Date; details: string }>();
+  private otpStore = new Map<string, { otp: string; expiresAt: Date; details: string; attempts?: number }>();
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -327,7 +328,7 @@ export class SmsService {
   // ─── OTP ───────────────────────────────────────────────────────────────────
 
   generateOtp(): string {
-    return String(Math.floor(100000 + Math.random() * 900000)); // 6-digit
+    return String(randomInt(100000, 1_000_000)); // 6-digit
   }
 
   async sendVoidOtp(branchId: string, orderId: string, itemName: string, itemQty: number, reason: string): Promise<{ sent: boolean; otp?: string; managerName?: string }> {
@@ -377,7 +378,14 @@ export class SmsService {
       this.otpStore.delete(key);
       return { valid: false, error: 'OTP expired. Please request a new one.' };
     }
-    if (stored.otp !== inputOtp) return { valid: false, error: 'Invalid OTP.' };
+    if (stored.otp !== String(inputOtp ?? '').trim()) {
+      stored.attempts = (stored.attempts ?? 0) + 1;
+      if (stored.attempts >= 5) {
+        this.otpStore.delete(key);
+        return { valid: false, error: 'Too many wrong codes. Please request a new OTP.' };
+      }
+      return { valid: false, error: 'Invalid OTP.' };
+    }
 
     this.otpStore.delete(key); // One-time use
     return { valid: true };
@@ -436,7 +444,14 @@ export class SmsService {
       this.otpStore.delete(key);
       return { valid: false, error: 'OTP expired. Please request a new one.' };
     }
-    if (stored.otp !== inputOtp) return { valid: false, error: 'Invalid OTP.' };
+    if (stored.otp !== String(inputOtp ?? '').trim()) {
+      stored.attempts = (stored.attempts ?? 0) + 1;
+      if (stored.attempts >= 5) {
+        this.otpStore.delete(key);
+        return { valid: false, error: 'Too many wrong codes. Please request a new OTP.' };
+      }
+      return { valid: false, error: 'Invalid OTP.' };
+    }
 
     this.otpStore.delete(key);
     return { valid: true };

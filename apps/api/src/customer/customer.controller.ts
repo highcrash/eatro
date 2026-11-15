@@ -4,6 +4,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '@restora/types';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { CustomerService } from './customer.service';
 
 // ─── Public endpoints (QR customer auth) ─────────────────────────────────────
@@ -13,6 +14,8 @@ export class CustomerPublicController {
   constructor(private readonly customerService: CustomerService) {}
 
   @Post('auth/request-otp')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   requestOtp(
     @Headers('x-branch-id') branchId: string,
     @Body() dto: { phone: string },
@@ -22,6 +25,8 @@ export class CustomerPublicController {
   }
 
   @Post('auth/verify-otp')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   verifyOtp(
     @Headers('x-branch-id') branchId: string,
     @Body() dto: { phone: string; otp: string },
