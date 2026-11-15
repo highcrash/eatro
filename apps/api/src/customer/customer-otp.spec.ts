@@ -4,6 +4,8 @@ import type { PrismaService } from '../prisma/prisma.service';
 import type { SmsService } from '../sms/sms.service';
 import { CustomerService } from './customer.service';
 
+process.env.JWT_SECRET ||= 'test-secret-for-customer-tokens';
+
 /** Customer login codes reach the customer by SMS only, and can't be guessed. No database needed. */
 describe('customer login OTP', () => {
   const PHONE = '01712345678';
