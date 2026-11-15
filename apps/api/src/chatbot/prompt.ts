@@ -113,6 +113,21 @@ export function contextLine(input: { now: Date; timezone: string; phoneOnFile: b
 }
 
 /** Brief for matching a customer's photo to the menu. */
+/** Which dishes one of the restaurant's own posts is about, so a "price?" comment gets the real price. */
+export function buildPostPrompt(menu: MenuSnapshot): string {
+  const list = menu.units.map((u) => `${u.ref} ${u.name} (${u.category})`).join('\n');
+  return `This is a post from a restaurant's own Facebook or Instagram page. Customers are commenting to ask the price, so decide which menu items below the post is about.
+
+The caption may be in English, Bangla or Banglish, may use a short or different name for a dish, or may be only hashtags and emojis. A dish name written on the photo is strong evidence. If the post is not about particular dishes (an announcement, opening hours, an event, a general ad), or you cannot tell, return no matches: a wrong match would tell customers a wrong price.
+
+Respond with one JSON object and nothing else:
+{"matches": [{"ref": "#12", "confidence": 0.0}]}
+List at most 3 matches, most likely first, each with a confidence from 0 to 1.
+
+Menu items:
+${list}`;
+}
+
 export function buildVisionPrompt(brand: string, menu: MenuSnapshot): string {
   const list = menu.units.map((u) => `${u.ref} ${u.name} (${u.category})`).join('\n');
   return `A customer of ${brand}, a restaurant, has sent a photo in chat. They usually want to know which dish it is and what it costs. The photo may be a dish, a screenshot of one of the restaurant's posts, or part of the printed menu. Decide which menu items below it most likely shows.

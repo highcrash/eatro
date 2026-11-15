@@ -3634,6 +3634,8 @@ model ChatPostContext {
   /// Menu item ids the caption mentions, best match first.
   menuItemIds Json?
   fetchedAt   DateTime       @default(now())
+  /// When the AI read the caption and photo because no dish name matched.
+  aiCheckedAt DateTime?
 
   @@index([branchId])
   @@map("chat_post_contexts")

@@ -170,13 +170,15 @@ export class MetaClient {
   }
 
   /** Caption and link of a Page post or Instagram media. */
-  async postDetails(auth: MetaAuth, platform: 'FACEBOOK' | 'INSTAGRAM', postId: string): Promise<{ caption: string | null; permalink: string | null }> {
+  async postDetails(auth: MetaAuth, platform: 'FACEBOOK' | 'INSTAGRAM', postId: string): Promise<{ caption: string | null; permalink: string | null; imageUrl?: string | null }> {
     if (platform === 'INSTAGRAM') {
-      const r = await this.call<{ caption?: string; permalink?: string }>('GET', postId, auth.pageToken, { fields: 'caption,permalink' });
-      return { caption: r.caption ?? null, permalink: r.permalink ?? null };
+      const r = await this.call<{ caption?: string; permalink?: string; media_type?: string; media_url?: string; thumbnail_url?: string }>(
+        'GET', postId, auth.pageToken, { fields: 'caption,permalink,media_type,media_url,thumbnail_url' },
+      );
+      return { caption: r.caption ?? null, permalink: r.permalink ?? null, imageUrl: (r.media_type === 'VIDEO' ? r.thumbnail_url : r.media_url) ?? null };
     }
-    const r = await this.call<{ message?: string; permalink_url?: string }>('GET', postId, auth.pageToken, { fields: 'message,permalink_url' });
-    return { caption: r.message ?? null, permalink: r.permalink_url ?? null };
+    const r = await this.call<{ message?: string; permalink_url?: string; full_picture?: string }>('GET', postId, auth.pageToken, { fields: 'message,permalink_url,full_picture' });
+    return { caption: r.message ?? null, permalink: r.permalink_url ?? null, imageUrl: r.full_picture ?? null };
   }
 
   /** Recent comments on recent posts, for the catch-up check. */

@@ -135,8 +135,8 @@ export const PRIVATE_REPLIES = {
     bn: 'আসসালামু আলাইকুম {name}! জানতে চাওয়ার জন্য ধন্যবাদ। {details}\nটেবিল বুক করতে চাইলে তারিখ, সময় আর কতজন জানিয়ে দিন।',
   },
   priceMenu: {
-    en: 'Our full menu with prices is here: {menuUrl}',
-    bn: 'আমাদের পুরো মেনু ও দাম এখানে: {menuUrl}',
+    en: "Which dish would you like the price of? Reply here with its name and I'll tell you right away. Our full menu with prices: {menuUrl}",
+    bn: 'কোন খাবারের দাম জানতে চান? এখানে খাবারের নামটি লিখুন, সাথে সাথে জানিয়ে দেব। দামসহ পুরো মেনু: {menuUrl}',
   },
   booking: {
     en: "Hi {name}! Happy to help with your booking. Please tell me the date, time and number of guests, and I'll send the request.",

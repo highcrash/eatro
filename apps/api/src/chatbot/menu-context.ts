@@ -185,19 +185,58 @@ export class MenuContextService {
   }
 }
 
+const STOP_WORDS = new Set(['with', 'the', 'from', 'and', 'of', 'a', 'an', 'in', 'on', 'for', 'to']);
+/** "burgers" → "burger", "wedges" → "wedge"; leaves "glass", "fries"→"frie" alike on both sides. */
+const stem = (w: string) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w);
+const words = (s: string) => normalize(s.replace(/&/g, ' and ')).split(' ').filter(Boolean).map(stem);
+
+/** Fewest caption words that hold every one of `keys`, or null when some key is missing. */
+function closestSpan(hay: string[], keys: string[]): number | null {
+  if (!keys.every((k) => hay.includes(k))) return null;
+  let best: number | null = null;
+  for (let i = 0; i < hay.length; i++) {
+    if (!keys.includes(hay[i])) continue;
+    const need = new Set(keys);
+    for (let j = i; j < hay.length; j++) {
+      need.delete(hay[j]);
+      if (need.size === 0) {
+        if (best === null || j - i + 1 < best) best = j - i + 1;
+        break;
+      }
+    }
+  }
+  return best;
+}
+
 /**
- * Dishes a post caption or title names, longest name first, so
- * "Chicken Cheese Burger" wins over "Cheese Burger". At most three dishes.
+ * Dishes a post caption or title names, at most three. The full name
+ * wins ("Chicken Cheese Burger" over "Cheese Burger"); plurals and "&"
+ * still match, and so does the same name in another order or with one
+ * word between ("Black Pepper Stir Fry" for "Stir Fry Black Pepper").
  */
 export function matchDishes(text: string | null | undefined, menu: MenuSnapshot, max = 3): string[] {
   if (!text) return [];
-  const hay = ` ${normalize(text)} `;
-  const dishes = new Map<string, string>();
-  for (const u of menu.units) if (!dishes.has(u.dishId)) dishes.set(u.dishId, normalize(u.dishName));
-  const hits = [...dishes.entries()].filter(([, n]) => n.length >= 4 && hay.includes(` ${n} `)).sort((a, b) => b[1].length - a[1].length);
-  const picked: [string, string][] = [];
-  for (const h of hits) if (!picked.some(([, n]) => n.includes(h[1]))) picked.push(h);
-  return picked.slice(0, max).map(([id]) => id);
+  const hayWords = words(text);
+  const hay = ` ${hayWords.join(' ')} `;
+  const dishes = new Map<string, string[]>();
+  for (const u of menu.units) if (!dishes.has(u.dishId)) dishes.set(u.dishId, words(u.dishName.replace(/\([^)]*\)/g, ' ')));
+  const hits: { id: string; name: string; score: number }[] = [];
+  for (const [id, w] of dishes) {
+    const name = w.join(' ');
+    if (name.length < 4) continue;
+    if (hay.includes(` ${name} `)) {
+      hits.push({ id, name, score: 1000 + name.length });
+      continue;
+    }
+    const keys = [...new Set(w.filter((x) => !STOP_WORDS.has(x)))];
+    if (keys.length < 2) continue;
+    const span = closestSpan(hayWords, keys);
+    if (span !== null && span <= keys.length + 1) hits.push({ id, name, score: name.length });
+  }
+  hits.sort((a, b) => b.score - a.score);
+  const picked: typeof hits = [];
+  for (const h of hits) if (!picked.some((p) => p.name.includes(h.name))) picked.push(h);
+  return picked.slice(0, max).map((h) => h.id);
 }
 
 const normalize = (s: string) =>

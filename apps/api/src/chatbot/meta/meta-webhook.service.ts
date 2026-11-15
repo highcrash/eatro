@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { downloadImage } from '../image-fetch';
 import { createHmac, timingSafeEqual } from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.service';
-import type { AiImage, AiImageMediaType } from '../ai/ai.types';
+import type { AiImage } from '../ai/ai.types';
 import { ChatbotService } from '../chatbot.service';
 import { CommentService } from '../comment.service';
 import type { PostRef } from '../post-context.service';
@@ -33,7 +34,6 @@ interface MessagingEvent {
 interface Change { field?: string; value?: Record<string, unknown> }
 export interface MetaWebhookBody { object?: string; entry?: { id?: string; time?: number; messaging?: MessagingEvent[]; changes?: Change[] }[] }
 
-const MAX_PHOTO_BYTES = 4_500_000;
 
 /**
  * Turns Meta's webhook events into chats and comments. Runs after the HTTP
@@ -171,12 +171,3 @@ export class MetaWebhookService {
   }
 }
 
-async function downloadImage(url: string): Promise<AiImage | null> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) return null;
-  const type = (res.headers.get('content-type') ?? '').split(';')[0].trim();
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length > MAX_PHOTO_BYTES) return null;
-  const mediaType = (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(type) ? type : 'image/jpeg') as AiImageMediaType;
-  return { mediaType, data: buf.toString('base64') };
-}

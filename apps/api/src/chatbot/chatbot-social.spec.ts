@@ -9,6 +9,8 @@ import { createHmac } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
 import { RestoraPosGateway } from '../ws-gateway/restora-pos.gateway';
+import { AiAdminService } from './ai/ai-admin.service';
+import { AiRouterService } from './ai/ai-router.service';
 import { OpenAiCompatibleProvider } from './ai/openai-compatible.provider';
 import { ChatbotModule } from './chatbot.module';
 import { ChatbotService } from './chatbot.service';
@@ -87,6 +89,28 @@ describe('social: pure pieces', () => {
     expect(matchDishes('Happy Friday!', menu)).toEqual([]);
   });
 
+  it('matches plurals, "&", and the same name in another order, but not words far apart', () => {
+    const menu = buildMenuSnapshot(
+      {
+        categories: [{ id: 'c', name: 'Mains', parentId: null, sortOrder: 1 }],
+        items: [
+          { id: 'w', categoryId: 'c', name: 'Potato Wedges', price: 20_000, sortOrder: 1 },
+          { id: 'p', categoryId: 'c', name: 'Stir Fry Black Pepper', price: 50_000, sortOrder: 2 },
+          { id: 'f', categoryId: 'c', name: 'Spicy Fried Chicken (1pcs)', price: 25_000, sortOrder: 3 },
+          { id: 'cw', categoryId: 'c', name: 'Chicken Wrap', price: 30_000, sortOrder: 4 },
+          { id: 'mc', categoryId: 'c', name: 'Mac & Cheese', price: 35_000, sortOrder: 5 },
+        ],
+      },
+      'https://eatrobd.com',
+    );
+    expect(matchDishes('Crispy potato wedge 🥔', menu)).toEqual(['w']);
+    expect(matchDishes('Try our Black Pepper Stir Fry with chicken!', menu)).toEqual(['p']);
+    expect(matchDishes('SPICY FRIED CHICKEN is back', menu)).toEqual(['f']);
+    expect(matchDishes('mac and cheese lovers 🧀', menu)).toEqual(['mc']);
+    // "chicken" and "wrap" are there, but about different dishes.
+    expect(matchDishes('Chicken burger, beef steak or a veggie wrap?', menu)).toEqual([]);
+  });
+
   it('splits long messages and builds dish cards', () => {
     const parts = splitMessage(`${'a'.repeat(1500)}\n\n${'b'.repeat(1500)}`);
     expect(parts).toHaveLength(2);
@@ -123,6 +147,8 @@ describe('social: webhooks, comments, complaints', () => {
   let categoryId: string;
   let discountId: string;
   const sms = { sendSms: jest.fn().mockResolvedValue(true) };
+  const ai = { complete: jest.fn().mockRejectedValue(new Error('no AI in this test')), listModels: jest.fn(), openRouterKeyInfo: jest.fn() };
+  let moduleRefHolder: { get<T>(t: new (...a: never[]) => T): T } | null = null;
   const meta = {
     sendText: jest.fn().mockResolvedValue(['mid.out']),
     sendCards: jest.fn().mockResolvedValue(undefined),
@@ -174,7 +200,7 @@ describe('social: webhooks, comments, complaints', () => {
       .overrideProvider(MetaClient)
       .useValue(meta)
       .overrideProvider(OpenAiCompatibleProvider)
-      .useValue({ complete: jest.fn().mockRejectedValue(new Error('no AI in this test')) })
+      .useValue(ai)
       .compile();
     void NestFactory;
     app = moduleRef.createNestApplication({ rawBody: true });
@@ -184,6 +210,8 @@ describe('social: webhooks, comments, complaints', () => {
     await app.listen(0, '127.0.0.1');
     origin = `http://127.0.0.1:${(app.getHttpServer().address() as { port: number }).port}`;
 
+    moduleRefHolder = moduleRef as never;
+    moduleRef.get(AiRouterService).retryDelayMs = 0;
     prisma = moduleRef.get(PrismaService);
     chatbot = moduleRef.get(ChatbotService);
     chatbot.burstWaitMs = 0;
@@ -304,6 +332,51 @@ describe('social: webhooks, comments, complaints', () => {
     expect(second?.status).toBe('IGNORED');
     expect(meta.replyToComment).toHaveBeenCalledTimes(1);
     expect(meta.postDetails).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks the AI which dish a post is about when the caption names none, once per post', async () => {
+    // An "Unclear comments" connection the AI request goes through.
+    const c = await moduleRefHolder!.get(AiAdminService).create(branchId, { name: `Post ${runId}`, provider: 'OPENAI_COMPATIBLE', apiKey: 'sk-test-post-1234', model: `fake-post-${runId}`, inputPricePerM: 0, outputPricePerM: 0 }, { sub: ownerId, role: 'OWNER', branchId } as never);
+    await prisma.aiConnection.update({ where: { id: c.id }, data: { selfTestScore: 90 } });
+    const route = await prisma.aiRoute.create({ data: { branchId, job: 'COMMENT', connectionIds: [c.id] } });
+    moduleRefHolder!.get(AiRouterService).invalidate(branchId);
+    try {
+      const ref = (await menus.get(branchId)).units.find((u) => u.dishId === dishId)!.ref;
+      ai.complete.mockImplementation(async (_t: unknown, req: { system: string; messages: { content: string }[] }) => ({
+        text: req.system.includes("restaurant's own Facebook") && req.messages[0].content.includes('বিরিয়ানি')
+          ? JSON.stringify({ matches: [{ ref, confidence: 0.9 }] })
+          : JSON.stringify({ matches: [] }),
+        inputTokens: 1, outputTokens: 1, latencyMs: 1,
+      }));
+
+      // A Bangla caption that never spells the menu name.
+      meta.postDetails.mockResolvedValueOnce({ caption: 'আজকের স্পেশাল বিরিয়ানি 🔥 #eatro', permalink: 'https://fb.test/b', imageUrl: null });
+      await comment({ id: 'ai1', text: 'price please', post: `${PAGE}_555`, from: 'u-ai1' });
+      expect(meta.replyToComment.mock.calls[0][3]).toContain('৳450');
+      expect(meta.replyToComment.mock.calls[0][3]).toContain(dishName);
+      const ctx = await prisma.chatPostContext.findUniqueOrThrow({ where: { postId: `${PAGE}_555` } });
+      expect(ctx.menuItemIds).toEqual([dishId]);
+      expect(ctx.aiCheckedAt).toBeTruthy();
+
+      // Another person on the same post: the cached answer, no new AI request or Meta call.
+      const calls = ai.complete.mock.calls.length;
+      await comment({ id: 'ai2', text: 'dam koto?', post: `${PAGE}_555`, from: 'u-ai2' });
+      expect(meta.replyToComment.mock.calls[1][3]).toContain('৳450');
+      expect(ai.complete.mock.calls.length).toBe(calls);
+      expect(meta.postDetails).toHaveBeenCalledTimes(1);
+
+      // A post the AI can't tie to a dish: no guess, and the message asks which dish.
+      meta.postDetails.mockResolvedValueOnce({ caption: 'We are open late this Friday!', permalink: null, imageUrl: null });
+      await comment({ id: 'ai3', text: 'price?', post: `${PAGE}_556`, from: 'u-ai3' });
+      expect(meta.replyToComment.mock.calls[2][3]).not.toContain('৳');
+      expect(meta.sendText.mock.calls.at(-1)![2]).toMatch(/Which dish would you like the price of\?/);
+      expect((await prisma.chatPostContext.findUniqueOrThrow({ where: { postId: `${PAGE}_556` } })).aiCheckedAt).toBeTruthy();
+    } finally {
+      ai.complete.mockReset();
+      ai.complete.mockRejectedValue(new Error('no AI in this test'));
+      await prisma.aiRoute.delete({ where: { id: route.id } });
+      moduleRefHolder!.get(AiRouterService).invalidate(branchId);
+    }
   });
 
   it('never answers a complaint in public automatically, and drafts for staff', async () => {
