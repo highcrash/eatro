@@ -4,6 +4,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload, CreateReservationDto, ConfirmReservationDto, UpdateReservationDto, ReservationSettings } from '@restora/types';
+import { sessionCustomerId } from '../customer/customer-token';
 import { ReservationService } from './reservation.service';
 
 // ─── Public (no auth — website booking) ──────────────────────────────────────
@@ -23,8 +24,13 @@ export class ReservationPublicController {
   }
 
   @Post('book')
-  book(@Headers('x-branch-id') branchId: string, @Body() dto: CreateReservationDto) {
-    return this.svc.create(branchId, dto);
+  book(
+    @Headers('x-branch-id') branchId: string,
+    @Headers('x-customer-token') customerToken: string | undefined,
+    @Body() dto: CreateReservationDto,
+  ) {
+    // Linked to a customer record only for the customer logged in by SMS code.
+    return this.svc.create(branchId, { ...dto, customerId: sessionCustomerId(customerToken, branchId) ?? undefined });
   }
 }
 

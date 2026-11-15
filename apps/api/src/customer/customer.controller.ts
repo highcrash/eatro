@@ -1,13 +1,18 @@
-import { Controller, Get, Post, Patch, Delete, Query, Body, Param, UseGuards, Headers, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Query, Body, Param, UseGuards, Headers, BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '@restora/types';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import { CustomerService } from './customer.service';
+import { CustomerService, normalizeBdPhone } from './customer.service';
+import { customerSessionToken, requireCustomer, sessionCustomerId, signupPhone } from './customer-token';
 
 // ─── Public endpoints (QR customer auth) ─────────────────────────────────────
+//
+// The customer is whoever the `x-customer-token` login token says, never a
+// customer id from the request body. The token comes from verify-otp (or
+// signup), so only someone who typed the SMS code gets one.
 
 @Controller('customers')
 export class CustomerPublicController {
@@ -37,32 +42,40 @@ export class CustomerPublicController {
 
   @Patch('auth/profile')
   updateProfile(
-    @Body() dto: { customerId: string; name?: string; email?: string },
+    @Headers('x-customer-token') token: string | undefined,
+    @Body() dto: { customerId?: string; name?: string; email?: string },
   ) {
-    if (!dto.customerId) throw new BadRequestException('Customer ID required');
-    return this.customerService.updateProfile(dto.customerId, { name: dto.name, email: dto.email });
+    const customerId = requireCustomer(token);
+    if (dto.customerId && dto.customerId !== customerId) throw new ForbiddenException('Not your account');
+    return this.customerService.updateProfile(customerId, { name: dto.name, email: dto.email });
   }
 
-  /** Brand-new customer signup after OTP verify when no row matched
-   *  the phone. Name required, email optional. Public endpoint —
-   *  branch comes from the x-branch-id header same as the rest of
-   *  the QR auth flow. */
+  /** Brand-new customer signup after verify-otp found no row for the phone.
+   *  Needs the signupToken verify-otp returned, so the phone is proven. */
   @Post('auth/signup')
-  signup(
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  async signup(
     @Headers('x-branch-id') branchId: string,
-    @Body() dto: { phone: string; name: string; email?: string },
+    @Body() dto: { phone: string; name: string; email?: string; signupToken?: string },
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
-    return this.customerService.createFromQr(branchId, dto);
+    const proven = signupPhone(dto.signupToken, branchId);
+    if (!proven || proven !== normalizeBdPhone(dto.phone ?? '')) {
+      throw new UnauthorizedException({ code: 'CUSTOMER_LOGIN_REQUIRED', message: 'Please verify your phone number with the SMS code first.' });
+    }
+    const customer = await this.customerService.createFromQr(branchId, { phone: proven, name: dto.name, email: dto.email });
+    return { ...customer, token: customerSessionToken(customer.id, branchId) };
   }
 
   @Post('auth/active-order')
   getActiveOrder(
     @Headers('x-branch-id') branchId: string,
-    @Body() dto: { customerId: string },
+    @Headers('x-customer-token') token: string | undefined,
+    @Body() dto: { customerId?: string },
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
-    return this.customerService.getActiveOrder(branchId, dto.customerId);
+    return this.customerService.getActiveOrder(branchId, ownCustomer(token, branchId, dto.customerId));
   }
 
   /**
@@ -71,17 +84,16 @@ export class CustomerPublicController {
    * snapshot drives the lifetime-stats strip (totalSpent /
    * totalOrders / lastVisit) so the page doesn't need a separate
    * /me endpoint and stays in sync with whatever the order list
-   * shows. customerId in the body is the same trust shape as the
-   * existing auth/active-order endpoint.
+   * shows.
    */
   @Post('auth/order-history')
   getOrderHistory(
     @Headers('x-branch-id') branchId: string,
-    @Body() dto: { customerId: string; limit?: number },
+    @Headers('x-customer-token') token: string | undefined,
+    @Body() dto: { customerId?: string; limit?: number },
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
-    if (!dto.customerId) throw new BadRequestException('customerId required');
-    return this.customerService.getOrderHistory(branchId, dto.customerId, dto.limit);
+    return this.customerService.getOrderHistory(branchId, ownCustomer(token, branchId, dto.customerId), dto.limit);
   }
 
   /**
@@ -92,21 +104,30 @@ export class CustomerPublicController {
   @Post('auth/customer-reviews')
   getCustomerReviewHistory(
     @Headers('x-branch-id') branchId: string,
-    @Body() dto: { customerId: string },
+    @Headers('x-customer-token') token: string | undefined,
+    @Body() dto: { customerId?: string },
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
-    if (!dto.customerId) throw new BadRequestException('customerId required');
-    return this.customerService.getCustomerReviewHistory(branchId, dto.customerId);
+    return this.customerService.getCustomerReviewHistory(branchId, ownCustomer(token, branchId, dto.customerId));
   }
 
   @Post('reviews')
   createReview(
     @Headers('x-branch-id') branchId: string,
+    @Headers('x-customer-token') token: string | undefined,
     @Body() dto: { orderId: string; customerId?: string; foodScore: number; serviceScore: number; atmosphereScore: number; priceScore: number; notes?: string },
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
-    return this.customerService.createReview(branchId, dto);
+    // A review is only tied to the customer who is logged in.
+    return this.customerService.createReview(branchId, { ...dto, customerId: sessionCustomerId(token, branchId) ?? undefined });
   }
+}
+
+/** The logged-in customer; a different customer id in the body is refused. */
+function ownCustomer(token: string | undefined, branchId: string, claimed?: string): string {
+  const customerId = requireCustomer(token, branchId);
+  if (claimed && claimed !== customerId) throw new ForbiddenException('Not your account');
+  return customerId;
 }
 
 // ─── Authenticated endpoints (POS/Admin) ─────────────────────────────────────

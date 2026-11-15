@@ -9,7 +9,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { OrderService } from './order.service';
-import { normalizePhone } from '../customer/customer.service';
+import { requireCustomer, sessionCustomerId } from '../customer/customer-token';
 import { PrismaService } from '../prisma/prisma.service';
 import { QrGateService, extractClientIp } from '../qr-gate/qr-gate.service';
 
@@ -302,6 +302,7 @@ export class QrOrderController {
   async createQr(
     @Headers('x-branch-id') branchId: string,
     @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Headers('x-customer-token') customerToken: string | undefined,
     @Body() dto: CreateOrderDto,
     @Req() req: Request,
   ) {
@@ -316,6 +317,8 @@ export class QrOrderController {
         items: dto.items.map((i) => ({ ...i, removedIngredientIds: undefined })),
       };
     }
+    // An order is only attached to the customer who is logged in on this device.
+    if (dto.customerId && dto.customerId !== sessionCustomerId(customerToken, branchId)) dto = { ...dto, customerId: undefined };
     return this.orderService.createQrOrder(branchId, dto, { primaryDeviceId: deviceId ?? null });
   }
 
@@ -464,44 +467,30 @@ export class QrOrderController {
   }
 
   /**
-   * Phone-based identification for the QR flow. Finds an existing customer
-   * with this phone in the branch (creating one if new), then attaches it
-   * to the order. Used as a prerequisite to applying coupons from the QR
-   * app — the backend rejects coupon-apply without a customerId.
+   * Attaches the logged-in customer (SMS-verified, from the login token)
+   * to the order, so coupons and loyalty points can be used on it. Only a
+   * device that is on the order can do this, and only for its own login.
    */
   @Post('qr/:id/identify-customer')
   async identifyCustomer(
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
-    @Body() dto: { phone: string; name?: string },
+    @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Headers('x-customer-token') customerToken: string | undefined,
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
-
-    // Canonicalise the phone so `01620307630` and `+8801620307630`
-    // collapse to the same customer row instead of spawning duplicates.
-    const phone = normalizePhone(dto.phone);
-    if (!phone) throw new BadRequestException('Phone number required');
-    const name = (dto.name ?? '').trim() || 'Guest';
+    const customerId = requireCustomer(customerToken, branchId);
+    await this.requireOrderParticipant(id, branchId, deviceId, customerId);
 
     const order = await this.prisma.order.findFirst({ where: { id, branchId, deletedAt: null } });
     if (!order) throw new NotFoundException('Order not found');
-
-    // Suffix-aware lookup so legacy rows stored in non-canonical form
-    // (e.g. `+8801620307630`) still match a fresh canonical input.
-    let customer = await this.prisma.customer.findFirst({
-      where: { branchId, phone, isActive: true },
-    });
-    if (!customer) {
-      const tail = phone.slice(1); // drop leading 0 → 1XXXXXXXXX
-      customer = await this.prisma.customer.findFirst({
-        where: { branchId, isActive: true, phone: { endsWith: tail } },
-      });
+    if (order.customerId && order.customerId !== customerId) {
+      throw new ForbiddenException({ code: 'ORDER_HAS_CUSTOMER', message: 'This order is already linked to another customer. Ask our staff for help.' });
     }
-    if (!customer) {
-      customer = await this.prisma.customer.create({ data: { branchId, phone, name } });
-    }
+    const customer = await this.prisma.customer.findFirst({ where: { id: customerId, branchId, isActive: true } });
+    if (!customer) throw new NotFoundException('Customer not found');
 
     await this.prisma.order.update({
       where: { id },
@@ -537,15 +526,17 @@ export class QrOrderController {
   async moveTableQr(
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
-    @Body() dto: { tableId: string; customerId: string },
+    @Headers('x-customer-token') customerToken: string | undefined,
+    @Body() dto: { tableId: string; customerId?: string },
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
-    if (!dto.tableId || !dto.customerId) throw new BadRequestException('tableId + customerId required');
+    if (!dto.tableId) throw new BadRequestException('tableId required');
     await this.ensureGateOpen(branchId, req);
+    const customerId = requireCustomer(customerToken, branchId);
     const order = await this.prisma.order.findFirst({ where: { id, branchId, deletedAt: null } });
     if (!order) throw new NotFoundException('Order not found');
-    if (order.customerId !== dto.customerId) {
+    if (order.customerId !== customerId) {
       throw new BadRequestException('This order does not belong to the signed-in customer');
     }
     if (order.tableId === dto.tableId) return order; // no-op rescan of same table
@@ -585,12 +576,13 @@ export class QrOrderController {
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
     @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Headers('x-customer-token') customerToken: string | undefined,
     @Body() body: { items: { menuItemId: string; quantity: number; notes?: string; addons?: { groupId: string; addonItemId: string }[]; removedIngredientIds?: string[]; comboChoices?: { includedItemId: string; quantity: number }[] }[]; customerId?: string },
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
-    await this.requireOrderParticipant(id, branchId, deviceId, body.customerId);
+    await this.requireOrderParticipant(id, branchId, deviceId, sessionCustomerId(customerToken, branchId));
     // If order is already accepted (not PENDING), new items need cashier approval
     const order = await this.prisma.order.findFirst({ where: { id, deletedAt: null } });
     if (!order) throw new NotFoundException('Order not found');
@@ -656,12 +648,13 @@ export class QrOrderController {
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
     @Headers('x-qr-device-id') deviceId: string | undefined,
+    @Headers('x-customer-token') customerToken: string | undefined,
     @Body() dto: { code: string; customerId?: string },
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
-    await this.requireOrderParticipant(id, branchId, deviceId, dto.customerId);
+    await this.requireOrderParticipant(id, branchId, deviceId, sessionCustomerId(customerToken, branchId));
     return this.orderService.applyCoupon(id, branchId, dto.code);
   }
 
@@ -676,13 +669,16 @@ export class QrOrderController {
     @Param('id') id: string,
     @Headers('x-branch-id') branchId: string,
     @Headers('x-qr-device-id') deviceId: string | undefined,
-    @Body() dto: { points: number; customerId: string },
+    @Headers('x-customer-token') customerToken: string | undefined,
+    @Body() dto: { points: number; customerId?: string },
     @Req() req: Request,
   ) {
     if (!branchId) throw new BadRequestException('Branch ID required');
     await this.ensureGateOpen(branchId, req);
-    await this.requireOrderParticipant(id, branchId, deviceId, dto.customerId);
-    return this.orderService.applyLoyalty(id, branchId, dto.customerId, dto.points);
+    // Points are spent only by the customer who owns them, logged in by SMS code.
+    const customerId = requireCustomer(customerToken, branchId);
+    await this.requireOrderParticipant(id, branchId, deviceId, customerId);
+    return this.orderService.applyLoyalty(id, branchId, customerId, dto.points);
   }
 
   @Patch('qr/:id/items/:itemId/notes')

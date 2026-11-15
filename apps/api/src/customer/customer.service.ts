@@ -3,6 +3,7 @@ import { randomInt, timingSafeEqual } from 'crypto';
 import { Injectable, BadRequestException, HttpException, HttpStatus, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
+import { customerSessionToken, signupToken } from './customer-token';
 
 /** Bangladesh phone normaliser. Accepts:
  *    01910202020   (11-digit local with leading 0)
@@ -164,6 +165,7 @@ export class CustomerService {
         // an empty name field (Walk-in default) vs greet by name.
         isWalkIn: existing.name === 'Walk-in',
         isNew: false,
+        token: customerSessionToken(existing.id, branchId),
       };
     }
 
@@ -175,6 +177,8 @@ export class CustomerService {
       customer: null,
       isNew: true,
       phone: normalized,
+      // Proof for /auth/signup that this browser typed the SMS code for this phone.
+      signupToken: signupToken(branchId, normalized),
     };
   }
 
@@ -488,6 +492,8 @@ export class CustomerService {
   // ─── Reviews ───────────────────────────────────────────────────────────────
 
   async createReview(branchId: string, dto: { orderId: string; customerId?: string; foodScore: number; serviceScore: number; atmosphereScore: number; priceScore: number; notes?: string }) {
+    const order = await this.prisma.order.findFirst({ where: { id: dto.orderId, branchId }, select: { id: true } });
+    if (!order) throw new NotFoundException('Order not found');
     const existing = await this.prisma.review.findUnique({ where: { orderId: dto.orderId } });
     if (existing) throw new BadRequestException('Review already submitted for this order');
 

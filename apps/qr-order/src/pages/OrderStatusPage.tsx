@@ -79,7 +79,6 @@ export default function OrderStatusPage() {
   const qc = useQueryClient();
   const branchId = useSessionStore((s) => s.branchId);
   const customer = useSessionStore((s) => s.customer);
-  const setCustomer = useSessionStore((s) => s.setCustomer);
   const myDeviceId = useSessionStore((s) => s.deviceId);
   // Multi-device share state. `shareRequest` populates when the
   // primary device receives an order:share-request WS event from
@@ -101,10 +100,8 @@ export default function OrderStatusPage() {
   const [loyaltyError, setLoyaltyError] = useState<string | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponBusy, setCouponBusy] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [loginPhone, setLoginPhone] = useState('');
-  const [loginName, setLoginName] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
+  const [linkTried, setLinkTried] = useState(false);
   // One-shot toast surfaced from TableEntry when a rescan-driven
   // table transfer was refused (409). sessionStorage handoff lets us
   // cross the route boundary without a global toast lib.
@@ -157,6 +154,20 @@ export default function OrderStatusPage() {
       setActiveOrder(null);
     }
   }, [order?.status, setActiveOrder]);
+
+  // Back from the login page: link this order to the customer who just
+  // logged in with their SMS code, so coupons and points work on it.
+  useEffect(() => {
+    if (!order || order.customerId || !customer?.token || linkTried) return;
+    setLinkTried(true);
+    void qrFetch(`/orders/qr/${orderId}/identify-customer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
+      body: '{}',
+    })
+      .then((res) => { if (res.ok) void qc.invalidateQueries({ queryKey: ['order-status', orderId] }); })
+      .catch(() => undefined);
+  }, [order, customer?.token, linkTried, orderId, branchId, qc]);
 
   // Compute "is this device a participant on this order?" — drives
   // the read-only / editable branch in the JSX. Legacy orders with
@@ -355,7 +366,7 @@ export default function OrderStatusPage() {
         // Server uses the CUSTOMER_REQUIRED prefix so we can switch from
         // "bad coupon" message into the identify-customer flow.
         if ((err.message ?? '').includes('CUSTOMER_REQUIRED')) {
-          setShowLogin(true);
+          void linkAccount();
           return;
         }
         throw new Error(err.message || 'Failed to apply coupon');
@@ -376,7 +387,7 @@ export default function OrderStatusPage() {
       return;
     }
     if (!order.customerId) {
-      setShowLogin(true);
+      void linkAccount();
       return;
     }
     setLoyaltyBusy(true);
@@ -400,36 +411,28 @@ export default function OrderStatusPage() {
     }
   };
 
-  const submitLogin = async () => {
-    if (!loginPhone.trim()) return;
+  /** Coupons and points need the customer's account: log in by SMS code, then link this order. */
+  const linkAccount = async () => {
+    const loginUrl = `/login?next=/order/${orderId}`;
+    if (!customer?.token) {
+      void navigate(loginUrl);
+      return;
+    }
     setLoginBusy(true);
     try {
       const res = await qrFetch(`/orders/qr/${orderId}/identify-customer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-branch-id': branchId || '' },
-        body: JSON.stringify({ phone: loginPhone.trim(), name: loginName.trim() || undefined }),
+        body: '{}',
       });
+      if (res.status === 401) {
+        void navigate(loginUrl);
+        return;
+      }
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: 'Login failed' })) as { message?: string };
-        throw new Error(err.message || 'Login failed');
+        const err = await res.json().catch(() => ({ message: 'Could not link your account' })) as { message?: string };
+        throw new Error(err.message || 'Could not link your account');
       }
-      // Hydrate the session-store customer so downstream gates (Review,
-      // future coupon retries on different orders) see the user as
-      // logged-in. The endpoint returns the resolved customer payload;
-      // mirror it into the session so it persists across navigation
-      // and reload (localStorage-backed).
-      const resolved = (await res.json().catch(() => null)) as
-        | { customerId: string; customerName: string; customerPhone: string; customerEmail?: string | null }
-        | null;
-      if (resolved?.customerId) {
-        setCustomer({
-          id: resolved.customerId,
-          name: resolved.customerName,
-          phone: resolved.customerPhone,
-          email: resolved.customerEmail ?? null,
-        });
-      }
-      setShowLogin(false);
       void qc.invalidateQueries({ queryKey: ['order-status', orderId] });
       // Retry the coupon apply now that the order has a customer.
       if (couponCode.trim()) void applyCoupon();
@@ -780,7 +783,8 @@ export default function OrderStatusPage() {
                   Coupons are tied to your customer account. Please log in with your phone number to apply.
                 </p>
                 <button
-                  onClick={() => setShowLogin(true)}
+                  onClick={() => void linkAccount()}
+                  disabled={loginBusy}
                   className="w-full bg-[#C8FF00] text-[#0D0D0D] py-2.5 font-body font-medium text-sm"
                 >
                   Log in to apply coupon
@@ -849,46 +853,6 @@ export default function OrderStatusPage() {
               </button>
             </div>
             {loyaltyError && <p className="text-xs text-[#D62B2B] font-body">{loyaltyError}</p>}
-          </div>
-        </div>
-      )}
-
-      {/* Phone-login modal (QR coupon flow) */}
-      {showLogin && (
-        <div className="fixed inset-0 bg-black/80 z-40 flex items-center justify-center p-4" onClick={() => setShowLogin(false)}>
-          <div className="bg-[#1A1A1A] border border-[#2A2A2A] w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div>
-              <p className="font-display text-lg text-white tracking-wider">LOGIN</p>
-              <p className="text-xs text-[#888] font-body mt-1">Enter your phone to apply coupons and earn loyalty.</p>
-            </div>
-            <input
-              value={loginPhone}
-              onChange={(e) => setLoginPhone(e.target.value)}
-              placeholder="Phone number"
-              autoFocus
-              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2.5 text-sm font-body text-white outline-none focus:border-[#C8FF00]"
-            />
-            <input
-              value={loginName}
-              onChange={(e) => setLoginName(e.target.value)}
-              placeholder="Name (optional)"
-              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] px-3 py-2.5 text-sm font-body text-white outline-none focus:border-[#C8FF00]"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowLogin(false)}
-                className="flex-1 border border-[#2A2A2A] text-[#999] py-2.5 font-body text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => void submitLogin()}
-                disabled={!loginPhone.trim() || loginBusy}
-                className="flex-1 bg-[#C8FF00] text-[#0D0D0D] py-2.5 font-body font-medium text-sm disabled:opacity-40"
-              >
-                {loginBusy ? 'Logging in…' : 'Continue'}
-              </button>
-            </div>
           </div>
         </div>
       )}

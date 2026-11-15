@@ -72,10 +72,10 @@ export default function TableEntry() {
       let activeOrderTableId: string | null = null;
       if (customer) {
         try {
-          const res = await fetch(apiUrl('/customers/auth/active-order'), {
+          const res = await qrFetch('/customers/auth/active-order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-branch-id': table.branchId },
-            body: JSON.stringify({ customerId: customer.id }),
+            body: JSON.stringify({}),
           });
           if (res.ok) {
             const data = (await res.json()) as ActiveOrderResponse;
@@ -163,7 +163,7 @@ export default function TableEntry() {
           const res = await qrFetch(`/orders/qr/${orderId}/move-table`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-branch-id': table.branchId },
-            body: JSON.stringify({ tableId: table.id, customerId: customer!.id }),
+            body: JSON.stringify({ tableId: table.id }),
           });
           if (res.status === 409) {
             const body = await res.json().catch(() => null) as { message?: string } | null;
